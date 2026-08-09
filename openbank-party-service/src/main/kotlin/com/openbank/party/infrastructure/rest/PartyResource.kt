@@ -55,6 +55,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.jboss.resteasy.reactive.MultipartForm
 import org.jboss.resteasy.reactive.PartType
 import java.net.URI
+import java.time.Instant
 import java.util.UUID
 
 @Path("/api/v1/parties")
@@ -493,6 +494,7 @@ class PartyResource {
                             Response.Status.SERVICE_UNAVAILABLE.statusCode,
                             "DEDUP_UNAVAILABLE",
                             "RČ dedup pepper not configured; uniqueness not enforced",
+                            timestamp = Instant.now(),
                         ),
                     ).build()
             } else {
@@ -503,6 +505,7 @@ class PartyResource {
                             Response.Status.NOT_FOUND.statusCode,
                             "PARTY_NOT_FOUND",
                             "No party matches the supplied RČ",
+                            timestamp = Instant.now(),
                         ),
                     ).build()
             }

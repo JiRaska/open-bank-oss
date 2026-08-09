@@ -61,7 +61,7 @@ mp:
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
-      # group.id / auto.offset.reset for both channels below are set via the
+      # group.id / auto.offset.reset for the channels below are set via the
       # engagement-service-msg-override ConfigMap (override.properties), NOT here — a dotted leaf
       # map key under mp.messaging.incoming.<channel> in YAML never resolves to the plain
       # MicroProfile Config property name SmallRye reads (issue #686, ADR-0137 pattern).
@@ -78,6 +78,11 @@ mp:
       fraud-hold-events-in:
         connector: smallrye-kafka
         topic: openbank.fraud.hold.changed
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      dispute-events-in:
+        connector: smallrye-kafka
+        topic: openbank.dispute.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 

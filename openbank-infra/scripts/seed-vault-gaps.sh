@@ -2,7 +2,6 @@
 # Seed the Vault KV gaps that keep the `secrets` and `glitchtip` ArgoCD apps
 # Degraded (ExternalSecrets failing with "Secret does not exist"):
 #
-#   openbank/audit-service                   OIDC_CLIENT_SECRET
 #   openbank/keycloak-customers-realm-import openbank-customers-realm.json
 #   openbank/glitchtip                       SECRET_KEY + GRAFANA_API_TOKEN
 #   openbank/alertmanager                    SLACK_WEBHOOK   (needs $SLACK_WEBHOOK)
@@ -21,9 +20,10 @@
 #     ./openbank-infra/scripts/seed-vault-gaps.sh
 #
 # Notes:
-# - audit-service uses the SHARED `openbank-services` realm client, so its
-#   OIDC_CLIENT_SECRET equals the value ESO already syncs for the other
-#   services; we copy it from the live account-service-oidc Secret.
+# - There is no OIDC seeding here any more. Every service authenticates as the
+#   one `openbank-services` realm client and every ExternalSecret reads the one
+#   `openbank/account-service` entry (rules.yaml: oidc_secret_convention,
+#   #3485), so a new service needs no KV write at all.
 # - The customers realm JSON comes from the in-repo template (the same source
 #   seed-customers-realm.sh uses — but that script writes to the legacy
 #   `secret/` mount; the ClusterSecretStore reads `openbank/`, used here).
@@ -42,9 +42,11 @@ vault_kv_put() { # key prop=value... (values passed on stdin-safe argv)
     vault kv put "$@" >/dev/null
 }
 
-echo "[1/5] openbank/audit-service (shared openbank-services client secret)"
-OIDC_SECRET="$(kubectl -n accounts get secret account-service-oidc -o jsonpath='{.data.OIDC_CLIENT_SECRET}' | base64 -d)"
-vault_kv_put openbank/audit-service OIDC_CLIENT_SECRET="$OIDC_SECRET"
+echo "[1/5] openbank/audit-service — OBSOLETE, nothing written"
+echo "      audit-service's ExternalSecret now reads the shared openbank/account-service entry"
+echo "      directly (#3485). This step used to COPY that same value into a second KV entry,"
+echo "      which is exactly the duplication the convention removed — writing it again would"
+echo "      recreate an entry no ExternalSecret reads, for the next rotation to miss."
 
 echo "[2/5] openbank/keycloak-customers-realm-import (realm template JSON)"
 kubectl -n vault exec -i openbao-0 -- env VAULT_TOKEN="$VAULT_TOKEN" VAULT_ADDR=http://127.0.0.1:8200 \

@@ -167,6 +167,15 @@ spec:
             # Declared here so gen-network-policies.py opens the edge->lending ingress allow.
             - name: LENDING_SERVICE_URL
               value: http://lending-service.lending.svc:8126
+            # Delegated access / sharing (ADR-0232): the edge asks delegation-service whether an
+            # ACTIVE grant lets the caller read someone else's account, card or document. The URL
+            # was already correct as a CODE default, which is exactly why this was invisible: the
+            # call worked in every test and was DROPPED in the cluster, because
+            # gen-network-policies.py derives the ingress allow-list from DECLARED env URLs and an
+            # undeclared caller does not exist as far as the generator is concerned. Every edge
+            # -> delegation call timed out for as long as this line was missing.
+            - name: DELEGATION_SERVICE_URL
+              value: http://delegation-service.delegation.svc:8126
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             - name: DOMESTIC_PAYMENT_SERVICE_URL

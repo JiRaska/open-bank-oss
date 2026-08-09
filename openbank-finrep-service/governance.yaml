@@ -10,10 +10,16 @@ dataClassification: confidential
 retentionPolicy: 10 years
 evidenceExported: true
 lineage:
-  upstream:
+  upstream: []
+    # Removed (issue #3982): `statement-service (api, "reads statement data for regulatory
+    # reporting")` — statement-service's clients are account/balance/party/transaction and its
+    # Deployment env carries no finrep URL; finrep-service has no statement-service client
+    # either. The edge exists in neither direction.
+  downstream:
+    # Direction corrected (issue #3982): declared as `upstream: ledger-service`, i.e.
+    # ledger-service calling finrep-service. LedgerClient(configKey = "ledger-service") lives in
+    # finrep-service and its Deployment env carries LEDGER_SERVICE_URL — finrep reads the ledger,
+    # not the other way round. (This is the edge whose wrong path shipped as #2269.)
     - serviceName: ledger-service
       relationType: api
-      description: reads transaction and balance data for FINREP templates
-    - serviceName: statement-service
-      relationType: api
-      description: reads statement data for regulatory reporting
+      description: reads GL data for FINREP/COREP templates via LedgerClient

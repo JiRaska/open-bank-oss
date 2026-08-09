@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -466,6 +466,15 @@ spec:
               value: http://sanctions-service.sanctions.svc:8123
             - name: AML_SERVICE_URL
               value: http://aml-service.aml.svc:8117
+            # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221). This Rollout carried no
+            # FRAUD_SERVICE_URL, so SepaPaymentActivitiesImpl's rest-client fell back to
+            # application.yaml's `http://localhost:8133` — nothing listens there, the adapter is
+            # fail-open, and every scoring call logged "shadow ALLOW / Connection refused" and
+            # moved on. `fraud_scores` held 0 rows fleet-wide as a result. Behaviour-neutral to
+            # wire: the verdict is only logged (`SEPA` rail), never acted on, until
+            # SEPA_FRAUD_ENFORCEMENT_ENABLED flips — which is a separate runbook-gated change.
+            - name: FRAUD_SERVICE_URL
+              value: http://fraud-service.fraud.svc:8133
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -745,7 +754,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-73d5f0dc
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -812,6 +821,15 @@ spec:
             # the lookup hung until the caller timed out ("upstream unavailable"). Declare it.
             - name: ACCOUNT_SERVICE_URL
               value: http://account-service.accounts.svc:8100
+            # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221). Same omission as the
+            # ACCOUNT_SERVICE_URL edge above and with the same consequence: no FRAUD_SERVICE_URL
+            # here meant DomesticPaymentActivitiesImpl.shadowFraudScore resolved
+            # `http://localhost:8133`, the fail-open adapter swallowed the refusal as
+            # "shadow ALLOW", and the DOMESTIC rail scored nothing for its entire life.
+            # Behaviour-neutral: shadowFraudScore only logs a non-ALLOW verdict. Enforcement is
+            # DOMESTIC_FRAUD_ENFORCEMENT_ENABLED, deliberately left off (and today unread).
+            - name: FRAUD_SERVICE_URL
+              value: http://fraud-service.fraud.svc:8133
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
@@ -1069,7 +1087,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-73d5f0dc
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1129,12 +1147,17 @@ spec:
               value: http://sanctions-service.sanctions.svc:8123
             - name: AML_SERVICE_URL
               value: http://aml-service.aml.svc:8117
-            # NOTE: no FRAUD_SERVICE_URL — sepa-instant does not consume fraud scoring yet
-            # (zero `fraud` refs in src). A dangling env pointing at a non-existent "fraud-detection"
-            # Service was removed (#1827; the real service is fraud-service). Re-add FRAUD_SERVICE_URL
-            # pointing at fraud-service (port 8133) WITH the fraud-client code + threat-model update
-            # when instant-rail fraud screening is actually wired — that also lets gen-network-
-            # policies derive the payments→fraud-service ingress edge (least-privilege, ADR-0060).
+            # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221).
+            # This block previously read "no FRAUD_SERVICE_URL — sepa-instant does not consume
+            # fraud scoring yet (zero `fraud` refs in src)", and named the conditions for re-adding
+            # it. Both halves are now satisfied and the premise had gone stale: the fraud client
+            # DID land (SctInstPaymentService.scoreFraudShadow, rail SCT_INST), so the env was
+            # missing from a consumer rather than absent from a non-consumer — the note stated a
+            # fact about src that had stopped being true, which is why nobody re-checked it. The
+            # dangling "fraud-detection" env removed in #1827 was a different, genuinely wrong host.
+            # Behaviour-neutral: scoreFraudShadow logs a non-ALLOW verdict and enforces nothing.
+            - name: FRAUD_SERVICE_URL
+              value: http://fraud-service.fraud.svc:8133
             # ADR-0104 D4: real ISO 20022 pacs.008 → clearing-simulator → pacs.002 pipeline
             # (shipped in PR #1732). Fail-closed: gateway down ⇒ payment stays PROCESSING.
             - name: CLEARING_SIMULATOR_URL
@@ -1383,7 +1406,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1681,7 +1704,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1947,7 +1970,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2217,7 +2240,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-73d5f0dc
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2645,7 +2668,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-73d5f0dc
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2958,7 +2981,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-2f2eb227
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-73d5f0dc
 
           imagePullPolicy: IfNotPresent
           ports:
