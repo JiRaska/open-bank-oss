@@ -47,8 +47,13 @@ class AmlCaseResource(
     @Operation(summary = "Submit an AML screening case")
     suspend fun createCase(
         request: CreateAmlCaseRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        // Nullable by necessity: JAX-RS injects null for an absent header, and Kotlin's
+        // null-safety is compile-time only — a non-nullable declaration turns a missing
+        // header into a 500 (or, on a suspend fun, lets the null flow into the body).
+        // libs-runtime maps IllegalArgumentException to 400 (#526, #3624).
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
+        requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
 
         idempotencyStore.get(idempotencyKey)?.let { cached ->
