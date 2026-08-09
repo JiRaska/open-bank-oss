@@ -1307,6 +1307,30 @@ gates:
     run: |
       python3 .github/scripts/check-main-red-watch.py --check-declaration
 
+  # Nothing in this repo has ever read a merged PR's required contexts: before #4240,
+  # `grep -rl 'required_status_checks\|statusCheckRollup' .github/scripts .github/workflows`
+  # returned one hit and it was a comment. A ruleset bypass is recorded only in
+  # `rulesets/rule-suites`, which tells nobody: no PR carries it, no check turns red.
+  #
+  # The binding copy is HERE, not in merged-past-red-check-watch.yml: that workflow is
+  # scheduled and paths-filtered, so it can never be a required context. What this gate holds
+  # is the DECLARATION half — that the watch still queries an explicit non-`day` window (the
+  # default returned 1 row where the true count was 7), still paginates, still keys on the
+  # per-suite `failing` detail rather than `result: bypass` (22 of 29 such rows are benign),
+  # still escalates onto an issue rather than merely going red, and still refuses to report a
+  # window it could not read. The runtime half never gates a merge — a bypass that already
+  # happened is not a defect in the PR at hand.
+  - id: merged-past-red-check-declaration
+    name: "the merged-past-red-check watch keeps its window, its key and its escalation (issue #4240, enforced)"
+    group: registry
+    mode: enforced
+    min_subjects: 6   # D1-D6, applied to the one watch workflow. 0 means the workflow moved.
+    selftest: |
+      python3 .github/scripts/check-merged-past-red-check.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-merged-past-red-check.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
