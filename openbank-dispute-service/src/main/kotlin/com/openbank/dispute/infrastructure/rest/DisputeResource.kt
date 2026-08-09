@@ -80,15 +80,15 @@ class DisputeResource(
     @Path("/{id}/withdraw")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Withdraw a dispute")
-    fun withdraw(@PathParam("id") id: UUID, @QueryParam("actor") actor: String): Uni<Response> =
-        updateUseCase.withdraw(id, actor).map { Response.ok(it).build() }
+    fun withdraw(@PathParam("id") id: UUID, @QueryParam("actor") actor: String?): Uni<Response> =
+        updateUseCase.withdraw(id, requiredActor(actor)).map { Response.ok(it).build() }
 
     @POST
     @Path("/{id}/escalate")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Operation(summary = "Escalate a dispute")
-    fun escalate(@PathParam("id") id: UUID, @QueryParam("actor") actor: String): Uni<Response> =
-        updateUseCase.escalate(id, actor).map { Response.ok(it).build() }
+    fun escalate(@PathParam("id") id: UUID, @QueryParam("actor") actor: String?): Uni<Response> =
+        updateUseCase.escalate(id, requiredActor(actor)).map { Response.ok(it).build() }
 
     @POST
     @Path("/{id}/resolve")
@@ -128,6 +128,27 @@ class DisputeResource(
     @Operation(summary = "Walk and verify a dispute's evidence hash chain (ADR-0117/ADR-0133 pattern)")
     fun verifyEvidenceChain(@PathParam("id") id: UUID): Uni<EvidenceChainVerification> =
         getUseCase.verifyEvidenceChain(id)
+
+    /**
+     * `actor` is who withdrew or escalated the dispute — it is written to the timeline as
+     * attribution, so it is genuinely required and has no sensible default.
+     *
+     * The parameter MUST be declared nullable for this guard to be reachable: JAX-RS injects `null`
+     * for an absent query parameter, and on a non-`suspend` handler a non-nullable Kotlin type
+     * compiles to an `Intrinsics.checkNotNullParameter` at offset 0 — the NPE lands before the first
+     * statement of the body and the generic mapper answers 500 (issue #3104/#3624). Written against
+     * the old signature, `requireNotNull` would have compiled to nothing.
+     *
+     * The throw is synchronous (the argument is evaluated before the `Uni` is built), so it escapes
+     * the handler rather than the reactive pipeline, and libs-runtime's
+     * `IllegalArgumentExceptionMapper` renders 400 + `ApiError`. Note this is deliberately NOT
+     * routed through `resolve`'s `onFailure(IllegalArgumentException)` → 422: a missing parameter is
+     * a malformed request, not a business-rule violation.
+     */
+    private fun requiredActor(actor: String?): String {
+        requireNotNull(actor) { "query parameter 'actor' is required" }
+        return actor
+    }
 
     companion object {
         /** RFC 4918 status code; not present in JAX-RS' [Response.Status] enum. */

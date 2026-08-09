@@ -938,12 +938,13 @@ class CustomerEdgeResource(
     @Path("/accounts/{accountId}/pockets/resolve")
     @Authorize(action = "customer.pockets.read", resource = "#accountId")
     @Blocking
-    fun resolvePocket(@PathParam("accountId") accountId: UUID, @QueryParam("currency") currency: String): Response {
+    fun resolvePocket(@PathParam("accountId") accountId: UUID, @QueryParam("currency") currency: String?): Response {
         val customer = customer()
+        val ccyRaw = currency ?: return badRequest("Missing required query parameter 'currency'")
         if (!ownsAccount(accountId, customer.partyId)) {
             return forbidden("Account does not belong to caller")
         }
-        val ccy = currency.uppercase()
+        val ccy = ccyRaw.uppercase()
         if (!isValidCurrency(ccy)) return badRequest("Invalid currency code")
         return upstream.get(
             "$accountServiceUrl/api/v1/accounts/$accountId/pockets/resolve?currency=$ccy",
@@ -1536,11 +1537,12 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.transactions.read")
     @Blocking
     fun listTransactions(
-        @QueryParam("accountId") accountId: UUID,
+        @QueryParam("accountId") accountIdOrNull: UUID?,
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): Response {
         val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
         if (!mayReadAccount(accountId, customer.partyId, "ACCOUNT_READ_TRANSACTIONS")) {
             return forbidden("Account does not belong to caller")
         }
@@ -2121,8 +2123,9 @@ class CustomerEdgeResource(
     @Path("/sepa-instant")
     @Authorize(action = "customer.payments.read")
     @Blocking
-    fun listSepaInstant(@QueryParam("accountId") accountId: UUID): Response {
+    fun listSepaInstant(@QueryParam("accountId") accountIdOrNull: UUID?): Response {
         val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
         if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
         return upstream.get(
             "$sepaInstantServiceUrl/api/v1/sepa-instant/debtor/$accountId",
@@ -2143,10 +2146,11 @@ class CustomerEdgeResource(
     @Blocking
     fun recallSepaInstant(
         @PathParam("paymentId") paymentId: UUID,
-        @QueryParam("accountId") accountId: UUID,
+        @QueryParam("accountId") accountIdOrNull: UUID?,
         body: String,
     ): Response {
         val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
         val accountJson = fetchAccount(accountId, customer.partyId)
             ?: return forbidden("Account does not belong to caller")
         if (extractOwnerPartyId(accountJson) != customer.partyId.toString()) {
@@ -3634,8 +3638,9 @@ class CustomerEdgeResource(
     @Path("/disputes")
     @Authorize(action = "customer.disputes.read")
     @Blocking
-    fun listDisputes(@QueryParam("accountId") accountId: UUID): Response {
+    fun listDisputes(@QueryParam("accountId") accountIdOrNull: UUID?): Response {
         val customer = customer()
+        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
         if (!ownsAccount(accountId, customer.partyId)) return forbidden("Account does not belong to caller")
         return upstream.get("$disputeServiceUrl/api/v1/disputes/account/$accountId", customer.partyId.toString())
     }
