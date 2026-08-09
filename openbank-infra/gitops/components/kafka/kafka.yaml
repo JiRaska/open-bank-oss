@@ -192,6 +192,24 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# billing-service's single outbox topic (#4217, ADR-0248) — carries all its events
+# (billing.fee.post-intent.v1, billing.fee.reversal-intent.v1, and the new
+# AnnualFeeSummaryReady) via its one "billing-events-out" channel. Single partition
+# + RF 1 to match the single-broker sandbox; prod should raise partitions/RF.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.billing.fee.event
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # Dead-letter topic for account-service's party-events-in channel (SmallRye
 # failure-strategy: dead-letter-queue). A party event whose projection survives the
 # consumer's bounded retry is parked here for inspection/replay instead of being dropped.
@@ -213,4 +231,22 @@ spec:
   replicas: 1
   config:
     retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# ADR-0220 D2 feedback loop. No consumer exists yet (allowlisted in rules.yaml:
+# event_consumer_liveness) — this is the first slice's producer, ahead of the analytics
+# consumer ADR-0221's dashboards are meant to read from. Contract:
+# openbank-contracts/openbank-engagement-service/asyncapi.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.engagement.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
     cleanup.policy: delete

@@ -130,6 +130,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "disabled",
         "Boot probe; builds one service and needs no cross-run Gradle state.",
     ),
+    "onnx-serving-smoke.yml::smoke": (
+        "read-only",
+        "Consumer; restores fleet-lint's home. Builds one service's quarkusBuild to smoke "
+        "the ONNX serving path inside the shipped image (#3354), on a schedule rather than "
+        "per-push, so it neither needs nor should store a per-run entry.",
+    ),
     "pitest.yml::pitest": (
         "read-only",
         "Demoted from setup-java. Consumer; restores fleet-lint's home. The setup-java "
@@ -153,10 +159,6 @@ DECLARED: dict[str, tuple[str, str]] = {
         "three live `setup-java-Linux-x64-gradle` entries (3.29 GB, 29% of the ceiling) sat "
         "on PR refs, not one shared entry. Its check also passes `--refresh-dependencies` "
         "deliberately, so a warm Gradle home is what it is designed not to lean on.",
-    ),
-    "dependabot-verification-metadata.yml::refresh-metadata": (
-        "setup-java",
-        "Same setup-java keying as pitest.",
     ),
     "perf-gate.yml::perf": (
         "read-only",

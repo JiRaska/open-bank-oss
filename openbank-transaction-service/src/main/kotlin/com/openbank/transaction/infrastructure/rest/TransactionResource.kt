@@ -4,6 +4,7 @@
 
 package com.openbank.transaction.infrastructure.rest
 
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.payment.InstructionType
@@ -14,9 +15,12 @@ import com.openbank.transaction.application.port.`in`.InitiateTransactionCommand
 import com.openbank.transaction.application.port.`in`.ListTransactionsQuery
 import com.openbank.transaction.application.port.`in`.ReverseTransactionCommand
 import com.openbank.transaction.application.port.`in`.TransactionUseCase
+import com.openbank.transaction.domain.model.MerchantDescriptor
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
+import com.openbank.transaction.infrastructure.persistence.entity.MerchantCatalogEntity
+import com.openbank.transaction.infrastructure.persistence.repository.MerchantCatalogRepository
 import com.openbank.transaction.infrastructure.persistence.repository.PanacheTransactionRepository
 import com.openbank.transaction.infrastructure.persistence.repository.TransactionSearchQuery
 import jakarta.annotation.security.RolesAllowed
@@ -54,6 +58,7 @@ import java.util.UUID
 class TransactionResource(
     private val transactionUseCase: TransactionUseCase,
     private val transactionRepository: PanacheTransactionRepository,
+    private val merchantCatalog: MerchantCatalogRepository,
 ) {
 
     @GET
@@ -61,12 +66,19 @@ class TransactionResource(
     @Authorize(action = "transaction.list", resource = "")
     @Operation(summary = "List transactions for an account")
     suspend fun listTransactions(
-        @QueryParam("accountId") accountId: UUID,
+        @QueryParam("accountId") accountId: UUID?,
         @QueryParam("limit") @DefaultValue("20") limit: Int,
         @QueryParam("cursor") cursor: String?,
     ): Response {
+        // #3104 — listing "transactions for an account" with no account is a bad request, not a
+        // server fault. Absent, this reached ListTransactionsQuery as null and answered 500.
+        requireNotNull(accountId) { "query parameter 'accountId' is required" }
         val page = transactionUseCase.listTransactions(ListTransactionsQuery(accountId, limit, cursor))
-        return Response.ok(page.toResponse()).build()
+        // D5 — one catalogue query per page, after the page is fetched. Enrichment is additive and
+        // display-only: `description` is passed through untouched, because disputes and SPAYD are
+        // built from the raw acquirer descriptor and must not inherit a prettified name.
+        val merchants = merchantCatalog.findByDescriptors(page.data.map { it.description })
+        return Response.ok(page.toResponse(merchants)).build()
     }
 
     @GET
@@ -318,9 +330,51 @@ data class TransactionResponse(
     val rail: String?,
     val instructionType: String?,
     val merchantCategory: String?,
+    // D5 — resolved merchant identity. Absent when the acquirer descriptor is not in the
+    // catalogue, which is most of them: absence is what tells the client to render the raw
+    // description, and it must never be filled with a guess.
+    //
+    // NON_NULL is contractual, not cosmetic. Serialising `"merchant": null` adds a key to every
+    // existing response body, which is a wire change for consumers that have never heard of
+    // enrichment — the sepa-payment Pact verification fails on exactly that. Additive means the
+    // old bytes stay the old bytes when there is nothing to add.
+    @field:JsonInclude(JsonInclude.Include.NON_NULL)
+    val merchant: MerchantResponse? = null,
 )
 
-private fun Transaction.toResponse() = TransactionResponse(
+/**
+ * Public identity of the merchant behind a card transaction.
+ *
+ * [geo] is null for card-not-present merchants — an e-shop has no place where the money was spent,
+ * and a head-office pin on a "where you spent" map would be fiction. [source] is always `ENRICHED`
+ * here; the field exists so a client never has to infer whether a name is the bank's or the
+ * acquirer's.
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+data class MerchantResponse(
+    val cleanName: String,
+    val logoUrl: String?,
+    val category: String?,
+    val geo: MerchantGeoResponse?,
+    val source: String = "ENRICHED",
+)
+
+data class MerchantGeoResponse(val lat: Double, val lon: Double, val city: String?, val country: String?)
+
+private fun MerchantCatalogEntity.toResponse() = MerchantResponse(
+    cleanName = cleanName,
+    logoUrl = logoUrl,
+    category = category,
+    // Both coordinates or neither — the column constraint enforces it, and this mirrors it so a
+    // half-populated row can never become a pin at latitude 0.
+    geo = if (lat != null && lon != null) {
+        MerchantGeoResponse(lat = lat!!, lon = lon!!, city = city, country = country)
+    } else {
+        null
+    },
+)
+
+private fun Transaction.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) = TransactionResponse(
     id = id,
     referenceNumber = referenceNumber,
     type = type.name,
@@ -337,7 +391,8 @@ private fun Transaction.toResponse() = TransactionResponse(
     rail = rail?.name,
     instructionType = instructionType?.name,
     merchantCategory = merchantCategory,
+    merchant = MerchantDescriptor.normalise(description)?.let { merchants[it] }?.toResponse(),
 )
 
-private fun CursorPage<Transaction>.toResponse() =
-    CursorPage(data = data.map { it.toResponse() }, pagination = pagination)
+private fun CursorPage<Transaction>.toResponse(merchants: Map<String, MerchantCatalogEntity> = emptyMap()) =
+    CursorPage(data = data.map { it.toResponse(merchants) }, pagination = pagination)

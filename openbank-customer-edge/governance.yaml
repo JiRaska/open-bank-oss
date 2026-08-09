@@ -14,13 +14,21 @@ dataClassification: confidential
 retentionPolicy: passkeys until revoked; all other Redis keys 30 days or less
 evidenceExported: false
 lineage:
-  upstream:
+  upstream: []
+  downstream:
+    # Direction corrected (issue #3982): all three were declared as `upstream`, i.e. those
+    # services calling the edge. customer-edge is a BFF — it calls THEM. It has ZERO
+    # @RegisterRestClient interfaces; every upstream hop goes through a Vert.x WebClient built
+    # from an `openbank.edge.<svc>-url` @ConfigProperty (see CustomerEdgeResource), which is why
+    # the lineage-vs-code audit cannot witness these and they are allowlisted in
+    # rules.yaml: lineage_code_audit. The Deployment env is the independent witness: 25
+    # `http://<svc>.<ns>.svc:<port>` entries, these three among them.
     - serviceName: party-service
       relationType: api
-      description: onboarding
+      description: onboarding (Vert.x WebClient via openbank.edge.party-service-url)
     - serviceName: account-service
       relationType: api
-      description: proxy
+      description: proxy (Vert.x WebClient via openbank.edge.account-service-url)
     - serviceName: sca-service
       relationType: api
-      description: proxy
+      description: proxy (Vert.x WebClient via openbank.edge.sca-service-url)

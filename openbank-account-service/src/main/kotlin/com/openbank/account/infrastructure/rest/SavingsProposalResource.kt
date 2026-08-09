@@ -41,6 +41,7 @@ data class ProposalResponse(
     val status: WithdrawalProposalStatus,
     val approvalId: String?,
     val createdAt: OffsetDateTime,
+    val expiresAt: OffsetDateTime,
 ) {
     companion object {
         fun from(p: WithdrawalProposal): ProposalResponse = ProposalResponse(
@@ -53,6 +54,7 @@ data class ProposalResponse(
             status = p.status,
             approvalId = p.approvalId,
             createdAt = p.createdAt,
+            expiresAt = p.expiresAt,
         )
     }
 }

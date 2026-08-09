@@ -52,7 +52,9 @@ We want an admin-UI **onboarding cockpit**: a live funnel of stages with per-sta
 a drill-down per applicant with the full audit timeline, and the ability for staff to move
 an applicant forward, correct a case, or cancel onboarding — with every action being audit-,
 security-, and process-correct. The infrastructure primitives all already exist in
-`openbank-libs` (`AuditEvent`/`@Audited`, `@Authorize`/OPA, `@Idempotent`, the outbox); they
+`openbank-libs` (`AuditEvent` + `AuditEventPublisher`, `@Authorize`/OPA, `IdempotencyStore`,
+the outbox — all used explicitly; the `@Audited` and `@Idempotent` annotations this line once
+named were inert and are gone, #4011); they
 are simply not wired onto this flow. What is genuinely missing is (a) a unified read surface,
 (b) a four-eyes maker-checker primitive, and (c) an operator step-up.
 

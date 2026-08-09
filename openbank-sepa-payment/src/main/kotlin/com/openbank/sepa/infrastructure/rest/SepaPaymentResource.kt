@@ -9,6 +9,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.sepa.application.port.`in`.HandlePaymentReturnCommand
 import com.openbank.sepa.application.port.`in`.ListSepaPaymentsQuery
+import com.openbank.sepa.application.port.`in`.PaymentConfirmationUseCase
 import com.openbank.sepa.application.port.`in`.SepaPaymentUseCase
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.infrastructure.rest.dto.CreateSepaPaymentRequest
@@ -38,6 +39,7 @@ import java.util.UUID
 @Tag(name = "SEPA Payments", description = "SEPA credit transfer lifecycle")
 class SepaPaymentResource(
     private val paymentUseCase: SepaPaymentUseCase,
+    private val confirmationUseCase: PaymentConfirmationUseCase,
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
 ) {
@@ -48,9 +50,11 @@ class SepaPaymentResource(
     @Operation(summary = "Create a SEPA payment")
     suspend fun createPayment(
         request: CreateSepaPaymentRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // #3104 — an ABSENT header injected null, so `null.isNotBlank()` threw NPE and this guard
+        // answered 500 in exactly the case it was written for. A blank header was always a 400.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
         idempotencyStore.get(idempotencyKey)?.let { cached ->
             return Response.status(cached.statusCode)
@@ -76,6 +80,25 @@ class SepaPaymentResource(
     @Operation(summary = "Get a SEPA payment by ID")
     suspend fun getPayment(@PathParam("paymentId") paymentId: UUID): Response =
         Response.ok(paymentUseCase.getPayment(paymentId).toResponse()).build()
+
+    @GET
+    @Path("/{paymentId}/confirmation")
+    @Produces("text/html")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "sepaPayment.downloadConfirmation", resource = "#paymentId")
+    @Operation(summary = "Download the payment confirmation document for a COMPLETED SEPA payment")
+    suspend fun getConfirmation(
+        @PathParam("paymentId") paymentId: UUID,
+        @QueryParam("locale") @DefaultValue("en") locale: String,
+    ): Response {
+        // ADR-0248 #3: rendered synchronously, on this explicit customer request only — never
+        // pre-generated, never cached, never persisted anywhere (in this service or document-service).
+        val confirmation = confirmationUseCase.getConfirmation(paymentId, locale)
+        return Response.ok(confirmation.bytes)
+            .type(confirmation.contentType)
+            .header("Content-Disposition", "attachment; filename=\"${confirmation.fileName}\"")
+            .build()
+    }
 
     @GET
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API")

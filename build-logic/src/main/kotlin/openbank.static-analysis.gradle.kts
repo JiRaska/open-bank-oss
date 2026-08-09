@@ -55,6 +55,12 @@ val detektCli: Configuration = configurations.create("detektCli") {
 
 dependencies {
     detektCli("io.gitlab.arturbosch.detekt:detekt-cli:$detektVersion")
+    // ADR-0219 D4's compile-time wiring assertion (openbank-libs-detekt-rules), loaded onto
+    // every module's forked detekt CLI classpath via ServiceLoader (META-INF/services) — including
+    // the rule module's own detekt task: config/detekt/detekt.yml's `openbank-contact-policy` key
+    // is fleet-wide, and detekt fails config validation ("Property ... is misspelled or does not
+    // exist") on any module whose classpath doesn't know that rule set id, self included.
+    detektCli(project(":openbank-libs-detekt-rules"))
 }
 
 // rootProject here is the main openbank build (build-logic is a composite, but this

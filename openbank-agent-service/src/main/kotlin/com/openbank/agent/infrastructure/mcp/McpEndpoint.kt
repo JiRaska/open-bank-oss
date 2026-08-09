@@ -192,6 +192,7 @@ class McpEndpoint {
             agentId = agentId,
             plane = headers.getHeaderString("X-Agent-Plane")?.takeIf { it.isNotBlank() },
             skill = arguments?.get("skill")?.asText()?.takeIf { it.isNotBlank() },
+            modelId = charterRegistry.modelId(agentId),
         )
     }
 

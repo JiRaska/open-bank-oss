@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.1...dispute-service-v0.9.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** answer 400, not 500, for a missing required query parameter ([#4211](https://github.com/JiRaska/open-bank-oss/issues/4211)) ([4ddb6ef](https://github.com/JiRaska/open-bank-oss/commit/4ddb6efeb23864fe65a4f2624f8722e1fcae04fb)), closes [#3624](https://github.com/JiRaska/open-bank-oss/issues/3624)
+
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.0...dispute-service-v0.9.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.8.5...dispute-service-v0.9.0) (2026-08-08)
+
+
+### Features
+
+* **dispute:** publish dispute.opened so an open dispute is visible outside this service ([#4087](https://github.com/JiRaska/open-bank-oss/issues/4087)) ([ef72727](https://github.com/JiRaska/open-bank-oss/commit/ef72727f32757bb13b104dcdfc664c2b614a30fb)), closes [#4070](https://github.com/JiRaska/open-bank-oss/issues/4070)
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.8.4...dispute-service-v0.8.5) (2026-08-02)
 
 

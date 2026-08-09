@@ -83,6 +83,11 @@ class FraudScoreRepositoryImpl(private val clock: Clock) :
         find("verdict = ?1 ORDER BY createdAt DESC", verdict).page(0, limit.coerceIn(1, MAX_QUEUE_LIMIT)).list()
     }.awaitSuspending().map { it.toScoredRecord() }
 
+    override suspend fun countRecentByAccountAndVerdict(accountId: UUID, verdict: String, since: Instant): Long =
+        Panache.withSession {
+            count("accountId = ?1 and verdict = ?2 and createdAt >= ?3", accountId, verdict, since)
+        }.awaitSuspending()
+
     private companion object {
         const val MAX_QUEUE_LIMIT = 200
     }

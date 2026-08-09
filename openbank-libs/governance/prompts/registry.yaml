@@ -142,12 +142,19 @@ charters:
     placeholders: []
 
   - id: authz-policy-auditor
-    status: pending
-    blocked_by: ADR-0167
-    reason: LlmDiagnosisAdapter is a stub; no /chat/completions call yet.
+    status: registered
+    prompts: [system.v1]
+    source: openbank-authz-policy-auditor LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
 
   - id: flaky-test-hunter
     status: registered
     prompts: [system.v1]
     source: openbank-flaky-test-hunter LlmDiagnosisAdapter.SYSTEM_PROMPT
+    placeholders: []
+
+  - id: case-coordinator
+    status: registered
+    prompts: [system.v1]
+    source: openbank-case-coordinator-agent CaseCoordinatorLlmAdapter.SYSTEM_PROMPT
     placeholders: []

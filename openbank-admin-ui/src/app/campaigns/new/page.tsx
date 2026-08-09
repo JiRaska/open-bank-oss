@@ -78,6 +78,8 @@ export default function NewCampaignPage() {
   const [reach, setReach] = useState<number | null>(null)
   // Null = no cap, which is the service's own default (absent stopCondition runs every step).
   const [stopAfter, setStopAfter] = useState<number | null>(null)
+  // Null = measure nothing, which is the service's default and an honest state rather than a gap.
+  const [conversionRule, setConversionRule] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -161,6 +163,7 @@ export default function NewCampaignPage() {
         segmentName: segName,
         segmentVersion: Number(segVersion),
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
+        ...(conversionRule ? { conversionRule } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
@@ -320,6 +323,43 @@ export default function NewCampaignPage() {
           />
         )}
 
+        </div>
+
+        {/* What "it worked" means, asked at authoring time because it cannot be answered later:
+            attribution runs from the first send, so a rule added after the fact measures nothing
+            retroactively (ADR-0245 D2). The options are a closed catalogue — a marketer picks what
+            the bank already observes and cannot invent a metric (D1). */}
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+          <span className="text-sm font-medium">{t('Co znamená úspěch', 'What counts as success')}</span>
+          <div className="flex flex-wrap gap-2">
+            {[null, 'ACCOUNT_OPENED', 'CARD_ISSUED'].map(r => (
+              <button
+                key={r ?? 'NONE'}
+                type="button"
+                data-conversion-pick={r ?? 'NONE'}
+                data-selected={conversionRule === r ? 'true' : 'false'}
+                onClick={() => setConversionRule(r)}
+                className="btn"
+                style={
+                  conversionRule === r
+                    ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' }
+                    : undefined
+                }
+              >
+                {r === null
+                  ? t('Neměřit', 'Do not measure')
+                  : r === 'ACCOUNT_OPENED'
+                    ? t('Založení účtu', 'Account opened')
+                    : t('Vydání karty', 'Card issued')}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              'Počítá se skutečná událost v bance, ne otevření e-mailu ani proklik — ty se nesledují.',
+              'Counted from a real banking event, never an email open or a click — those are not tracked.',
+            )}
+          </p>
         </div>
 
         {/* The one contact rule a campaign DOES own. The platform-wide ones below are read-only; this

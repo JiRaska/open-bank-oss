@@ -22,6 +22,18 @@ Uzavře měsíc pro **každou kapsu** účtu. Přidělí další právní/elektr
 - `200` → pole `StatementPeriod` (jeden na kapsu).
 - `409` → fail-closed nesoulad rekonciliace; **žádný výpis se nevydá** (tělo `{ "error": "..." }`).
 
+### `POST /api/v1/statements/{accountId}/{currency}/restate`
+
+Přepracování (restatement) uzavřeného období po opravě podkladových zaúčtovaných dat (ADR-0035 §D). Existující záznam se **nikdy needituje**: služba znovu načte zaúčtované položky i koncový zůstatek z balance-service, provede stejnou fail-closed rekonciliaci jako první uzávěrka a vydá **novou** uzávěrku s dalším právním pořadovým číslem a `supersedesSequence` odkazujícím na nahrazovaný záznam; ten ve stejné transakci přechází do stavu `SUPERSEDED`.
+
+- Role: `ROLE_OPERATOR`, `ROLE_ADMIN` (operátorská akce — záměrně **ne** `ROLE_API`).
+- Query parametry: `from` (datum, povinné), `to` (datum, povinné).
+- Pokud se přepočtené částky nezměnily, **nespotřebuje se žádné pořadové číslo** a vrací se stávající záznam.
+- Nahrazený záznam zůstává uchován a po celou dobu archivace je nadále renderovatelný pod svým právním pořadovým číslem.
+- `200` → platný `StatementPeriod` po přepracování.
+- `404` → pro dané období neexistuje uzavřená uzávěrka; restatement nikdy nevytváří první uzávěrku.
+- `409` → fail-closed neshoda rekonciliace; stávající uzávěrka zůstává **nedotčena**.
+
 ### `GET /api/v1/statements/{accountId}`
 
 Vypíše uchovávané záznamy uzávěrek pro účet. `200` → pole `StatementPeriod`.

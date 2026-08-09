@@ -33,7 +33,11 @@ interface ServiceTokenProvider {
 class StaticServiceTokenProvider(private val token: String) : ServiceTokenProvider {
     init {
         require(token.isNotBlank()) { "static service token must be non-blank" }
-        org.jboss.logging.Logger.getLogger(StaticServiceTokenProvider::class.java).warnf(
+        // JDK System.Logger, not org.jboss.logging.Logger — this module must stay
+        // framework-free (ADR-0002/ADR-0122, #3670). Same category, same destination:
+        // under Quarkus the JDK logger bridges into the JBoss LogManager via JUL.
+        System.getLogger(StaticServiceTokenProvider::class.java.name).log(
+            System.Logger.Level.WARNING,
             "StaticServiceTokenProvider in use — DO NOT deploy this outside dev/test. " +
                 "Switch to OidcClientFilter for production.",
         )

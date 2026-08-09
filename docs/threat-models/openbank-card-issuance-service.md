@@ -59,6 +59,62 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
 | **E**oP | Viewer escalates to issue or block | Distinct roles enforced at JAX-RS layer (`@RolesAllowed`) + OPA; deny-by-default |
 | **T**ampering | Race between `suspend` and `block` on same card | Domain `require` guards throw `IllegalArgumentException` on illegal state; a concurrent block on a SUSPENDED card is valid by design; concurrent suspend+block both succeed on ACTIVE → last writer wins idempotently (both move toward frozen state) — acceptable; optimistic locking would make this exact (see §5) |
 
+## 4a. Card authorization decision point (D3) — STRIDE supplement
+
+Three new surfaces: `GET /api/v1/cards/category-taxonomy`, `GET|PUT /api/v1/cards/{id}/category-limits`,
+and `POST /api/v1/cards/{id}/authorizations` — the decision that answers whether one card
+authorisation is approved.
+
+**The pre-existing defect this closes.** The channel controls (`contactlessEnabled`,
+`onlineEnabled`, `atmEnabled`, `abroadEnabled`) have been stored on `cards` and returned by the API
+since V5, and **no code anywhere read them to decide anything**. A customer who switched off
+"payments abroad" changed a boolean, got a 200, and their card kept working abroad. That is worse
+than not offering the control: a security control that reports success without acting invites the
+customer to stop taking other precautions. Everything below exists to make those toggles real.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **E**oP | A caller obtains approvals for a card it does not own | `@RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN)` + `@Authorize(action = "card.authorization.decide", resource = "#id")`; the customer-facing path reaches this only through the edge, which already enforces card ownership against the JWT party |
+| **T**ampering | The caller supplies its own spend totals, so a compromised caller could under-report and slip past a limit | Accepted and explicit: the totals are inputs, because this service holds no authorisation history. The trust boundary is that only trusted rails may call it (no `ROLE_CUSTOMER`). When spend tracking lands, the totals become server-derived and this row narrows — flagged in the response today as `spendTracking: false` so no client presents them as measured |
+| **S**poofing | An unknown card id is used to fish for a permissive default | An unknown card **declines** (`CARD_NOT_ACTIVE`) rather than 404s. The acquirer needs an answer, and the safe answer to "may this unknown card spend" is no; it also avoids an existence oracle on card ids |
+| **D**oS | A customer locks themselves out of every rail | `CHIP_AND_PIN` deliberately has no toggle. A customer able to disable every channel could not pay at any terminal and could not recover from one either |
+| **T**ampering | A category block is bypassed by sending an MCC the taxonomy does not know | Unknown, malformed and absent MCCs all resolve to `OTHER`, which is **limitable but never blockable**. That asymmetry is deliberate: making OTHER blockable would let one unclassified code decline arbitrary legitimate spend as the acquirer estate changes, while leaving it unblockable means a customer's gambling block cannot be dodged by a merchant miscoding — because a miscoded gambling merchant is not in the gambling range for any control, including ours |
+| **R**epudiation | A decline cannot be explained to the customer | The decision returns a specific `declineReason`, and the evaluation order is card state, then customer switches, then amounts — so the reason shown is the one the customer can act on ("you turned gambling off"), not a downstream limit they never set |
+| **I**nfo disclosure | The taxonomy leaks something sensitive | It is public bank policy — category ids, labels and MCC ranges. Serving it is the point: a client that hardcoded MCC sets would keep enforcing a stale policy on every installed build |
+
+**DFD update:** adds `acquirer rail → POST /cards/{id}/authorizations → decision` and
+`customer (via edge) → PUT /cards/{id}/category-limits`. No new downstream dependency; the decision
+reads only this service's own tables.
+**Risk class:** integrity of a money-path control (an authorisation approve/decline).
+**Rollback:** revert. Card behaviour returns to what it is today — controls stored and unenforced —
+which is the defect, so a rollback should be paired with disabling the customer-facing toggles
+rather than leaving them visibly ineffective.
+
+## 4b. Single-use card lifecycle (D1) — STRIDE supplement
+
+Adds the terminal status `CONSUMED`, a `closedReason`, and an `expiresAt` validity window for
+SINGLE_USE cards. No new endpoint: the card list and detail responses carry the new fields.
+
+**Why a distinct status rather than reusing CANCELLED.** Until now "cancelled" covered a customer
+closing a card, a card reported lost, and a disposable card doing exactly what it promised. Those
+are three different things a customer is owed three different sentences about — and one of them is
+a security signal. "Your disposable card was just used" is the fraud alarm for this product; it
+cannot be distinguished from routine closure if the status is the same.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **E**oP | A consumed card is re-provisioned with a live PAN and spends again | `CONSUMED` is in `TERMINAL_STATUSES`, which the PAN-vault backfill excludes. A pinned test asserts the exact contents of that set, so growing it silently is not possible — that assertion caught this change and had to be updated deliberately |
+| **T**ampering | A card is marked CONSUMED without having been used, hiding a decline or a failure | `consume()` requires `cardType == SINGLE_USE` **and** `status == ACTIVE`, and is driven by the processor's lifecycle event rather than by a customer or operator request. Any other type or status throws |
+| **R**epudiation | The customer cannot tell why their card stopped working | `closedReason` distinguishes `SINGLE_USE_CONSUMED` from `VALIDITY_EXPIRED`, `LOST_OR_STOLEN` and `CUSTOMER_CANCEL`; an unused card that times out becomes EXPIRED, never CONSUMED, because nothing was spent |
+| **I**nfo disclosure | Revealing the PAN of a card that already spent | Unchanged and still correct: `CONSUMED` is terminal, so the existing "card not live" guard on secure details refuses it |
+| **D**oS | A disposable card issued and forgotten stays a live PAN indefinitely | `expiresAt` bounds the window even if the card is never presented; a partial index supports finding those cards without weighing on the hot path |
+
+**Not in this change, and load-bearing:** the authorize-once guarantee itself lives at the card
+processor. This models the outcome so the customer can see it; it does not enforce single use. Until
+the processor is configured, a SINGLE_USE card is a virtual card with a validity window — the status
+machine is ready, the guarantee is not. Anything that presents it to customers as "authorises once"
+before the processor side lands would be claiming a control the bank does not yet have.
+
 ## 5. Residual risks / assumptions
 
 - **No optimistic locking today.** `Card` lacks a `version` column; two concurrent lifecycle
@@ -78,6 +134,10 @@ All mutations require `Idempotency-Key` or `X-Operator-Id` header; resource-leve
   is implemented, erasure is manual.
 
 ## 6. Change log
+
+- **2026-08-07** — Single-use card lifecycle (D1 server preparation). New terminal status `CONSUMED`, `CardClosedReason` (`SINGLE_USE_CONSUMED | VALIDITY_EXPIRED | LOST_OR_STOLEN | CUSTOMER_CANCEL`), and `expiresAt`; `consume()` and `expireUnused()` transitions; migration V9. STRIDE supplement in §4b. `CONSUMED` joins `TERMINAL_STATUSES`, which excludes a card from PAN-vault backfill — the pinned assertion on that set failed on this change, which is the change-detector working, and was updated deliberately rather than relaxed. **The authorize-once guarantee is NOT in this change:** it lives at the card processor, and until it is configured a SINGLE_USE card is a virtual card with a validity window. Do not present it to customers as "authorises once" before then. Rollback: revert; a card sitting in CONSUMED must be remapped to CANCELLED first, or it becomes a status no older build understands.
+
+- **2026-08-07** — Card authorization decision point (D3). New `CardAuthorizationPolicy` (pure, 15 unit tests) plus `POST /cards/{id}/authorizations`, `GET|PUT /cards/{id}/category-limits` and `GET /cards/category-taxonomy`; new `card_category_rules` table. STRIDE supplement in §4a. **This closes a live defect, not just a missing feature:** the channel controls stored since V5 were read by nothing, so a customer switching off "payments abroad" got a 200 and no protection. The policy is deliberately pure — no repository, no clock — so every branch of a money-path decision is reachable in a unit test rather than only against a live acquirer. Per-category spend is not yet tracked; the response says `spendTracking: false` so a client shows "no data" instead of a progress ring against a zero that looks measured. Rollback: revert, but pair it with hiding the customer-facing toggles rather than leaving controls that visibly do nothing.
 
 - **2026-06-30** — Initial threat model authored (ADR-0113 delivery gate).
   Sandbox: maskedPan synthetic, no real PAN stored, PCI DSS CHD scope not triggered.

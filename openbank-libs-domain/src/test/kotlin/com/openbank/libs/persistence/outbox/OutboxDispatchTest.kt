@@ -68,4 +68,75 @@ class OutboxDispatchTest {
         assertThat(repo.failed.single().first).isEqualTo(row.eventId)
         assertThat(repo.failed.single().second).isEqualTo("kafka down")
     }
+
+    private fun breakerOpen() =
+        org.eclipse.microprofile.faulttolerance.exceptions.CircuitBreakerOpenException("circuit breaker is open")
+
+    @Test
+    fun `an open breaker consumes no attempt and abandons the rest of the batch`() {
+        val rows = listOf(entry("a.created"), entry("b.created"), entry("c.created"))
+        val repo = FakeRepo(rows)
+        val attempted = mutableListOf<UUID>()
+
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo) { e ->
+                attempted += e.eventId
+                throw breakerOpen()
+            }
+        }
+
+        // The first row is the only one offered; the batch stops there rather than burning an
+        // attempt on every remaining row (#4005: 24 rows x 10 ticks -> all DEAD in ~50 s).
+        assertThat(attempted).containsExactly(rows[0].eventId)
+        assertThat(repo.failed).isEmpty()
+        assertThat(repo.sent).isEmpty()
+    }
+
+    @Test
+    fun `a breaker-open cause nested under another exception is still not an attempt`() {
+        val row = entry("nested")
+        val repo = FakeRepo(listOf(row))
+
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo) {
+                throw IllegalStateException("wrapped", breakerOpen())
+            }
+        }
+
+        assertThat(repo.failed).isEmpty()
+        assertThat(repo.sent).isEmpty()
+    }
+
+    @Test
+    fun `a real publish failure still counts, so a poison row still reaches DEAD`() {
+        val rows = listOf(entry("poison"), entry("healthy"))
+        val repo = FakeRepo(rows)
+        val attempted = mutableListOf<UUID>()
+
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo) { e ->
+                attempted += e.eventId
+                if (e.eventType == "poison") error("serialization failed")
+            }
+        }
+
+        // Unlike a breaker fast-fail, a genuine failure is recorded AND the batch continues.
+        assertThat(attempted).containsExactly(rows[0].eventId, rows[1].eventId)
+        assertThat(repo.failed.map { it.first }).containsExactly(rows[0].eventId)
+        assertThat(repo.sent).containsExactly(rows[1].eventId)
+    }
+
+    @Test
+    fun `a timeout is NOT treated as transport-unavailable`() {
+        // A @Timeout can fire after the record already reached the broker, so it must keep
+        // counting as a real attempt — otherwise the row is retried and the consumer sees a
+        // duplicate. Deliberately excluded from TRANSPORT_UNAVAILABLE_EXCEPTIONS.
+        assertThat(
+            OutboxDispatch.isTransportUnavailable(
+                java.util.concurrent.TimeoutException("publish timed out"),
+            ),
+        ).isFalse()
+        assertThat(OutboxDispatch.isTransportUnavailable(breakerOpen())).isTrue()
+        assertThat(OutboxDispatch.isTransportUnavailable(null)).isFalse()
+    }
 }

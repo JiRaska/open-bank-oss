@@ -49,7 +49,7 @@ graph TB
     persist[Persistence<br/>PartyRepositoryImpl<br/>PartyOutboxRepositoryImpl<br/>Hibernate Reactive / Panache]
     outbox[Outbox<br/>PartyOutboxDispatcher<br/>pollne každých 5s]
     consumer[Kafka in<br/>KycAmlEventConsumer]
-    producer[Kafka out<br/>KafkaPartyEventPublisher]
+    producer[Kafka out<br/>KafkaPartyOutboxEventPublisher]
   end
 
   rest --> uc
@@ -75,7 +75,7 @@ com.openbank.party/
 ├── application/                     ◄── orchestrace use-case
 │   ├── port/in/                     PartyPort (PartyUseCase, příkazy, dotazy)
 │   ├── port/out/                    PartyRepository, PartyDocumentRepository,
-│   │                                PartyEventPublisher, PartyOutbox* porty
+│   │                                PartyOutbox* porty
 │   └── usecase/                     PartyService (createParty, updateParty,
 │                                    addDocument, updateKycStatus, updateAmlStatus,
 │                                    searchParties, eraseParty, deriveStatus brána)
@@ -85,8 +85,7 @@ com.openbank.party/
     ├── persistence/entity/          PartyEntity, PartyDocumentEntity, PartyOutboxEntity
     ├── persistence/repository/      *RepositoryImpl (Panache reactive)
     ├── outbox/                      PartyOutboxDispatcher (@Scheduled)
-    ├── kafka/                       KafkaPartyEventPublisher, KafkaPartyOutboxEventPublisher,
-    │                                KycAmlEventConsumer
+    ├── kafka/                       KafkaPartyOutboxEventPublisher, KycAmlEventConsumer
     ├── authz/                       AuthzProducer (OPA, ADR-0034)
     └── flags/                       FlagdProducer (OpenFeature, ADR-0067)
 ```
@@ -99,7 +98,6 @@ com.openbank.party/
 |---|---|---|
 | `PartyRepository` | `PartyRepositoryImpl` | persist/find/search/anonymize party |
 | `PartyDocumentRepository` | (Panache) | persist/list dokumentů party |
-| `PartyEventPublisher` | `KafkaPartyEventPublisher` | publikace doménových eventů |
 | `PartyOutboxRepository` | `PartyOutboxRepositoryImpl` | životní cyklus outbox řádku |
 | `PartyOutboxEventPublisher` | `KafkaPartyOutboxEventPublisher` | emise uloženého outbox payloadu |
 

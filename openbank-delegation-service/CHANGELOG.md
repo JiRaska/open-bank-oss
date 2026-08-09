@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.1...delegation-service-v0.5.2) (2026-08-07)
+
+
+### Bug Fixes
+
+* **delegation:** refuse dailyLimit/monthlyLimit — ADR-0232's cumulative ceilings are enforced nowhere ([#3613](https://github.com/JiRaska/open-bank-oss/issues/3613)) ([841d20e](https://github.com/JiRaska/open-bank-oss/commit/841d20e7f6f5e8674a20bdbd08e9488f64365fc6))
+
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.0...delegation-service-v0.5.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* **delegation:** attach the M2M token to every outbound REST client ([#3937](https://github.com/JiRaska/open-bank-oss/issues/3937)) ([9a7212a](https://github.com/JiRaska/open-bank-oss/commit/9a7212a51196ae39975902b3e7cee670c0e1326b))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.4.1...delegation-service-v0.5.0) (2026-08-06)
 
 
