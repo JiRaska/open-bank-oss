@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.17.1...card-issuance-service-v0.18.0) (2026-08-09)
+
+
+### Features
+
+* **card-issuance:** model the single-use card lifecycle (D1 server preparation) ([#4039](https://github.com/JiRaska/open-bank-oss/issues/4039)) ([3dcaa48](https://github.com/JiRaska/open-bank-oss/commit/3dcaa480ff6b6079b3ebffc4896fe911f4927fe0))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.17.0...card-issuance-service-v0.17.1) (2026-08-08)
 
 

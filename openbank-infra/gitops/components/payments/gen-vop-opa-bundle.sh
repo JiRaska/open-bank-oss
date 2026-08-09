@@ -9,70 +9,16 @@ RULES_YAML=$REPO/openbank-libs/governance/rules-opa-data.yaml
 MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # VoP REST extension (ADR-0171, ADR-0034 Phase 5).
-VOP_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
-# VoP REST extension (ADR-0171 — Verification of Payee, Reg. (EU) 2024/886 Art. 5c).
-# Extends openbank.rest with the vop-domain allow reason.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
-# Action gated (VopResource):
-#   vop.verify — check a payee name against an IBAN (POST /api/v1/vop/verify)
-#
-# The action prefix is deliberately `vop`, matching the module name openbank-vop-service, so
-# `money_path_scopes` in the base rest.rego derives "vop" and actually matches. Contrast
-# gen-sepa-instant-opa-bundle.sh, whose real prefix is `sctInstPayment` while the derived scope
-# is "sepa-instant" — a mismatch that silently stops four_eyes_required firing for that rail
-# (issue #395). Naming this `vop.create` or `payeeVerification.*` would reintroduce that bug.
-#
-# Base rest.rego grants operator-read-any / compliance-read-any for *.read + *.list. `vop.verify`
-# is neither, so it has no base coverage — that is the gap this extension fills.
-#
-# NOTE on why this is a *write-shaped* action with a read's consequences: vop.verify mints
-# nothing and changes no money state, but it is not a `*.read` either — it is a name oracle
-# (docs/threat-models/openbank-vop-service.md). Authorization deliberately does NOT try to bound
-# the oracle: a payer must be able to check a payee they do not own, so any read-role holder may
-# call it. The enumeration control is the per-requester rate limit (VopRateLimitFilter) plus the
-# response asymmetry (never echo a name on NO_MATCH), not this rule.
-
-package openbank.rest
-
-import rego.v1
-
-# Operators, admins, the payments desk and viewers may verify a payee. The admin-ui payments
-# console initiates with the signed-in operator's OWN bearer token (BFF pattern, ADR-0080 P1).
-# ROLE_VIEWER is included because verification is a pre-payment check, not a money movement —
-# the same role set the resource's own @RolesAllowed declares.
-allowed_reasons contains "operator-vop-verify" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
-	role in input.principal.roles
-	input.action == "vop.verify"
-}
-
-# M2M: the payment rails verify a payee before execution. Gated on the Keycloak
-# client_credentials convention (`service-account-*` preferred_username), which the
-# AuthorizeInterceptor classifies as HUMAN — there is no SERVICE principal type, and a rule gated
-# on one is unreachable dead code (rules.yaml: authz_policy.principal_type_service_unreachable).
-#
-# Deliberately scoped to vop.verify ONLY, never a `vop.` family prefix: this is the sole action
-# today, and a family grant would silently pre-authorise any future write/config action (e.g. a
-# threshold flip, which the threat model flags as the change with real fraud consequence).
-#
-# Deliberately NOT scoped to one hardcoded client id: more than one rail legitimately verifies a
-# payee (sepa-instant, sepa-payment, domestic-payment, psd2), and unlike device.enroll this is not
-# an account-takeover primitive. It IS a name oracle, which is why the rate limit — not a
-# per-caller allow-list — is the control that bounds it.
-allowed_reasons contains "m2m-vop-verify" if {
-	input.principal.type == "HUMAN"
-	startswith(input.principal.id, "service-account-")
-	input.action == "vop.verify"
-}
-REGO
-)
+# Extension extracted to a standalone .rego (mirroring standing_order_rest_ext.rego, issue #1322)
+# so `opa test` can load and cover it — see vop_rest_ext_test.rego in this same directory. It was
+# a heredoc until #4228, which is why the rule below had no test: opa-policy.yml discovers suites
+# by the *_rest_ext_test.rego / *_rest_ext.rego file PAIR, and a heredoc has no file to pair with.
+VOP_REST_EXT=$REPO/openbank-infra/gitops/components/payments/vop_rest_ext.rego
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \
-    "$(echo "$VOP_REST_EXT")" \
+    "$(cat "$VOP_REST_EXT")" \
     "$(cat "$AGENTS_REGO")" \
     "$(cat "$AGENTS_YAML")" \
     "$(cat "$RULES_YAML")" \
@@ -98,7 +44,7 @@ OUT=$REPO/openbank-infra/gitops/components/payments/vop-opa-bundle.yaml
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  vop_rest_ext.rego: |"
-  echo "$VOP_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$VOP_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"

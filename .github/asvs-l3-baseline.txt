@@ -224,7 +224,6 @@ V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintex
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:131: plaintext http:// env value http://apicurio-registry.messaging.svc:8080
 V13.1 openbank-analytics-sink: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-authz-policy-auditor: serves REST resources but publishes no openapi.yaml
-V13.1 openbank-case-coordinator-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-devops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-docs-truth-agent: serves REST resources but publishes no openapi.yaml
@@ -240,3 +239,11 @@ V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: pla
 V9.1 openbank-infra/gitops/components/case-coordinator/case-coordinator-service.yaml:122: plaintext http:// env value http://litellm.ai-platform.svc:4000/v1
 V9.1 openbank-infra/gitops/components/case-coordinator/case-coordinator-service.yaml:134: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:99: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
+
+# fraud -> account-service (ADR-0220 D3.5, issue #2749). Genuinely a NEW plaintext edge, declared
+# as such: fraud-service's first-ever outbound rest-client (AccountServiceClient, partyId lookup
+# for the fraud-hold signal) reaches account-service the only way any of the 200+ other callers in
+# this baseline do — there is no mTLS-terminated HTTPS listener on account-service to point at
+# instead (https is not an available alternative here, same as analytics-sink -> Apicurio above).
+# Paid off by the Layer 1 mesh-mTLS work, not before, and not by this PR alone.
+V9.1 openbank-infra/gitops/components/fraud-service/fraud-service.yaml:124: plaintext http:// env value http://account-service.accounts.svc:8100

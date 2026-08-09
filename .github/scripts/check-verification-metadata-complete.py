@@ -29,6 +29,10 @@ Two things this deliberately does NOT do:
 Usage:
     check-verification-metadata-complete.py --modules openbank-a,openbank-b
     check-verification-metadata-complete.py --modules "" --enforce   # no-op, exits 0
+
+    Exit codes: 0 = no gap; 1 = a real gap (with --enforce); 2 = the check could not run
+    (Gradle failed), which is NOT a verdict about the metadata. Callers must treat 2 as
+    "unknown" and must not report it as drift.
     check-verification-metadata-complete.py --selftest               # prove it can fail
 """
 
@@ -293,7 +297,13 @@ def main() -> int:
         print(f"::error title=verification-metadata check could not run::Gradle failed "
               f"({failed}); this says nothing about whether the metadata is complete. "
               f"Re-run, and if it persists treat it as a build problem, not a metadata gap.")
-        return 1
+        # Exit 2, NOT 1. The sentence above was already true and already printed, and the
+        # caller still could not act on it: both outcomes returned 1, so the workflow's
+        # `if: failure()` fired the same "unpinned artifacts on main" issue either way.
+        # That is how #4162 came to assert drift when all three failing shards had died of
+        # `Java heap space`. A checker that knows the difference must ENCODE the difference
+        # in the one thing its caller reads.
+        return 2
 
     missing = sorted(after - before)
     if not missing:

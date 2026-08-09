@@ -504,7 +504,7 @@ jobs:
           #      not on the image tag, which is what everyone assumes (issue #2621).
           #   2. A deploy loop, worked around by the `if:` on this job (line ~83): the PR touches
           #      openbank-admin-ui/**, which is this workflow's own path filter.
-          #   3. agent-review flagged the derived churn as if it were an infra decision, piling up
+          #   3. agent-review (retired #2161) flagged the derived churn as an infra decision, piling up
           #      #596/#608/#609 unmerged on 2026-07-08 — worked around by path exclusions in
           #      agent-review.yml, i.e. at the symptom.
           # The dossiers are still generated on every build and still baked by the Dockerfile;

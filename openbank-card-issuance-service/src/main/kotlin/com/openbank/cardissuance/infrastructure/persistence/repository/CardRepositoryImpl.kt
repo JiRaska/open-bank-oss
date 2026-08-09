@@ -7,6 +7,7 @@ package com.openbank.cardissuance.infrastructure.persistence.repository
 import com.openbank.cardissuance.application.port.out.CardRepository
 import com.openbank.cardissuance.domain.model.Card
 import com.openbank.cardissuance.infrastructure.persistence.entity.CardEntity
+import com.openbank.cardissuance.infrastructure.persistence.mapper.applyFrom
 import com.openbank.cardissuance.infrastructure.persistence.mapper.toDomain
 import com.openbank.cardissuance.infrastructure.persistence.mapper.toEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -96,27 +97,6 @@ class CardRepositoryImpl(private val outboxRepository: CardOutboxRepositoryImpl)
             cardId,
         )
     }.awaitSuspending() == 1
-
-    /** Copy the mutable (lifecycle) fields of [card] onto a managed entity for an in-place update. */
-    private fun CardEntity.applyFrom(card: Card) {
-        status = card.status.name
-        maskedPan = card.maskedPan
-        cardholderName = card.cardholderName
-        embossedName = card.embossedName
-        expiryDate = card.expiryDate
-        dailyLimitMinorUnits = card.dailyLimitMinorUnits
-        monthlyLimitMinorUnits = card.monthlyLimitMinorUnits
-        contactlessEnabled = card.contactlessEnabled
-        onlineEnabled = card.onlineEnabled
-        atmEnabled = card.atmEnabled
-        abroadEnabled = card.abroadEnabled
-        currency = card.currency
-        deliveryAddress = card.deliveryAddress
-        activatedAt = card.activatedAt
-        blockedAt = card.blockedAt
-        blockedReason = card.blockedReason
-        updatedAt = card.updatedAt
-    }
 
     private companion object {
         /** `status` is persisted as its enum NAME (see CardMapper), so the query compares strings. */

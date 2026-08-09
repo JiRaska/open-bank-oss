@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.client
 
+import com.openbank.ledger.application.port.out.CnbFixing
 import com.openbank.ledger.application.port.out.CnbRateProvider
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -13,7 +14,6 @@ import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
-import java.math.BigDecimal
 
 /**
  * Resilient adapter over [FxServiceClient]. Wraps the cross-service call in the same fault-tolerance
@@ -27,15 +27,17 @@ class FxServiceCnbRateAdapter(@RestClient private val client: FxServiceClient) :
     @Inject
     lateinit var self: FxServiceCnbRateAdapter
 
-    override suspend fun cnbRate(base: String): BigDecimal? = self.fetchWithResilience(base)
+    override suspend fun cnbRate(base: String): CnbFixing? = self.fetchWithResilience(base)
 
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 3, delay = 500, jitter = 200, retryOn = [Exception::class])
     @Timeout(8_000)
-    open suspend fun fetchWithResilience(base: String): BigDecimal? = try {
+    open suspend fun fetchWithResilience(base: String): CnbFixing? = try {
         val rate = client.getRate(base, QUOTE, SOURCE_CNB).awaitSuspending()
         // CNB fixing stores bid == ask == mid; either is the per-unit CZK rate.
-        rate.bidRate ?: rate.askRate
+        // `validFrom` rides along unchanged, including when absent — see CnbFixing's KDoc for why a
+        // missing fixing date must not become Instant.now() here (#3921).
+        (rate.bidRate ?: rate.askRate)?.let { CnbFixing(it, rate.validFrom) }
     } catch (ex: WebApplicationException) {
         if (ex.response?.status == 404) null else throw ex
     }

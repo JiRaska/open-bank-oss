@@ -16,6 +16,7 @@ import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import java.math.BigDecimal
+import java.time.Instant
 
 /**
  * RestClient binding to `openbank-fx-service` for reading the ČNB central-bank fixing
@@ -37,11 +38,21 @@ interface FxServiceClient {
     ): Uni<FxRateResponse>
 }
 
-/** Subset of the fx-service FxRate payload we need; a CNB fixing has bid == ask == mid. */
+/**
+ * Subset of the fx-service FxRate payload we need; a CNB fixing has bid == ask == mid.
+ *
+ * [validFrom] is read because the revaluation has to know **how old the fixing it is about to mark
+ * positions at actually is** (#3921). fx-service has always served it — it is a column on
+ * `fx_rates` and a field of that service's own `FxRateResponse` — and this DTO simply did not
+ * declare it, so `@JsonIgnoreProperties(ignoreUnknown = true)` dropped it on the floor and the
+ * ledger side had no time value to reason about at all. Nullable so a payload without it degrades
+ * to "age unknown" rather than to a fabricated "just now".
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class FxRateResponse(
     val baseCurrency: String? = null,
     val quoteCurrency: String? = null,
     val bidRate: BigDecimal? = null,
     val askRate: BigDecimal? = null,
+    val validFrom: Instant? = null,
 )
