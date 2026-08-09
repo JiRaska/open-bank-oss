@@ -2309,3 +2309,18 @@ gates:
       # closed. Falsified against the real tree before wiring in: injecting one production
       # caller and, separately, flipping the declared status each produce exactly one finding.
       python3 .github/scripts/check-enforcement-reachability.py --enforce
+  - id: label-description-length
+    name: "a labels.yml description fits GitHub's 100-character cap (#4192)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-label-descriptions.py --self-test
+    selftest_expect: pass
+    run: |
+      # GitHub caps a label description at 100 characters and Label sync fails the whole apply on
+      # the first over-long entry, so ONE wordy label turns main red on a push-triggered workflow
+      # addressed to nobody. This has happened THREE times, each fixed by shortening the string —
+      # which leaves the next occurrence exactly as reachable. The limit is invisible from every
+      # angle a contributor uses: the YAML is valid, yamllint is clean, and the failure surfaces
+      # only after the merge. Falsified on the real file: the #4192 entry at 110 chars exits 1 and
+      # is named; at 100 it exits 0.
+      python3 .github/scripts/check-label-descriptions.py .
