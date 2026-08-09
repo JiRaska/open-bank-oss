@@ -840,10 +840,19 @@ gates:
   # an event happened; a script that renews one manufactures evidence (#4247). Enforcement is
   # therefore never a deadlock: the two honest exits are to perform the event again and record
   # it, or to delete the entry and let the score show its derived value.
+  # Lands ADVISORY on purpose, and the reason is a date, not caution. Measured by time-travel on
+  # the file as committed: `--today 2026-08-16` exits 0, `--today 2026-08-17` exits 1, because
+  # the two pentest attestations expire on 2026-08-16 and 2026-08-18. `Validate manifests` is a
+  # REQUIRED context, so an enforced gate here would block every PR in the repo eight days from
+  # now — and the honest remedy is to perform a pentest, which is not something a commit can do.
+  # An anti-rot gate that makes the whole repo unmergeable in order to announce a rotting
+  # attestation has traded a small problem for a larger one.
+  # GRADUATE TO enforced once both pentest entries carry a fresh date: the fuse is then 21 days
+  # out, the 14-day warning window gives real notice, and a red means someone ignored it.
   - id: attestation-ttl-watch
     name: "attestation TTL watch (Refs #2365, attestations.yaml anti-rot)"
     group: registry
-    mode: enforced
+    mode: advisory
     selftest: |
       python3 .github/scripts/check-attestation-ttl.py --self-test
     selftest_expect: pass
