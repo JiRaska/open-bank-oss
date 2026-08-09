@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.105.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.104.0...admin-ui-v0.105.0) (2026-08-08)
+
+
+### Features
+
+* **admin-ui:** swarm case list + thread view over the Temporal case history ([#4186](https://github.com/JiRaska/open-bank-oss/issues/4186)) ([#4235](https://github.com/JiRaska/open-bank-oss/issues/4235)) ([c774330](https://github.com/JiRaska/open-bank-oss/commit/c7743304b9cbcbfaa97b545008b66a3dee3150a5))
+
 ## [0.104.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.2...admin-ui-v0.104.0) (2026-08-08)
 
 
