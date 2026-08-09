@@ -106,9 +106,18 @@ not change any existing request's outcome until explicitly flipped.
     **failed** — a state Temporal surfaces and an operator can re-drive — rather than completed.
   - **Why retrying is safe rather than a duplicate-payment risk**, established from the code and
     not assumed: `SettlementAdapter` sends `idempotencyKey = "domestic-settlement-<paymentId>"`,
-    payment-scoped and stable across attempts; transaction-service answers a duplicate with HTTP
-    409, which the adapter maps to `settled = true`; and the `SENT_TO_CLEARING` guard makes the
-    activity re-entrant once the status write lands. This is the opposite of the #4218 dispatch
+    payment-scoped and stable across attempts; transaction-service deduplicates on it by
+    early-returning the existing transaction (`TransactionService.initiateTransaction`), which it
+    answers as **201 with that transaction** — not 409, and the adapter maps that arm to
+    `settled = true` too; and the `SENT_TO_CLEARING` guard makes the activity re-entrant once the
+    status write lands. The `HTTP_CONFLICT` branch in `SettlementAdapter` is unreachable today and
+    kept only as defence if that service ever starts answering 409.
+
+    One caveat that follows from the early return and is NOT covered: it returns the existing row
+    whatever its status, so a first attempt that committed the transaction but died before posting
+    hands a retry a `PENDING` transaction as 201, which the adapter reads as `settled = true`. The
+    fix belongs in transaction-service; recorded here so the safety argument is not read as wider
+    than it is. This is the opposite of the #4218 dispatch
     edge, where no downstream deduplication exists and holding is therefore the correct trade.
   - **Residual risk**: the retry window is unchanged (3 attempts, 10 min schedule-to-close), so a
     multi-hour outage still ends in a failed workflow with the payment in `SENT_TO_CLEARING`. That

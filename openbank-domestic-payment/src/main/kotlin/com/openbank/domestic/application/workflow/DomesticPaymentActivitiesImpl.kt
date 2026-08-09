@@ -133,8 +133,8 @@ open class DomesticPaymentActivitiesImpl(
         // moved past this step there is nothing to do. Without the early return a re-drive of a
         // stranded payment dies here on "Invalid domestic payment status transition" and never
         // reaches settlePayment — which is the step that would actually recover it, and which is
-        // idempotent (payment-scoped key, 409 = already booked). submitScheme and settlePayment
-        // below both carry the same guard; validate was the one activity that did not (#4182).
+        // idempotent (payment-scoped key; a replay returns the existing transaction). submitScheme
+        // and settlePayment below both carry the same guard; validate was the one that did not (#4182).
         if (payment.status != DomesticPaymentStatus.RECEIVED) return@vtx Unit
         val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
         paymentRepository.update(
@@ -247,13 +247,18 @@ open class DomesticPaymentActivitiesImpl(
      *  - [SettlementAdapter][com.openbank.domestic.infrastructure.client.SettlementAdapter] sends
      *    `idempotencyKey = "domestic-settlement-<paymentId>"` — payment-scoped and stable across
      *    attempts (no timestamp, no nonce), so every retry carries the key of the first attempt.
-     *  - transaction-service answers a duplicate with HTTP 409, which the adapter maps to
-     *    `SettlementOutcome(settled = true)` — an already-booked payment is a success, not a fault.
+     *  - transaction-service deduplicates on that key by early-returning the existing
+     *    transaction, which it answers as **201 with that transaction** — measured, not assumed:
+     *    `TransactionResource` calls `Response.created(...)` unconditionally, and the only 409s in
+     *    that service come from optimistic-lock and state-transition mappers. The adapter maps that
+     *    arm to `SettlementOutcome(settled = true)`, so an already-booked payment is a success.
+     *    (`SettlementAdapter`'s `HTTP_CONFLICT` branch is unreachable today and kept as defence.)
      *  - the `SENT_TO_CLEARING` guard above makes the activity re-entrant: once the status write
      *    lands, a retry (or an operator re-drive) returns `SETTLED` without calling the port again.
      *
      * So the failure direction is the dangerous one here, not the retry direction: a retry costs at
-     * worst a 409, whereas swallowing costs a customer a payment that left and never arrived.
+     * worst a redundant round-trip that returns the same transaction, whereas swallowing costs a
+     * customer a payment that left and never arrived.
      */
     override fun settlePayment(paymentId: UUID): DomesticPaymentStatus = vtx {
         val payment = paymentRepository.findById(paymentId)

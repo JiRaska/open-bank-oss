@@ -29,8 +29,10 @@ import java.util.UUID
 /**
  * Adapter over [TransactionServiceClient] — books the debit leg in transaction-service once
  * the Czech CERTIS scheme returns ACSC (ADR-0108). The idempotency key is payment-scoped so
- * Temporal retries never double-book. HTTP 409 (duplicate) is treated as a successful
- * already-booked outcome.
+ * Temporal retries never double-book: transaction-service early-returns the existing transaction
+ * for a repeated key and answers 201 with it, which is the arm that actually fires. The 409 branch
+ * below is unreachable against that service today and kept only as defence if it ever adopts a
+ * conflict response — do not cite it as the deduplication mechanism.
  *
  * The OIDC token is acquired explicitly (not via OidcClientRequestReactiveFilter) because the
  * filter loses the Vert.x context on Temporal activity threads — same root cause as ADR-0104
@@ -107,9 +109,14 @@ class SettlementAdapter(
                 log.infof("Settlement booked for payment %s → transactionId=%s", payment.id, txId)
                 SettlementOutcome(settled = true, transactionId = txId)
             }
+            // Unreachable against transaction-service today — it replays a duplicate key as 201
+            // with the existing transaction (see this class's KDoc). Kept as defence, and logged
+            // loudly enough to notice if that ever changes.
             HTTP_CONFLICT -> {
                 log.infof(
-                    "Settlement already booked (409) for payment %s — idempotent success",
+                    "Settlement already booked (409) for payment %s — idempotent success. " +
+                        "NOTE: transaction-service is not expected to answer 409; if this line " +
+                        "appears, its duplicate handling changed and the docs need revisiting.",
                     payment.id,
                 )
                 SettlementOutcome(settled = true, transactionId = null)
