@@ -108,21 +108,56 @@ def strip_comments_only(src: str) -> str:
     The SQL predicate needs this: an INSERT lives inside a string literal, which
     strip_comments_and_strings() blanks. Prose describing an insert must still not count, so the
     comments still go.
+
+    STRING-AWARE, and it has to be. Its sibling above states the invariant this function must also
+    honour — "a `\"/*\"` inside a literal must not open a comment" — and gets it for free by
+    blanking literals first. This one cannot blank them (the SQL *is* a literal), so it has to
+    track them, which makes a regex the wrong tool: comment and string openers alias each other.
+    The first version walked `/*` blind to literals, so `val a = "/*"` opened a comment that
+    swallowed every following INSERT and reported a real writer as writerless — measured, and the
+    one case in the self-test below that separates the two implementations (#4240). Raw strings are
+    consumed first: otherwise the opening `\"\"` of a `\"\"\"…\"\"\"` reads as an empty literal.
+
+    No service in the tree trips this today — the fleet verdict is byte-identical before and after
+    (33 dispatchers, 8 baselined, 0 new, 0 stale). This is a latent-defect fix, so the self-test is
+    the only thing that can hold it: there is no failing service to point at.
     """
-    src = re.sub(r"//[^\n]*", "", src)
     out: list[str] = []
-    depth = i = 0
-    while i < len(src):
+    i, n, depth = 0, len(src), 0
+    while i < n:
+        if depth:
+            if src.startswith("/*", i):
+                depth += 1
+                i += 2
+            elif src.startswith("*/", i):
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
         if src.startswith("/*", i):
-            depth += 1
+            depth = 1
             i += 2
             continue
-        if src.startswith("*/", i) and depth:
-            depth -= 1
-            i += 2
+        if src.startswith("//", i):
+            while i < n and src[i] != "\n":
+                i += 1
             continue
-        if not depth:
-            out.append(src[i])
+        if src.startswith('"""', i):
+            end = src.find('"""', i + 3)
+            end = n if end == -1 else end + 3
+            out.append(src[i:end])
+            i = end
+            continue
+        if src[i] == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append(src[i:j])
+            i = j
+            continue
+        out.append(src[i])
         i += 1
     return "".join(out)
 
@@ -230,6 +265,32 @@ def self_test() -> int:
     sql_kdoc = disp + "\n/** Historically this did INSERT INTO case_outbox directly. */\n"
     expect("a KDoc describing an INSERT is NOT a writer",
            classify_service({"a.kt": sql_kdoc}), (True, False))
+
+    # The SQL strip must honour the same `"/*"` invariant its sibling states. Exactly ONE of the
+    # three below was measured failing against the regex-plus-blind-walk version this replaced —
+    # the first. The other two pass either way and are regression tests, not evidence of a defect;
+    # saying so here because a comment claiming three failures where one was measured is the kind
+    # of unverified evidence this file's own header exists to warn about.
+    #
+    # A false negative is the dangerous direction for all three: the gate reports a service that
+    # DOES write its outbox as writerless, which reads as a clean finding rather than a broken
+    # probe — the shape that put this gate on main's critical path in the first place (#4240).
+    slash_star_literal = disp + '\nval a = "/*"\nval s = """INSERT INTO case_outbox (id)"""\n'
+    expect('a "/*" inside a literal must not open a comment and swallow the INSERT',
+           classify_service({"a.kt": slash_star_literal}), (True, True))
+    # Regression: `//` stripped to end-of-line must not reach inside a literal and take a
+    # following INSERT with it.
+    url_in_sql = (
+        disp + '\nval s = """\n-- see http://wiki/outbox\nINSERT INTO case_outbox (id)\n"""\n'
+    )
+    expect("a // inside the SQL literal does not hide the INSERT",
+           classify_service({"a.kt": url_in_sql}), (True, True))
+    # Regression: a quote inside a comment must not open a string and swallow the SQL after it.
+    raw_after_comment = (
+        disp + '\n/* the "outbox" table */\nval s = """INSERT INTO case_outbox"""\n'
+    )
+    expect("a quote inside a comment does not swallow the following SQL",
+           classify_service({"a.kt": raw_after_comment}), (True, True))
 
     # …and the stripper must not swallow real code that merely follows a comment.
     after = disp + "\n/* note */\n" + write
