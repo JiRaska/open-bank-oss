@@ -55,12 +55,23 @@ class ResolveSurfaceUseCase(
         val recent = events.recentForPartyAndSlot(partyId, slot, Instant.now().minus(DISMISSAL_LOOKBACK))
         if (DismissalRule.shouldSuppress(recent)) return Result.Suppressed
 
-        // Half-real (issue #2749): ARREARS (LendingArrearsEventConsumer, openbank.lending.events)
-        // and ERASURE_REQUESTED (PartyErasureConsumer, openbank.party.events) are materialised.
-        // FRAUD_HOLD and DISPUTE_OPENED are NOT — neither signal is published as an event
-        // anywhere in this fleet today (fraud-service has no persisted hold state; dispute-service
-        // emits only on resolution, never on open). That is still an honest gap for those two, not
-        // a silent one — a party with an open dispute or fraud hold is NOT currently excluded.
+        // Three of four adverse states are materialised (issue #2749): ARREARS
+        // (LendingArrearsEventConsumer, openbank.lending.events), ERASURE_REQUESTED
+        // (PartyErasureConsumer, openbank.party.events) and FRAUD_HOLD (FraudHoldEventConsumer,
+        // fraud-hold-events-in). DISPUTE_OPENED is the one gap: a party with an open dispute is
+        // NOT currently excluded.
+        //
+        // The previous version of this note was wrong on all three of its factual claims, and is
+        // corrected rather than deleted so the next reader learns it was superseded rather than
+        // that it never existed. It said neither signal is published anywhere in the fleet,
+        // "fraud-service has no persisted hold state" and "dispute-service emits only on
+        // resolution, never on open". Measured on this sha: fraud-service persists holds
+        // (FraudHoldEntity/FraudHoldService) and dispute-service does emit `dispute.opened`
+        // (DisputeService.openedOutboxMessage, landed #4087).
+        //
+        // So the REASON DISPUTE_OPENED is missing is not the producer — it exists — but that this
+        // service has no @Incoming for openbank.dispute.events. A note that blames the wrong layer
+        // sends the next person to fix a service that is already correct.
         val eligibility = EligibilitySnapshot(
             partyId = partyId,
             adverseState = adverseState.activeStates(partyId),
