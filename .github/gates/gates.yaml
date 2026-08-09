@@ -2418,3 +2418,51 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-pr-file-overlap.py
+
+  # ADR-0251. The script this falsifies is the PROOF that an independent review happened, and
+  # its predecessor is the reason the control was retired: ADR-0154's "Verify the Claude
+  # fallback actually reviewed" step carried the SAME `if:` as the review it verified, so
+  # across 10 consecutive runs both were `skipped` while every run concluded `success`
+  # (#4281). A verifier that can be switched off by the thing it verifies is not one.
+  #
+  # So the script itself must stay falsifiable, which is what this gate is for. Its self-test
+  # drives 9 cases: the two shapes that ARE a review must pass, and seven that are not — a
+  # missing file, no argument, an empty file, a whitespace-only file, plausible prose with no
+  # verdict line, a real `401 OAuth access token is invalid`, and a dead-driver marker sitting
+  # next to a verdict line (the marker must win).
+  #
+  # Three of those assert on the MESSAGE, not just the exit code. That is not thoroughness for
+  # its own sake: deleting the empty-file check left this self-test GREEN, because an empty
+  # file also fails one branch later for want of a verdict line. Two branches agreeing on the
+  # verdict made the earlier one unfalsifiable — inside the very script whose job is to make
+  # a non-review impossible to mistake for a clean one.
+  - id: agent-review-proof-falsifiable
+    name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
+    group: lint
+    mode: enforced
+    selftest: bash .github/scripts/check-agent-review-happened.sh --self-test
+    selftest_expect: pass
+    run: |
+      bash .github/scripts/check-agent-review-happened.sh --self-test
+
+  # ADR-0251's other half: WHICH PRs get reviewed. Both of this rule's clauses were wrong in
+  # the first draft, and both failed silently toward reviewing LESS than the ADR claimed —
+  # `governance` written as a commit TYPE (no such type exists in rules.yaml `commits.types`,
+  # so the branch was unreachable dead code, 0 hits in 7 days), and the money-path list
+  # matched literally (`money_path_services` says `openbank-ledger-service`, real scopes say
+  # both `fraud` and `fraud-service`, so `fix(ledger)` — the most obviously in-scope shape
+  # here — was not covered; 48 PRs instead of 114).
+  #
+  # Neither was visible by reading the rule. The self-test drives 18 titles whose answer is
+  # known, plus an unreadable rules.yaml which must RAISE rather than classify everything out
+  # of scope. It reads its fixture through the real money_path_scopes() — an earlier version
+  # built the normalised set inline and stayed green when that function was gutted, the
+  # counter-example never reaching the code under test.
+  - id: agent-review-scope-falsifiable
+    name: "ADR-0251 review scope rule is falsifiable (enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/agent-review-scope.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/agent-review-scope.py --self-test
