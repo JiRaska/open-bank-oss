@@ -21,7 +21,7 @@
 # Do not revert to a musl base to reclaim the layer: .github/scripts/verify-image-native-libs.py
 # runs `ldd` on every bundled linux .so INSIDE this exact base before any image is pushed, and
 # fails the push. It reads the base image from THIS file — never give it a second copy.
-FROM eclipse-temurin:25-jre@sha256:681c543d6f36c50f45e9b5226930a46203dcfa351d3670e9d0bdf0dabae53539
+FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e
 WORKDIR /app
 # uid 100 / gid 101 reproduce exactly what busybox `adduser -S` yielded on the alpine base, so
 # nothing that assumed those numbers changes. Deployments pin runAsUser/runAsGroup anyway.

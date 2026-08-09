@@ -55,6 +55,10 @@ class FraudHoldService @Inject constructor(
     @ConfigProperty(name = "openbank.fraud-hold.ttl-days", defaultValue = "30")
     private val ttlDays: Long,
 ) {
+    /**
+     * Field-injected rather than a constructor parameter: the constructor already takes 8,
+     * and detekt's LongParameterList fires AT `constructorThreshold: 9`, not above it.
+     */
     @Inject
     lateinit var domainMetrics: DomainMetrics
 
@@ -136,6 +140,11 @@ class FraudHoldService @Inject constructor(
             if (expired.isNotEmpty()) {
                 log.infof("fraud-hold expiry sweep cleared=%d", expired.size)
             }
+            // Only on the path that actually completed. A heartbeat inside (or after) the
+            // catch would assert the very thing it exists to disprove — and this sweep
+            // swallows its exception, so a permanently broken run is otherwise
+            // indistinguishable from a healthy quiet one: no exception escapes, and
+            // "cleared=0" is the normal case.
             liveness?.recordSuccess()
         } catch (ex: Exception) {
             log.warnf(ex, "fraud-hold expiry sweep failed")
@@ -165,7 +174,12 @@ class FraudHoldService @Inject constructor(
     private companion object {
         const val WORKFLOW_NAME = "fraud-hold-expiry-sweep"
 
-        /** Matches the @Scheduled default `openbank.fraud-hold.sweep-interval:1h`. */
+        /**
+         * Matches the @Scheduled default `openbank.fraud-hold.sweep-interval:1h`. The
+         * staleness rule bakes in a 2x multiplier, so this is the SCHEDULE, not a tighter
+         * SLA — and a deployment that widens the cron without widening this makes the
+         * gauge over-strict rather than lax, which is the safe direction to be wrong in.
+         */
         val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
 
         const val RULE_VERSION = "fraud-hold-v1"

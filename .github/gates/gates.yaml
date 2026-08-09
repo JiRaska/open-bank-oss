@@ -659,6 +659,7 @@ gates:
     name: "release-scope-mismatch gate (rules.yaml release_scope_mismatch, advisory)"
     group: supplychain
     mode: advisory
+    verified: "2026-08-09 — heuristic by design (classifies from PR title before the squash commit exists); PR-only, still noisy-not-wrong, no graduation planned"
     when: pull_request
     needs_base: required
     run: |
@@ -1009,6 +1010,25 @@ gates:
   # Deliberately run here as well as in the `adr-registry` workflow: that one is
   # path-filtered to docs/adr/**, but this gate's dangling-`ADR-NNNN`-reference
   # check is repo-wide and is most useful on PRs that touch CODE, not ADRs.
+  # Journey catalog integrity (ADR-0252 phase 2, #4348). The catalog is the platform's
+  # claim about which customer journeys are checked in production; this gate makes every
+  # claim in it checkable and makes a silent shrink impossible. It does NOT establish that
+  # the catalog is COMPLETE — deriving the customer-visible capability set is the unbuilt
+  # half, and the file's own header says so, because a coverage claim nobody can falsify is
+  # the failure mode this whole ADR exists to end.
+  - id: journey-catalog-integrity
+    name: "journey catalog is consistent with the manifests and alerts it claims (ADR-0252)"
+    group: registry
+    mode: enforced
+    selftest: python3 .github/scripts/check-journey-catalog.py --self-test
+    selftest_expect: pass
+    min_subjects: 3   # 3 journeys today (2026-08-09): 1 active, 2 planned
+    run: |
+      # Falsified against the REAL tree before wiring in, not only in the self-test's temp
+      # trees: moving cronjob-journey-public-edge.yaml aside makes it exit 2 naming that
+      # exact file, and it returns to OK when the file is restored.
+      python3 .github/scripts/check-journey-catalog.py --root . --enforce
+
   - id: adr-registry-integrity-check
     name: "ADR registry integrity check"
     group: registry
@@ -1520,6 +1540,8 @@ gates:
     name: "no runBlocking in a @Scheduled body (rules.yaml: scheduled_methods, enforced)"
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-no-runblocking-in-scheduled.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-no-runblocking-in-scheduled.py
 
@@ -2028,6 +2050,7 @@ gates:
     name: "dotted mp.messaging key guard (application.yaml, #686, advisory)"
     group: data
     mode: advisory
+    verified: "2026-08-09 — fleet still not clean per #686; no target date set for --enforce yet"
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
@@ -2042,6 +2065,7 @@ gates:
     name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
     group: data
     mode: advisory
+    verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
     when: pull_request
     needs_base: required
     run: |
@@ -2081,6 +2105,7 @@ gates:
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
     group: data
     mode: advisory
+    verified: "2026-08-09 — on track for ADR-0144's 2026-09-15 enforce target"
     when: pull_request
     needs_base: required
     run: |
@@ -2487,6 +2512,7 @@ gates:
     name: "PR file overlap (other open PRs editing the same files, advisory)"
     group: lint
     mode: advisory
+    verified: "2026-08-09 — advisory by design (informational cross-PR heads-up, not a correctness gate)"
     when: pull_request
     selftest: python3 .github/scripts/check-pr-file-overlap.py --self-test
     selftest_expect: pass
@@ -2581,6 +2607,26 @@ gates:
     run: |
       bash .github/scripts/check-manifest-types-only.sh
 
+  # ADR-0071: the fleet-wide governance manifest is code-derived from per-service
+  # governance.yaml. This is the OTHER half of the pair above, and the one where living in
+  # `ui-build` was not near-harmless: its subject is every module with a version.txt, while
+  # `changes-ui` fires only for openbank-admin-ui/, */governance.yaml or the governance
+  # schema. A PR adding a whole new service and OMITTING governance.yaml touches none of
+  # those, so the job was absent — not skipped — and openbank-engagement-service shipped with
+  # no manifest for days while the aggregate check read green (#4083, third sighting after
+  # #2236 and #3629). Reasoning for the checks themselves lives in the script header.
+  # Costs an `npm ci --omit=dev` (~47s) when node_modules is cold, which is every CI run;
+  # if that makes `lint` the tail shard, move this `group:` — shards are wall-time buckets.
+  - id: governance-manifest
+    name: "Governance manifest gate (ADR-0071, enforced)"
+    group: lint
+    mode: enforced
+    selftest: bash .github/scripts/check-governance-manifest.sh --self-test
+    selftest_expect: pass
+    min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
+    run: |
+      bash .github/scripts/check-governance-manifest.sh
+
   # The other half of check-gate-script-registration.py, which says in its own header that it
   # answers "is anything wired to this script" and deliberately not "can that invocation run".
   # A gate written as an inline step in ci.yml inherits its host job's conditions instead of
@@ -2654,6 +2700,43 @@ gates:
       echo "SUBJECTS=${#files[@]}"
       python3 -m ruff check --no-cache --isolated --target-version py311 \
         --select E9,F,B --output-format concise "${files[@]}"
+
+  # ADR-0254. A required-status-check context whose workflow was renamed or deleted strands
+  # every PR forever with no error anywhere naming why — the gap that made deleting #4339's
+  # four duplicate workflows an by-hand `gh api` check before this gate existed. Read live,
+  # never from a checked-in copy of the ruleset (the hand-kept-list trap this repo's CI
+  # section names as its most-repeated defect class).
+  #
+  # Needs NO permission grant — GET .../rulesets is world-readable on a public repo (verified
+  # with a bare unauthenticated curl). The first version of this gate declared `permissions:
+  # administration: read` on the job from a private-repo assumption; `administration` is not a
+  # valid workflow-permissions key at all, and GitHub cannot parse a workflow declaring one —
+  # it broke ci.yml outright (zero jobs, every push) before this was caught. See this script's
+  # own header for the full story.
+  - id: ruleset-context-parity
+    name: "every required status-check context matches a job some workflow emits (ADR-0254, enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-ruleset-context-parity.py --self-test
+    selftest_expect: pass
+    min_subjects: 3   # 5 required contexts today (2026-08-09)
+    run: |
+      python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
+
+  # ADR-0254. incluster-hostname-resolution shipped advisory with a "these six findings are
+  # all benign" note; three were live (settlement-service and onboarding-service dialling
+  # hostnames that resolve in no namespace). The note was never re-checked. Every mode:
+  # advisory gate must carry a dated `verified:` claim, re-justified every 180 days — this
+  # does not re-verify the CLAIM, only forces it to keep being re-dated by a human.
+  - id: advisory-finding-staleness
+    name: "an advisory gate's 'not enforced yet' reasoning is dated and re-justified (ADR-0254, enforced)"
+    group: lint
+    mode: enforced
+    selftest: python3 .github/scripts/check-advisory-finding-staleness.py --self-test
+    selftest_expect: pass
+    min_subjects: 3   # 5 advisory-mode gates today (2026-08-09)
+    run: |
+      python3 .github/scripts/check-advisory-finding-staleness.py --today "$(date -u +%F)" --enforce
 
   - id: gate-subject-floor
     name: "every gate declares how much it expects to find (#4339, enforced)"

@@ -90,6 +90,7 @@ export const SERVICE_REGISTRY: ServiceEntry[] = [
   { id: 'fraud',             label: 'Fraud',            group: 'compliance',   container: 'openbank-fraud-service',          port: 8133 },
   { id: 'analytics-sink',    label: 'Analytics Sink',   group: 'platform',     container: 'openbank-analytics-sink',         port: 8134 },
   { id: 'anacredit',         label: 'AnaCredit',        group: 'compliance',   container: 'openbank-anacredit-service',      port: 8137 },
+  { id: 'case-coordinator',  label: 'Case Coordinator', group: 'platform',     container: 'openbank-case-coordinator-agent', port: 8146 },
 ]
 
 export function findService(id: string): ServiceEntry | undefined {

@@ -791,6 +791,14 @@ fire from *outside* it, so they stay here:
   claims to have run your gate (`gh api .../actions/jobs/<id> --jq '.steps[]'`); a green job name
   is not evidence your step was in it. Fix is always the same: declare it in
   `.github/gates/gates.yaml` with a `group:`, never as an inline step in a conditional job.
+  **The checker that enforces this had the same blind spot as every other probe here: it keyed
+  on `check-*.py|sh` in the step's `run:`, so the ADR-0071 governance-manifest gate — plain
+  `node scripts/generate-governance.mjs` — was invisible to it and sat in that same `ui-build`
+  job while the checker reported it clean** (#4083, the third sighting after #2236 and #3629).
+  A gate is not always a `check-*` script; the one thing it always has is a NAME saying it is
+  one, so `check-gate-invocation-reachability.py` now also flags a step whose name contains
+  `gate`/`enforced`/`advisory` in a narrowing job, with `always()` carved out explicitly
+  because it broadens rather than narrows. Falsified by running it against pre-fix `ci.yml`.
 - **`main`'s own CI conclusion is the one signal with no reader — every check in this repo is
   about a PR.** A red push-triggered run on `main` has no PR to carry it, no reviewer, and no
   notification; it is a red dot in the Actions tab, and the next PR opened against that commit

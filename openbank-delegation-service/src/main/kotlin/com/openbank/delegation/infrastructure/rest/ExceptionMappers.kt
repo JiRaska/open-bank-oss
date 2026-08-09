@@ -12,6 +12,10 @@ import com.openbank.delegation.application.usecase.DelegationNotGrantorException
 import com.openbank.delegation.application.usecase.DelegationResourceOwnershipException
 import com.openbank.delegation.application.usecase.DelegationScaException
 import com.openbank.delegation.application.usecase.DelegationUnsupportedConstraintException
+import com.openbank.delegation.application.usecase.SpendReservationNotFoundException
+import com.openbank.delegation.application.usecase.SpendReservationRefusedException
+import com.openbank.delegation.application.usecase.SpendReservationStateException
+import com.openbank.delegation.infrastructure.rest.dto.SpendRefusalResponse
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -81,4 +85,34 @@ class DelegationUnsupportedConstraintExceptionMapper : ExceptionMapper<Delegatio
 class DelegationResourceOwnershipExceptionMapper : ExceptionMapper<DelegationResourceOwnershipException> {
     override fun toResponse(exception: DelegationResourceOwnershipException): Response =
         Response.status(422).entity(errorBody(422, exception.message)).build()
+}
+
+/**
+ * ADR-0249 D3: 409, and the body says which ceiling and how much is left. Not 403 — the caller may
+ * well be entitled to spend, just not this much right now — and not 422, because the same request
+ * becomes acceptable when the window rolls or a reservation is released.
+ */
+@Provider
+class SpendReservationRefusedExceptionMapper : ExceptionMapper<SpendReservationRefusedException> {
+    override fun toResponse(exception: SpendReservationRefusedException): Response {
+        val status = Response.Status.CONFLICT
+        return Response.status(status).entity(SpendRefusalResponse.from(status.statusCode, exception.decision)).build()
+    }
+}
+
+@Provider
+class SpendReservationNotFoundExceptionMapper : ExceptionMapper<SpendReservationNotFoundException> {
+    override fun toResponse(exception: SpendReservationNotFoundException): Response =
+        Response.status(Response.Status.NOT_FOUND)
+            .entity(errorBody(Response.Status.NOT_FOUND.statusCode, exception.message))
+            .build()
+}
+
+/** Confirming a released reservation, or releasing a confirmed one — the settle cannot be replayed. */
+@Provider
+class SpendReservationStateExceptionMapper : ExceptionMapper<SpendReservationStateException> {
+    override fun toResponse(exception: SpendReservationStateException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(errorBody(Response.Status.CONFLICT.statusCode, exception.message))
+            .build()
 }

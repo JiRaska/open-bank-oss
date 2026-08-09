@@ -33,9 +33,10 @@ What exists today, read off the tree:
 - [`prometheus-rules-synthetic.yaml`](../../openbank-infra/gitops/components/observability/prometheus-rules-synthetic.yaml)
   alerts on `probe_success`, `probe_duration_seconds` and TLS expiry — all derived from
   those four probes.
-- [`k6-synthetic.yaml`](../../openbank-infra/gitops/components/observability/k6-synthetic.yaml)
-  is a scripted multi-step journey that runs `iterations: 1` **once on sync**. Its header
-  states plainly that turning it into a periodic monitor is the documented follow-up.
+- `k6-synthetic.yaml` was a scripted multi-step journey that ran `iterations: 1` **once on
+  sync**. Its header stated plainly that turning it into a periodic monitor was the
+  documented follow-up. Phase 2 did that and deleted the file; the periodic replacement is
+  [`cronjob-journey-public-edge.yaml`](../../openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml).
 
 So the platform continuously verifies that its hosts answer HTTP, and never verifies that a
 customer can be paid or notified. A payment between two customers is not covered by any
@@ -206,8 +207,8 @@ a skipped push no longer recorded as `SENT`. Phases 1-4 are tracked in #4348.
 
 - Issue #4348 — phases 1-4 tracking
 - [`probes-synthetic.yaml`](../../openbank-infra/gitops/components/observability/probes-synthetic.yaml),
-  [`k6-synthetic.yaml`](../../openbank-infra/gitops/components/observability/k6-synthetic.yaml),
   [`prometheus-rules-synthetic.yaml`](../../openbank-infra/gitops/components/observability/prometheus-rules-synthetic.yaml)
+- [`journeys.yaml`](../../openbank-libs/governance/journeys.yaml) — the phase 2 journey catalog
 - [`ApnsPushSender`](../../openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/push/ApnsPushSender.kt),
   [`NotificationConsumer`](../../openbank-notification-service/src/main/kotlin/com/openbank/notification/application/NotificationConsumer.kt)
 - Regulation (EU) 2022/2554 (DORA); Commission Delegated Regulation (EU) 2018/389;

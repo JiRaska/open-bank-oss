@@ -1,0 +1,56 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Standing report: how many of CLAUDE.md's documented incidents cite a gate (ADR-0254).
+#
+# Deliberately NOT in .github/gates/gates.yaml, unlike the other two ADR-0254 checks. Those two
+# assert something true about THIS PR (does it strand a required context, does it let an
+# advisory claim go stale); this one is a repo-wide ratio that changes only when CLAUDE.md or
+# the gate estate changes, neither of which happens on most PRs. Running it on every PR would
+# cost a checkout + a python invocation for a number that would print identically on 95% of
+# them — the same "does this PR need this gate" question `dependency-submission.yml`'s path
+# filter already answers for a different check, applied here by putting it on a schedule
+# instead. `check-incident-gate-coverage.py` itself never fails (see its own header and
+# ADR-0254's "Alternatives considered" for why enforcing it would be worse than the gap it
+# closes) — this workflow's only job is to make the number visible on a cadence, in the job
+# summary, without anyone having to run the script by hand.
+name: Incident-gate coverage
+
+on:
+  schedule:
+    - cron: "15 5 * * 1" # 05:15 UTC every Monday — CLAUDE.md changes by the week, not the hour
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: incident-gate-coverage
+  cancel-in-progress: false
+
+jobs:
+  report:
+    name: incident-gate-coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install PyYAML
+        # gatelib.py (imported for its subjects() helper) does not itself need PyYAML, but
+        # importing it must not become the first thing in this job that requires it either —
+        # match ci.yml's own install step so this workflow behaves the same off that runner.
+        run: python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+
+      - name: Compute coverage and write the job summary
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-incident-gate-coverage.py --root . \
+            | tee /tmp/incident-gate-coverage.out
+          {
+            echo "## Incident-gate coverage (ADR-0254)"
+            echo
+            echo '```'
+            cat /tmp/incident-gate-coverage.out
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

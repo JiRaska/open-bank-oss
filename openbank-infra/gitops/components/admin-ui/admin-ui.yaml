@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-fe90a29d6
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-67ef8503a
           ports:
             - name: http
               containerPort: 3000
@@ -92,6 +92,11 @@ spec:
             # at the in-cluster Service (agent-service lives in the platform ns).
             - name: AGENT_SERVICE_URL
               value: http://agent-service.platform.svc:8109/mcp
+            # case-coordinator-agent (ADR-0244 swarm case thread) — the /api/iaops/cases
+            # BFF routes resolve it from this env directly (unset → localhost:8146 → the
+            # page renders not_deployed). The in-cluster Service lives in the platform ns.
+            - name: CASE_COORDINATOR_URL
+              value: http://case-coordinator-agent.platform.svc:8146
             # ADR-0224 D4/D2: the staff OBO MCP channel (/api/agent/obo-mcp). The route
             # 404s unless enabled; enabling requires the whole chain in place —
             # realm permission (#2762), session store (#2843) and this flow (#2850).
