@@ -2572,6 +2572,26 @@ gates:
     run: |
       bash .github/scripts/check-manifest-types-only.sh
 
+  # ADR-0071: the fleet-wide governance manifest is code-derived from per-service
+  # governance.yaml. This is the OTHER half of the pair above, and the one where living in
+  # `ui-build` was not near-harmless: its subject is every module with a version.txt, while
+  # `changes-ui` fires only for openbank-admin-ui/, */governance.yaml or the governance
+  # schema. A PR adding a whole new service and OMITTING governance.yaml touches none of
+  # those, so the job was absent — not skipped — and openbank-engagement-service shipped with
+  # no manifest for days while the aggregate check read green (#4083, third sighting after
+  # #2236 and #3629). Reasoning for the checks themselves lives in the script header.
+  # Costs an `npm ci --omit=dev` (~47s) when node_modules is cold, which is every CI run;
+  # if that makes `lint` the tail shard, move this `group:` — shards are wall-time buckets.
+  - id: governance-manifest
+    name: "Governance manifest gate (ADR-0071, enforced)"
+    group: lint
+    mode: enforced
+    selftest: bash .github/scripts/check-governance-manifest.sh --self-test
+    selftest_expect: pass
+    min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
+    run: |
+      bash .github/scripts/check-governance-manifest.sh
+
   # The other half of check-gate-script-registration.py, which says in its own header that it
   # answers "is anything wired to this script" and deliberately not "can that invocation run".
   # A gate written as an inline step in ci.yml inherits its host job's conditions instead of
