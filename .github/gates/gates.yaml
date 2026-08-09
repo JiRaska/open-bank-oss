@@ -150,14 +150,23 @@ gates:
 
   # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
-  # mechanism-3 liveness gauge. ADVISORY with a baseline ratchet — the 37 files
-  # without a heartbeat at introduction are listed in the producer; a NEW job
-  # without one fails even now, and the baseline may only shrink. rules.yaml:
-  # scheduled_methods.liveness_adoption, enforce target 2026-09-30.
+  # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
+  # target — a baseline ratchet, not a sweep gate: the 16 files still without a
+  # heartbeat are grandfathered in the producer's BASELINE, and only two things
+  # are red — a NEW domain @Scheduled job with no registerWorkflowLiveness, and a
+  # baseline entry that HEALED without being removed. Both directions, so the list
+  # cannot rot either way. rules.yaml: scheduled_methods.liveness_adoption.
+  #
+  # Why the mode had to move: the script already returned 1 on both of those
+  # branches, and `mode: advisory` converted it to a warning at the runner
+  # (run-gates.py:333-338). So the ratchet's forward half never blocked — #3875
+  # merged a heartbeat-less ConversationRetentionScheduler on the day the gate
+  # reported it, and account-service's SavingsProposalExpiryScheduler followed it
+  # in the same way. A ratchet whose forward half does not block is not a ratchet.
   - id: scheduler-liveness-adoption
-    name: "scheduler liveness adoption (ADR-0237, advisory)"
+    name: "scheduler liveness adoption (ADR-0237)"
     group: gitops
-    mode: advisory
+    mode: enforced
     selftest: |
       python3 .github/scripts/check-scheduler-liveness.py --self-test
     run: |
