@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.1...notification-service-v0.19.0) (2026-08-09)
+
+
+### Features
+
+* **notification:** ADR-0252 synthetic assurance — phase 0, make the push channel observable ([#4351](https://github.com/JiRaska/open-bank-oss/issues/4351)) ([98c3623](https://github.com/JiRaska/open-bank-oss/commit/98c36233a0f8a55bb2be191a8b7142b77e9db492))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.0...notification-service-v0.18.1) (2026-08-08)
 
 
