@@ -1537,7 +1537,11 @@ gates:
   # correlation/trace ids, nonces/tokens that must not leak a creation timestamp).
   # DIFF-SCOPED: fails only if THIS PR adds a bare UUID.randomUUID() in src/main, so
   # it never trips on the ~100 pre-existing sites (those migrate to Ids as-touched)
-  # nor on unrelated fleet churn. No-ops on non-PR runs. stdlib-only shell.
+  # nor on unrelated fleet churn. No-ops on non-PR runs. stdlib-only Python.
+  # Kotlin COMMENTS ARE STRIPPED before matching (nesting-aware, shared with
+  # check-roles-allowed-realm.py): the gate matches source text, so before #4308 it read a
+  # KDoc quoting another service's id-minting call as this file committing the defect and
+  # was worked around by rewording the prose (b0e6c02ac) — the wrong direction.
   - id: identifier-intent-guard
     name: "identifier intent guard (ADR-0106, #1699)"
     group: kotlin
@@ -1545,8 +1549,15 @@ gates:
     # optional, not required: the command reads ${PR_DIFF_BASE:-} and this gate is
     # `when: always`, so it also runs on push to main where there is no PR and no base.
     needs_base: optional
+    # Each case is a real base/HEAD pair in a throwaway git repo driven through the gate's own
+    # matcher — a hand-fed string cannot exercise the diff scoping, which is half the gate.
+    # Falsified in both directions: with no stripping 4 cases go red, with a NON-nesting
+    # stripper the nested-KDoc case alone goes red.
+    selftest: |
+      python3 .github/scripts/check-new-random-uuid.py --self-test
+    selftest_expect: pass
     run: |
-      bash .github/scripts/check-new-random-uuid.sh "${PR_DIFF_BASE:-}"
+      python3 .github/scripts/check-new-random-uuid.py "${PR_DIFF_BASE:-}"
 
   # DomainEvent.occurredAt constructor guard (PR #2662 / #2709).
   # Path-scoped CI only rebuilds changed services — a new DomainEvent subclass
