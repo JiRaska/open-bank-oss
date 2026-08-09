@@ -2339,6 +2339,31 @@ gates:
       # closed. Falsified against the real tree before wiring in: injecting one production
       # caller and, separately, flipping the declared status each produce exactly one finding.
       python3 .github/scripts/check-enforcement-reachability.py --enforce
+  - id: readiness-attestation-format
+    name: "prod-readiness attestations: format + freshness (#2365, enforced)"
+    group: registry
+    mode: enforced
+    selftest: python3 .github/scripts/check-readiness-attestations.py --self-test
+    selftest_expect: pass
+    run: |
+      # attestations.yaml is the ONLY hand-entered input to the prod-readiness matrix, and
+      # nothing read it before this gate. It shipped with `consent-service:` as a service
+      # heading; the collector looks attestations up by the SHORT name (`consent`), so that
+      # entry matched nothing and scored nothing — measured, renaming the one key flips
+      # consent C7 from 2 to 3. A wrong key is invisible from both ends: the file reads as
+      # attested and the matrix reads as underscored, and neither points at the other.
+      #
+      # ENFORCED covers AUTHORING defects only — missing field, non-date, future date,
+      # unknown service, unknown attestation key, unresolvable ref. Each is introduced and
+      # fixable by the PR that writes it. DECAY deliberately only warns (the script prints
+      # ::warning and still exits 0): the collector's TTL already stops counting an expired
+      # entry, so a lapse cannot buy a green cell, and failing the whole fleet the morning a
+      # pentest TTL rolls over is the alert-fatigue trade this repo has already paid for.
+      # Expired for more than 30 days IS an error — that is stale bookkeeping, not a lapse.
+      #
+      # The attestation count prints on every run: a green reading "0 attestations" would be
+      # a gate that never opened the file.
+      python3 .github/scripts/check-readiness-attestations.py
   - id: label-description-length
     name: "a labels.yml description fits GitHub's 100-character cap (#4192)"
     group: lint
