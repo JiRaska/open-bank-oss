@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.2...sanctions-service-v0.8.3) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.1...sanctions-service-v0.8.2) (2026-08-08)
 
 
