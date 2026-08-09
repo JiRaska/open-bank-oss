@@ -56,6 +56,29 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // ADR-0063 P2: consumer-driven contract tests (Pact). StatementDocumentServicePactConsumerTest
+    // publishes the document-service template/preview contract that
+    // DocumentPactProviderVerificationTest replays on every PR.
+    testImplementation(libs.pact.consumer)
+}
+
+// Pact: write generated consumer contracts to pacts/ and forward broker config for provider
+// verification (ADR-0063 P2). pactbroker.* props are injected by CI with -D. Without
+// `pact.rootDir` the generated pact lands in this module's build/pacts and the committed
+// pacts/*.json is never rewritten — the drift gate would then be green about work it never did.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {

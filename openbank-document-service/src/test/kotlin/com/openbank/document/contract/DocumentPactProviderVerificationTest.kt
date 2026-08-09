@@ -21,9 +21,20 @@ import org.junit.jupiter.api.extension.ExtendWith
 
 /**
  * Provider-side Pact verification for the contracts consumers publish against
- * `openbank-document-service`. The first is `openbank-sepa-payment`'s payment-confirmation render
- * (ADR-0248 #3): `GET /api/v1/documents/templates` then
- * `POST /api/v1/documents/templates/preview` — see `SepaPaymentDocumentServicePactConsumerTest`.
+ * `openbank-document-service`. `@PactFolder` replays EVERY pact in `../pacts` naming this provider,
+ * so the set below is what is committed today rather than a list this class maintains — all three
+ * merged services holding a live synchronous REST client against document-service, each making the
+ * same two calls (ADR-0248 #3): `GET /api/v1/documents/templates` then
+ * `POST /api/v1/documents/templates/preview`.
+ *
+ *  - `openbank-sepa-payment` — `SepaPaymentDocumentServicePactConsumerTest` (#4299)
+ *  - `openbank-domestic-payment` — `DomesticPaymentDocumentServicePactConsumerTest`
+ *  - `openbank-statement-service` — `StatementDocumentServicePactConsumerTest`
+ *
+ * All three declare the same two provider states, which is why adding them cost no new
+ * `@State` handler: the states are properties of the provider (seeded templates, a stateless
+ * renderer), not of any one consumer. Deliberately ONE class — a second broker-sourced `@Provider`
+ * class for the same provider collides, since each fetches every pact the broker holds.
  *
  * **Why this class is the load-bearing half.** A consumer pact ALONE cannot catch a wrong request
  * path: the Pact mock server answers whatever path the client asks for, so pointing a client at a
@@ -43,10 +54,11 @@ import org.junit.jupiter.api.extension.ExtendWith
  * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact folder a skip rather
  * than a failure, matching every other `@PactFolder` provider class in the fleet.
  *
- * IMPORTANT: if `SepaPaymentDocumentServicePactConsumerTest` changes the contract, regenerate
- * (`./gradlew :openbank-sepa-payment:test --tests "*SepaPaymentDocumentServicePactConsumerTest*"`)
- * and commit the updated `pacts/openbank-sepa-payment-openbank-document-service.json` in the same
- * PR, or this test replays a stale contract.
+ * IMPORTANT: if any of the three consumer tests changes the contract, regenerate that consumer's
+ * pact (`./gradlew :<consumer-module>:test --rerun --tests "*.contract.*PactConsumerTest"`) and
+ * commit the updated `pacts/*-openbank-document-service.json` in the same PR, or this test replays
+ * a stale contract. `pact-drift-check.yml` enforces it over a scope derived from the `@Pact`
+ * annotations, so a new consumer module is in scope automatically.
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.document.it.PostgresRedisTestResource::class)

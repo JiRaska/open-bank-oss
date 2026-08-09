@@ -53,11 +53,12 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
-    // ADR-0063: document-service is a pact PROVIDER. sepa-payment renders the customer's payment
-    // confirmation through this service's template list + preview endpoints (ADR-0248 #3), and
-    // until DocumentPactProviderVerificationTest nothing replayed that contract — the only cover
-    // was sepa-payment's own WireMock stub, which is written from the client and so cannot
-    // disagree with it (the #2269 shape).
+    // ADR-0063: document-service is a pact PROVIDER. Three merged services render documents
+    // through this service's template list + preview endpoints (ADR-0248 #3) — sepa-payment and
+    // domestic-payment (payment confirmations) and statement-service — and until
+    // DocumentPactProviderVerificationTest nothing replayed those contracts. The only cover was
+    // each consumer's own WireMock/mock stub, written from the client and so unable to disagree
+    // with it (the #2269 shape).
     testImplementation(libs.pact.provider)
     // AuditEventTime — the ONE copy of the rule openbank-audit-service's AuditConsumer applies to
     // a domain-event payload, so this service's producer tests assert against the real contract
