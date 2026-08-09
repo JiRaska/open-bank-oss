@@ -2293,7 +2293,7 @@ deploy_reconcile:
   incident: 2026-07-24
 
 identifier_intent_guard:
-  script: .github/scripts/check-new-random-uuid.sh
+  script: .github/scripts/check-new-random-uuid.py
   wired_into: .github/workflows/ci.yml   # Validate manifests job -> all-green (a REQUIRED check)
   # THE RULE (ADR-0106, #1699): a PR must not ADD a bare java.util.UUID.randomUUID() in
   # src/main -- new code mints identifiers via com.openbank.libs.domain.identifiers.Ids
@@ -2304,15 +2304,27 @@ identifier_intent_guard:
     Added lines under */src/main/*.kt (excluding the Ids wrapper itself) must not contain
     a bare UUID.randomUUID() call.
   basis: new_identifier_code_uses_the_sanctioned_wrapper
-  # KNOWN GAP: the guard skips a FULL-LINE comment (a line whose trimmed content starts
-  # with `//`), fixed by PR #1475 after a false positive on PR #1430 -- a comment merely
-  # describing that a sibling call site still uses UUID.randomUUID() tripped the guard with
-  # zero code change. It does NOT skip an INLINE trailing comment on real code
-  # (`val x = foo()  // still uses UUID.randomUUID() elsewhere`) -- that line still matches.
-  # Left unfixed deliberately: the guard is diff-scoped to src/main, so a false negative
-  # here has low blast radius, and stripping a trailing `// ...` risks breaking on `//`
-  # inside a string literal. Tracked, not silently accepted -- see issue below.
-  known_gap: issue-1511
+  # CODE-ABOUT-CODE: Kotlin comments are stripped before matching, nesting-aware, reusing
+  # check-roles-allowed-realm.py's stripper by import rather than a second copy of it.
+  # History of the gap this closes: PR #1475 taught the old bash/awk matcher to skip a
+  # FULL-LINE `//` comment, after a false positive on #1430 where prose noting that a
+  # sibling call site still uses UUID.randomUUID() tripped the guard with zero code change.
+  # An INLINE trailing comment and a KDoc were left matching (issue-1511), on the reasoning
+  # that stripping a trailing `// ...` with a regex breaks on `//` inside a string literal.
+  # That gap then cost a real change: on #4308 a KDoc in card-issuance quoted
+  # openbank-audit-service's own id-minting call verbatim, as the evidence for why outbox
+  # requeue cannot be automatic, and the gate read the explanation of the defect as this
+  # file committing it. It was worked around by rewording the prose (b0e6c02ac) -- the wrong
+  # direction, since the file was correct and the checker was not. A real stripper closes
+  # all three shapes at once, so the guard is now Python and the gap is gone.
+  # Residual, inherited with the shared stripper: it does not model string literals, so
+  # `"...//..."` blanks the rest of that line and an unbalanced `"/*"` opens a block. Both
+  # fail toward a false NEGATIVE, never toward flagging correct code.
+  falsified: >-
+    --self-test drives real base/HEAD commit pairs through the gate's own matcher: a bare call
+    in src/main MUST be flagged, #4308's KDoc MUST NOT be, and a KDoc with a nested comment
+    MUST NOT be. With no stripping 4 cases go red; with a NON-nesting stripper the nested-KDoc
+    case alone goes red.
   incident: 2026-07-17
 
 governance_manifest:

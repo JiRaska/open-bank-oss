@@ -90,3 +90,34 @@ spec:
               Almost every PUSH request targets a party with no ACTIVE device token. Suspect the
               device-registration path (POST /api/v1/devices) or a mass token invalidation, not
               the push provider.
+
+        # The ratio rules above are about the channel; this one is about a single message, because
+        # not every push is worth the same alert. SCA_APPROVAL is the prompt telling a customer a
+        # payment waits on their approval — a PSD2 Art. 97 control — so ONE undelivered instance
+        # is worth waking someone, where one lost marketing push is not.
+        #
+        # It is NOT true that the customer cannot then authorise: openbank-app also lists live
+        # challenges at GET /customer/v1/sca/pending, so someone who opens the app can still
+        # approve. What they lose is any notice that they need to. The wording says that, because
+        # an alert that overstates its own severity is one people learn to discount.
+        #
+        # Reads the `template` label added to the fan-out counter for exactly this rule — before
+        # it existed an undeliverable SCA approval was indistinguishable at the metrics layer from
+        # any other push. Measured 2026-08-08: 11 failed SCA_APPROVAL pushes across 6 parties over
+        # two weeks, none of which raised anything.
+        - alert: ScaApprovalPushUndeliverable
+          expr: |
+            increase(openbank_notification_push_fanouts_total{
+              template="SCA_APPROVAL", outcome="FAILED"
+            }[15m]) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "An SCA approval push could not be delivered"
+            description: >-
+              An SCA_APPROVAL fan-out ended FAILED in the last 15m, so the customer was never
+              prompted that a payment is waiting on them. They can still approve by opening the
+              app (pending-approvals list), but will not know to. devices_bucket="0" means the
+              party has no registered device at all — that is a registration problem, not a
+              provider one.
