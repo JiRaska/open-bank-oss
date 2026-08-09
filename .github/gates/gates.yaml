@@ -1009,6 +1009,25 @@ gates:
   # Deliberately run here as well as in the `adr-registry` workflow: that one is
   # path-filtered to docs/adr/**, but this gate's dangling-`ADR-NNNN`-reference
   # check is repo-wide and is most useful on PRs that touch CODE, not ADRs.
+  # Journey catalog integrity (ADR-0252 phase 2, #4348). The catalog is the platform's
+  # claim about which customer journeys are checked in production; this gate makes every
+  # claim in it checkable and makes a silent shrink impossible. It does NOT establish that
+  # the catalog is COMPLETE — deriving the customer-visible capability set is the unbuilt
+  # half, and the file's own header says so, because a coverage claim nobody can falsify is
+  # the failure mode this whole ADR exists to end.
+  - id: journey-catalog-integrity
+    name: "journey catalog is consistent with the manifests and alerts it claims (ADR-0252)"
+    group: registry
+    mode: enforced
+    selftest: python3 .github/scripts/check-journey-catalog.py --self-test
+    selftest_expect: pass
+    min_subjects: 3   # 3 journeys today (2026-08-09): 1 active, 2 planned
+    run: |
+      # Falsified against the REAL tree before wiring in, not only in the self-test's temp
+      # trees: moving cronjob-journey-public-edge.yaml aside makes it exit 2 naming that
+      # exact file, and it returns to OK when the file is restored.
+      python3 .github/scripts/check-journey-catalog.py --root . --enforce
+
   - id: adr-registry-integrity-check
     name: "ADR registry integrity check"
     group: registry

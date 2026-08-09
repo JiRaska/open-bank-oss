@@ -1,0 +1,111 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# THE JOURNEY CATALOG (ADR-0252) — every customer journey the platform checks in production,
+# and every one it does not yet check, with the reason.
+#
+# WHY THIS FILE EXISTS
+#   Two customer-visible failures were found by customers: push reached one device, and a
+#   domestic payment failed silently. The platform checked neither. What it did check was
+#   `probes-synthetic.yaml` — four blackbox targets answering HTTP — plus a k6 journey that
+#   ran `iterations: 1` once on ArgoCD sync. So "is the front door open?" was continuously
+#   verified and "can a customer be paid or notified?" never was.
+#
+# WHAT AN ENTRY MEANS
+#   A journey is a customer-visible capability that a machine exercises on a schedule in
+#   production. `status: active` means it runs; `status: planned` means it does not, and the
+#   entry then has to say what blocks it. A planned entry is not an aspiration — it is this
+#   file refusing to let a gap be invisible, which is the failure mode that produced both
+#   outages.
+#
+# WHY THE GAPS ARE LISTED HERE RATHER THAN OMITTED
+#   The repo's hardest-won gate rule is that a gate whose SCOPE is a hand-kept list reads as
+#   PASSING when the list is short (pact-drift-check, #2284). A catalog holding only the two
+#   journeys that happen to run would report full coverage of a platform that moves money it
+#   never checks. Listing the unbuilt ones inverts that: the file's own gate
+#   (check-journey-catalog.py) fails on a planned entry with no blocker, so the gap can be
+#   deferred but not forgotten.
+#
+#   This is NOT yet coverage derived from the set of customer-visible capabilities — that is
+#   the harder half, and until it exists this list is still hand-kept and can still be short
+#   without anyone noticing. Tracked in #4348. Read the coverage claim accordingly.
+#
+# FIELDS
+#   id             stable slug. Names the CronJob (`journey-<id>`) and the alert labels.
+#   title          what a human calls it.
+#   capability     the customer-visible thing this proves works. One sentence, no hedging.
+#   status         active | planned
+#   severity       page | ticket — what a red run is worth waking someone for.
+#   money_moving   true when the journey initiates a real payment or ledger posting.
+#   cronjob        path to the manifest that runs it — the CronJob and the ConfigMap holding
+#                  its k6 script live in that one file (active only). The script is embedded
+#                  rather than kept as a sibling .js so there is no second copy to drift:
+#                  the same reason the external-feed watch reads its URL out of the committed
+#                  config instead of keeping its own.
+#   schedule       cron expression, mirrored from the manifest (active only).
+#   falsification  how to make this journey go red on purpose. A journey that has only ever
+#                  been green is unfalsified — the same rule gates.yaml applies to CI gates.
+#   blocked_by     what prevents this from running (planned only).
+
+version: 1
+
+journeys:
+  - id: public-edge
+    title: "Public edge reachability"
+    capability: >-
+      The public API, the customer edge and the admin UI answer as themselves — a service
+      that is up but serving the wrong thing (an ingress pointing at a dead backend, an
+      edge returning 5xx instead of an auth challenge) is caught here.
+    status: active
+    severity: page
+    money_moving: false
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml
+    schedule: "*/5 * * * *"
+    falsification: >-
+      Set the API_BASE env on the CronJob's container to a host that resolves but serves 502
+      (or scale the customer-edge Rollout to zero) and the run must exit non-zero within one
+      schedule interval. The script reads API_BASE / CUSTOMER_BASE / ADMIN_BASE from __ENV
+      with the production hosts as defaults, so this is executable rather than a description.
+      The checks assert status < 500, so a backend outage fails the run while an auth
+      challenge does not. Measured against grafana/k6:1.2.0: a failing threshold exits 99, a
+      passing run exits 0.
+
+  # ---------------------------------------------------------------------------------------
+  # PLANNED — the journeys that would have caught the two reported outages. Both need a
+  # synthetic party that can hold an account and a device, which is ADR-0252 phase 1.
+  # ---------------------------------------------------------------------------------------
+  - id: domestic-payment
+    title: "Domestic payment between two customers"
+    capability: >-
+      One customer can pay another: the payment is accepted, screened, posted to the ledger
+      and visible on both balances. This is the journey whose absence let a failed payment
+      between two real customers go unreported until they said so.
+    status: planned
+    severity: page
+    money_moving: true
+    falsification: >-
+      Blackhole the payment topic, or point the screening client at a dead host: the journey
+      must go red rather than time out silently, and it must fail on the missing balance
+      change rather than only on a transport error.
+    blocked_by: >-
+      ADR-0252 phase 1 (#4348) — needs bank-owned synthetic parties with the SYNTHETIC taint
+      propagated to the ledger and the regulatory aggregates. Running this before the taint
+      exists would post synthetic movements into FINREP/COREP and the AML baseline.
+
+  - id: push-delivery
+    title: "Push notification reaches a device"
+    capability: >-
+      A notification requested for a party is delivered to a real device and acknowledged by
+      the app. Not "APNs returned 200" — the outage that motivated ADR-0252 had APNs
+      returning 200 for every send while exactly one phone ever rang.
+    status: planned
+    severity: page
+    money_moving: false
+    falsification: >-
+      Revoke the APNs signing key in the sandbox, or set APNS_ENABLED=false: the journey must
+      go red. Phase 0 already makes the second case visible as a metric
+      (PushChannelSkippedOnly); this journey is what proves the whole path, device included.
+    blocked_by: >-
+      ADR-0252 phase 3 (#4348) — needs the canary device fleet and the /probe/ack endpoint.
+      Delivery is not observable server-side at any effort: APNs issues no receipt, so no
+      amount of in-cluster probing can substitute for a device acknowledging the push.
