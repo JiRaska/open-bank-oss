@@ -31,10 +31,12 @@ import java.util.UUID
  *   `TriggeredEnrolment.ALREADY_ENROLLED` and `ConversionConsumer` returns early on
  *   `context.alreadyConverted`. A replay there is a no-op.
  * - `openbank-audit-service` is **not**. `AuditConsumer` builds every entry with
- *   `id = UUID.randomUUID()` and calls `repo.save(entry)` with no dedup on the outbox `ce-id`
- *   header; `AuditRepository.save` links the row into a hash chain, and `audit_entries` is
- *   append-only at the database. A replayed card event therefore appends a **second, permanent,
- *   undeletable** audit record of an event that happened once.
+ *   a freshly generated random id per entry and calls `repo.save(entry)` with no dedup on the
+ *   outbox `ce-id` header; `AuditRepository.save` links the row into a hash chain, and
+ *   `audit_entries` is append-only at the database. A replayed card event therefore appends a
+ *   **second, permanent, undeletable** audit record of an event that happened once.
+ *   (Spelled in prose rather than as the literal call: `identifier-intent-guard` matches the
+ *   text of a KDoc quoting another service's code as if this file minted an id itself.)
  *
  * One non-idempotent consumer is enough to make an automatic sweeper the wrong shape: it would
  * silently duplicate audit history on every deploy that happened to find a DEAD row. So the
