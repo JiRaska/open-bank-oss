@@ -87,18 +87,41 @@ class CopilotChatResource {
     }
 
     /**
-     * The identity `PARTY_ERASED` will arrive with: the `party_id` claim, falling back to `sub`
-     * (the resolution customer-edge's `RateLimitFilter` and `WebAuthnKeycloakClient` already use).
+     * The identity `PARTY_ERASED` will arrive with: the token's `party_id` claim, or **null** when
+     * the token carries none.
      *
      * Recorded on the conversation row so erasure can find it; it is NOT the storage key, so this
      * changes nothing about which conversation a customer resumes. Resolving it here rather than in
      * the consumer is the whole point: at erasure time the Keycloak user is gone, so the `sub` ->
      * `party_id` mapping no longer exists to be looked up. Measured against the deployed customers
      * realm, `sub` equalled `party_id` for 0 of 35 users (#3881) — this is not a corner case.
+     *
+     * ## Why the `sub` fallback was removed (#4175)
+     *
+     * It never widened the erasure's reach by a single row. `ConversationStore.deleteForParty`
+     * already matches `partyId = ?1 OR customerId = ?1`, and `customerId` IS the `sub` — so writing
+     * `sub` into the party-id column duplicated an arm the delete performs anyway. What it did do
+     * was disguise the failure: the column is *defined* as the erasure identity, so a row holding a
+     * fabricated one is indistinguishable, in the table and in every query over it, from a row that
+     * genuinely resolved a party. That is the whole reason a `PARTY_ERASED` carrying the true party
+     * id can no-op invisibly for these users.
+     *
+     * Returning null is what the port already specifies for this case ("null when the caller could
+     * not resolve one; such a row remains reachable by `customerId`"), and it makes the gap
+     * countable rather than merely absent — see `erasure_identity_total{source="absent"}`.
+     *
+     * Deliberately NOT a refusal: rejecting the chat turn would not erase one extra row, and would
+     * take a working assistant away from the majority of real users over a Keycloak attribute they
+     * cannot set themselves. The reach is identical either way; only the honesty of the record
+     * changes. Seeding the missing `party_id` attribute upstream remains the real fix (#4156).
      */
     private fun erasureIdentity(): String? {
-        val jwt = identity.principal as? JsonWebToken ?: return customerSubject()
-        return jwt.getClaim<String>("party_id")?.takeIf { it.isNotBlank() } ?: customerSubject()
+        val jwt = identity.principal as? JsonWebToken
+        val partyId = jwt?.getClaim<String>("party_id")?.takeIf { it.isNotBlank() }
+        metrics.recordErasureIdentity(
+            if (partyId != null) CopilotMetricsAdapter.SOURCE_CLAIM else CopilotMetricsAdapter.SOURCE_ABSENT,
+        )
+        return partyId
     }
 
     /**
