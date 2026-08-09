@@ -34,6 +34,7 @@ import com.openbank.notification.infrastructure.persistence.entity.NotificationE
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
@@ -102,6 +103,10 @@ class NotificationConsumer {
     @Inject lateinit var audit: AuditEventPublisher
 
     @Inject lateinit var contactGate: ContactPolicyGate
+
+    // Field injection, not a constructor parameter: this class is already at detekt's
+    // LongParameterList threshold, which fires AT 9 rather than above it.
+    @Inject lateinit var meterRegistry: MeterRegistry
 
     /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
     @Inject
@@ -593,6 +598,7 @@ class NotificationConsumer {
                                     .map { e ->
                                         e?.also {
                                             it.status = outcome.name
+                                            it.failureReason = reason
                                             if (delivered > 0) it.sentAt = Instant.now(clock)
                                         }
                                     }
@@ -603,6 +609,11 @@ class NotificationConsumer {
                                     }
                             }
                         }
+                            // The fan-out writes its own terminal status rather than going through
+                            // markStatus, so it must count its own outcome here, inside the scope
+                            // that owns `outcome`/`reason` — otherwise the metric is blind to
+                            // exactly the provider-rejection case it exists to surface.
+                            .invoke { _ -> countOutcome(req, outcome, reason) }
                     }
                     .replaceWithVoid()
             }
@@ -615,6 +626,29 @@ class NotificationConsumer {
      * producer's funnel permanently wrong about a message — which is issue #3663 in miniature — and
      * an event without the status would announce a transition that never happened.
      */
+    /**
+     * Count every terminal delivery outcome, tagged by channel, template and reason.
+     *
+     * Exists because the failure was invisible, not because it was unknown: on 2026-08-08 the
+     * table held 53 FAILED PUSH rows against 12 SENT — an 81% failure rate, 11 of them
+     * `SCA_APPROVAL` — and no rule could see it, since nothing exported delivery outcomes.
+     * `reason` is bounded by the REASON_* vocabulary, so this cannot become a high-cardinality
+     * label; `unknown` covers the SENT case where no reason applies.
+     */
+    private fun countOutcome(req: NotificationRequest, status: NotificationOutcome, reason: String?) {
+        meterRegistry.counter(
+            "openbank_notification_delivery_total",
+            "channel",
+            req.channel.name,
+            "template",
+            req.template.name,
+            "outcome",
+            status.name,
+            "reason",
+            reason ?: "none",
+        ).increment()
+    }
+
     private fun markStatus(
         req: NotificationRequest,
         entity: NotificationEntity,
@@ -626,11 +660,15 @@ class NotificationConsumer {
             .map { e ->
                 e?.also {
                     it.status = status.name
+                    // Persist the reason alongside the status (V13): the outcome event below
+                    // carries the same value, but its outbox row is pruned after dispatch, so
+                    // without this the table can only ever say FAILED.
+                    it.failureReason = reason
                     if (sent) it.sentAt = Instant.now(clock)
                 }
             }
             .chain { _ -> outboxRepo.persistInTransaction(outcomeMessage(req, entity, status, reason)) }
-    }.replaceWithVoid()
+    }.invoke { _ -> countOutcome(req, status, reason) }.replaceWithVoid()
 
     /**
      * The outbox row for one terminal transition.
