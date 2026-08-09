@@ -69,7 +69,10 @@ Assets protected, in priority order:
                      └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Trust boundaries crossed: (1) external caller → REST; (3) service → Postgres;
+Trust boundaries crossed: (1) external caller → REST — in a deployed environment this means
+namespaces `payments` (domestic-payment, sepa-payment, sepa-instant) and `fx` (fx-service), which
+is what this service's NetworkPolicy admits; until issue #4221 it was crossed by nothing at all,
+since no workload set `FRAUD_SERVICE_URL`; (3) service → Postgres;
 (4) Kafka (`openbank.transactions.transaction.initiated`) → `TransactionSignalConsumer` → (5)
 `velocity_aggregates` Postgres and (6) `payee_history` Postgres (ADR-0084 §3 v4 — same Kafka signal,
 same trust boundary, no new topic). Domain layer (`FraudRuleEngine`, model) has **zero** framework
@@ -135,6 +138,35 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-08-09** — Boundary (1) gains its first real callers (issue #4221). No new *kind* of
+  boundary: the inbound REST surface, its `@RolesAllowed`/`@Authorize` gates, the rule engine and
+  every stored artefact are untouched. What changes is that boundary (1) — described above as the
+  "(Phase 2 caller)" — had **never once been crossed in a deployed environment**. All four scoring
+  clients (domestic-payment, sepa-payment, sepa-instant, fx-service) resolved
+  `${FRAUD_SERVICE_URL:http://localhost:8133}` with the variable unset in every workload, so each
+  dialled its own pod, was refused, and the fail-open `FraudScoringAdapter` returned a synthetic
+  ALLOW. `fraud_scores` held 0 rows fleet-wide. Wiring the four workloads to
+  `fraud-service.fraud.svc:8133` makes `gen-network-policies.py` derive the corresponding ingress
+  edge, so this service's NetworkPolicy now admits namespaces `payments` and `fx` (previously
+  `admin-ui` only). Security-relevant in both directions, and worth stating plainly:
+  - **Reduces** a real risk. Every payment on all four rails was scored by a fail-open stub, and
+    the WARN it emitted per payment ("shadow ALLOW") is indistinguishable in aggregate from a
+    genuinely quiet risk engine. The RTS Art. 18 baseline ADR-0084 §4.1 assumes is now actually
+    being collected rather than assumed.
+  - **Adds** exposure worth naming. Two namespaces reach this service's REST surface that could
+    not before, and `fraud_scores` starts receiving live money-path amounts, currencies and
+    account identifiers at payment volume for the first time. Ingress remains least-privilege
+    (derived per-namespace, not opened wildly), callers still present a Keycloak JWT and are still
+    gated by `@RolesAllowed`, and the storage contract is unchanged.
+  - **No verdict is acted on.** Every call site is shadow-only — `shadowFraudScore`
+    (domestic/sepa), `scoreFraudShadow` (sepa-instant) — and logs a non-ALLOW outcome without
+    influencing payment flow. The `*_FRAUD_ENFORCEMENT_ENABLED` flags that would change that have
+    no reader in Kotlin today. Flipping enforcement is a separate, runbook-gated change and needs
+    its own threat-model entry, including the load test §5 already requires before any surface
+    moves to challenge/enforce.
+  - **Rollback**: remove `FRAUD_SERVICE_URL` from the four workloads and regenerate network
+    policies. That restores the fail-open stub, i.e. the state described above — which is a
+    return to unmeasured risk, not to safety.
 - **2026-08-08** — ADR-0220 D3.5 fraud-hold signal (issue #2749): two NEW trust boundaries,
   documented in S3/T5/I3 above. This is fraud-service's **first-ever Kafka producer** (every
   prior grant was Read-only, `openbank.fraud.hold.changed`, `kafka-fraud-mtls.yaml`) and its
