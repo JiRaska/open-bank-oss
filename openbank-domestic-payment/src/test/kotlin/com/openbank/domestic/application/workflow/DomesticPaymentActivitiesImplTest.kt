@@ -88,8 +88,7 @@ class DomesticPaymentActivitiesImplTest {
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         coJustRun { amlCasePort.openCase(any()) }
-        coJustRun { paymentRepository.markSchemeDispatched(any(), any()) }
-        coJustRun { paymentRepository.clearSchemeDispatched(any()) }
+        coJustRun { paymentRepository.setSchemeDispatched(any(), any()) }
 
         schemeGatewayPort = mockk()
         settlementPort = mockk()
@@ -342,7 +341,7 @@ class DomesticPaymentActivitiesImplTest {
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
         coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
-        coVerify(exactly = 0) { paymentRepository.markSchemeDispatched(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.setSchemeDispatched(any(), any()) }
     }
 
     @Test
@@ -357,7 +356,7 @@ class DomesticPaymentActivitiesImplTest {
         activitiesWithScheme.submitScheme(validated.id)
 
         coVerifyOrder {
-            paymentRepository.markSchemeDispatched(validated.id, any())
+            paymentRepository.setSchemeDispatched(validated.id, any())
             schemeGatewayPort.submit(any())
             paymentRepository.update(any(), any())
         }
@@ -377,7 +376,7 @@ class DomesticPaymentActivitiesImplTest {
 
         // Scheme is simply down: no clearing item exists, so the payment must stay re-drivable.
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
-        coVerify(exactly = 1) { paymentRepository.clearSchemeDispatched(validated.id) }
+        coVerify(exactly = 1) { paymentRepository.setSchemeDispatched(validated.id, null) }
     }
 
     @Test
@@ -391,7 +390,7 @@ class DomesticPaymentActivitiesImplTest {
         val result = activitiesWithScheme.submitScheme(validated.id)
 
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
-        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatched(any()) }
+        coVerify(exactly = 0) { paymentRepository.setSchemeDispatched(any(), null) }
     }
 
     @Test
@@ -409,8 +408,8 @@ class DomesticPaymentActivitiesImplTest {
             .isInstanceOf(RuntimeException::class.java)
             .hasMessageContaining("db blip")
 
-        coVerify(exactly = 1) { paymentRepository.markSchemeDispatched(validated.id, any()) }
-        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatched(any()) }
+        coVerify(exactly = 1) { paymentRepository.setSchemeDispatched(validated.id, any<Instant>()) }
+        coVerify(exactly = 0) { paymentRepository.setSchemeDispatched(any(), null) }
     }
 
     @Test

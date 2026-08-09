@@ -31,7 +31,5 @@ data class SchemeSubmissionOutcome(val accepted: Boolean, val reasonCode: String
  * that claim makes the payment safe to submit again. Every other failure, a timeout above all, is
  * ambiguous and must be treated as "possibly delivered": the default is therefore `true`.
  */
-class SchemeGatewayUnavailableException(
-    cause: Throwable,
-    val requestLeftThisProcess: Boolean = true,
-) : RuntimeException("scheme gateway unavailable", cause)
+class SchemeGatewayUnavailableException(cause: Throwable, val requestLeftThisProcess: Boolean = true) :
+    RuntimeException("scheme gateway unavailable", cause)
