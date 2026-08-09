@@ -5,6 +5,7 @@
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -41,7 +42,10 @@ import java.util.concurrent.atomic.AtomicLong
  *     override suspend fun currentDeadLettered(): Long = outboxRepository.countDead()
  *
  *     @PostConstruct
- *     fun register() = registerDeadLetterGauge()
+ *     fun register() {
+ *         registerDeadLetterGauge()
+ *         bindLiveness(metrics.registerWorkflowLiveness("party-outbox-dead-letter-gauge", INTERVAL))
+ *     }
  *
  *     @Scheduled(every = "60s", delayed = "10s",
  *                concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
@@ -60,10 +64,25 @@ import java.util.concurrent.atomic.AtomicLong
  *    context, so `runBlocking { }` around the reactive count throws `HR000068` and the tick dies
  *    silently, leaving the gauge frozen at its last value (or at the boot zero, which is the
  *    reading that looks healthiest).
+ *
+ * ### ADR-0237 liveness — why this base does NOT take the outbox exemption
+ * `check-scheduler-liveness.py` exempts outbox infrastructure "by role", on the grounds that
+ * `openbank.outbox.backlog` is itself the freshness signal. That reasoning does not carry over
+ * here: the alert on this gauge is `> 0`, so a tick that dies leaves it pinned at the boot **zero**
+ * — the value that reads as perfectly healthy — and the alert then never fires, which is the exact
+ * class of silence #4005 is about. So [registerDeadLetterGauge] also registers an ADR-0237
+ * heartbeat and [refreshDeadLettered] records a success on every tick.
+ *
+ * The heartbeat is REGISTERED BY THE CONCRETE BEAN and handed here via [bindLiveness], not
+ * registered in this base. That is not ceremony: `check-scheduler-liveness.py` classifies the file
+ * that declares `@Scheduled`, so a heartbeat hidden in a shared superclass leaves every subclass
+ * looking like an unmonitored scheduler to the gate — and the honest way to satisfy a text-matching
+ * gate is to put the call where it says, not to mention its name in a comment.
  */
 abstract class AbstractOutboxDeadLetterGauge {
     private lateinit var metrics: DomainMetrics
     private val cached = AtomicLong(0)
+    private var liveness: WorkflowLivenessRecorder? = null
 
     constructor(metrics: DomainMetrics) {
         this.metrics = metrics
@@ -87,10 +106,19 @@ abstract class AbstractOutboxDeadLetterGauge {
     }
 
     /**
+     * Hand this base the ADR-0237 heartbeat the concrete bean registered, so
+     * [refreshDeadLettered] can mark each successful tick. Call from the same `@PostConstruct`.
+     */
+    protected fun bindLiveness(recorder: WorkflowLivenessRecorder) {
+        liveness = recorder
+    }
+
+    /**
      * Refresh the cached DEAD count from the repository. Call from the concrete bean's
      * `@Scheduled` **`suspend`** method so the reactive query runs on the right context.
      */
     protected suspend fun refreshDeadLettered() {
         cached.set(currentDeadLettered())
+        liveness?.recordSuccess()
     }
 }

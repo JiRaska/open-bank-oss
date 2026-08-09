@@ -11,6 +11,7 @@ import io.quarkus.scheduler.Scheduled
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import java.time.Duration
 
 /**
  * Publishes the card-issuance outbox **dead-letter** count as the
@@ -30,10 +31,12 @@ import jakarta.inject.Inject
 @ApplicationScoped
 class CardOutboxDeadLetterGauge : AbstractOutboxDeadLetterGauge {
     private lateinit var outboxRepository: CardOutboxRepository
+    private var domainMetrics: DomainMetrics? = null
 
     @Inject
     constructor(outboxRepository: CardOutboxRepository, metrics: DomainMetrics) : super(metrics) {
         this.outboxRepository = outboxRepository
+        this.domainMetrics = metrics
     }
 
     @Suppress("ProtectedMemberInFinalClass")
@@ -43,8 +46,17 @@ class CardOutboxDeadLetterGauge : AbstractOutboxDeadLetterGauge {
 
     override suspend fun currentDeadLettered(): Long = outboxRepository.countDead()
 
+    /**
+     * ADR-0237: the outbox exemption in `check-scheduler-liveness.py` rests on
+     * `openbank.outbox.backlog` being its own freshness signal, and that argument does not
+     * transfer here — the alert on this gauge is `> 0`, so a dead tick pins it at the boot ZERO
+     * and the alert simply never fires. So it carries a real heartbeat.
+     */
     @PostConstruct
-    fun register() = registerDeadLetterGauge()
+    fun register() {
+        registerDeadLetterGauge()
+        domainMetrics?.let { bindLiveness(it.registerWorkflowLiveness(WORKFLOW_NAME, REFRESH_INTERVAL)) }
+    }
 
     // suspend fun, not a plain one: a @Scheduled method carries no Vert.x context, so a
     // runBlocking around the reactive count would throw HR000068 and leave the gauge pinned at
@@ -55,4 +67,14 @@ class CardOutboxDeadLetterGauge : AbstractOutboxDeadLetterGauge {
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun refresh() = refreshDeadLettered()
+
+    private companion object {
+        /**
+         * Must stay equal to the `every =` above — it is published as the ADR-0237
+         * expected-interval, and a heartbeat whose declared interval disagrees with the real cron
+         * is a staleness rule that either never fires or fires constantly.
+         */
+        private val REFRESH_INTERVAL: Duration = Duration.ofSeconds(60)
+        private const val WORKFLOW_NAME = "card-issuance-outbox-dead-letter-gauge"
+    }
 }
