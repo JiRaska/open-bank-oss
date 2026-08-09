@@ -1,0 +1,44 @@
+# THROWAWAY probe — re-measure CLAUDE_CODE_OAUTH_TOKEN after rotation (secret set 14:56Z).
+# The previous token answered `401 OAuth access token is invalid`, confirming #2161.
+# Uses the CLI: `claude-code-action` is blocked earlier by a missing Claude GitHub App.
+name: probe claude token
+on:
+  pull_request:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v5.0.0
+        with:
+          node-version: '22'
+      - name: ask the gateway
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -o pipefail
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN}" ]; then
+            echo "::error::secret is EMPTY in this context — not a token verdict"; exit 1
+          fi
+          # Length only, never the value: a wrapped paste truncates the token and fails as
+          # 401 rather than as a paste error, which is how this was misdiagnosed before.
+          echo "token length: ${#CLAUDE_CODE_OAUTH_TOKEN}"
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          set +e
+          out=$(claude -p "Reply with exactly the word ALIVE and nothing else." --max-turns 1 2>&1)
+          rc=$?
+          set -e
+          echo "rc=${rc}"
+          echo "--- output ---"
+          echo "${out}"
+          echo "--- end ---"
+          # Verdict is the CONTENT. A rejected token can still exit 0 (#2161).
+          if echo "${out}" | grep -qi 'ALIVE'; then
+            echo "TOKEN VERDICT: ALIVE"
+          else
+            echo "::error::TOKEN VERDICT: NOT ALIVE (no model reply in output)"; exit 1
+          fi
