@@ -38,6 +38,12 @@ dependencies {
     api(libs.junit.jupiter)
     api(libs.assertj)
 
+    // AuditEventTime parses a producer's real outbox payload with the same Jackson the audit
+    // consumer uses. jsr310 (not bare databind) because it carries jackson-databind/core
+    // transitively at the catalog's pinned `jackson` version, and this module has no Quarkus BOM
+    // to align them — the same reason the direct pins further down are spelled out.
+    api(libs.jackson.datatype.jsr310)
+
     // JAX-RS + CDI security annotation types the authz conformance kit reflects over
     // (jakarta.ws.rs.GET/POST/.../jakarta.annotation.security.PermitAll/RolesAllowed).
     // No Quarkus BOM here (this module isn't a Quarkus service), so pinned directly —

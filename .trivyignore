@@ -99,3 +99,12 @@ AVD-KSV-0118
 # fails the admin-ui suite if another appears — the exclusion stays a thing
 # someone has to justify, not a default someone inherits.
 AVD-KSV-0108
+
+# ECR service-repository tags mutable (ecr-service-repositories.tf, #3659): MUTABLE
+# is load-bearing, not laziness — auto-deploy tags `sandbox-<sha>` and the reconcile
+# path (#2021, #3432) legitimately re-dispatches a build for a sha it has already
+# pushed; under IMMUTABLE that re-push fails and the deploy self-heal breaks. The
+# documented exception is openbank-admin-ui, which is IMMUTABLE (built off a version,
+# not a sha). Supply-chain integrity for deploys rides on the signed provenance /
+# attestation chain (ADR-0030, ADR-0121), not on tag immutability, in the sandbox.
+AVD-AWS-0031

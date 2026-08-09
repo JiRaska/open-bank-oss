@@ -1,0 +1,206 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic a service PRODUCES is documented in AsyncAPI 3.0 under
+# openbank-contracts/<service>/. `check-event-contract-coverage.py` asserts this file exists for
+# every `mp.messaging.outgoing.*.topic` in the service's application.yaml.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. The coverage gate asserts existence only; nothing validates the
+# content of this document, no AsyncAPI linter is wired, and no schema is registered in Apicurio —
+# the registry runs but zero topics have a registered schema, so a producer that violates this file
+# fails nowhere. Everything below is therefore DERIVED from the code that runs, and each claim names
+# its source so the next reader can re-check it rather than trust it.
+#
+# NOTE ON THE INBOUND TOPIC. notification-service also CONSUMES `openbank.notification.requests` and
+# `openbank.party.events`. Those are deliberately not described here: this file documents what this
+# service publishes. The request payload's producer-side shape is exercised by
+# `NotificationRequestMessagePactConsumerTest` and the pact under `pacts/`.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Notification Service — events
+  version: 1.0.0
+  description: |
+    Delivery outcomes for notification requests (ADR-0239, issue #3663).
+
+    A producer that puts a request on `openbank.notification.requests` learns only that the request
+    was accepted. What became of the message — delivered, suppressed by the ADR-0198 D4 marketing
+    consent gate, or failed for want of a deliverable address — lived only in this service's own
+    table and was never readable back. campaign-service's send log recorded `SENT` in every one of
+    those cases. This topic is the missing half.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS; the plaintext 9092
+      listener is ACL-denied. Producers authenticate with a per-service KafkaUser certificate —
+      here `notification-service`, whose only Write grant is the topic below
+      (`openbank-infra/gitops/components/notifications/kafka-notification-mtls.yaml`).
+
+channels:
+  notificationOutcomes:
+    address: openbank.notification.outcomes.v1
+    title: Notification delivery outcomes
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/notifications/kafka-topic.yaml`.
+
+      **Retention is 7 days and the topic is not compacted, so it is a change feed, not a source of
+      truth.** A consumer cannot rebuild delivery history from it beyond a week.
+
+      **`v1` is in the topic name.** The contract evolves additively within v1 (ADR-0006): new
+      optional fields and new `outcome` / `reason` values may appear at any time, so a consumer must
+      not switch exhaustively on either. A breaking change would be a new topic that consumers
+      migrate onto deliberately, never a redefinition of this one.
+
+      **Partitioning key: `aggregateId`** — the `notificationId`, as a UUID string
+      (`OutboxKafkaHeaders.partitionKey`). Deliberately NOT the `correlationId`: correlation is
+      optional, so keying on it would put every uncorrelated event on one partition. The consequence
+      is that two outcomes for the same `correlationId` are NOT ordered with respect to each other,
+      which is why ADR-0239 D4 makes the consumer-side transition monotonic rather than
+      last-write-wins.
+
+      **Transactional outbox.** Events are written to `notification_outbox` in the same transaction
+      as the status change they report, so a published outcome always corresponds to a committed
+      row (ADR-0003). The dispatcher is `NotificationOutboxDispatcher` (gated on
+      `openbank.outbox.dispatch-enabled`); the publisher is `KafkaNotificationOutboxEventPublisher`.
+
+      **Delivery is at-least-once.** A redelivered request persists a *fresh* notification row with
+      its own `notificationId`, and the dispatcher can republish a claimed row after a crash. A
+      consumer must therefore tolerate more than one event per `correlationId` and dedupe or order
+      on `notificationId` + `outcome`.
+    messages:
+      notificationOutcome:
+        $ref: '#/components/messages/NotificationOutcome'
+
+operations:
+  publishNotificationOutcome:
+    action: send
+    channel:
+      $ref: '#/channels/notificationOutcomes'
+    summary: Emitted once per terminal status transition of a notification.
+    description: |
+      Emitted for EVERY terminal transition, correlated or not — the topic is a shared contract, not
+      a private channel back to one consumer. Source: `NotificationConsumer.markStatus` and the push
+      fan-out's trailing transaction, both of which write the row and this event together.
+
+      No event is emitted for a request that never reaches a terminal state: an unparseable payload
+      and a request carrying a variable its template does not declare are both rejected before a row
+      exists, and a row left `PENDING` by a crash mid-dispatch has had no transition to report.
+    messages:
+      - $ref: '#/channels/notificationOutcomes/messages/notificationOutcome'
+
+components:
+  messages:
+    NotificationOutcome:
+      name: NotificationOutcome
+      title: Notification delivery outcome
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/NotificationOutcomeEvent'
+      examples:
+        - name: suppressedByConsentGate
+          summary: A marketing send the ADR-0198 D4 consent gate refused.
+          payload:
+            notificationId: 0192f3c1-2b4e-7a10-9c3d-5e6f70819234
+            correlationId: 0192f3c1-2b4e-7a10-9c3d-5e6f70819abc
+            partyId: 3f2a9c14-7c0e-4f2a-9d31-8b7c6a5e4d33
+            channel: EMAIL
+            template: MARKETING_PRODUCT_OFFER
+            outcome: SUPPRESSED
+            reason: no_active_consent
+            occurredAt: '2026-08-06T09:15:42.113Z'
+        - name: uncorrelatedSend
+          summary: An ordinary transactional send; the producer set no correlation id.
+          payload:
+            notificationId: 0192f3c1-2b4e-7a10-9c3d-5e6f7081aa55
+            correlationId: null
+            partyId: 3f2a9c14-7c0e-4f2a-9d31-8b7c6a5e4d33
+            channel: EMAIL
+            template: ACCOUNT_OPENED
+            outcome: SENT
+            reason: null
+            occurredAt: '2026-08-06T09:16:03.881Z'
+
+  schemas:
+    NotificationOutcomeEvent:
+      type: object
+      description: |
+        Source of truth: `com.openbank.notification.domain.model.NotificationOutcomeEvent`,
+        serialized with the service's Jackson `ObjectMapper`.
+
+        Carries no rendered body, no subject and no recipient address — an outcome says what
+        happened to a message, never what was in it. `template` is a catalogue constant, not
+        customer data. `partyId` is a pseudonymous identifier and is the only personal-data
+        reference on the payload.
+      required: [notificationId, partyId, channel, template, outcome, occurredAt]
+      additionalProperties: false
+      properties:
+        notificationId:
+          type: string
+          format: uuid
+          description: |
+            This service's id for the notification row. Unique per *attempt*: a redelivered request
+            produces a new row and therefore a new id, which is what makes duplicate outcomes for one
+            `correlationId` detectable rather than ambiguous.
+        correlationId:
+          type: [string, 'null']
+          format: uuid
+          description: |
+            The producer's own id, echoed back unchanged (ADR-0239 D1). Absent for producers that do
+            not need correlation. Never generated here — an id minted by this service would be
+            meaningless to the only party that can join it back.
+        partyId:
+          type: string
+          format: uuid
+        channel:
+          type: string
+          enum: [EMAIL, PUSH]
+          description: |
+            Mirrors `NotificationChannel`. SMS and IN_APP were removed in #2372 as never-implemented;
+            a channel added later appears here first as a value a consumer must tolerate.
+        template:
+          type: string
+          description: |
+            A `NotificationTemplate` constant. Left un-enumerated deliberately: the catalogue grows
+            with every product change, and a consumer that switches exhaustively on it would break on
+            an unrelated template being added.
+        outcome:
+          type: string
+          enum: [SENT, SUPPRESSED, FAILED, BOUNCED]
+          description: |
+            The terminal fate. `SENT` means the channel adapter accepted it — for EMAIL that is an
+            SMTP accept, which a later bounce can still refine.
+
+            `BOUNCED` has NO producer today: nothing in this service ingests bounces. It is declared
+            because ADR-0239 D4 gives it a defined meaning (a later refinement of an earlier `SENT`),
+            so a consumer written now must already tolerate it; adding it later would be the breaking
+            change. Do not read its presence here as evidence bounce handling exists.
+        reason:
+          type: [string, 'null']
+          description: |
+            Distinguishes causes a status alone flattens. Additive and open-ended — treat an
+            unrecognised value as "some other reason", never as an error.
+
+            Emitted today: `no_active_consent` (the ADR-0198 D4 gate refused — a GDPR control
+            working), `consent_check_unavailable` (consent-service unreachable, failed closed — an
+            availability problem, and deliberately never merged with the previous one),
+            `no_deliverable_recipient` (no resolvable address, #3581), `mailer_refused`,
+            `no_active_device`, `push_rejected_by_provider`, `channel_muted_by_preference`,
+            `push_adapter_disabled` (ADR-0252 phase 0 — every device's push adapter was switched
+            off, so nothing left the process; this case used to be reported as `SENT`, because a
+            disabled adapter returns a *successful* skipped result and the fan-out counted
+            successes, which is why a dead push channel produced telemetry identical to a healthy
+            one). Null on `SENT`.
+        occurredAt:
+          type: string
+          format: date-time
+          description: When the transition was recorded, from the service's injected `Clock` (UTC).

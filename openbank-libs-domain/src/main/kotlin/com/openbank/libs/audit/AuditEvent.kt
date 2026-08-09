@@ -40,7 +40,13 @@ data class AuditEvent(
     val operation: String,
     val resourceType: String,
     val resourceId: String?,
-    val timestamp: Instant = Instant.EPOCH,
+    /**
+     * When the audited operation happened. Defaults to construction time, which is what every
+     * call site means — it previously defaulted to [Instant.EPOCH], and 23 of the 25 fleet
+     * construction sites take the default, so the whole trail claimed 1970-01-01T00:00:00Z.
+     * Pass an explicit value only when replaying or back-dating a historical operation.
+     */
+    val timestamp: Instant = Instant.now(),
     val ipAddress: String? = null,
     val userAgent: String? = null,
     val result: AuditResult = AuditResult.SUCCESS,
@@ -65,12 +71,11 @@ object AuditChannel {
     const val API = "api"
 }
 
-/**
- * Marker for service code that emits an audit event. The interceptor in each service
- * picks this up and ensures an [AuditEvent] is published. Resource/operation strings
- * follow the convention `<service>.<aggregate>.<verb>` — e.g. `account.party.created`,
- * `payment.sepa.recalled`.
+/*
+ * There is deliberately no `@Audited` annotation (#4011). One existed and claimed in its own
+ * KDoc that "the interceptor in each service picks this up" — no such interceptor was ever
+ * written, in libs or in any service, and nothing ever applied it. A method carrying it
+ * emitted no audit event while the source read as audited, and a threat model cited it as the
+ * Repudiation mitigation for operator reads. Emit an [AuditEvent] through [AuditEventPublisher]
+ * explicitly; a declarative form must arrive with its interceptor in the same change.
  */
-@Target(AnnotationTarget.FUNCTION)
-@Retention(AnnotationRetention.RUNTIME)
-annotation class Audited(val operation: String, val resourceType: String, val resourceIdParam: String = "")

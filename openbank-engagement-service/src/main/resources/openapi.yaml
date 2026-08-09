@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+openapi: 3.0.3
+info:
+  title: OpenBank Engagement Service
+  description: >-
+    In-app engagement surfaces (ADR-0220), first infrastructure slice. Resolves a typed content
+    payload for a named app slot after the ADR-0219 contact-policy gate (consent + impression
+    budget) and a local repeated-dismissal exclusion, and records the app's impression/click/
+    dismiss/conversion feedback (D2).
+
+    Deliberately absent: gamification (D3) and pre-approved offers (D4, blocked on ADR-0142 not
+    existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
+    graduates from shadow (D5). No `@Authorize` OPA rule for these actions yet; the shared policy's
+    `default allow := false` denies both endpoints fail-closed under enforcement until that rule
+    lands.
+  version: 1.1.0
+tags:
+  - name: Surfaces
+  - name: Eligibility
+paths:
+  /api/v1/eligibility/adverse-states:
+    get:
+      tags: [Eligibility]
+      summary: List a party's active adverse states (ADR-0220 D3.5 targeting exclusions)
+      description: >-
+        The staff-plane read of `party_adverse_state` (issue #4265). Answers "why is this party
+        suppressed from marketing surfaces" with the set of flags currently set for them; an empty
+        list means no exclusion is active, which is a different fact from the endpoint being
+        unreachable and is why this is a list rather than a nullable object.
+
+        Not the customer-app plane: `ROLE_API` is deliberately absent, and the action
+        `engagement.adverseState.read` is outside the two actions the customer edge's
+        `edge-service-engagement` policy reason grants.
+
+        Returns flag names and a party id only — no balance, transaction or KYC content — so the
+        ADR-0210 D3 non-authoritative boundary is unchanged by it.
+      parameters:
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: the party's active adverse states, possibly empty
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdverseStateResponse"
+        "400":
+          description: partyId absent or not a UUID
+        "401":
+          description: no bearer token
+        "403":
+          description: token lacks ROLE_OPERATOR / ROLE_ADMIN / ROLE_COMPLIANCE
+  /api/v1/surfaces/{slot}:
+    get:
+      tags: [Surfaces]
+      summary: Resolve a typed content payload for a named surface slot
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        - name: partyId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: >-
+            Always 200 — the state field distinguishes rendered content from every reason it might
+            be absent, none of which is an error: not consented, over the impression budget,
+            outside quiet hours, or locally suppressed by repeated dismissal.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SurfaceResponse"
+        "400":
+          description: missing partyId or an unknown slot
+  /api/v1/surfaces/events:
+    post:
+      tags: [Surfaces]
+      summary: Record an impression, click, dismiss or conversion for a surfaced content item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EngagementEventRequest"
+      responses:
+        "202":
+          description: accepted — written to the transactional outbox, published asynchronously
+        "400":
+          description: unknown slot or event type
+components:
+  schemas:
+    AdverseStateResponse:
+      type: object
+      required: [partyId, adverseStates]
+      properties:
+        partyId: { type: string, format: uuid }
+        adverseStates:
+          type: array
+          description: >-
+            Sorted by name so the body is deterministic. Every value is a member of the enum
+            below; a value being absent from the list means the exclusion is not active for this
+            party, NOT that the signal is unwired — which of the four have a producing consumer is
+            a fact about this service's @Incoming consumers, tracked in AdverseState's KDoc.
+          items:
+            type: string
+            enum: [ARREARS, DISPUTE_OPENED, ERASURE_REQUESTED, FRAUD_HOLD]
+    SurfaceContent:
+      type: object
+      properties:
+        id: { type: string }
+        slot:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [BANNER, CARD, STORY, CAROUSEL, OFFER]
+        variables:
+          type: array
+          items: { type: string }
+    SurfaceResponse:
+      type: object
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [ok, not_eligible, suppressed]
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/SurfaceContent"
+        reason:
+          type: string
+          description: present only when state is not_eligible
+    EngagementEventRequest:
+      type: object
+      required: [partyId, contentId, slot, type]
+      properties:
+        partyId: { type: string, format: uuid }
+        contentId: { type: string }
+        slot:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [IMPRESSION, CLICK, DISMISS, CONVERSION]

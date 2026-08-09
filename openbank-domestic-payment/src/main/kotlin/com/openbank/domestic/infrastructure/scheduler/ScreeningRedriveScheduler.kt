@@ -5,10 +5,14 @@ package com.openbank.domestic.infrastructure.scheduler
 
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
 import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,6 +69,9 @@ class ScreeningRedriveScheduler {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
     @ConfigProperty(name = "openbank.domestic.screening-redrive.enabled", defaultValue = "true")
     var enabled: Boolean = true
 
@@ -81,6 +88,11 @@ class ScreeningRedriveScheduler {
     lateinit var temporalTaskQueue: String
 
     private val log = Logger.getLogger(ScreeningRedriveScheduler::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofMinutes(SWEEP_INTERVAL_MINUTES))
+    }
 
     @Scheduled(
         every = "{openbank.domestic.screening-redrive.interval:15m}",
@@ -94,9 +106,13 @@ class ScreeningRedriveScheduler {
         }
         val minAge = Instant.now(clock).minus(Duration.ofMinutes(minAgeMinutes))
         val stuck = paymentRepository.findRedrivable(maxAttempts, minAge, batchLimit)
-        if (stuck.isEmpty()) return
+        if (stuck.isEmpty()) {
+            liveness?.recordSuccess()
+            return
+        }
 
         log.infof("[screening-redrive] re-screening %d payment(s) held in RECEIVED", stuck.size)
+        var hadFailure = false
         for (paymentId in stuck) {
             // Counted BEFORE the attempt: a re-drive that dies mid-flight must still consume its
             // budget, or a payment that reliably kills the sweep is retried forever.
@@ -122,8 +138,12 @@ class ScreeningRedriveScheduler {
                 log.infof("[screening-redrive] re-drove payment %s", paymentId)
             } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
                 // One payment must not abort the sweep for the rest — the #846 shape.
+                hadFailure = true
                 log.warnf(ex, "[screening-redrive] could not re-drive payment %s", paymentId)
             }
+        }
+        if (!hadFailure) {
+            liveness?.recordSuccess()
         }
     }
 
@@ -131,5 +151,7 @@ class ScreeningRedriveScheduler {
         const val DEFAULT_MAX_ATTEMPTS = 5
         const val DEFAULT_MIN_AGE_MINUTES = 10L
         const val DEFAULT_BATCH_LIMIT = 20
+        const val SWEEP_INTERVAL_MINUTES = 15L
+        const val WORKFLOW_NAME = "domestic-payment-screening-redrive"
     }
 }

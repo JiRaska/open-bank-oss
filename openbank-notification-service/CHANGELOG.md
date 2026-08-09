@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.0...notification-service-v0.19.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **notification:** persist WHY a delivery failed (complements ADR-0252's counters) ([#4349](https://github.com/JiRaska/open-bank-oss/issues/4349)) ([28295b3](https://github.com/JiRaska/open-bank-oss/commit/28295b35453627d72e171284126286a7ad44ae43))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.1...notification-service-v0.19.0) (2026-08-09)
+
+
+### Features
+
+* **notification:** ADR-0252 synthetic assurance — phase 0, make the push channel observable ([#4351](https://github.com/JiRaska/open-bank-oss/issues/4351)) ([98c3623](https://github.com/JiRaska/open-bank-oss/commit/98c36233a0f8a55bb2be191a8b7142b77e9db492))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.0...notification-service-v0.18.1) (2026-08-08)
+
+
+### Security
+
+* **notification:** wire ContactPolicyGate at the ADR-0219 D4 choke point ([#4224](https://github.com/JiRaska/open-bank-oss/issues/4224)) ([91902ea](https://github.com/JiRaska/open-bank-oss/commit/91902ea3293a95c78e74cf74d0b61d1f99d0b861))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.4...notification-service-v0.18.0) (2026-08-06)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+
 ## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.17.3...notification-service-v0.17.4) (2026-08-03)
 
 

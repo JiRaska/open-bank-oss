@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+dataDomain: platform
+primaryDatastore: PostgreSQL
+databaseName: openbank_casecoordinator
+dataLineageRole: internal
+dataClassification: internal
+retentionPolicy: "7 years"
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: temporal
+      relationType: api
+      description: durable case workflow execution (ADR-0244)
+    # Removed (issue #3982): `agent-service (api, "policy decision point for tool-call
+    # authorization")`. ASPIRATIONAL, not stale — the module's src/main contains no reference to
+    # agent-service and no REST client of any kind, and it has no gitops component, so it is not
+    # deployed. Declared ahead of the code (ADR-0244). Re-add it in the PR that adds the client;
+    # a lineage edge is a claim about code that exists, and the lineage view, service map and
+    # catalog graph render it as if it did.
+databaseLineage:
+  ownedDatabases:
+    - openbank_casecoordinator
+  dependentDatabases: []

@@ -18,11 +18,11 @@ import java.util.concurrent.ConcurrentHashMap
  * [InMemoryProposalTokenStore]). Same contract as [RedisConversationStore]; entries expire via [clock].
  */
 @ApplicationScoped
-@IfBuildProperty(name = "copilot.token-store", stringValue = "memory")
+@IfBuildProperty(name = "copilot.conversation-store", stringValue = "memory")
 class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
     private val log = Logger.getLogger(InMemoryConversationStore::class.java)
 
-    private data class Entry(val messages: List<ChatMessage>, val expiresAt: Instant)
+    private data class Entry(val messages: List<ChatMessage>, val expiresAt: Instant, val partyId: String? = null)
 
     private val store = ConcurrentHashMap<String, Entry>()
 
@@ -36,7 +36,7 @@ class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
         return entry.messages
     }
 
-    override fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>) {
+    override fun append(customerId: String, conversationId: String, newTurns: List<ChatMessage>, partyId: String?) {
         if (!ConversationStore.persistable(conversationId) || newTurns.isEmpty()) return
         evictExpired()
         val k = key(customerId, conversationId)
@@ -44,8 +44,32 @@ class InMemoryConversationStore(private val clock: Clock) : ConversationStore {
         val merged = (load(customerId, conversationId) + newTurns)
             .map { ChatMessage(it.role, it.content) }
             .takeLast(ConversationStore.MAX_MESSAGES)
-        store[k] = Entry(merged, Instant.now(clock).plusSeconds(ConversationStore.TTL_SECONDS))
+        store[k] = Entry(
+            merged,
+            Instant.now(clock).plusSeconds(ConversationStore.TTL_SECONDS),
+            partyId ?: store[k]?.partyId,
+        )
         log.debugf("InMemoryConversationStore: appended %d turn(s) key=%s", newTurns.size, k)
+    }
+
+    // Either identity, mirroring PostgresConversationStore: the stored party id, or the key prefix
+    // (the OIDC `sub`) for the ADR-0069 case and for entries written without one.
+    override suspend fun deleteForParty(partyId: String): Long {
+        val prefix = "$partyId|"
+        val victims = store.entries
+            .filter { it.key.startsWith(prefix) || it.value.partyId == partyId }
+            .map { it.key }
+        victims.forEach { store.remove(it) }
+        return victims.size.toLong()
+    }
+
+    override suspend fun deleteConversation(customerId: String, conversationId: String): Long =
+        if (store.remove(key(customerId, conversationId)) != null) 1L else 0L
+
+    override suspend fun deleteExpired(now: Instant): Long {
+        val victims = store.entries.filter { !now.isBefore(it.value.expiresAt) }.map { it.key }
+        victims.forEach { store.remove(it) }
+        return victims.size.toLong()
     }
 
     private fun evictExpired() {

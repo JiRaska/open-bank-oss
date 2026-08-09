@@ -11,7 +11,7 @@ Coverage floor (kover): LINE ≥ 40 (money-path baseline; ratchet-only, target 7
 
 ## Image build & deploy
 
-- **fast-jar, host-side build** (CLAUDE.md GitOps rules). The Dockerfile builds with `-Dquarkus.package.jar.type=fast-jar` and copies `quarkus-app/` into an `eclipse-temurin:25-jre-alpine` runtime stage; runs as non-root user `openbank` with `-XX:+UseZGC`. `EXPOSE 8110`.
+- **fast-jar, host-side build** (CLAUDE.md GitOps rules). The image is assembled by `.github/workflows/Dockerfile.deploy`: it copies `quarkus-app/` into the `eclipse-temurin:25-jre` runtime base (glibc, #3354) and runs as non-root user `openbank` with `-XX:+UseZGC`. `openbank-sca-service/Dockerfile` builds nothing (#3016) — the pipeline reads exactly one thing from it, `EXPOSE 8110`.
 - Generic build: `openbank-infra/scripts/build-push-service.sh sca-service`.
 - **Flyway**: `migrate-at-start: true` with 10 connect-retries. If a checksum mismatch ever occurs on a live DB, set `QUARKUS_FLYWAY_REPAIR_AT_START=true` temporarily, then remove once settled (never rewrite an applied migration).
 

@@ -61,6 +61,15 @@ data class BalanceDto(
     val currency: String,
     val bookedAmount: BigDecimal,
     val availableAmount: BigDecimal,
+    /**
+     * What may actually be spent now (#1745) — `availableAmount` minus credits whose value date has
+     * not arrived. Nullable with a null default on purpose: during a rollout this service can be
+     * talking to a balance-service that predates the field, and defaulting to zero there would
+     * report every account as unspendable. [toView] falls back to `availableAmount`, i.e. to the
+     * old behaviour, which is wrong in the same direction it was already wrong rather than newly
+     * wrong in the other.
+     */
+    val effectiveAvailableAmount: BigDecimal? = null,
     val reservedAmount: BigDecimal,
     val pendingAmount: BigDecimal,
     val arrangedOverdraftLimit: BigDecimal = BigDecimal.ZERO,
@@ -92,16 +101,7 @@ class BalanceServiceClient(@RestClient private val client: BalanceServiceRestCli
         if (e.response?.status == 404) null else throw e
     }
 
-    private fun BalanceDto.toView() = BalanceView(
-        accountId = accountId,
-        currency = currency,
-        booked = bookedAmount,
-        available = availableAmount,
-        reserved = reservedAmount,
-        pending = pendingAmount,
-        arrangedOverdraftLimit = arrangedOverdraftLimit,
-        updatedAt = updatedAt.toInstant(),
-    )
+    private fun BalanceDto.toView() = toBalanceView()
 }
 
 /**
@@ -119,3 +119,23 @@ class BalanceAuthPropagationFilter(private val identity: SecurityIdentity) : Res
         requestContext.headers.putSingle(HttpHeaders.AUTHORIZATION, "Bearer $rawToken")
     }
 }
+
+/**
+ * `available` is the spendable figure, not the raw projection. Reading `availableAmount` here is
+ * what made the #1745 fix invisible outside balance-service: the invariant held for callers going
+ * through its own `placeHold`, and every account-service consumer kept spending the pre-fix number
+ * while the payload carried the correction in a field nobody read.
+ *
+ * Top-level and internal, not a private member of [BalanceServiceClient], so the mapping can be
+ * asserted without instantiating a REST client.
+ */
+internal fun BalanceDto.toBalanceView() = BalanceView(
+    accountId = accountId,
+    currency = currency,
+    booked = bookedAmount,
+    available = effectiveAvailableAmount ?: availableAmount,
+    reserved = reservedAmount,
+    pending = pendingAmount,
+    arrangedOverdraftLimit = arrangedOverdraftLimit,
+    updatedAt = updatedAt.toInstant(),
+)

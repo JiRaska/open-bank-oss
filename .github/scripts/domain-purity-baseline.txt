@@ -1,6 +1,23 @@
 # Domain-purity baseline (ADR-0002) — grandfathered violations, BURN DOWN ONLY.
 # Never add entries: a new framework import in the domain layer fails CI outright.
 # Delete a line here in the same PR that fixes (or removes) the import.
+#
+# HISTORY — the eight openbank-libs-domain Jackson entries that used to sit here are GONE.
+# #3670 added them when the gate's scope was widened from the `*/domain/*` PACKAGE PATH to the
+# whole openbank-libs-domain MODULE: not new code, just code in a part of the module the gate
+# had never opened (80 of its 107 main sources). Widening a gate's scope always uncovers
+# pre-existing violations, and grandfathering them is what makes the widening shippable.
+# The follow-up PR paid all eight off, each by the move ADR-0122 actually prescribes:
+#   - ApiError / CursorPage: wire DTOs whose @JsonInclude shapes the HTTP envelope — they ARE
+#     the serialization boundary, so they moved to openbank-libs-runtime, package unchanged.
+#   - OpaSidecarPolicyDecisionPoint / FlagdProvider: HTTP+Jackson infrastructure adapters;
+#     moved to libs-runtime beside the ports (PolicyDecisionPoint / FeatureClient) they
+#     implement, which stay in the domain module. Package unchanged, so no consumer import moved.
+#   - CompliancePackParser: split rather than moved. The decoder was already format-agnostic
+#     (`fromMap` takes an already-parsed Map), so all of it stays in libs-domain and only the
+#     three-line JSON front-end became `CompliancePackJson` in libs-runtime.
+# What is left below is older debt from the pre-#3670 scope, tracked separately.
+# Do not add further entries.
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.annotation.JsonInclude
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/McpTypes.kt:import com.fasterxml.jackson.databind.JsonNode
 openbank-agent-service/src/main/kotlin/com/openbank/agent/domain/model/ModelTypes.kt:import com.fasterxml.jackson.databind.JsonNode

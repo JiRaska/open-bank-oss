@@ -42,6 +42,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 FILTER_MARKERS = ("OidcClientRequestReactiveFilter", "OidcClientRequestFilter")
@@ -64,19 +66,20 @@ OPTIONAL_TRUE_PENDING_LIVE_CHECK: dict[str, str] = {
     "mcp-service": "secret is declared; flip after confirming it synced in `mcp`.",
     "sdd-service": "secret is declared; flip after confirming it synced in `sdd`.",
     "tpp-registry-service": "secret is declared; flip after confirming it synced in `tpp-registry`.",
+    "engagement-service": "new service, no Vault entry seeded yet — flip after confirming it synced in `engagement`.",
 }
 
 
 def services_minting_tokens() -> set[str]:
     """Services whose main sources wire an OIDC client filter onto a rest-client."""
     found: set[str] = set()
-    for service in sorted(REPO.glob("openbank-*/src/main")):
+    for service in gatelib.glob(REPO, "openbank-*/src/main"):
         name = service.parts[len(REPO.parts)]
-        for path in service.rglob("*"):
+        for path in gatelib.rglob(service, "*"):
             if not path.is_file() or path.suffix not in (".kt", ".yaml", ".yml", ".properties"):
                 continue
             try:
-                text = path.read_text(encoding="utf-8")
+                text = gatelib.read_text(path)
             except (UnicodeDecodeError, OSError):
                 continue
             if any(marker in text for marker in FILTER_MARKERS):
@@ -88,9 +91,9 @@ def services_minting_tokens() -> set[str]:
 def provisioned_secrets() -> set[tuple[str, str]]:
     """{(namespace, secret-name)} created by an ExternalSecret."""
     out: set[tuple[str, str]] = set()
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -106,9 +109,9 @@ def provisioned_secrets() -> set[tuple[str, str]]:
 def oidc_env_refs() -> dict[str, tuple[str, str, bool, pathlib.Path]]:
     """{workload: (namespace, secret-name, optional, manifest)} for every OIDC_CLIENT_SECRET ref."""
     refs: dict[str, tuple[str, str, bool, pathlib.Path]] = {}
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:

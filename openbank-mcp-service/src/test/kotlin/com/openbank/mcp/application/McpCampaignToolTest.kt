@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.mcp.application.port.out.AccountReadPort
 import com.openbank.mcp.application.port.out.ConsentContext
+import com.openbank.mcp.application.port.out.PaymentConfirmationReadPort
 import com.openbank.mcp.application.port.out.ProposalPort
+import com.openbank.mcp.application.port.out.StatementReadPort
 import com.openbank.mcp.infrastructure.read.StubMarketingReachPort
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -31,6 +33,8 @@ class McpCampaignToolTest {
     private val mapper = ObjectMapper()
     private val registry = McpToolRegistry(
         accounts = REFUSING_ACCOUNTS,
+        statements = REFUSING_STATEMENTS,
+        paymentConfirmations = REFUSING_PAYMENT_CONFIRMATIONS,
         proposals = REFUSING_PROPOSALS,
         marketingReach = StubMarketingReachPort(mapper),
         masker = McpPiiMasker(mapper),
@@ -46,6 +50,17 @@ class McpCampaignToolTest {
             override fun getBalance(consentContext: ConsentContext, accountId: String) = fail()
             override fun listTransactions(consentContext: ConsentContext, accountId: String, limit: Int) = fail()
             override fun listConsents(consentContext: ConsentContext) = fail()
+        }
+        private val REFUSING_STATEMENTS = object : StatementReadPort {
+            override fun getStatementSummary(
+                consentContext: ConsentContext,
+                accountId: String,
+                currency: String?,
+                legalSequence: Long?,
+            ) = fail()
+        }
+        private val REFUSING_PAYMENT_CONFIRMATIONS = object : PaymentConfirmationReadPort {
+            override fun getPaymentConfirmation(consentContext: ConsentContext, paymentId: String) = fail()
         }
         private val REFUSING_PROPOSALS = object : ProposalPort {
             override fun proposePayment(consentContext: ConsentContext, request: JsonNode) = fail()

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.5.0...flaky-test-hunter-v0.6.0) (2026-08-06)
+
+
+### Features
+
+* **flaky-test-hunter:** register prompt registry and wire LlmDiagnosisAdapter to shared gateway ([#3810](https://github.com/JiRaska/open-bank-oss/issues/3810)) ([8b94785](https://github.com/JiRaska/open-bank-oss/commit/8b9478502942572d819d78f4ef32c8b8a2d16224))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.4.0...flaky-test-hunter-v0.5.0) (2026-08-05)
 
 

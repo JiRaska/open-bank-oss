@@ -118,7 +118,13 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: 'npm'
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
@@ -424,6 +430,20 @@ jobs:
         id: rewrite
         run: |
           set -euo pipefail
+          # Recompute the bump against LIVE main, not against github.sha (#3194). The checkout
+          # above has no `ref:`, so on a push it holds the commit that triggered the build. The
+          # build takes minutes, admin-ui deploys are frequent, and if another one merges in that
+          # window create-pull-request branches from a main that no longer exists — both sides
+          # having rewritten the same `image:` line. The PR is then born CONFLICTED, which means
+          # no refs/pull/<n>/merge, which means NO workflow run at all: not skipped, absent. It
+          # reads as "waiting", never as broken, and the image is simply never deployed (four in
+          # one day, three closed undeployed).
+          #
+          # Safe because the rewrite is deterministic — set `image:` to the tag just built — so
+          # recomputing it against a newer main is always correct. It is what a human does when
+          # resolving this by hand.
+          git fetch origin main
+          git reset --hard origin/main
           TAG="${{ steps.build.outputs.tag }}"
           IMAGE="${ECR_REGISTRY}/${ECR_REPO}"
 
@@ -484,7 +504,7 @@ jobs:
           #      not on the image tag, which is what everyone assumes (issue #2621).
           #   2. A deploy loop, worked around by the `if:` on this job (line ~83): the PR touches
           #      openbank-admin-ui/**, which is this workflow's own path filter.
-          #   3. agent-review flagged the derived churn as if it were an infra decision, piling up
+          #   3. agent-review (retired #2161) flagged the derived churn as an infra decision, piling up
           #      #596/#608/#609 unmerged on 2026-07-08 — worked around by path exclusions in
           #      agent-review.yml, i.e. at the symptom.
           # The dossiers are still generated on every build and still baked by the Dockerfile;

@@ -8,20 +8,30 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.contact.ContactClass
+import com.openbank.libs.contact.ContactDenyReason
+import com.openbank.libs.contact.ContactPolicyGate
+import com.openbank.libs.contact.MarketingCallSite
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.notification.application.port.out.NotificationOutboxRepository
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
+import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
+import com.openbank.notification.domain.model.NotificationOutcome
+import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
+import com.openbank.notification.domain.model.PushResult
+import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
-import com.openbank.notification.infrastructure.client.ConsentServiceClient
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
@@ -31,16 +41,21 @@ import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
 import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.asUni
 import io.vertx.core.Vertx
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.Executor
 
 @ApplicationScoped
@@ -58,18 +73,37 @@ class NotificationConsumer {
         const val GENERIC_PUSH_BODY = "Open the OpenBank app to view details."
 
         /**
-         * The fixed internal marketing grantee every MARKETING consent is checked against
-         * (ADR-0205 D3). A constant so the gate cannot drift per call site.
-         */
-        const val MARKETING_GRANTEE = "party-service:marketing-comms"
-
-        /**
          * The consent scope a MARKETING send is checked against, per target channel (ADR-0198 D4).
          * Visible for tests — the gate's correctness is this mapping never drifting per channel.
          */
         fun marketingScopeFor(channel: NotificationChannel): String = when (channel) {
             NotificationChannel.EMAIL -> "MARKETING_COMMS_EMAIL"
             NotificationChannel.PUSH -> "MARKETING_COMMS_PUSH"
+        }
+
+        /**
+         * Terminal status of a PUSH fan-out from its accepted/skipped tally (ADR-0252 phase 0).
+         *
+         * Visible for tests, and deliberately a pure function of two numbers: this mapping is the
+         * defect. The previous form asked `success > 0`, which is true for a SKIPPED send, so an
+         * environment with every push adapter disabled recorded SENT and looked healthy.
+         *
+         * A fan-out that was only skipped is SUPPRESSED, not FAILED — nothing was rejected and
+         * nothing is retryable; the channel is switched off. Merging it into FAILED would put a
+         * configuration state into the delivery-failure series and make that series unusable for
+         * alerting, which is the mirror image of the bug being fixed.
+         */
+        fun pushOutcomeOf(accepted: Int, skipped: Int): NotificationOutcome = when {
+            accepted > 0 -> NotificationOutcome.SENT
+            skipped > 0 -> NotificationOutcome.SUPPRESSED
+            else -> NotificationOutcome.FAILED
+        }
+
+        /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
+        fun pushReasonOf(accepted: Int, skipped: Int): String? = when {
+            accepted > 0 -> null
+            skipped > 0 -> NotificationOutcomeEvent.REASON_PUSH_ADAPTER_DISABLED
+            else -> NotificationOutcomeEvent.REASON_PUSH_REJECTED
         }
     }
 
@@ -79,19 +113,30 @@ class NotificationConsumer {
 
     @Inject lateinit var notificationRepo: NotificationRepository
 
+    /**
+     * ADR-0239 D2. Field injection, not a constructor parameter: detekt's `LongParameterList`
+     * fires AT `constructorThreshold: 9`, and this bean is already at the ceiling — the fleet
+     * convention for one more collaborator is a field.
+     */
+    @Inject lateinit var outboxRepo: NotificationOutboxRepository
+
     @Inject lateinit var deviceTokenRepo: DeviceTokenRepository
 
     @Inject lateinit var preferenceRepo: NotificationPreferenceRepository
 
     @Inject lateinit var pushSender: PushSender
 
+    /**
+     * ADR-0252 phase 0. Field injection for the same reason as [outboxRepo] above — detekt's
+     * `LongParameterList` fires AT `constructorThreshold: 9` and this bean is at the ceiling.
+     */
+    @Inject lateinit var pushMetrics: PushMetricsPort
+
     @Inject lateinit var clock: Clock
 
     @Inject lateinit var audit: AuditEventPublisher
 
-    @Inject
-    @RestClient
-    lateinit var consentServiceClient: ConsentServiceClient
+    @Inject lateinit var contactGate: ContactPolicyGate
 
     /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
     @Inject
@@ -184,6 +229,7 @@ class NotificationConsumer {
             // Secret-bearing templates persist a placeholder; `body` below still carries the
             // rendered secret to the delivery adapters, so the customer receives it as usual.
             it.body = TemplateSensitivity.bodyForStorage(req.template, body)
+            it.correlationId = req.correlationId
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
         }
@@ -286,20 +332,29 @@ class NotificationConsumer {
     // mail never went out" from "the mail went out, but recording SENT failed" — Mutiny's
     // Uni#chain composes onto ONE failure channel, so it would catch both: a transient Postgres
     /**
-     * The ADR-0198 D4 consent gate (#2660): every MARKETING send asks consent-service for the
-     * party's ACTIVE consent under grantee `party-service:marketing-comms` (ADR-0205 D3), scoped
-     * to the target channel. A send with no ACTIVE consent records SUPPRESSED and audits it.
+     * The ADR-0219 D4 contact gate (#2749) — this service's own `consentServiceClient` call was
+     * the choke point ADR-0219 D4 names outright ("its consent call becomes this gate call"): one
+     * `ContactPolicyGate.check(...)` now wraps suppression list -> send cap -> quiet hours ->
+     * live consent pull, in the gate's ordering (same composition campaign-service and
+     * engagement-service already reuse), instead of a bespoke consent-only check.
      *
-     * Fail-closed in BOTH failure modes, deliberately distinguishable in the audit (#2660 §3):
-     *  - `granted == false`  → SUPPRESSED with reason `no_active_consent` (a genuine refusal)
-     *  - client error/timeout → SUPPRESSED with reason `consent_check_unavailable` (an outage)
-     * A consent-service outage must never read as a grant, and the two numbers must never merge
-     * into one — the first is a GDPR control working, the second is an availability problem.
+     * Bridged into this `Uni` chain via `CoroutineScope(Dispatchers.Unconfined).async {
+     * }.asUni()` — the same suspend-into-Uni idiom `CampaignJourneyActivitiesImpl` uses (the
+     * gate itself is a `suspend fun`; this dispatch pipeline is Mutiny `Uni`, not coroutines).
+     *
+     * Fail-closed in every deny reason, deliberately distinguishable in the audit (#2660 §3,
+     * carried forward): `NO_CONSENT` -> `no_active_consent` (a genuine refusal),
+     * `GATE_UNAVAILABLE` -> `consent_check_unavailable` (a port outage — consent, counter or
+     * suppression) — a gate outage must never read as a grant, and the two numbers must never
+     * merge into one. `SEND_CAP_REACHED`/`QUIET_HOURS`/`SUPPRESSED_LIST` are new reasons this
+     * service could not previously produce; each gets its own outcome code rather than folding
+     * into one of the two above.
      *
      * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
      * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
      * granted consent — a different and legitimate control, not the Art. 6(1)(a) basis.
      */
+    @MarketingCallSite
     private fun gateMarketingOnConsent(
         req: NotificationRequest,
         subject: String,
@@ -307,38 +362,38 @@ class NotificationConsumer {
         entity: NotificationEntity,
     ): Uni<Void> {
         val scope = marketingScopeFor(req.channel)
-        return consentServiceClient.hasActiveConsent(req.partyId, MARKETING_GRANTEE, scope)
-            .onItemOrFailure().transformToUni { check, failure ->
-                when {
-                    failure != null -> {
-                        log.warnf(
-                            failure,
-                            "MARKETING %s suppressed: consent-service unreachable (template=%s party=%s) — " +
-                                "failing closed (ADR-0198 D4, #2660)",
-                            req.channel,
-                            req.template,
-                            req.partyId,
-                        )
-                        markStatus(entity, "SUPPRESSED")
-                            .invoke { _ -> auditMarketingSuppressed(req, "consent_check_unavailable") }
-                    }
-                    check.granted ->
-                        when (req.channel) {
-                            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
-                        }
-                    else -> {
-                        log.infof(
-                            "MARKETING %s suppressed: no ACTIVE consent (template=%s party=%s, ADR-0198 D4)",
-                            req.channel,
-                            req.template,
-                            req.partyId,
-                        )
-                        markStatus(entity, "SUPPRESSED")
-                            .invoke { _ -> auditMarketingSuppressed(req, "no_active_consent") }
-                    }
+        val decisionUni = CoroutineScope(Dispatchers.Unconfined).async {
+            contactGate.check(req.partyId, ContactClass.OUTBOUND_SEND, scope)
+        }.asUni()
+        return decisionUni.chain { decision ->
+            if (decision.allowed) {
+                when (req.channel) {
+                    NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
                 }
+            } else {
+                val reason = when (decision.denyReason) {
+                    ContactDenyReason.NO_CONSENT -> NotificationOutcomeEvent.REASON_NO_CONSENT
+                    ContactDenyReason.GATE_UNAVAILABLE -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                    ContactDenyReason.SEND_CAP_REACHED -> NotificationOutcomeEvent.REASON_SEND_CAP_REACHED
+                    ContactDenyReason.QUIET_HOURS -> NotificationOutcomeEvent.REASON_QUIET_HOURS
+                    ContactDenyReason.SUPPRESSED_LIST -> NotificationOutcomeEvent.REASON_SUPPRESSED_LIST
+                    // IMPRESSION_BUDGET_REACHED, null: never produced for OUTBOUND_SEND — the
+                    // gate's own `when` is exhaustive over ContactClass, so this branch exists
+                    // only for a future ContactDenyReason value this file has not been taught yet.
+                    else -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                }
+                log.infof(
+                    "MARKETING %s suppressed: %s (template=%s party=%s, ADR-0219 D4)",
+                    req.channel,
+                    reason,
+                    req.template,
+                    req.partyId,
+                )
+                markStatus(req, entity, NotificationOutcome.SUPPRESSED, reason)
+                    .invoke { _ -> auditMarketingSuppressed(req, reason) }
             }
+        }
     }
 
     /**
@@ -400,7 +455,7 @@ class NotificationConsumer {
                 req.partyId,
                 req.template,
             )
-            markStatus(entity, "FAILED")
+            markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_NO_RECIPIENT)
         } else {
             deliverEmail(req, address, subject, body, entity)
         }
@@ -434,42 +489,37 @@ class NotificationConsumer {
         body: String,
         entity: NotificationEntity,
     ): Uni<Void> = mailer.send(Mail.withHtml(recipient, subject, body))
-        .onFailure().invoke { e ->
-            log.warnf(e, "Email send failed: party=%s template=%s", req.partyId, req.template)
-        }
-        .onFailure().recoverWithUni { _ ->
-            Panache.withTransaction {
-                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                    .map { ent -> ent?.also { it.status = "FAILED" } }
-            }.replaceWithVoid()
-        }
-        .chain { _ ->
-            Panache.withTransaction {
-                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                    .map { e ->
-                        e?.also {
-                            it.status = "SENT"
-                            it.sentAt = Instant.now(clock)
-                        }
+        // One branch point, deliberately, rather than two `.onFailure()` handlers at different
+        // depths (the older shape, issue #1392). The distinction that shape existed to preserve —
+        // "the mail never went out" vs "the mail went out but recording it failed" — is kept, and
+        // is now visible as two branches instead of two positions in a chain.
+        .onItemOrFailure().transformToUni { _, failure ->
+            if (failure != null) {
+                log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
+                markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_MAILER_REFUSED)
+            } else {
+                markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
+                    .onItem().invoke { _ ->
+                        log.infof("Email sent: party=%s template=%s", req.partyId, req.template)
                     }
-            }.replaceWithVoid()
+                    // Reachable only when the mail genuinely went out. Never marks the row FAILED —
+                    // that would be a lie about a message the customer already has — logs loudly
+                    // instead and swallows, so dispatch still completes. The cost is now explicit:
+                    // the outcome event is lost with the status write (they share one transaction,
+                    // ADR-0239 D2), so the producer's row stays PENDING rather than going wrong.
+                    .onFailure().invoke { e ->
+                        log.warnf(
+                            e,
+                            "Email sent but recording SENT status failed: party=%s template=%s — row " +
+                                "left as-is, NOT marked FAILED (the email was actually delivered); no " +
+                                "outcome event was emitted either",
+                            req.partyId,
+                            req.template,
+                        )
+                    }
+                    .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
+            }
         }
-        .onItem().invoke { _ -> log.infof("Email sent: party=%s template=%s", req.partyId, req.template) }
-        // Only reachable if the mail genuinely went out (the FAILED path above already recovered
-        // any send failure into a completed Uni). Never marks the row FAILED — that would be a
-        // lie about a message that was actually delivered — logs loudly instead, and swallows so
-        // dispatch still completes normally: the customer already has the message, this is a
-        // bookkeeping problem for an operator to notice via the log, not a reason to fail dispatch.
-        .onFailure().invoke { e ->
-            log.warnf(
-                e,
-                "Email sent but recording SENT status failed: party=%s template=%s — row left as-is, " +
-                    "NOT marked FAILED (the email was actually delivered)",
-                req.partyId,
-                req.template,
-            )
-        }
-        .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
 
     /**
      * Gate a PUSH by the party's preferences (#2). SECURITY-category notifications (OTP, SCA, KYC,
@@ -499,7 +549,12 @@ class NotificationConsumer {
                 sendPush(req, subject, entity)
             } else {
                 log.infof("PUSH suppressed by preference: party=%s category=%s", req.partyId, category)
-                markStatus(entity, "SUPPRESSED")
+                markStatus(
+                    req,
+                    entity,
+                    NotificationOutcome.SUPPRESSED,
+                    NotificationOutcomeEvent.REASON_PREFERENCE_MUTED,
+                )
             }
         }
     }
@@ -507,12 +562,20 @@ class NotificationConsumer {
     /**
      * Deliver a PUSH notification by fanning out to every ACTIVE device token registered for
      * the party. The inbound request carries no token (the producer does not know it) — the
-     * registry is the source of truth. Status is SENT if at least one device accepted the push,
-     * FAILED if there were no devices or every send failed. Tokens the provider rejects
-     * (UNREGISTERED / BadDeviceToken) are retired so they drop out of future fan-out.
+     * registry is the source of truth. Tokens the provider rejects (UNREGISTERED /
+     * BadDeviceToken) are retired so they drop out of future fan-out.
      *
-     * Adapters are off by default; a disabled adapter returns a *skipped* (successful) result,
-     * so in the sandbox a push is recorded SENT without any egress (mirrors the EMAIL stub).
+     * Terminal status, from the three-state [PushSendOutcome] rather than from `success`:
+     * - **SENT** — at least one provider ACCEPTED the push. Accepted, not delivered: APNs returns
+     *   HTTP 200 to mean accepted for delivery and issues no receipt, so this process cannot
+     *   observe whether a device received anything. Device-side acknowledgement is ADR-0252
+     *   phase 3 (#4348).
+     * - **SUPPRESSED** / `push_adapter_disabled` — nothing was accepted and at least one send was
+     *   skipped because the adapter is off. This used to be SENT: a skipped result is
+     *   `success = true`, the fan-out counted `success`, and so an environment with no APNs
+     *   credentials produced byte-identical telemetry and status to a working one. That is half
+     *   the reason a dead push channel went unnoticed until a customer reported it.
+     * - **FAILED** — no devices, or every send was rejected.
      */
     private fun sendPush(req: NotificationRequest, subject: String, entity: NotificationEntity): Uni<Void> {
         // ADR-0135 §3 + issue #1182: push payloads must carry NO amount / account number / PII.
@@ -533,7 +596,13 @@ class NotificationConsumer {
             .chain { tokens ->
                 if (tokens.isEmpty()) {
                     log.infof("PUSH: no active devices for party=%s template=%s", req.partyId, req.template)
-                    return@chain markStatus(entity, "FAILED")
+                    pushMetrics.recordFanOut(req.template, NotificationOutcome.FAILED, 0)
+                    return@chain markStatus(
+                        req,
+                        entity,
+                        NotificationOutcome.FAILED,
+                        NotificationOutcomeEvent.REASON_NO_DEVICE,
+                    )
                 }
                 // Snapshot detached values before crossing the async send boundary — the
                 // managed entities belong to the (now closed) read transaction.
@@ -541,47 +610,132 @@ class NotificationConsumer {
                 val sends = targets.map { (deviceId, platform, token) ->
                     pushSender.send(
                         PushMessage(platform, token, subject, pushText, mapOf("template" to req.template.name)),
-                    ).map { result -> deviceId to result }
+                    ).map { result ->
+                        // Recorded here, where the platform is in scope. Counter increments are
+                        // thread-safe, so running off the event loop (the adapters complete on the
+                        // JDK HttpClient pool) is fine — unlike the Panache work further down.
+                        pushMetrics.recordSend(platform, result.outcome, result.errorCode)
+                        deviceId to result
+                    }
                 }
                 Uni.join().all(sends).andCollectFailures()
                     // The sends completed off the Vert.x event loop; hop back onto the captured
                     // context so the Panache.withTransaction below has a context (issue #1548).
                     .emitOn(Executor { command -> vertxContext?.runOnContext { command.run() } ?: command.run() })
-                    .chain { results ->
-                        val delivered = results.count { it.second.success }
-                        val invalidIds = results.filter { it.second.invalidToken }.map { it.first }
-                        log.infof(
-                            "PUSH fan-out party=%s template=%s devices=%d delivered=%d invalidated=%d",
-                            req.partyId,
-                            req.template,
-                            results.size,
-                            delivered,
-                            invalidIds.size,
-                        )
-                        Panache.withTransaction {
-                            deviceTokenRepo.invalidate(invalidIds).chain { _ ->
-                                notificationRepo.find("notificationId", entity.notificationId).firstResult()
-                                    .map { e ->
-                                        e?.also {
-                                            if (delivered > 0) {
-                                                it.status = "SENT"
-                                                it.sentAt = Instant.now(clock)
-                                            } else {
-                                                it.status = "FAILED"
-                                            }
-                                        }
-                                    }
-                            }
-                        }
-                    }
+                    .chain { results -> persistPushFanOut(req, entity, results) }
                     .replaceWithVoid()
             }
     }
 
-    private fun markStatus(entity: NotificationEntity, status: String): Uni<Void> = Panache.withTransaction {
+    /**
+     * Tally one PUSH fan-out, then commit its status and outcome event in a single transaction.
+     *
+     * Split out of [sendPush] to keep that method under detekt's `LongMethod` ceiling; it runs on
+     * the Vert.x context [sendPush] hopped back onto, which is what lets the Panache work below
+     * function at all (issue #1548).
+     */
+    private fun persistPushFanOut(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        results: List<Pair<UUID, PushResult>>,
+    ): Uni<*> {
+        // `accepted`, not `delivered`, and it excludes SKIPPED — counting `success` here merged
+        // "the provider took it" with "the adapter is off" (ADR-0252 phase 0).
+        val accepted = results.count { it.second.outcome == PushSendOutcome.ACCEPTED }
+        val skipped = results.count { it.second.outcome == PushSendOutcome.SKIPPED }
+        val invalidIds = results.filter { it.second.invalidToken }.map { it.first }
+        log.infof(
+            "PUSH fan-out party=%s template=%s devices=%d accepted=%d skipped=%d invalidated=%d",
+            req.partyId,
+            req.template,
+            results.size,
+            accepted,
+            skipped,
+            invalidIds.size,
+        )
+        val outcome = pushOutcomeOf(accepted, skipped)
+        val reason = pushReasonOf(accepted, skipped)
+        pushMetrics.recordFanOut(req.template, outcome, results.size)
+        return Panache.withTransaction {
+            deviceTokenRepo.invalidate(invalidIds).chain { _ ->
+                notificationRepo.find("notificationId", entity.notificationId).firstResult()
+                    .map { e ->
+                        e?.also {
+                            it.status = outcome.name
+                            // ADR-0252's counters answer "how is the channel doing"; this answers
+                            // "why did THIS message fail", durably. The outcome event carries the
+                            // same value but its outbox row is pruned after dispatch.
+                            it.failureReason = reason
+                            if (accepted > 0) it.sentAt = Instant.now(clock)
+                        }
+                    }
+                    .chain { _ ->
+                        outboxRepo.persistInTransaction(outcomeMessage(req, entity, outcome, reason))
+                    }
+            }
+        }
+    }
+
+    /**
+     * Write the terminal status AND its outcome event in ONE transaction (ADR-0003, ADR-0239 D2).
+     *
+     * The two must commit together or not at all. A status written without its event leaves the
+     * producer's funnel permanently wrong about a message — which is issue #3663 in miniature — and
+     * an event without the status would announce a transition that never happened.
+     */
+    private fun markStatus(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        status: NotificationOutcome,
+        reason: String?,
+        sent: Boolean = false,
+    ): Uni<Void> = Panache.withTransaction {
         notificationRepo.find("notificationId", entity.notificationId).firstResult()
-            .map { e -> e?.also { it.status = status } }
+            .map { e ->
+                e?.also {
+                    it.status = status.name
+                    // Persist the reason alongside the status (V13): the outcome event below
+                    // carries the same value, but its outbox row is pruned after dispatch, so
+                    // without this the table can only ever say FAILED.
+                    it.failureReason = reason
+                    if (sent) it.sentAt = Instant.now(clock)
+                }
+            }
+            .chain { _ -> outboxRepo.persistInTransaction(outcomeMessage(req, entity, status, reason)) }
     }.replaceWithVoid()
+
+    /**
+     * The outbox row for one terminal transition.
+     *
+     * `aggregateId` is the **notificationId**, not the correlation id: it is what partitions the
+     * topic (`OutboxKafkaHeaders.partitionKey`), and a correlation id is optional, so keying on it
+     * would put every uncorrelated event on one partition.
+     */
+    private fun outcomeMessage(
+        req: NotificationRequest,
+        entity: NotificationEntity,
+        outcome: NotificationOutcome,
+        reason: String?,
+    ): OutboxMessage {
+        val now = Instant.now(clock)
+        val event = NotificationOutcomeEvent(
+            notificationId = entity.notificationId,
+            correlationId = req.correlationId,
+            partyId = req.partyId,
+            channel = req.channel,
+            template = req.template,
+            outcome = outcome,
+            reason = reason,
+            occurredAt = now,
+        )
+        return OutboxMessage(
+            eventId = Ids.newId(),
+            aggregateId = entity.notificationId,
+            eventType = NotificationOutcomeEvent.EVENT_TYPE,
+            payload = objectMapper.writeValueAsString(event),
+            createdAt = now,
+        )
+    }
 
     /**
      * Renders [template] into a (subject, body) pair.

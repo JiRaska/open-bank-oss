@@ -1,0 +1,106 @@
+# In-image smoke gate for the fraud-service ONNX serving path (issue #3354).
+#
+# The defect: every JVM test runs on a glibc host and loads libonnxruntime.so fine, but the
+# deployed image was musl (alpine) and the native library never loaded there. A green build
+# therefore proved nothing about the image. This workflow builds the production image from the
+# SAME Dockerfile.deploy the deploy pipeline uses and runs a tiny no-container main inside it
+# that forces the real load path.
+#
+# ONE leg runs: the image the fleet actually ships, built from Dockerfile.deploy with no
+# override. The base is pinned there (#3618/#3629 settled it on eclipse-temurin:25-jre) and
+# `verify-image-native-libs.py` refuses a second copy of it, so this workflow must not carry one.
+#
+# WHERE THE NEGATIVE CONTROL WENT. An earlier revision built a second leg on the old alpine base
+# and required it to FAIL, proving the gate could go red. That leg is gone, and deliberately:
+#   - it needed `ARG BASE_IMAGE` in Dockerfile.deploy, which is exactly the second copy of the
+#     base that verify-image-native-libs.py forbids — and with the ARG removed, `--build-arg`
+#     is accepted with a warning and silently builds the SAME base, so the leg would have
+#     "proved" a failure while testing the passing image. A negative control that cannot fail is
+#     worse than none.
+#   - the regression it guarded (going back to musl) is now caught on every push by
+#     verify-image-native-libs.py, which runs `ldd` over the bundled .so INSIDE the pinned base.
+# So this gate answers the narrower question that script cannot: does the serving path actually
+# WORK in the shipped image — native library, model, and ADR-0141 card, through the same
+# companion functions the bean uses.
+#
+# The smoke is intentionally not a @QuarkusTest: it needs no DB, no Kafka, no config; it only
+# needs the image filesystem and the bundled model/card.
+name: ONNX serving smoke
+
+on:
+  pull_request:
+    paths:
+      - "openbank-fraud-service/**"
+      - ".github/workflows/Dockerfile.deploy"
+      - ".github/workflows/onnx-serving-smoke.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onnx-serving-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # No base pinned here on purpose: Dockerfile.deploy is the single source, and a second copy
+  # is what verify-image-native-libs.py exists to prevent. (This used to pin ubi10-minimal —
+  # the candidate that was NOT adopted, so the gate would have tested an image nobody ships.)
+  SERVICE: openbank-fraud-service
+  SMOKE_CLASS: com.openbank.fraud.infrastructure.ml.OnnxServingSmokeKt
+
+jobs:
+  smoke:
+    name: fraud-service ONNX in-image smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+
+      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          cache-disabled: false
+          cache-read-only: true
+
+      # Fast-jar is the production package type used by the deploy pipeline; the smoke must
+      # exercise the exact same layout (boot + main + app jars) that Dockerfile.deploy copies.
+      - name: Build fraud-service quarkus-app
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+        run: |
+          ./gradlew :${{ env.SERVICE }}:quarkusBuild \
+            -Dquarkus.package.jar.type=fast-jar \
+            --console=plain
+
+      # Pre-pull the base Dockerfile.deploy pins, so a build error is attributable to the image
+      # rather than to a registry timeout. Read from the file — never hardcoded here.
+      - name: Pull the pinned runtime base
+        run: |
+          set -euo pipefail
+          base="$(grep -m1 '^FROM ' .github/workflows/Dockerfile.deploy | awk '{print $2}')"
+          echo "runtime base (from Dockerfile.deploy): $base"
+          docker pull "$base"
+
+      # The shipped image, built exactly as the deploy pipeline builds it — no --build-arg,
+      # no override. If this fails, the ONNX serving path does not work in what we deploy.
+      - name: "Smoke: the shipped image must serve"
+        run: |
+          set -euo pipefail
+          docker build \
+            -f .github/workflows/Dockerfile.deploy \
+            -t fraud-smoke \
+            "${{ env.SERVICE }}/build"
+          docker run --rm --entrypoint="" fraud-smoke \
+            java -cp "/app/lib/boot/*:/app/lib/main/*:/app/app/*" \
+              ${{ env.SMOKE_CLASS }}

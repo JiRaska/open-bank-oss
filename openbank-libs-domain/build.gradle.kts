@@ -32,15 +32,20 @@ dependencies {
     // Internal detail of domain.identifiers.Ids — services mint ids via EntityId.random() factories.
     implementation(libs.java.uuid.generator)
 
-    // Logging API used by OutboxDispatch, FlagExposure, StaticServiceTokenProvider.
-    // compileOnly: jboss-logging is provided at runtime by every Quarkus app via quarkus-core.
-    // Not a framework dependency — it is a logging facade that runs standalone.
-    compileOnly("org.jboss.logging:jboss-logging:3.6.2.Final")
-
-    // CDI interceptor binding annotations used by Authorize and FeatureFlag (@InterceptorBinding,
-    // @Nonbinding). compileOnly: provided at runtime by every Quarkus app via quarkus-arc/cdi.
-    compileOnly("jakarta.interceptor:jakarta.interceptor-api:2.2.0")
-    compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
+    // NO framework dependencies here, not even compileOnly ones: this is the domain side of the
+    // ADR-0122 split and ADR-0002 says it has zero framework imports (#3670). jboss-logging was
+    // replaced by the JDK's System.Logger in OutboxDispatch/FlagExposure/StaticServiceTokenProvider,
+    // and the CDI interceptor bindings (@Authorize, @FeatureFlag) moved to openbank-libs-runtime
+    // where @InterceptorBinding belongs. `check-domain-purity.py` now enforces this module-wide.
+    //
+    // The follow-up to #3670 paid off the eight baselined Jackson references the same way. Moved
+    // to openbank-libs-runtime, PACKAGE UNCHANGED so no consumer import moved: the ApiError and
+    // CursorPage wire DTOs (they ARE the serialization boundary), and the OpaSidecarPolicyDecision-
+    // Point / FlagdProvider HTTP adapters — their PORTS (PolicyDecisionPoint, FeatureClient) stay
+    // here, which is the direction the hexagon wants. CompliancePackParser was SPLIT instead of
+    // moved: its decoder already took an already-parsed Map, so only the JSON front-end left, as
+    // `CompliancePackJson` in libs-runtime. Jackson survives below ONLY as the annotation-level
+    // dependency of EntityId/LendingIds/Money, which are still baselined and still owed a fix.
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -48,7 +53,6 @@ dependencies {
     testImplementation(libs.mockk)
     // FlagdProviderTest and OpaSidecarPolicyDecisionPointTest drive real HttpClient calls over
     // a mock server; no framework needed — they are pure JVM.
-    testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     // Property-based tests on Money arithmetic invariants (ADR-0011 L1, issue #469). Same
     // version pin as openbank-ledger-service/openbank-balance-service's JournalEntryPropertyTest/
     // BalancePropertyTest — kept as a direct GAV like theirs rather than the shared catalog, since

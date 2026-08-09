@@ -2,6 +2,7 @@
 date: 2026-07-16
 decision-status: accepted
 delivery-status: partial
+followup: "#3962 — the eu-central-1 defaults; the un-enforced LLM prompt egress to a US provider is still unfiled"
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -91,7 +92,10 @@ rather than letting them read as the target state.
   second region). *(Pending)*
 - **D3 — Gate hosted-LLM egress on the data class.** Either enforce `sensitivity: self-hosted` routing
   for anything non-synthetic (ADR-0031's decision, unbuilt), or hard-disable the customer-facing
-  copilot outside sandbox. The current control is a comment. *(Pending — the highest-value item here.)*
+  copilot outside sandbox. The current control is a comment. **OPEN — highest-value item here.
+  All inference currently routes to hosted providers (Groq/DeepInfra); no sensitive-data routing is
+  enforced. Tracked in issue #3599 (LiteLLM choke-point work for data-residency enforcement). Not
+  acceptable for any deployment holding real personal data.** *(Pending)*
 - **D4 — Correct the OPA bundles' residency claim.** ~16 bundles assert `routing: {sensitive_data:
   self_hosted}` as live policy data. Shared with [ADR-0174](0174-ict-third-party-dependencies-and-exit-strategy.md)
   D1 — one fix, two ADRs. *(Pending)*

@@ -1,0 +1,35 @@
+# Makes balance-service's Kafka consumer `group.id` reach the connector from a config source
+# SmallRye does not mangle (#686, #2945). Full mechanism + rationale:
+# openbank-infra/gitops/components/accounts/account-service-msg-override.yaml.
+#
+# Short form: a dotted YAML leaf key under mp.messaging.incoming.<channel> registers only as the
+# QUOTED property name, so the connector never reads it and silently falls back to
+# quarkus.application.name. balance-service's declared group.id happens to EQUAL that fallback, so
+# the broken key is a no-op by coincidence — until a rename or a channel-specific group makes it
+# one. balance-service is money-path (rules.yaml: money_path_services) and consumes the ledger
+# journal, so a silent consumer-group change here is a balance-projection correctness event.
+# Deploying this changes no effective value: both channels keep the group
+# `openbank-balance-service`, which is what kafka-balance-mtls.yaml grants Read on and where
+# today's committed offsets live.
+#
+# `auto.offset.reset: earliest` is declared for both channels and is subject to the same bug
+# (effective value: the connector default `latest`). It is deliberately NOT set here — making it
+# effective would replay the retained ledger journal on the next offset expiry. Owner decision,
+# see #2945.
+#
+# Properties file rather than env vars: the hyphenated channel names hit the unresolved
+# quarkusio/quarkus#30106 / smallrye-reactive-messaging#2028 env-var split bug (SRMSG00071).
+# config_ordinal=500 outranks the baked application.yaml (~254); loaded via QUARKUS_CONFIG_LOCATIONS.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: balance-service-msg-override
+  namespace: balances
+  labels:
+    app.kubernetes.io/name: balance-service
+    app.kubernetes.io/part-of: balances
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.ledger-events-in.group.id=openbank-balance-service
+    mp.messaging.incoming.balance-init-in.group.id=openbank-balance-service

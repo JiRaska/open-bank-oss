@@ -68,6 +68,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 IMAGE_SVC = re.compile(r"openbank-([a-z0-9-]+-service)\b")
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 
@@ -133,9 +135,9 @@ def has_authorize_annotation(root: pathlib.Path, service_dir_name: str) -> bool:
     src_main = root / service_dir_name / "src" / "main"
     if not src_main.exists():
         return False
-    for kt in src_main.rglob("*.kt"):
+    for kt in gatelib.rglob(src_main, "*.kt"):
         try:
-            text = kt.read_text(encoding="utf-8")
+            text = gatelib.read_text(kt)
         except OSError:
             continue
         if "@Authorize" not in text:  # cheap pre-filter; the stripper is the authority
@@ -152,7 +154,7 @@ def app_enforce_default(root: pathlib.Path, service_dir_name: str) -> bool | Non
     if not app_yaml.exists():
         return None
     try:
-        data = yaml.safe_load(app_yaml.read_text(encoding="utf-8")) or {}
+        data = gatelib.load_yaml(app_yaml) or {}
     except yaml.YAMLError:
         return None
     enforce = (((data.get("authz") or {}) if isinstance(data.get("authz"), dict) else {}).get("enforce"))
@@ -175,9 +177,9 @@ def env_value(container: dict, name: str) -> str | None:
 
 
 def iter_workloads(components: pathlib.Path):
-    for path in sorted(components.rglob("*.yaml")):
+    for path in gatelib.rglob(components, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except yaml.YAMLError:
             continue
         for doc in docs:

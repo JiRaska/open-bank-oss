@@ -41,6 +41,7 @@ it can move past *Proposed*.
 | `docs-truth-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `authz-policy-auditor` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `flaky-test-hunter` | development | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `case-coordinator` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 
 ### Non-agent ML and statistical systems
 
@@ -89,25 +90,24 @@ not deployed.
 | Property | As-built value | AI Act / GDPR bearing |
 |---|---|---|
 | Gateway / egress choke point | `litellm` | A single in-cluster choke point exists — the place where residency, redaction and an egress NetworkPolicy CAN be enforced. Whether every caller is actually forced through it is the `Egress enforced` row, not this one. |
-| Egress enforced | `partial` | The gateway is enforced for its own egress, but at least one caller's pod can still reach a provider directly — the choke point is bypassable. |
-| Callers routed through the gateway | `copilot-service`, `control-liveness-sentinel`, `devops-agent`, `docs-truth-agent`, `finops-agent`, `flaky-test-hunter`, `governance-auditor`, `release-steward`, `authz-policy-auditor` | Prompt content from these systems has a single auditable egress path. |
-| Callers NOT routed | `agent-service` | Prompt content from these systems reaches a provider directly. |
+| Egress enforced | `full` | Every LLM caller is network-forced through the gateway; the provider is unreachable directly. |
+| Callers routed through the gateway | `copilot-service`, `control-liveness-sentinel`, `devops-agent`, `docs-truth-agent`, `finops-agent`, `flaky-test-hunter`, `governance-auditor`, `release-steward`, `authz-policy-auditor`, `agent-service` | Prompt content from these systems has a single auditable egress path. |
+| Callers NOT routed | none | Prompt content from these systems reaches a provider directly. |
 | Hosted (external) provider(s) | `deepinfra`, `groq` | Prompt content leaves the platform trust boundary — Art. 10 data governance applies. |
 | Sensitive-data routing | `none` | No routing separates sensitive from non-sensitive prompt data. |
 | Budgets enforced at | `charter` | Cost control only — not a data-governance control. |
 | Fallback | `none` | Single provider; on failure the agent degrades to a deterministic path. |
 
-> ⚠ **Partially closed gap (Art. 10 / GDPR).** A hosted external provider is in use
-> behind an in-cluster gateway, so the provider credential and the egress path are
-> centralised and auditable — but the gateway is not yet the *only* way out. Until
-> `egress_enforced` reads `full`, a caller pod can still reach the provider directly
-> and the choke point is a convention, not a control. Sensitive-data routing remains
-> absent either way. Residency, DPA and the synthetic-data licence position are
-> recorded in **ADR-0175**.
+> ⚠ **Enforced, not resolved (Art. 10 / GDPR).** Every caller is network-forced
+> through the in-cluster gateway and the provider is unreachable directly, so the
+> choke point is a control rather than a convention. The exposure it centralises is
+> unchanged: prompt content still reaches a hosted external provider and still leaves
+> the EU. Residency, DPA and the synthetic-data licence position are recorded in
+> **ADR-0175**, and sensitive-data routing is reported separately above.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `d873c5a72aeb949b…`, 15 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `e93d82f28786d1ef…`, 16 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),

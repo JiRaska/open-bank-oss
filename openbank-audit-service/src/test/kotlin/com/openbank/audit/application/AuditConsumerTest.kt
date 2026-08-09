@@ -2,11 +2,15 @@
 package com.openbank.audit.application
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.audit.domain.model.AttributionSource
+import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -19,6 +23,8 @@ class AuditConsumerTest {
 
     private val repo = mockk<AuditRepository>()
 
+    private val registry = SimpleMeterRegistry()
+
     private lateinit var consumer: AuditConsumer
 
     @BeforeEach
@@ -27,7 +33,8 @@ class AuditConsumerTest {
             it.repo = repo
             it.objectMapper = jacksonObjectMapper().findAndRegisterModules()
             // ADR-0100: recordedAt is stamped via Instant.now(clock); fix it for determinism.
-            it.clock = Clock.fixed(Instant.parse("2026-05-27T12:00:00Z"), ZoneOffset.UTC)
+            it.clock = Clock.fixed(INGEST_TIME, ZoneOffset.UTC)
+            it.meterRegistry = registry
         }
     }
 
@@ -351,5 +358,199 @@ class AuditConsumerTest {
         }.doesNotThrowAnyException()
 
         coVerify(exactly = 0) { repo.save(any()) }
+    }
+
+    // ── #3883: event time vs ingest time ──────────────────────────────────────────────────────
+    //
+    // `occurredAt` is the fleet's canonical event-time key (declared on DomainEvent), so the
+    // consumer's read of it is right and stays. What was missing is any record of the OTHER
+    // branch: 7 of the 21 consumed topics send no event time, and their rows silently claimed
+    // ingest time as business time. These pin both halves.
+
+    @Test
+    fun `consume keeps the producer's event time and marks it as the producer's (EVENT)`(): Unit = runBlocking {
+        // Deliberately far from the fixed ingest clock: an assertion using a value equal to
+        // Instant.now(clock) would pass against the bug, which is how this survived.
+        val eventTime = Instant.parse("2026-05-27T09:15:30Z")
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","occurredAt":"$eventTime"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match {
+                    it.occurredAt == eventTime &&
+                        it.occurredAtSource == OccurredAtSource.EVENT &&
+                        it.recordedAt == INGEST_TIME
+                },
+            )
+        }
+        assertThat(registry.find("openbank.audit.event.time.missing").counters()).isEmpty()
+    }
+
+    @Test
+    fun `consume marks an entry INGEST-sourced when the producer sends no occurredAt`(): Unit = runBlocking {
+        // A real statement-service payload shape: it carries closedAt, never occurredAt.
+        val payload = """
+            {"eventType":"account.statement.period.closed.v1","accountId":"${UUID.randomUUID()}",
+             "sourceService":"statement-service","closedAt":"2026-05-27T09:15:30Z"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(
+                match { it.occurredAt == INGEST_TIME && it.occurredAtSource == OccurredAtSource.INGEST },
+            )
+        }
+        assertThat(
+            registry.counter("openbank.audit.event.time.missing", "source_service", "statement-service").count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `consume does NOT accept a differently-named event-time key`(): Unit = runBlocking {
+        // document-service emits `at`, the canonical audit envelope names the field `timestamp`.
+        // Accepting either here would be a second silent path; the producer is the thing to fix,
+        // and an INGEST row plus a counter is what makes that visible.
+        val payload = """{"eventType":"DOCUMENT_GENERATED","documentId":"${UUID.randomUUID()}",
+            "sourceService":"document-service","at":"2026-05-27T09:15:30Z","timestamp":"2026-05-27T09:15:30Z"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify { repo.save(match { it.occurredAtSource == OccurredAtSource.INGEST }) }
+    }
+
+    @Test
+    fun `consume keeps the entry when occurredAt is unparseable, rather than dropping it`(): Unit = runBlocking {
+        // Before #3883 this threw out of the AuditEntry constructor into consume()'s catch, so one
+        // malformed field discarded the entire audit record. RED against that code: repo.save was
+        // never called.
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","occurredAt":"not-a-timestamp"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify {
+            repo.save(match { it.occurredAt == INGEST_TIME && it.occurredAtSource == OccurredAtSource.INGEST })
+        }
+    }
+
+    // ── Explicit JSON null must never become the STRING "null" (#3994) ──────────────────────────
+    //
+    // Jackson's asText() on a NullNode returns "null", so `{"actorId": null}` stored an actor
+    // called "null". Measured on the live audit database: 7 rows carry actor_id = 'null', all
+    // TransactionInitiated. Every test below is RED against origin/main.
+    //
+    // Note what is asserted: the exact expected VALUE, never non-nullity. `assertThat(actorId)
+    // .isNotNull()` passes happily against the string "null" — it is the same shape as the
+    // Instant.EPOCH trap, where isNotNull() agreed with 1970-01-01.
+
+    @Test
+    fun `consume stores no actor when the producer explicitly sends a null actor`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        // The live payload shape: transaction-service emits initiatedByPartyId as an explicit null
+        // for a system-initiated transaction. 22 rows in the live table are exactly this.
+        val payload = """
+            {"eventType":"TransactionInitiated","transactionId":"${UUID.randomUUID()}",
+             "initiatedByPartyId":null,"actorId":null,"actorType":null,"partyId":"$partyId"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        // origin/main: actorId == "null", actorType == "null".
+        coVerify { repo.save(match { it.actorId == null && it.actorType == null }) }
+    }
+
+    @Test
+    fun `consume prefers a real actor over an explicitly null one earlier in the chain`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val payload = """
+            {"eventType":"TransactionInitiated","transactionId":"${UUID.randomUUID()}",
+             "requestedBy":null,"actorId":null,"initiatedByPartyId":"$partyId"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        // origin/main: the first `?.asText()` yields "null", which is non-null, so the elvis chain
+        // short-circuits and the REAL actor two links down is never reached. The explicit null did
+        // not merely fail to attribute — it actively displaced a known actor.
+        coVerify { repo.save(match { it.actorId == partyId.toString() }) }
+    }
+
+    @Test
+    fun `consume does not attribute a source service the producer explicitly nulled`(): Unit = runBlocking {
+        val payload = """
+            {"eventType":"BALANCE_UPDATED","accountId":"${UUID.randomUUID()}","sourceService":null}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, EventAddress(topic = "openbank.balance.events"))
+
+        // origin/main: `takeIf { it.isNotBlank() }` passes "null" through, so the row claims
+        // source_service = "null" with provenance EVENT — a consumer-invented value recorded as
+        // the producer's own assertion, which is the exact failure V13's column exists to prevent.
+        coVerify {
+            repo.save(
+                match {
+                    it.sourceService == "balance-service" &&
+                        it.sourceServiceSource == AttributionSource.TOPIC
+                },
+            )
+        }
+    }
+
+    @Test
+    fun `consume keeps aggregate type and id agreeing when a candidate field is null`(): Unit = runBlocking {
+        val transactionId = UUID.randomUUID()
+        val payload = """
+            {"eventType":"TransactionCompleted","accountId":null,"transactionId":"$transactionId"}
+        """.trimIndent()
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        // origin/main: inferAggregateType uses `has` (true for an explicit null) and returns
+        // ACCOUNT, while inferAggregateId uses asText() and returns "null" — a typed aggregate
+        // pointing at an id that identifies nothing. Both sides now test the same predicate.
+        coVerify {
+            repo.save(
+                match { it.aggregateType == "TRANSACTION" && it.aggregateId == transactionId.toString() },
+            )
+        }
+    }
+
+    @Test
+    fun `consume falls back to the ce-type header when eventType is explicitly null`(): Unit = runBlocking {
+        val payload = """{"eventType":null,"accountId":"${UUID.randomUUID()}"}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, EventAddress(topic = "openbank.balance.events", ceType = "BALANCE_UPDATED"))
+
+        // origin/main: eventType == "null" — and because that is non-null the ce-type header the
+        // transport was carrying is never consulted, so #4270's recovery silently does not apply.
+        coVerify { repo.save(match { it.eventType == "BALANCE_UPDATED" }) }
+    }
+
+    @Test
+    fun `consume records ingest time without a bogus parse warning when occurredAt is null`(): Unit = runBlocking {
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","occurredAt":null}"""
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        // Same class, benign outcome by luck: "null" is unparseable, so main already lands on
+        // INGEST — but via the "unparseable occurredAt" warning path, which reports a malformed
+        // producer where there is only an absent field. Asserted so the two stay distinguishable.
+        coVerify { repo.save(match { it.occurredAtSource == OccurredAtSource.INGEST }) }
+    }
+
+    private companion object {
+        val INGEST_TIME: Instant = Instant.parse("2026-05-27T12:00:00Z")
     }
 }

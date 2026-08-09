@@ -136,6 +136,20 @@ Accepted and deployed (statement-service v0.2.0, sandbox). Two notes on how the 
   — a Kafka projection of the account-service `AccountCreated` stream (topic
   `openbank.accounts.account.created`), not a direct "all accounts" endpoint (account-service owns its
   own DB, ADR-0002). The scheduler enumerates `accountRegistry.allAccountIds()`.
+- **§D/§F's byte-identical promise was not true until 2026-08-09 (issue #3986).** The close persisted
+  only the metadata record, so `render()` rebuilt the canonical model at request time from two LIVE
+  projections — transaction-service's booked entries for the (already closed) window, and the
+  account's current IBAN/holder name. A late entry booked into the closed window, or a holder rename,
+  therefore changed an already-issued legal statement page, with the stored closing balance staying
+  put so the document also stopped reconciling. The close now freezes those inputs (`StatementSnapshot`
+  → `statement_period.model_snapshot`, Flyway V7) and a closed period renders purely from stored
+  state. This does **not** weaken §F: no camt/MT/PDF bytes are stored, only the canonical *model* —
+  which is exactly what this ADR's own "Alternatives considered" already chose ("persist the canonical
+  model, render on demand"). §F.1's "a small `StatementPeriod` metadata record" should be read as
+  including that snapshot. **Periods closed before V7 have no snapshot and still replay live data**;
+  they are deliberately not backfilled, because the live projections may already have drifted from
+  what was issued and freezing today's answer would make the drift canonical. §D/§F are therefore
+  true for every period closed from V7 onward, and best-effort for older ones.
 - The **scheduled monthly close stays disabled** (`openbank.statement.scheduled-close.enabled=false`);
   the per-customer close model here is deliberately *completeness-over-atomicity*, and the operational
   hardening required before enabling the cron (self-healing catch-up, run-outcome persistence,

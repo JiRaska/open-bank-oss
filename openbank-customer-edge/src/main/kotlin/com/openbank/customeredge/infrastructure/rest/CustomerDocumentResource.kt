@@ -35,7 +35,7 @@ import java.util.UUID
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 @RolesAllowed("ROLE_CUSTOMER")
-class CustomerDocumentResource(private val upstream: UpstreamClient) {
+class CustomerDocumentResource(private val upstream: UpstreamClient, private val grants: DelegationGrants) {
 
     @Inject
     lateinit var jwt: JsonWebToken
@@ -103,10 +103,27 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
                 put("createdAt", doc.get("createdAt")?.asText())
             }
         }
-        return Response.ok(json.writeValueAsString(safe)).type(MediaType.APPLICATION_JSON).build()
+        // Documents shared WITH the caller belong in the list too — without this a grantee accepts
+        // a share and then has no way to reach what they were given. Appended and marked, never
+        // blended: "sharedWithMe" is how the app can say whose document it is, so a delegate does
+        // not come to believe they own what they were lent. Own documents are unaffected when
+        // delegation-service is unreachable.
+        val shared = sharedDocuments(upstream, json, documentServiceUrl, grants, partyId)
+        val out = if (shared.isEmpty()) safe else safe + shared
+        return Response.ok(json.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
     }
 
-    /** Stream a document's PDF bytes — only if it belongs to the caller. */
+    /**
+     * Stream a document's PDF bytes — to its owner, or to someone it was shared with.
+     *
+     * Delegated access over a DOCUMENT (ADR-0232) was until now a grant nobody could use: the app
+     * could offer one and this route still answered 404, because ownership was the only question
+     * asked. Same defect as accounts had before #4021, one level down — and reintroduced the
+     * moment the app grew a share button on a document row.
+     *
+     * A non-owner needs an ACTIVE grant carrying OBJECT_READ on THIS document. Anything else is
+     * still 404 rather than 403: a stranger must not learn that a document id exists.
+     */
     @GET
     @Path("/documents/{id}/content")
     @Blocking
@@ -114,7 +131,9 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
         val partyId = partyId()
         val meta = upstream.get("$documentServiceUrl/api/v1/documents/$id", partyId)
         if (meta.status != OK) return notFound()
-        if (ownerPartyOf(meta) != partyId) return notFound() // do not leak existence to a non-owner
+        if (ownerPartyOf(meta) != partyId && !grants.has(partyId, "DOCUMENT", id.toString(), "OBJECT_READ")) {
+            return notFound()
+        }
         return upstream.getRaw("$documentServiceUrl/api/v1/documents/$id/content", partyId, MediaType.WILDCARD)
     }
 
@@ -189,3 +208,37 @@ class CustomerDocumentResource(private val upstream: UpstreamClient) {
 
 /** `RAMCOVA_SMLOUVA_CS` and `RAMCOVA_SMLOUVA_EN` are two languages of one contract, not two. */
 private fun templateFamily(templateCode: String): String = templateCode.removeSuffix("_CS").removeSuffix("_EN")
+
+private const val HTTP_OK = 200
+
+/**
+ * Documents someone else shared with this caller, projected onto the same customer-safe field set
+ * the owner's own documents get, plus `sharedWithMe` so the app can say whose document it is.
+ *
+ * File-level rather than a member: it is a pure projection over a grant lookup and a fetch, and the
+ * resource class is already at its function budget.
+ */
+private fun sharedDocuments(
+    upstream: UpstreamClient,
+    json: com.fasterxml.jackson.databind.ObjectMapper,
+    documentServiceUrl: String,
+    grants: DelegationGrants,
+    partyId: String,
+): List<Map<String, Any?>> = grants.activeResourceIds(partyId, "DOCUMENT", "OBJECT_READ")
+    .mapNotNull { id ->
+        upstream.get("$documentServiceUrl/api/v1/documents/$id", partyId)
+            .takeIf { it.status == HTTP_OK }
+    }
+    .mapNotNull { r -> runCatching { json.readTree(r.entity?.toString() ?: "") }.getOrNull() }
+    .map { doc ->
+        buildMap<String, Any?> {
+            put("id", doc.textOrNull("id"))
+            put("templateCode", doc.textOrNull("templateCode"))
+            put("templateVersion", doc.textOrNull("templateVersion"))
+            put("contentType", doc.textOrNull("contentType"))
+            put("sizeBytes", doc.get("sizeBytes")?.asLong())
+            put("status", doc.textOrNull("status"))
+            put("createdAt", doc.textOrNull("createdAt"))
+            put("sharedWithMe", true)
+        }
+    }

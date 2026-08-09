@@ -50,23 +50,58 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 PROBES = ("livenessProbe", "readinessProbe", "startupProbe")
 
 
+# ADR-0122 / #3672: openbank-libs-runtime ships a base application.yaml that every service
+# inherits. Quarkus reads it from the dependency jar at a LOWER ordinal than the service's own
+# file, so a port declared only in the base IS opened at runtime — verified empirically by
+# FinrepBootSmokeTest, not assumed here. Reading a service's file alone therefore under-reports
+# what listens, and the gate blamed finrep for a management port the base already opens (#3686).
+# The failure direction matters: it is a FALSE POSITIVE that grows with adoption, one new red for
+# every service that takes the base.
+BASE_CONFIG = REPO / "openbank-libs-runtime" / "src" / "main" / "resources" / "application.yaml"
+
+
+def _ports_of(doc: dict) -> dict[str, int | None]:
+    quarkus = doc.get("quarkus") or {}
+    return {
+        "http": (quarkus.get("http") or {}).get("port"),
+        "management": (quarkus.get("management") or {}).get("port"),
+    }
+
+
+def _load(path: pathlib.Path) -> dict | None:
+    try:
+        return gatelib.load_yaml(path) or {}
+    except (yaml.YAMLError, OSError):
+        return None
+
+
+def base_ports() -> dict[str, int | None]:
+    """Ports the shared openbank-libs-runtime base opens for every service that inherits it."""
+    doc = _load(BASE_CONFIG)
+    return _ports_of(doc) if doc is not None else {"http": None, "management": None}
+
+
 def service_ports() -> dict[str, dict[str, int | None]]:
-    """{service: {"http": port, "management": port}} from each service's application.yaml."""
+    """{service: {"http": port, "management": port}}, service file layered over the shared base."""
+    base = base_ports()
     out: dict[str, dict[str, int | None]] = {}
-    for path in sorted(REPO.glob("openbank-*/src/main/resources/application.yaml")):
-        try:
-            doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        except yaml.YAMLError:
+    for path in gatelib.glob(REPO, "openbank-*/src/main/resources/application.yaml"):
+        if path == BASE_CONFIG:
+            continue  # the base is not a service
+        doc = _load(path)
+        if doc is None:
             continue
-        quarkus = doc.get("quarkus") or {}
+        own = _ports_of(doc)
+        # The service's own value wins where it sets one; the base fills the rest.
         out[path.parts[len(REPO.parts)]] = {
-            "http": (quarkus.get("http") or {}).get("port"),
-            "management": (quarkus.get("management") or {}).get("port"),
+            k: own[k] if own[k] is not None else base[k] for k in ("http", "management")
         }
     return out
 
@@ -74,9 +109,9 @@ def service_ports() -> dict[str, dict[str, int | None]]:
 def workloads() -> list[tuple[pathlib.Path, dict]]:
     """Every Deployment/Rollout manifest in gitops, with its path."""
     found: list[tuple[pathlib.Path, dict]] = []
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -94,9 +129,9 @@ def podmonitor_ports() -> dict[str, set[str]]:
     the name is the key and a non-matching name simply contributes no finding.
     """
     out: dict[str, set[str]] = {}
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -205,6 +240,9 @@ def selftest() -> int:
         (8085, 8128, None, True),    # #2870 exactly: no quarkus.management block
         (8085, 8128, 8086, True),    # management enabled, different port
         (8128, 8128, None, False),   # probing the http port needs no management block
+        # #3686: the port comes from the shared base, not the service's own file. Before this,
+        # service_ports() returned management=None here and the gate flagged a healthy service.
+        (8085, 8140, 8085, False),   # base-supplied management port, resolved by layering
     ]
     for probe_port, http, management, must_flag in cases:
         flagged = probe_port not in {http, management}
@@ -212,8 +250,20 @@ def selftest() -> int:
             verb = "missed" if must_flag else "wrongly flagged"
             print(f"selftest FAIL: {verb} probe={probe_port} http={http} management={management}")
             return 1
+    base = base_ports()
+    if base["management"] is None:
+        print("selftest FAIL: the shared base declares no management port — either it moved or "
+              f"{BASE_CONFIG.relative_to(REPO)} no longer parses, and every inheriting service "
+              "would be flagged for a port that is in fact open.")
+        return 1
+    inheritors = [s for s, p in configs.items() if (_load(REPO / s / "src/main/resources/application.yaml")
+                  or {}).get("quarkus", {}).get("management") is None and p["management"] is not None]
+    if not inheritors:
+        print("selftest FAIL: no service resolves its management port from the base, so the "
+              "layering path is untested — it would pass while doing nothing.")
+        return 1
     print(f"selftest OK: {len(cases)} cases, both directions; "
-          f"{len(configs)} service config(s), {len(workloads())} workload(s) parsed.")
+          f"{len(configs)} service config(s) ({len(inheritors)} inheriting management="f"{base['management']} from the shared base), {len(workloads())} workload(s) parsed.")
     return 0
 
 
@@ -229,6 +279,7 @@ def main() -> int:
     for line in messages:
         print(line if args.enforce else line.replace("::error", "::warning", 1))
     verdict = "clean." if not messages else f"{len(messages)} finding(s) above."
+    gatelib.subjects(checked, "probed/scraped ports")
     print(f"check-probe-port-listener: {checked} probed/scraped port(s) checked — {verdict}")
     return 1 if messages and args.enforce else 0
 

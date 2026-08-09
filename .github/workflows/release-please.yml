@@ -105,8 +105,9 @@ jobs:
       # scratch branch is what keeps this non-destructive: resetting the release ref back to
       # its parent and re-committing in place would leave the PR momentarily empty if the
       # mutation failed in between. No push-triggered workflow watches a scratch branch —
-      # every `on: push` in this repo is filtered to `main` (runner-smoke.yml to
-      # `ci/self-hosted-runner`) — so it fires nothing on create or delete.
+      # every `on: push` in this repo is filtered to `main` — so it fires nothing on create
+      # or delete. (The one exception, runner-smoke.yml on `ci/self-hosted-runner`, was
+      # deleted in #4026 along with that branch, so the claim is now unconditional.)
       #
       # Idempotent by design, because it has to be: release-please force-pushes each release
       # branch on every push to main, which re-unsigns it. Already-verified PRs are skipped, so
@@ -385,7 +386,7 @@ jobs:
       RP_OUTPUTS: ${{ needs.release-please.outputs.rp_outputs }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "25"

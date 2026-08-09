@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.9.0...sdd-service-v0.10.0) (2026-08-07)
+
+
+### Features
+
+* **sdd:** register workflow liveness on mandate expiry scheduler (ADR-0237) ([#3706](https://github.com/JiRaska/open-bank-oss/issues/3706)) ([584c72b](https://github.com/JiRaska/open-bank-oss/commit/584c72b97dd0a9d0db3c396636ee005f31727f88))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.8.3...sdd-service-v0.9.0) (2026-07-31)
 
 

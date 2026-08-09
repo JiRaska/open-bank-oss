@@ -47,6 +47,45 @@ layer (advisory by default, `copilot.opa.enforce=false`; flip via `COPILOT_OPA_E
 once `copilot-opa-bundle.yaml` is deployed). OPA rego tool names synced to actual Kotlin `name` values.
 `ScheduledPaymentsTool` capability corrected to `account.scheduled-payments.read`.
 
+## Conversation history is personal data — and is now erasable (#3870)
+
+Durable chat transcripts live in Postgres (`conversation_history`, `PostgresConversationStore`).
+Free-text chat is where the least predictable personal data lands, so the retention path matters:
+
+- **`expires_at` is a read-side filter, not deletion.** `load` filters on `expires_at > now()`, so an
+  expired conversation stops being *served* while the row stays on disk and in every base backup.
+  `ConversationRetentionScheduler` is what actually removes it (daily 03:30 UTC,
+  `copilot.retention.conversation.enabled`).
+- **`PartyErasureConsumer`** consumes `PARTY_ERASED` and hard-deletes the party's rows (GDPR Art. 17,
+  ADR-0117), matching the shape the other seven consumers of that topic use.
+- **The erasure ops on `ConversationStore` are `suspend`, deliberately.** Both callers already run on
+  a Vert.x context, where the blocking `VertxContextSupport.subscribeAndAwait` bridge that `load` and
+  `append` use would throw. For the same reason the sweep is a `suspend @Scheduled` method — a plain
+  one runs on a bare `executor-thread` and dies with `HR000068` on the first reactive call.
+- **The header comment in `V1__conversation_history.sql` is now stale** — it says there is no sweep
+  and no `PARTY_ERASED` consumer "yet". It is deliberately NOT corrected: Flyway checksums the whole
+  file including comments, so editing an applied migration fails the service at boot. Believe this
+  file, not that one.
+- **The erasure identity is captured at WRITE time, and must stay that way (#3881).** `PARTY_ERASED`
+  carries `partyId`; history is keyed on the OIDC `sub`, and those are not the same value — measured
+  against the deployed customers realm, `sub` equalled `party_id` for **0 of 35** users, because
+  `WebAuthnKeycloakClient.ensureUser` never sets the Keycloak user `id`, so Keycloak mints a random
+  UUID and `party_id` survives as a separate attribute. Keyed on `sub`, the consumer received the
+  event, deleted nothing, and logged `erased 0 copilot conversation(s)` at INFO — a GDPR Art. 17
+  control reporting coverage it did not have, provable wrong only by querying the table. It cannot be
+  fixed in the consumer: by erasure time the Keycloak user is gone, so nothing maps `partyId` back to
+  a `sub`. So `CopilotChatResource.erasureIdentity()` (the `party_id` claim, `sub` as fallback — the
+  resolution customer-edge already uses) writes `conversation_history.party_id` (migration V2), and
+  `deleteForParty` matches **either** column. Do not "simplify" that `or` away.
+- **`party_id` is never a lookup key.** `customerId` alone still decides which conversation a
+  customer resumes; changing that would silently move every customer to a different history and
+  orphan every existing row. Rows written before V2 carry no party id and are reachable only by the
+  `customer_id` arm; they pick one up on that customer's next message.
+- **An erasure test whose two identities are the same string cannot see this class of bug.** Every
+  test in `ConversationErasureIT` erases using the id it seeded with, so all four passed against the
+  broken code. `PartyErasureIdentityIT` deliberately seeds `sub != partyId` and asserts by direct
+  JDBC — measured red on the unfixed behaviour with `expected: 2L but was: 0L`.
+
 ## Build
 
 ```

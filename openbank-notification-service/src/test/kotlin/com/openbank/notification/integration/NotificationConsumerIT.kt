@@ -13,7 +13,9 @@ import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.persistence.entity.DeviceTokenEntity
+import com.openbank.notification.infrastructure.persistence.entity.NotificationOutboxEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
+import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
@@ -101,9 +103,17 @@ class NotificationConsumerIT {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.body
 
+    private fun failureReasonFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.failureReason
+
     private fun notificationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.notificationId
+
+    private fun correlationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.correlationId
 
     /** Drive one request through the in-memory inbound channel and wait for the ack. */
     private fun consumeAndAwait(request: NotificationRequest) {
@@ -263,6 +273,114 @@ class NotificationConsumerIT {
         assertThat(bodyFor(partyId)).isNotEqualTo(TemplateSensitivity.REDACTED_BODY)
     }
 
+    // ── Delivery-outcome events (ADR-0239 D2, issue #3663) ──
+
+    @Inject
+    lateinit var outboxRepo: NotificationOutboxRepositoryImpl
+
+    /** Outbox rows for one notification, read through a real reactive session. */
+    private fun outcomeRowsFor(notificationId: UUID): List<NotificationOutboxEntity> =
+        VertxContextSupport.subscribeAndAwait {
+            Panache.withSession { outboxRepo.find("aggregateId", notificationId).list() }
+        } ?: emptyList()
+
+    /**
+     * The whole of issue #3663 in one assertion: a producer that handed a request over has, until
+     * now, had NOTHING to read back. The status write and this row commit in one transaction
+     * (ADR-0003), so a row that exists is a transition that happened.
+     *
+     * Asserts the correlation id is ECHOED, not merely that some event was emitted — an outcome the
+     * producer cannot join back to its own row is the same silence in a more expensive form.
+     */
+    @Test
+    fun `a completed send emits a correlated delivery-outcome event (ADR-0239 D2)`() {
+        val partyId = UUID.randomUUID()
+        val correlationId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.WELCOME,
+                recipient = "outcome-correlated@example.com",
+                variables = mapOf("name" to "Alice"),
+                correlationId = correlationId,
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        val notificationId = notificationIdFor(partyId)!!
+        val rows = outcomeRowsFor(notificationId)
+        assertThat(rows)
+            .withFailMessage("no delivery-outcome event was emitted for a completed send (issue #3663)")
+            .hasSize(1)
+        assertThat(rows.single().eventType).isEqualTo("NotificationOutcome")
+
+        val event = objectMapper.readTree(rows.single().payload)
+        assertThat(event.path("outcome").asText()).isEqualTo("SENT")
+        assertThat(event.path("correlationId").asText()).isEqualTo(correlationId.toString())
+        assertThat(event.path("notificationId").asText()).isEqualTo(notificationId.toString())
+        assertThat(event.path("partyId").asText()).isEqualTo(partyId.toString())
+        assertThat(event.path("reason").isNull).isTrue()
+        // The row itself carries the correlation id too, so an operator can join it back without
+        // replaying the topic.
+        assertThat(correlationIdFor(partyId)).isEqualTo(correlationId)
+    }
+
+    /**
+     * The uncorrelated case, which is the majority of this topic's traffic. An event is still
+     * emitted — ADR-0239 D2 makes it a shared contract, not a private channel back to one consumer
+     * — and its `correlationId` is null rather than a value nothing can match.
+     */
+    @Test
+    fun `an uncorrelated send still emits an outcome, with a null correlation id`() {
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.ACCOUNT_OPENED,
+                recipient = "outcome-uncorrelated@example.com",
+                variables = mapOf("accountNumber" to "CZ6508000000192000145399"),
+            ),
+        )
+
+        val rows = outcomeRowsFor(notificationIdFor(partyId)!!)
+        assertThat(rows).hasSize(1)
+        val event = objectMapper.readTree(rows.single().payload)
+        assertThat(event.path("outcome").asText()).isEqualTo("SENT")
+        assertThat(event.path("correlationId").isNull).isTrue()
+        assertThat(correlationIdFor(partyId)).isNull()
+    }
+
+    /**
+     * A request rejected before a row exists has had no transition, so it must emit nothing. The
+     * negative matters: an event for a request that was never dispatched would settle a producer's
+     * row on the strength of something that never happened.
+     */
+    @Test
+    fun `a rejected request emits no outcome at all`() {
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.ACCOUNT_FROZEN,
+                recipient = "outcome-rejected@example.com",
+                variables = mapOf(
+                    "accountNumber" to "CZ6508000000192000145399",
+                    "reason" to "AML review",
+                    "code" to "483920",
+                ),
+                correlationId = UUID.randomUUID(),
+            ),
+        )
+
+        assertThat(countFor(partyId)).isEqualTo(0L)
+    }
+
     // ── PUSH channel end-to-end (issue #1548 hardening) ──
 
     @Inject
@@ -325,6 +443,41 @@ class NotificationConsumerIT {
         // The provider-rejected token was retired in the same transaction (pre-fix: stayed ACTIVE).
         assertThat(deviceStatusFor(OffContextPushSender.BAD_TOKEN)).isEqualTo("INVALID")
         assertThat(deviceStatusFor(OffContextPushSender.GOOD_TOKEN)).isEqualTo("ACTIVE")
+        // A delivered push carries no failure reason — the column means "why this FAILED", so a
+        // stale value on a SENT row would be worse than none.
+        assertThat(failureReasonFor(partyId)).isNull()
+    }
+
+    /**
+     * ADR-0252 phase 0 — a fan-out where every adapter is DISABLED must not read as a delivery.
+     *
+     * This is the production shape that hid a dead push channel: `ApnsPushSender` is
+     * `enabled=false` by default and returns `PushResult.skipped(...)`, which is `success = true`.
+     * The fan-out counted `success`, so the row committed SENT with `sentAt` set, and an
+     * environment holding no APNs credentials was indistinguishable from a working one — in the
+     * status column, in the outcome stream, and in the logs.
+     *
+     * Asserted through the real consumer path rather than on the mapping function alone: the unit
+     * test pins the mapping, this pins that the fan-out actually calls it.
+     */
+    @Test
+    fun `PUSH with every adapter disabled is SUPPRESSED, never SENT`() {
+        val partyId = UUID.randomUUID()
+        seedActiveDevice(partyId, OffContextPushSender.DISABLED_TOKEN)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.WELCOME,
+                recipient = "push-disabled@example.com",
+                variables = mapOf("name" to "Push"),
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
+        // Nothing was rejected, so the token stays usable the moment the adapter is switched on.
+        assertThat(deviceStatusFor(OffContextPushSender.DISABLED_TOKEN)).isEqualTo("ACTIVE")
     }
 
     /**
@@ -367,6 +520,28 @@ class NotificationConsumerIT {
         assertThat(msg.title).doesNotContain(amount).doesNotContain(account)
         assertThat(msg.body).doesNotContain(amount).doesNotContain(account)
     }
+
+    @Test
+    fun `a push to a party with no device records WHY it failed, not just that it did`() {
+        // No seedActiveDevice: this party has never registered one, which is the overwhelmingly
+        // common case in the live estate — 40 of the 43 parties with a failed push.
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.TRANSACTION_COMPLETED,
+                recipient = "no-device@example.com",
+                variables = mapOf("amount" to "10.00", "currency" to "CZK"),
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("FAILED")
+        // The point of the change: FAILED alone cannot distinguish "no device registered" from
+        // "the provider rejected the token", and those need entirely different fixes.
+        assertThat(failureReasonFor(partyId)).isEqualTo("no_active_device")
+    }
 }
 
 /**
@@ -383,10 +558,11 @@ class OffContextPushSender : PushSender {
         // Record what actually crosses the transport boundary so a test can assert the payload
         // is PII-free (ADR-0135 §3, issue #1182).
         SENT.add(message)
-        val result = if (message.token == GOOD_TOKEN) {
-            PushResult.ok("apns-id-it")
-        } else {
-            PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
+        val result = when (message.token) {
+            GOOD_TOKEN -> PushResult.ok("apns-id-it")
+            // ADR-0252 phase 0: what a DISABLED adapter returns — a successful no-op.
+            DISABLED_TOKEN -> PushResult.skipped("adapter disabled")
+            else -> PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
         }
         return Uni.createFrom().completionStage(CompletableFuture.supplyAsync({ result }, EXECUTOR))
     }
@@ -394,6 +570,9 @@ class OffContextPushSender : PushSender {
     companion object {
         const val GOOD_TOKEN = "apns-good-token-it"
         const val BAD_TOKEN = "apns-bad-token-it"
+
+        /** Token whose send comes back *skipped*, i.e. the adapter is switched off. */
+        const val DISABLED_TOKEN = "apns-disabled-adapter-token-it"
         private val EXECUTOR = Executors.newSingleThreadExecutor()
 
         /** Messages the adapter was asked to deliver, in order — inspected by the PII assertion. */

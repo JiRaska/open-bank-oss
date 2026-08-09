@@ -85,7 +85,13 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: "20"
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
@@ -98,26 +104,14 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
-      # ADR-0071 Phase 4: manifest.ts must stay types-only — no hand-edited versions
-      # or inline data. Enforced (hard failure). Runs from repo root so the script
-      # can resolve the relative path to manifest.ts.
-      - name: manifest.ts types-only gate (ADR-0071 Phase 4, enforced)
-        working-directory: ${{ github.workspace }}
-        run: bash .github/scripts/check-manifest-types-only.sh
-
-      # Per-service Dockerfiles are runtime recipes only; images come from
-      # .github/workflows/Dockerfile.deploy. Before #3016 every one of them carried a
-      # build stage that could not run, which read as authoritative while being fiction.
-      # This also guards the EXPOSE line — the only thing the deploy pipeline reads from
-      # those files, and whose loss silently defaults the container port to 8080.
-      - name: Dockerfiles are runtime-only and declare EXPOSE (#3016, enforced)
-        working-directory: ${{ github.workspace }}
-        run: python3 .github/scripts/check-dockerfile-no-build-stage.py --enforce
-
       # ADR-0071: the governance manifest is code-derived from per-service
       # governance.yaml. Regenerate and fail on any module missing/with an invalid
       # governance.yaml. Phase 4: flipped from advisory (::warning::) to enforce
       # (exit 1) — the fleet completed the governance.yaml sweep in phases 1-3.
+      #
+      # The manifest.ts types-only gate used to sit here too. It is now declared in
+      # .github/gates/gates.yaml (`manifest-types-only`), because this job is conditional
+      # and a gate must not inherit a scope nobody declared (#3629, #4339).
       - name: Governance manifest gate (ADR-0071, enforced)
         working-directory: openbank-admin-ui
         run: |
@@ -453,12 +447,51 @@ jobs:
       APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      # Does THIS PR touch the dossier or its generator?
+      #
+      # Drift between the committed app-status.json and openbank-app's source is caused by
+      # openbank-app SHIPPING, never by a PR here. Comparing on every PR therefore reports a
+      # real defect to whoever happened to open one next: measured 2026-08-07, openbank-app
+      # released three times in twelve hours (0.16.1, 0.17.0, 0.18.0) against a daily refresh
+      # tick, and 10 of 55 open PRs were red on a file none of them touched. It has recurred
+      # five times in six days (#3212, #3552, #3818, #2101, #3053 — all closed by regenerating).
+      #
+      # Freshness is already owned, and already loud: app-status-refresh.yml regenerates daily
+      # and opens its own PR (#3747, #3867, #3917, #3952 are those PRs). What that job CANNOT
+      # see is a PR that hand-edits app-status.json or changes the generator — which is exactly
+      # what stays checked below. So this narrows the scope to the only drift a PR can author,
+      # and loses no coverage (#3988).
+      #
+      # The JOB stays unconditional on purpose. A gate behind a conditional job is absent
+      # rather than skipped, the aggregate check goes green, and nothing says a gate was not
+      # consulted (#3629). Only the comparison is scoped; the context always reports.
+      - name: Could this PR have caused drift
+        id: scope
+        shell: bash
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          set -euo pipefail
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags
+          N=$(git diff --name-only "origin/${BASE_REF}...HEAD" -- \
+                openbank-admin-ui/app-status.json \
+                openbank-admin-ui/scripts/generate-app-status.mjs | wc -l | tr -d ' ')
+          echo "owns=$( [ "$N" -gt 0 ] && echo true || echo false )" >> "$GITHUB_OUTPUT"
+          echo "files this PR changes in the dossier's own scope: $N"
+
+      - name: Not this PR's drift
+        if: steps.scope.outputs.owns == 'false'
+        run: |
+          echo "::notice title=app-status::This PR touches neither app-status.json nor its generator, so it cannot have caused dossier drift. Freshness against openbank-app is owned by app-status-refresh.yml, which opens its own regeneration PR (#3988)."
 
       # Read-only checkout of the customer-app source so the generator can derive
       # facts (AppConfig.kt + version.txt + app-status.yaml). openbank-app pins no
       # ref → its default branch, the published state the committed copy should match.
       - name: Checkout customer-app source
-        if: env.APP_RO_TOKEN != ''
+        if: env.APP_RO_TOKEN != '' && steps.scope.outputs.owns == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: JiRaska/openbank-app
@@ -471,14 +504,20 @@ jobs:
         run: echo "::notice title=app-status::OPENBANK_APP_RO_TOKEN not set — skipping customer-app dossier content check (ADR-0074)."
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        if: env.APP_RO_TOKEN != ''
+        if: env.APP_RO_TOKEN != '' && steps.scope.outputs.owns == 'true'
         with:
-          node-version: "20"
+          # Matches the runtime image (openbank-admin-ui/Dockerfile: node:26-alpine). Pinned at 20
+          # it was three majors behind what ships, and #3569's jsdom bump made that fatal:
+          # jsdom 30 declares engines ^22.22.2 || ^24.15.0 || >=26 and pulls undici 8, whose
+          # cachestorage calls webidl.util.markAsUncloneable. On 20 every vitest worker died
+          # with "Failed to start forks worker", the run collected ZERO tests, and the job
+          # still reported a plain red — engine-strict is off, so npm ci installed it happily.
+          node-version: "26"
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
       - name: Install (admin-ui, for the yaml parser)
-        if: env.APP_RO_TOKEN != ''
+        if: env.APP_RO_TOKEN != '' && steps.scope.outputs.owns == 'true'
         working-directory: openbank-admin-ui
         run: npm ci --no-audit --no-fund
 
@@ -492,7 +531,7 @@ jobs:
       # This step carried a comment claiming pipefail propagation for as long as it has existed, so
       # the check was documented as enforcing, believed to be enforcing, and was not (#3053).
       - name: Regenerate & diff derived block
-        if: env.APP_RO_TOKEN != ''
+        if: env.APP_RO_TOKEN != '' && steps.scope.outputs.owns == 'true'
         working-directory: openbank-admin-ui
         shell: bash
         run: |
@@ -505,7 +544,7 @@ jobs:
 
       # Sticky PR comment ONLY when drift is detected, so a clean PR stays quiet.
       - name: Comment on drift
-        if: env.APP_RO_TOKEN != ''
+        if: env.APP_RO_TOKEN != '' && steps.scope.outputs.owns == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |

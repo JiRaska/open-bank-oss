@@ -1,5 +1,117 @@
 # Changelog
 
+## [0.106.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.105.0...admin-ui-v0.106.0) (2026-08-09)
+
+
+### Features
+
+* **engagement:** expose a party's active adverse states as a read API ([#4302](https://github.com/JiRaska/open-bank-oss/issues/4302)) ([8617fa9](https://github.com/JiRaska/open-bank-oss/commit/8617fa9e5502c80accb1b5154acbedbef01a1e0a)), closes [#4265](https://github.com/JiRaska/open-bank-oss/issues/4265)
+* **governance:** guard prod-readiness attestation format and freshness ([#2365](https://github.com/JiRaska/open-bank-oss/issues/2365)) ([#3929](https://github.com/JiRaska/open-bank-oss/issues/3929)) ([5a1ae1c](https://github.com/JiRaska/open-bank-oss/commit/5a1ae1cff97167d8cd78e0ad2e8525e13ea268a8))
+
+## [0.105.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.104.0...admin-ui-v0.105.0) (2026-08-08)
+
+
+### Features
+
+* **admin-ui:** swarm case list + thread view over the Temporal case history ([#4186](https://github.com/JiRaska/open-bank-oss/issues/4186)) ([#4235](https://github.com/JiRaska/open-bank-oss/issues/4235)) ([c774330](https://github.com/JiRaska/open-bank-oss/commit/c7743304b9cbcbfaa97b545008b66a3dee3150a5))
+
+## [0.104.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.2...admin-ui-v0.104.0) (2026-08-08)
+
+
+### Features
+
+* **authz-policy-auditor:** wire ADR-0148 prompt registry and LLM gateway (ADR-0167) ([#3775](https://github.com/JiRaska/open-bank-oss/issues/3775)) ([06aedd6](https://github.com/JiRaska/open-bank-oss/commit/06aedd6dd2176934298b997808d6ad23566d88ae))
+
+
+### Security
+
+* **admin-ui:** pin nanoid to 3.3.17 for CVE-2026-67213 ([#4153](https://github.com/JiRaska/open-bank-oss/issues/4153)) ([f50fb95](https://github.com/JiRaska/open-bank-oss/commit/f50fb95a23b481a2e552e3852bd403104f00ff92)), closes [#4023](https://github.com/JiRaska/open-bank-oss/issues/4023)
+
+## [0.103.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.1...admin-ui-v0.103.2) (2026-08-08)
+
+
+### Bug Fixes
+
+* **admin-ui:** stop the ⌘K palette reading a stale result list on keydown ([#4142](https://github.com/JiRaska/open-bank-oss/issues/4142)) ([3f2a3c4](https://github.com/JiRaska/open-bank-oss/commit/3f2a3c444824a409b7b787edc7a0b91d5000e433)), closes [#3886](https://github.com/JiRaska/open-bank-oss/issues/3886)
+
+## [0.103.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.0...admin-ui-v0.103.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* **engagement:** add the missing governance.yaml — main is red without it ([#4114](https://github.com/JiRaska/open-bank-oss/issues/4114)) ([a4a94c4](https://github.com/JiRaska/open-bank-oss/commit/a4a94c429eae56fee86e4d5be1abde9c3ccf0245))
+
+## [0.103.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.102.0...admin-ui-v0.103.0) (2026-08-07)
+
+
+### Features
+
+* **agent:** capture the charter-declared model id on every MCP tool-call audit event ([#3693](https://github.com/JiRaska/open-bank-oss/issues/3693)) ([9292c7d](https://github.com/JiRaska/open-bank-oss/commit/9292c7db493925530ce22b0a2638186de3d9eb3e)), closes [#3667](https://github.com/JiRaska/open-bank-oss/issues/3667)
+
+## [0.102.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.101.0...admin-ui-v0.102.0) (2026-08-07)
+
+
+### Features
+
+* **case-coordinator-agent:** create module and register in rules.yaml (ADR-0244) ([#3772](https://github.com/JiRaska/open-bank-oss/issues/3772)) ([fbde2b6](https://github.com/JiRaska/open-bank-oss/commit/fbde2b65efed06296d96c8bb6e5cb7a2801a54a3))
+
+## [0.101.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.100.0...admin-ui-v0.101.0) (2026-08-07)
+
+
+### Features
+
+* **campaign:** record conversions from product events (ADR-0245) ([#3977](https://github.com/JiRaska/open-bank-oss/issues/3977)) ([0a14c46](https://github.com/JiRaska/open-bank-oss/commit/0a14c46c3793c6f8ada3a42717f44f0b1cb02885))
+
+## [0.100.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.99.0...admin-ui-v0.100.0) (2026-08-07)
+
+
+### Features
+
+* **admin-ui:** author campaign stop and step conditions on the canvas ([#3936](https://github.com/JiRaska/open-bank-oss/issues/3936)) ([7b4aa76](https://github.com/JiRaska/open-bank-oss/commit/7b4aa760b817b6f00b32cb07cac97aa931a950a8))
+
+## [0.99.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.98.0...admin-ui-v0.99.0) (2026-08-06)
+
+
+### Features
+
+* **campaign,notification:** tell a delivered message from an accepted handoff (ADR-0239) ([#3838](https://github.com/JiRaska/open-bank-oss/issues/3838)) ([789d662](https://github.com/JiRaska/open-bank-oss/commit/789d6626fde13ab48cd72806a07b7c4e6c19ed0e))
+
+## [0.98.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.97.0...admin-ui-v0.98.0) (2026-08-06)
+
+
+### Features
+
+* **docs-truth-agent:** wire prompt registry and LLM gateway ([#3787](https://github.com/JiRaska/open-bank-oss/issues/3787)) ([1d00fdd](https://github.com/JiRaska/open-bank-oss/commit/1d00fddf7c67c76f2c020bae669a61c15503b947)), closes [#3786](https://github.com/JiRaska/open-bank-oss/issues/3786)
+
+## [0.97.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.96.0...admin-ui-v0.97.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** deliver campaign steps on push as well as email ([#3584](https://github.com/JiRaska/open-bank-oss/issues/3584)) ([d5fdaf3](https://github.com/JiRaska/open-bank-oss/commit/d5fdaf3f321e433c6a602892bd99398cf517f12a))
+
+## [0.96.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.95.0...admin-ui-v0.96.0) (2026-08-06)
+
+
+### Features
+
+* **governance-auditor:** wire prompt registry and LLM gateway seam ([#3783](https://github.com/JiRaska/open-bank-oss/issues/3783)) ([226f9bf](https://github.com/JiRaska/open-bank-oss/commit/226f9bf131b48fe4ccac85481f4c93455a1bb640))
+
+## [0.95.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.94.0...admin-ui-v0.95.0) (2026-08-06)
+
+
+### Features
+
+* **campaign:** stop journeys at the campaign's own send cap (ADR-0200 D1, [#3585](https://github.com/JiRaska/open-bank-oss/issues/3585) slice 1) ([#3635](https://github.com/JiRaska/open-bank-oss/issues/3635)) ([9c513e8](https://github.com/JiRaska/open-bank-oss/commit/9c513e83dfc19300a9afe543026ec891063783d3))
+
+## [0.94.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.93.0...admin-ui-v0.94.0) (2026-08-06)
+
+
+### Features
+
+* **delegation:** snapshot counterparty display names onto a grant ([#3797](https://github.com/JiRaska/open-bank-oss/issues/3797)) ([5bc41f6](https://github.com/JiRaska/open-bank-oss/commit/5bc41f6f4735384fc65388d9a5854a3ce88f4b1d))
+* **flaky-test-hunter:** register prompt registry and wire LlmDiagnosisAdapter to shared gateway ([#3810](https://github.com/JiRaska/open-bank-oss/issues/3810)) ([8b94785](https://github.com/JiRaska/open-bank-oss/commit/8b9478502942572d819d78f4ef32c8b8a2d16224))
+
 ## [0.93.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.92.1...admin-ui-v0.93.0) (2026-08-06)
 
 

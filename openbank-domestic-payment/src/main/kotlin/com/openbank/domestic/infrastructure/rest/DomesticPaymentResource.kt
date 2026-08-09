@@ -7,6 +7,7 @@ package com.openbank.domestic.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.domestic.application.port.`in`.DomesticPaymentUseCase
 import com.openbank.domestic.application.port.`in`.ListDomesticPaymentsQuery
+import com.openbank.domestic.application.port.`in`.PaymentConfirmationUseCase
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.infrastructure.rest.dto.CreateDomesticPaymentRequest
 import com.openbank.domestic.infrastructure.rest.dto.TransitionDomesticPaymentStatusRequest
@@ -40,6 +41,7 @@ import java.util.UUID
 @Tag(name = "Domestic Payments", description = "Domestic CZK payment lifecycle")
 class DomesticPaymentResource(
     private val paymentUseCase: DomesticPaymentUseCase,
+    private val confirmationUseCase: PaymentConfirmationUseCase,
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
 ) {
@@ -61,9 +63,13 @@ class DomesticPaymentResource(
     @Operation(summary = "Create a domestic payment")
     suspend fun createPayment(
         request: CreateDomesticPaymentRequest,
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
     ): Response {
-        require(idempotencyKey.isNotBlank()) { "Idempotency-Key header is required" }
+        // #3104 — the guard below could not run when the header was ABSENT: JAX-RS injected null,
+        // and `null.isNotBlank()` threw NPE, so the very case it exists for answered 500. `suspend`
+        // hid it further, since Kotlin emits no checkNotNullParameter intrinsic for a suspend
+        // function — the null reached the first dereference instead of failing at the boundary.
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
         idempotencyStore.get(idempotencyKey)?.let { cached ->
             return Response.status(cached.statusCode)
@@ -109,6 +115,23 @@ class DomesticPaymentResource(
             ),
         )
         return Response.ok(payments.map { it.toResponse() }).build()
+    }
+
+    /**
+     * Customer-facing "download confirmation" action (ADR-0248 #3). Strictly additive and
+     * read-only: renders synchronously, on request only, off the payment's own persisted status
+     * record — no pre-generation, no caching, nothing written here or in document-service. Only
+     * meaningful once a payment has SETTLED (409 otherwise, mapped from [PaymentNotSettledMapper]).
+     */
+    @GET
+    @Path("/{paymentId}/confirmation")
+    @Produces(MediaType.TEXT_HTML)
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS")
+    @Authorize(action = "domestic-payment.confirmation.read", resource = "#paymentId")
+    @Operation(summary = "Download the payment confirmation document for a SETTLED payment")
+    suspend fun getConfirmation(@PathParam("paymentId") paymentId: UUID, @QueryParam("lang") lang: String?): Response {
+        val html = confirmationUseCase.getConfirmation(paymentId, lang)
+        return Response.ok(html, MediaType.TEXT_HTML_TYPE).build()
     }
 
     @PATCH

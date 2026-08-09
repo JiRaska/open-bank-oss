@@ -39,8 +39,47 @@ spec:
           name: openbank.consent.events
           patternType: literal
         operations: [Read, Describe]
+      # Consume delivery outcomes for this service's own sends (ADR-0239 D3, issue #3663).
+      - resource:
+          type: topic
+          name: openbank.notification.outcomes.v1
+          patternType: literal
+        operations: [Read, Describe]
+      # Consume the product events that count as a conversion (ADR-0245 D2). Read-only, and the
+      # service only ever appends an outcome row from them — it cannot cause, suppress or alter a
+      # send, so the blast radius of this grant is a reporting number.
+      - resource:
+          type: topic
+          name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: topic
+          name: openbank.cards.events
+          patternType: literal
+        operations: [Read, Describe]
       - resource:
           type: group
           name: openbank-campaign-service
+          patternType: literal
+        operations: [Read, Describe]
+      # One group per conversion topic, for the reason stated below: a shared group would make one
+      # member set out of two disjoint subscriptions.
+      - resource:
+          type: group
+          name: openbank-campaign-service-account-conversions
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-campaign-service-card-conversions
+          patternType: literal
+        operations: [Read, Describe]
+      # A separate group from the one above on purpose: two channels sharing a group makes
+      # one member set out of two disjoint subscriptions, so a rebalance on either topic
+      # churns the other and the offsets can never be reset independently.
+      - resource:
+          type: group
+          name: openbank-campaign-service-notification-outcomes
           patternType: literal
         operations: [Read, Describe]

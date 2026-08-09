@@ -59,7 +59,9 @@ jobs:
           PATTERN="${PATTERN}|^openbank-libs/governance/rules\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/rules-opa-data\.yaml$"
           PATTERN="${PATTERN}|^openbank-libs/governance/policies/"
+          PATTERN="${PATTERN}|^openbank-libs/governance/agents-opa-data\.yaml$"
           PATTERN="${PATTERN}|^\.github/scripts/gen-rules-opa-data\.py$"
+          PATTERN="${PATTERN}|^\.github/scripts/gen-agents-opa-data\.py$"
           PATTERN="${PATTERN}|^\.github/workflows/opa-policy\.yml$"
 
           # Every component directory that owns a bundle generator — discovered, never
@@ -138,6 +140,30 @@ jobs:
       - name: Build + validate the policy bundle (opa check + decision assertions)
         run: ./openbank-infra/opa/build-bundle.sh
 
+      - name: Run per-service rest_ext unit tests
+        run: |
+          # Every *_rest_ext_test.rego runs as its own trio (shared rest.rego + its ext + the
+          # test): all exts extend package openbank.rest, so one invocation would
+          # cross-contaminate allowed_reasons (issue #1797 follow-up 2). These tests previously
+          # ran only by hand — a suite that never runs in CI is vacuous. Discovered, never
+          # hard-coded, and zero discoveries fails closed.
+          TESTS=()
+          while IFS= read -r t; do
+            TESTS+=("$t")
+          done < <(find openbank-infra/gitops/components -name '*_rest_ext_test.rego' | sort)
+          if [ "${#TESTS[@]}" -eq 0 ]; then
+            echo "::error::No rest_ext test files discovered — the find pattern is wrong, not the repo. Refusing to pass a check that verifies nothing."
+            exit 1
+          fi
+          FAILED=0
+          for t in "${TESTS[@]}"; do
+            ext="${t%_test.rego}.rego"
+            echo "--- $t"
+            opa test openbank-libs/governance/policies/rest.rego "$ext" "$t" || FAILED=1
+          done
+          [ "$FAILED" -eq 0 ] || { echo "::error::One or more rest_ext suites failed."; exit 1; }
+          echo "All ${#TESTS[@]} rest_ext suites green."
+
       - name: Verify agent-opa-bundle ConfigMap is in sync with the policy source
         run: |
           cd openbank-infra/gitops/components/agent
@@ -148,6 +174,24 @@ jobs:
             exit 1
           fi
           echo "ConfigMap is in sync with agents.rego + agents.yaml + bundle.manifest."
+
+      - name: Verify the derived OPA policy-input subset of agents.yaml is in sync
+        run: |
+          # openbank-libs/governance/agents-opa-data.yaml is what the bundles embed — the
+          # paths of agents.yaml a .rego actually reads under data.agents.*, with each
+          # charter projected to the fields an iteration variable dereferences (#3927).
+          # Same ordering rule as rules-opa-data.yaml below: it must be regenerated BEFORE
+          # the bundle generators, or they hash a stale input and the diff check passes
+          # about the wrong thing.
+          #
+          # --self-test first, and it is not decoration: it feeds the generator a
+          # projection that drops `skills` and `tools.allow` and requires the differential
+          # proof to REJECT it. A gate that has only ever passed is unfalsified, and this
+          # one's failure mode (a silently narrower charter document) is invisible from
+          # every other angle — `data.agents.<missing>` is undefined in Rego, not an error.
+          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          python3 .github/scripts/gen-agents-opa-data.py --self-test
+          python3 .github/scripts/gen-agents-opa-data.py --check
 
       - name: Verify the derived OPA policy-input subset of rules.yaml is in sync
         run: |

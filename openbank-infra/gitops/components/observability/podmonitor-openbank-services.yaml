@@ -69,6 +69,7 @@ spec:
       - dispute
       - docs-truth-agent
       - documents
+      - engagement
       - finops-agent
       - finrep
       - flaky-test-hunter

@@ -44,6 +44,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 PAGE = REPO / "openbank-admin-ui/src/app/docs/compliance/page.tsx"
 
@@ -78,7 +80,7 @@ def kotlin_sources():
     for svc in REPO.glob("openbank-*/src/main"):
         if "migration" in svc.parts:
             continue
-        yield from svc.rglob("*.kt")
+        yield from gatelib.rglob(svc, "*.kt")
 
 
 def column_has_reader(column: str, cache: dict[str, bool]) -> bool:
@@ -87,7 +89,7 @@ def column_has_reader(column: str, cache: dict[str, bool]) -> bool:
     needle = column
     for kt in kotlin_sources():
         try:
-            text = kt.read_text(encoding="utf-8", errors="ignore")
+            text = gatelib.read_text(kt, errors="ignore")
         except OSError:
             continue
         if needle in text:
@@ -114,7 +116,7 @@ def analyse() -> tuple[list[str], list[str], int, int]:
     signal, but it does not publish a false green, and a gate that goes red on someone being
     too careful teaches people to mark rows `ok`.
     """
-    text = PAGE.read_text(encoding="utf-8")
+    text = gatelib.read_text(PAGE)
     items = iter_items(text)
     if not items:
         return (

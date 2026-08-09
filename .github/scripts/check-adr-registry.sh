@@ -73,7 +73,9 @@ dupes=$(
 )
 if [[ -n "$dupes" ]]; then
   while IFS= read -r num; do
-    files=$(ls "$ADR_DIR/$num"-*.md 2>/dev/null | xargs -n1 basename | paste -sd', ' -)
+    files=$(for dupe in "$ADR_DIR/$num"-*.md; do
+      [[ -e "$dupe" ]] && basename "$dupe"
+    done | paste -sd', ' -)
     err "duplicate ADR number $num shared by: $files — renumber all but one to the next free number."
   done <<< "$dupes"
 fi
@@ -126,6 +128,11 @@ fi
 KNOWN_REPOS="$ADR_DIR/known-repos.txt"
 TAGS_FILE="$ADR_DIR/tags.txt"
 SCHEMA_KEYS="date decision-status delivery-status authors supersedes superseded-by delivery-repos tags summary"
+# Optional keys: present in the schema, never required here. `followup` is required
+# only for `delivery-status: partial` ADRs, and that rule is enforced by its own gate
+# (.github/scripts/check-adr-partial-followup.py, issue #3965) which also validates the
+# value. This script only has to stop the unknown-key check below from rejecting it.
+OPTIONAL_KEYS="followup"
 DECISION_ENUM="proposed accepted superseded deprecated rejected"
 DELIVERY_ENUM="planned partial shipped n-a"
 SUMMARY_MAX=240
@@ -193,7 +200,7 @@ for f in "${adrs[@]}"; do
   done
   while IFS=$'\t' read -r k v; do
     [[ -z "$k" || "$k" == "!malformed" ]] && continue
-    in_set "$k" "$SCHEMA_KEYS" || err "$base: unknown front-matter key '$k' (typo? see docs/adr/SCHEMA.md)."
+    in_set "$k" "$SCHEMA_KEYS $OPTIONAL_KEYS" || err "$base: unknown front-matter key '$k' (typo? see docs/adr/SCHEMA.md)."
   done <<< "$fm"
 
   decision=$(fm_field "$fm" decision-status)
