@@ -44,7 +44,11 @@ class SurfaceRestContractIT {
                 // lending-events-in / party-events-in (LendingArrearsEventConsumer,
                 // PartyErasureConsumer) — without this, @QuarkusTest boot tries a real Kafka
                 // consumer connection with no broker in this IT's stack.
-                InMemoryConnector.switchIncomingChannelsToInMemory("lending-events-in", "party-events-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory(
+                    "lending-events-in",
+                    "party-events-in",
+                    "fraud-hold-events-in",
+                )
 
         override fun stop() = InMemoryConnector.clear()
     }
