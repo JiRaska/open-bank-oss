@@ -97,6 +97,7 @@ gates:
     name: "yamllint"
     group: lint
     mode: enforced
+    min_subjects: 400   # 900+ yaml/yml files today (2026-08-09)
     run: |
       # Lint the infra/CI manifests this job is named for. Quarkus service
       # application.yaml files are validated by Quarkus itself during the
@@ -134,12 +135,26 @@ gates:
       YML
       # strict:false equivalent — yamllint exits non-zero only on errors,
       # warnings don't fail the job (no --strict).
-      yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml" openbank-infra .github
+      # -P4 over an explicit file list, not `yamllint <dir>`: the linter is single-threaded and
+      # the CI runner has four cores, so the directory form leaves three of them idle for the
+      # whole gate. Measured locally: 15.7s serial, 6.6s at -P4, same findings.
+      #
+      # The list is also what lets the gate say how much it linted. `yamllint` with no file
+      # arguments exits 0, so the directory form could not tell a clean tree from a directory
+      # that had been renamed out from under it (#4339).
+      files=()
+      while IFS= read -r f; do files+=("$f"); done < <(
+        find openbank-infra .github \( -name '*.yaml' -o -name '*.yml' \) -type f | sort
+      )
+      echo "SUBJECTS=${#files[@]}"
+      printf '%s\0' "${files[@]}" \
+        | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
     name: "shellcheck"
     group: lint
     mode: enforced
+    min_subjects: 30   # 63 shell scripts today (2026-08-09)
     run: |
       # BOTH script trees. `.github/scripts` was out of scope until #4337, so the 42 shell
       # files implementing the gates themselves — the code every other gate's verdict rests
@@ -150,6 +165,7 @@ gates:
       # over a directory it never opened, which is exactly the shape this manifest exists to
       # make impossible (a renamed directory is the realistic way it happens).
       status=0
+      total=0
       for root in .github/scripts openbank-infra/scripts; do
         files=()
         while IFS= read -r f; do files+=("$f"); done < <(find "$root" -type f -name '*.sh' | sort)
@@ -159,8 +175,10 @@ gates:
           continue
         fi
         echo "shellcheck: ${#files[@]} script(s) under $root"
+        total=$((total + ${#files[@]}))
         shellcheck -S warning "${files[@]}" || status=1
       done
+      echo "SUBJECTS=$total"
       exit $status
 
   # ==== gitops =========================================================

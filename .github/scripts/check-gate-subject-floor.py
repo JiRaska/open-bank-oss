@@ -67,8 +67,6 @@ NO_CORPUS = {
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
-    "shellcheck",
-    "yamllint",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
