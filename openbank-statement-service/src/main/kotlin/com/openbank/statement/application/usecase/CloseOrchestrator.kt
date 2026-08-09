@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.openbank.libs.domain.event.EventActor
 import com.openbank.statement.application.port.`in`.ClosePocketUseCase
 import com.openbank.statement.application.port.`in`.CloseRunQueryUseCase
 import com.openbank.statement.application.port.`in`.RunCloseUseCase
@@ -19,6 +20,7 @@ import com.openbank.statement.domain.model.CloseFailureReason
 import com.openbank.statement.domain.model.CloseRun
 import com.openbank.statement.domain.model.CloseRunStatus
 import com.openbank.statement.domain.model.CloseTrigger
+import com.openbank.statement.domain.model.StatementEventActors
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -217,7 +219,9 @@ class CloseOrchestrator(
             "reason":"$reason",
             "detail":"$detail",
             "failedAt":"$failedAt",
-            "occurredAt":"$failedAt"}
+            "occurredAt":"$failedAt",
+            "actorId":"${StatementEventActors.PERIOD_CLOSE}",
+            "actorType":"${EventActor.TYPE_SYSTEM}"}
         """.trimIndent().replace("\n", "")
         return outbox.append(
             StatementOutboxMessage(
