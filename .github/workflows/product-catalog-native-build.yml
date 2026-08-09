@@ -15,11 +15,15 @@
 # Promoting `openbank-product-catalog` to T1 in rules.yaml:finops_tiers.declared still
 # requires that separate, cluster-side measurement (see ADR-0083 "Pilot plan" step 5).
 #
-# EXPECTED RED as of 2026-07-05 (see ADR-0083 correction note + issue #253): the native
-# image currently 500s on every request once running, a suspected openbank-libs
-# native-compatibility gap. That is exactly the failure this smoke test exists to catch
-# — a red run here means "do not promote," which is correct; it is non-blocking so it
-# does not stop unrelated JVM PRs from merging while this is investigated.
+# The "EXPECTED RED / issue #253: the image 500s on every request" note that stood here
+# from 2026-07-05 was WRONG about this lane, and stating an expected failure is how it
+# went unread for 39 runs (issue #4026). The image never got as far as serving a request:
+# the smoke test started the container with no database, no OIDC opt-out, and polled the
+# WRONG PORT. Flyway (`migrate-at-start: true`) hit `Connection refused` against
+# localhost:5432 and the app aborted at boot, so every run failed at "never reported
+# ready" — a defect in this workflow, not evidence about the native image. The three
+# fixes are inline below. Do not re-add an "expected red" note: a lane that is allowed
+# to be red tells you nothing on the day it goes red for a new reason.
 name: Product Catalog Native Build (T1 enabler smoke test)
 
 on:
@@ -50,6 +54,24 @@ jobs:
     name: Build native image + smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    # FIX 1 of 3 (#4026): product-catalog runs `quarkus.flyway.migrate-at-start: true`, so
+    # it needs a reachable Postgres to finish booting. There was none, and Flyway's
+    # `Connection refused` aborted startup on all 39 runs. Credentials/db name match the
+    # defaults in application.yaml so the container needs no datasource overrides.
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: openbank
+          POSTGRES_PASSWORD: CHANGE_ME_LOCAL_DEV_ONLY
+          POSTGRES_DB: openbank_products
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U openbank -d openbank_products"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -60,14 +82,23 @@ jobs:
             -t product-catalog:native-ci \
             .
 
+      # FIX 2 of 3 (#4026): `--network host` so the container reaches the `postgres`
+      # service on localhost:5432; QUARKUS_OIDC_TENANT_ENABLED=false because there is no
+      # Keycloak here and OIDC discovery against localhost:8080 aborts boot (the `%test`
+      # profile that disables it does not apply to this prod-profile binary).
+      # FIX 3 of 3 (#4026): readiness lives on the MANAGEMENT port 8085 (`quarkus.
+      # management.port`, root-path /q), not on 8104. The old poll of 8104/q/health/ready
+      # could never have returned 200 even with a healthy app.
       - name: Cold-start smoke test
         run: |
           set -euo pipefail
           START=$(date +%s%N)
-          CID=$(docker run -d -p 8104:8104 product-catalog:native-ci)
+          CID=$(docker run -d --network host \
+            -e QUARKUS_OIDC_TENANT_ENABLED=false \
+            product-catalog:native-ci)
           READY=0
-          for _ in $(seq 1 60); do
-            if curl -sf http://localhost:8104/q/health/ready >/dev/null 2>&1; then
+          for _ in $(seq 1 120); do
+            if curl -sf http://localhost:8085/q/health/ready >/dev/null 2>&1; then
               READY=1
               break
             fi

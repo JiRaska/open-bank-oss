@@ -10,7 +10,7 @@ import com.openbank.libs.governance.Proposal
 import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackParser
+import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -86,7 +86,7 @@ class CompliancePackRefresher(
  */
 internal fun CompliancePackActivationEntity.toProposal(): Proposal<CompiledCompliancePack> = Proposal(
     id = "activation-$id",
-    action = CompliancePackCompiler.compile(CompliancePackParser.fromJson(payload)),
+    action = CompliancePackCompiler.compile(CompliancePackJson.fromJson(payload)),
     proposedBy = proposedBy,
     proposedAt = proposedAt.toInstant(),
     state = ProposalState.EXECUTED,

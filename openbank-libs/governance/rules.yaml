@@ -384,7 +384,12 @@ change_requirements:
       upstream direction: the first upstream scan surfaced 24 further unbacked edges (26 total
       unallowlisted, of which 2 are the pre-existing downstream findings) plus 10 edges naming an
       external system — all untriaged, which is why target_enforce_date is unchanged and this
-      stays advisory."
+      stays advisory. Re-measured 2026-08-08 (#3931): 103 relationships checked, 31 unallowlisted,
+      5 allowlisted, 11 naming no in-tree service. Triage of those 31 is #3982; the mode flip is its
+      last step, not a separate decision. NOTE the runner reports this gate PASS, not WARN — it is
+      advisory INSIDE the script (::warning + exit 0 without --enforce) as well as by mode:, so its
+      31 findings are invisible to anyone reading the gate verdict rather than the gate output.
+      That is what produced this issue's own 'finds nothing, can graduate free' premise."
     ci_producer: ".github/scripts/check-governance-lineage.py"
     allowlist:
       - edge: "openbank-copilot-service->balance-service:api"
@@ -483,8 +488,12 @@ change_requirements:
     gate: dotted-mp-messaging-keys
     enforced: advisory
     target_enforce_date: "2026-09-30"   # ADR-0144
-    blocked_on: "1 finding remains fleet-wide; the script already supports --enforce, so graduating
-      is a one-word change in ci.yml once it is cleared"
+    blocked_on: "16 findings fleet-wide as of 2026-08-08 (#3931), across kyc/sdd/psd2/ledger/
+      onboarding/anacredit — NOT the 1 this line claimed while carrying no date; the claim was never
+      re-measured because an advisory gate's own justification note is not itself gated. The script
+      supports --enforce, so graduating is a one-word change once the findings are cleared — and
+      the right sequencing is #3928 first: widen the ENFORCED check-kafka-dotted-keys.py to the
+      whole class and retire this advisory duplicate, rather than graduating two overlapping gates."
     # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
     # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
     # itself gated by .github/scripts/check-advisory-gate-registration.py.
@@ -1484,19 +1493,27 @@ scheduled_methods:
   # staleness rule and to the control-liveness-sentinel (its documented known gap
   # is exactly this adoption rate).
   #
-  # RATCHET, not a sweep-gate: the 37 files without a heartbeat at introduction
-  # (first scan 2026-08-03, money-path first) are baselined in the producer with
-  # their adoption PRs shrinking the list; a NEW domain @Scheduled job with no
-  # registerWorkflowLiveness fails even in advisory mode, and a healed entry that
-  # was not removed from the baseline fails too — the list cannot rot in either
-  # direction. Exempt by role, not by name: outbox dispatchers/backlog gauges (own
-  # openbank.outbox.backlog freshness) and two allowlisted producers (audit-chain
-  # gauge — own three-rule alerting; the sentinel's own scheduler — circularity).
-  # Flipping to enforced = --enforce in the gates.yaml entry (mode: enforced).
+  # RATCHET, not a sweep-gate: the files without a heartbeat at introduction
+  # (first scan 2026-08-03, 37; 16 as of 2026-08-08, money-path block empty) are
+  # baselined in the producer with their adoption PRs shrinking the list; a NEW
+  # domain @Scheduled job with no registerWorkflowLiveness is red, and a healed
+  # entry that was not removed from the baseline is red too — the list cannot rot
+  # in either direction. Exempt by role, not by name: outbox dispatchers/backlog
+  # gauges (own openbank.outbox.backlog freshness) and two allowlisted producers
+  # (audit-chain gauge — own three-rule alerting; the sentinel's own scheduler —
+  # circularity).
+  #
+  # ENFORCED as of 2026-08-08 (#3931), ahead of the 2026-09-30 ADR-0144 target.
+  # `enforced: advisory` here was NOT a statement that findings were tolerated —
+  # the producer already exited 1 on both ratchet branches, and `mode: advisory`
+  # in gates.yaml converted that to a warning at the runner. That is precisely how
+  # #3875's heartbeat-less ConversationRetentionScheduler, and later
+  # account-service's SavingsProposalExpiryScheduler, merged while the gate said
+  # so. The mode is now split from the baseline: the baseline grandfathers, the
+  # mode blocks.
   liveness_adoption:
     gate: scheduler-liveness-adoption
-    enforced: advisory
-    target_enforce_date: "2026-09-30"
+    enforced: enforce
     ci_producer: ".github/scripts/check-scheduler-liveness.py"
 
 

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: vop-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "53ce49839f1a1b3a"
+    openbank.tech/policy-checksum: "8688d6e4ebd0fcc2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -561,8 +561,22 @@ data:
     # console initiates with the signed-in operator's OWN bearer token (BFF pattern, ADR-0080 P1).
     # ROLE_VIEWER is included because verification is a pre-payment check, not a money movement —
     # the same role set the resource's own @RolesAllowed declares.
+    #
+    # HUMANS ONLY (GHSA-58jq-9hq3-66jr, issue #4228). Without the exclusion this rule is role-only,
+    # and `service-account-openbank-services` — the identity nearly every backend service
+    # authenticates as — carries ROLE_OPERATOR and is classified HUMAN by AuthorizeInterceptor, so it
+    # reached vop.verify through the OPERATOR branch. That reach was pure over-grant here, because the
+    # rails have their own identity-pinned reason directly below: measured against this bundle, the
+    # shared account resolved BOTH ["m2m-vop-verify", "operator-vop-verify"], so removing the second
+    # strands no caller. Unlike the sibling debt entries this one needed no caller audit — the
+    # legitimate M2M caller was already named by its own rule.
+    #
+    # Do NOT "simplify" this back by deleting m2m-vop-verify and relying on ROLE_OPERATOR: that
+    # re-creates the exposure, and it would then also admit every OTHER service-account holding the
+    # role, not just the payment rails.
     allowed_reasons contains "operator-vop-verify" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in {"ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS"}
     	role in input.principal.roles
     	input.action == "vop.verify"

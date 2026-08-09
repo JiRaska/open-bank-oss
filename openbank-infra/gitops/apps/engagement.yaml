@@ -1,0 +1,47 @@
+# engagement domain: engagement-service + single-owner CNPG Postgres (ADR-0037 domain=namespace).
+# Onboarded so the ADR-0220 D1/D3.5 in-app engagement surface (impression/click/dismiss/conversion
+# feedback + AdverseState-driven eligibility, consuming openbank.lending.events/party.events/
+# fraud.hold.changed) actually runs somewhere — the gitops component was complete and the service
+# was already in auto-deploy.yml's ALL_SERVICES, but with no Application here nothing ever
+# reconciled it (issue #4268).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: engagement
+  namespace: argocd
+  annotations:
+    # Server-Side Diff must run the Kyverno verify-images mutation in its dry-run, otherwise the
+    # digest-pinning annotation it injects reads as a permanent OutOfSync diff (issue #856).
+    argocd.argoproj.io/compare-options: IncludeMutationWebhook=true
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: git@github.com:JiRaska/open-bank-oss.git
+    targetRevision: main
+    path: openbank-infra/gitops/components/engagement
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: engagement
+  syncPolicy:
+    # ServerSideApply: the OPA bundle ConfigMap can exceed the 262144-byte last-applied-
+    # configuration annotation cap under client-side apply (issue #856's fraud.yaml precedent).
+    syncOptions:
+      - ServerSideApply=true
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 10
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
+  # Argo Rollouts (ADR-0098) sets spec.selector.rollouts-pod-template-hash on the stable/canary
+  # Services at runtime; git holds only the base selector, so without this every Rollout-backed
+  # Service reads as permanently OutOfSync (same fraud.yaml precedent, issue #856).
+  ignoreDifferences:
+    - group: ""
+      kind: Service
+      jqPathExpressions:
+        - .spec.selector."rollouts-pod-template-hash"

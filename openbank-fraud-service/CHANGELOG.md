@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.10.2...fraud-service-v0.11.0) (2026-08-09)
+
+
+### Features
+
+* **fraud:** raise a marketing-suppression fraud-hold signal (ADR-0220 D3.5, [#2749](https://github.com/JiRaska/open-bank-oss/issues/2749)) ([#4252](https://github.com/JiRaska/open-bank-oss/issues/4252)) ([26486a0](https://github.com/JiRaska/open-bank-oss/commit/26486a014c2df3b32b6523fd494d7071d76406f4))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.10.1...fraud-service-v0.10.2) (2026-08-07)
 
 

@@ -37,6 +37,15 @@ dependencies {
     // replaced by the JDK's System.Logger in OutboxDispatch/FlagExposure/StaticServiceTokenProvider,
     // and the CDI interceptor bindings (@Authorize, @FeatureFlag) moved to openbank-libs-runtime
     // where @InterceptorBinding belongs. `check-domain-purity.py` now enforces this module-wide.
+    //
+    // The follow-up to #3670 paid off the eight baselined Jackson references the same way. Moved
+    // to openbank-libs-runtime, PACKAGE UNCHANGED so no consumer import moved: the ApiError and
+    // CursorPage wire DTOs (they ARE the serialization boundary), and the OpaSidecarPolicyDecision-
+    // Point / FlagdProvider HTTP adapters — their PORTS (PolicyDecisionPoint, FeatureClient) stay
+    // here, which is the direction the hexagon wants. CompliancePackParser was SPLIT instead of
+    // moved: its decoder already took an already-parsed Map, so only the JSON front-end left, as
+    // `CompliancePackJson` in libs-runtime. Jackson survives below ONLY as the annotation-level
+    // dependency of EntityId/LendingIds/Money, which are still baselined and still owed a fix.
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
