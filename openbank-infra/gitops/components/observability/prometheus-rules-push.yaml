@@ -1,0 +1,92 @@
+# PUSH-channel alert rules (ADR-0252 phase 0). Fed by PushMetricsAdapter in
+# openbank-notification-service, which emits openbank_notification_push_sends_total
+# and openbank_notification_push_fanouts_total. Picked up automatically
+# (ruleSelectorNilUsesHelmValues=false), same as the other rule files here.
+#
+# WHAT THESE CAN AND CANNOT SAY. `outcome="ACCEPTED"` counts provider ACCEPTANCES:
+# APNs answers HTTP 200 to mean accepted for delivery and issues no receipt, so
+# nothing in the service can observe whether a device received anything. These
+# rules therefore detect "we stopped handing pushes to the provider" and "the
+# provider is rejecting us" — not "customers stopped getting notifications".
+# Closing that gap needs a device-side acknowledgement (ADR-0252 phase 3, #4348);
+# until it exists, do not read a green board here as proof of delivery.
+#
+# The outage these exist for produced NO errors: every adapter was disabled, every
+# send returned a successful no-op, and the notification rows read SENT. That is
+# why PushChannelSkippedOnly below alerts on a *success* state.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-push-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.push
+      rules:
+        # The disabled-adapter case, stated positively. A skipped send means the adapter is
+        # switched off, which in an environment that is supposed to push is a silent outage:
+        # nothing errors, nothing retries, and before ADR-0252 phase 0 the notification was
+        # even recorded SENT. Fires on any sustained skip, because there is no legitimate
+        # steady-state reason for one here.
+        - alert: PushChannelSkippedOnly
+          expr: |
+            sum(rate(openbank_notification_push_sends_total{outcome="SKIPPED"}[15m])) > 0
+            and
+            sum(rate(openbank_notification_push_sends_total{outcome="ACCEPTED"}[15m])) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Push adapters are disabled — every send is a no-op"
+            description: >-
+              notification-service has accepted no push into a provider for 15m while skipping
+              sends, i.e. the APNs/FCM adapters are switched off or unconfigured. Customers are
+              receiving nothing. Check APNS_ENABLED / the notification-service-apns ExternalSecret.
+        # Fan-outs are happening but nothing reaches a provider. Distinct from the alert above:
+        # there the adapter is off, here it is on and failing.
+        - alert: PushDeliveryRejected
+          expr: |
+            sum(rate(openbank_notification_push_sends_total{outcome="FAILED"}[15m]))
+              / clamp_min(sum(rate(openbank_notification_push_sends_total[15m])), 0.001) > 0.5
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Over half of push sends are rejected by the provider"
+            description: >-
+              More than 50% of push sends have failed for 15m. Check the error_code label —
+              CONFIG points at credentials, HTTP_403/BadTopic at the signing key or apns-topic
+              bundle id, HTTP_410 at token retirement (which is normal in small numbers).
+        # Absence, not failure. A counter that has never incremented does not exist, so no
+        # ratio or rate rule above can fire when the channel stops being exercised at all —
+        # which is precisely how a dead push path stays invisible. This is the rule that
+        # covers the silence. 6h is deliberately long: a quiet night is not an outage.
+        - alert: PushChannelSilent
+          expr: absent_over_time(openbank_notification_push_sends_total[6h])
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "No push send recorded anywhere for 6h"
+            description: >-
+              notification-service has emitted no push send series for 6h. Either nothing is
+              requesting PUSH notifications, or the fan-out is not running. Neither is visible
+              from any error signal — check openbank_notification_push_fanouts_total and the
+              consumer lag on openbank.notification.requests.
+        # Every fan-out ends with no registered device. Not a delivery failure — a registration
+        # one, and it would otherwise present as "push is broken" to everyone looking.
+        - alert: PushNoDevicesRegistered
+          expr: |
+            sum(rate(openbank_notification_push_fanouts_total{devices_bucket="0"}[30m]))
+              / clamp_min(sum(rate(openbank_notification_push_fanouts_total[30m])), 0.001) > 0.9
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Over 90% of push fan-outs find no registered device"
+            description: >-
+              Almost every PUSH request targets a party with no ACTIVE device token. Suspect the
+              device-registration path (POST /api/v1/devices) or a mass token invalidation, not
+              the push provider.

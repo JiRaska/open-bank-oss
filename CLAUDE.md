@@ -197,6 +197,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   mass replay on money-path channels. `check-kafka-dotted-keys.py` ratchets it (enforced in
   `Validate manifests`) — new occurrences fail, today's six are baselined against #2945, and a
   baseline entry that becomes covered is reported too (#686, #2945).
+- **A "successful no-op" result and a real success must not share a boolean — an off-by-default
+  adapter then reports as a working one, and no signal anywhere disagrees.** `PushResult.skipped()`
+  (returned when `openbank.notification.push.apns.enabled=false`) carries `success = true`, and the
+  fan-out asked `count { success }`. So every push in an environment with no APNs credentials was
+  counted as delivered, the row committed `SENT` with `sentAt` set, and the outcome event announced
+  a delivery that never left the process. Three things made it unrecoverable from telemetry: the
+  channel emitted **no metric at all** (one class in that whole service touched `MeterRegistry`), a
+  200 from APNs means *accepted*, not delivered — APNs issues no receipt, so delivery is not
+  observable server-side at any effort — and the disabled path is the *quiet* one, so there was no
+  error to find. It shipped that way and a customer reported it. Two rules: give a
+  skipped/disabled/no-op outcome its **own enum value**, never a flag shared with success (`PushResult.outcome`
+  is now `ACCEPTED | SKIPPED | FAILED`); and name the metric for what you can actually establish —
+  `accepted`, never `delivered`. Then alert on the success state: "adapter skipping and accepting
+  nothing" is the alert that was missing, not an error rate. The same shape is anywhere a stub, a
+  dry-run or a feature-flagged-off adapter returns success — grep for `enabled` defaults of `false`
+  next to a `success = true` return (ADR-0252 phase 0, #4348).
 - **`Instant.EPOCH` as a data-class default is a lie every test agrees with, and a non-null
   assertion is not a check.** `AuditEvent.timestamp` and `FlagExposure.timestamp` both defaulted to
   it; 23 of the 25 fleet `AuditEvent(` sites take the default, and `FlagExposure.of` — the KDoc's
