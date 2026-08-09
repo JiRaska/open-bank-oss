@@ -48,6 +48,13 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // Test-only (#4221): FraudScoringMetricsTest asserts the alert expressions in
+    // gitops/components/payments/prometheus-rules.yaml against a real Prometheus scrape, so the
+    // dot->underscore mapping, the counter's `_total` suffix and the tag ordering come from
+    // Micrometer rather than from this test's idea of them. Runtime already ships the registry via
+    // quarkus-micrometer-registry-prometheus; only the compile classpath needs it. Same version and
+    // same rationale as openbank-libs-runtime's WorkflowLivenessMetricNamingTest.
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.14.5")
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)

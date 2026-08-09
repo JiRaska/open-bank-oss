@@ -24,6 +24,16 @@ data class FraudScoreOutcome(
     val score: Int,
     val ruleVersion: String,
     val reasons: List<String>,
+    /**
+     * `true` when this outcome was **invented by the adapter** because fraud-service could not be
+     * reached, rather than returned by it (#4221). The fail-open fallback is an `ALLOW`, so without
+     * this flag a total scoring outage is byte-for-byte identical to a clean payment at every layer
+     * that reads the outcome. `ruleVersion == "unavailable"` was the only hint and is a magic string
+     * no caller checked; this is the same claim as a field the type system can see.
+     *
+     * A caller must never treat a synthetic outcome as evidence of anything about the payment.
+     */
+    val synthetic: Boolean = false,
 )
 
 /**

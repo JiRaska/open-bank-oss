@@ -826,8 +826,12 @@ spec:
             # here meant DomesticPaymentActivitiesImpl.shadowFraudScore resolved
             # `http://localhost:8133`, the fail-open adapter swallowed the refusal as
             # "shadow ALLOW", and the DOMESTIC rail scored nothing for its entire life.
-            # Behaviour-neutral: shadowFraudScore only logs a non-ALLOW verdict. Enforcement is
-            # DOMESTIC_FRAUD_ENFORCEMENT_ENABLED, deliberately left off (and today unread).
+            # Behaviour-neutral: shadowFraudScore only logs a non-ALLOW verdict. There is no
+            # enforcement toggle: DOMESTIC_FRAUD_ENFORCEMENT_ENABLED named a control the Temporal
+            # migration (#1917) had deleted, and #4221 removed the orphaned key rather than leave a
+            # lever that does not move. Rebuilding enforcement is tracked in #4403.
+            # Whether this rail is actually being scored is now visible in
+            # openbank_fraud_scoring_degraded{service="domestic"} — see prometheus-rules.yaml.
             - name: FRAUD_SERVICE_URL
               value: http://fraud-service.fraud.svc:8133
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT

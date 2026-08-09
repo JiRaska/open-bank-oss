@@ -148,7 +148,14 @@ open class SepaPaymentActivitiesImpl(
                 counterpartyId = null,
             ),
         )
-        if (outcome.verdict != FraudVerdict.ALLOW) {
+        if (outcome.synthetic) {
+            // #4221: a payment that was never scored is not a payment that scored clean.
+            log.warnf(
+                "Fraud scoring UNAVAILABLE for payment %s — synthetic ALLOW, this payment carries no " +
+                    "fraud verdict (see openbank_fraud_scoring_degraded{service=\"sepa-payment\"})",
+                paymentId,
+            )
+        } else if (outcome.verdict != FraudVerdict.ALLOW) {
             log.infof(
                 "Fraud SHADOW verdict %s (score=%d, rules=%s) for payment %s — observed, not enforced",
                 outcome.verdict,

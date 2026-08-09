@@ -171,12 +171,18 @@ openbank:
     scheme-submission:
       # ADR-0104 D4 Czech clearing pilot. OFF by default; when off, behaviour is exactly as before.
       enabled: ${DOMESTIC_SCHEME_SUBMISSION_ENABLED:false}
-    fraud:
-      # ADR-0084 §4.2: flips the fraud verdict from SHADOW (observed, logged, ignored) to
-      # ENFORCED (REVIEW/CHALLENGE hold the payment for manual release; DECLINE rejects it).
-      # OFF by default — a deliberate runbook-gated rollout flip, same convention as the
-      # four-eyes `enforce` toggle below. ALLOW always validates regardless of this flag.
-      enforcement-enabled: ${DOMESTIC_FRAUD_ENFORCEMENT_ENABLED:false}
+    # fraud.enforcement-enabled was REMOVED here (#4221 layer 3). It is not a disabled feature —
+    # it had no reader. The enforcement path it named (`DomesticPaymentService.applyFraudGate`)
+    # was deleted by the Temporal migration (#1917) along with the in-service orchestration; the
+    # key, ADR-0084 §4.2 and the threat-model row survived it, so the runbook offered an operator a
+    # flip that would have changed nothing and reported nothing, and the threat model credited a
+    # mitigation that no longer existed. Both are corrected in this change.
+    #
+    # Re-introducing enforcement is NOT a config key: the verdict now reaches a Temporal activity
+    # (`shadowFraudScore`, returns Unit), so acting on it needs a decision returned to
+    # `DomesticPaymentWorkflow` and a hold state for the payment. Tracked in #4403 — do not
+    # re-add this key without that path, and see FraudEnforcementFlagRetiredTest, which fails if
+    # the key comes back with nothing reading it.
   temporal:
     enabled: false
     server-url: temporal-frontend.temporal.svc.cluster.local:7233

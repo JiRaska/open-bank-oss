@@ -180,7 +180,16 @@ open class DomesticPaymentActivitiesImpl(
                 counterpartyId = null,
             ),
         )
-        if (outcome.verdict != FraudVerdict.ALLOW) {
+        if (outcome.synthetic) {
+            // #4221: the fail-open fallback used to land here as an ordinary ALLOW and say nothing.
+            // A payment that was never scored is not a payment that scored clean, and this is the
+            // only place that difference is recorded per payment.
+            log.warnf(
+                "Fraud scoring UNAVAILABLE for payment %s — synthetic ALLOW, this payment carries no " +
+                    "fraud verdict (see openbank_fraud_scoring_degraded{service=\"domestic\"})",
+                paymentId,
+            )
+        } else if (outcome.verdict != FraudVerdict.ALLOW) {
             log.infof(
                 "Fraud SHADOW verdict %s (score=%d, rules=%s) for payment %s — observed, not enforced",
                 outcome.verdict,

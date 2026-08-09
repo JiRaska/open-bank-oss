@@ -237,6 +237,23 @@ not change any existing request's outcome until explicitly flipped.
   separately-reviewed flip, not bundled with this change. No DB schema change (the AML case store's
   `alertCode` column already accepts arbitrary values); rollback = flip the flag back to `false` or
   revert the commit.
+- **2026-08-09** — **Retraction of the 2026-07-09 entry above, plus fraud-scoring observability
+  (issue #4221).** The ENFORCEMENT mode credited on 2026-07-09 **does not exist**: the code it
+  describes (`DomesticPaymentService.applyFraudGate` and the `fraudEnforcementEnabled` flag) was
+  deleted on 2026-07-24 by the Temporal migration in the entry above, which carried over only the
+  shadow scoring activity. The `openbank.domestic.fraud.enforcement-enabled` key survived with no
+  reader anywhere in `src/main/kotlin`, so this threat model has credited an absent mitigation since
+  that migration, and the documented runbook flip would have been a no-op. The key is removed here;
+  restoring enforcement needs a workflow-level decision path and a hold state, tracked in #4403.
+  **Treat the fraud gate as SHADOW-ONLY** — a non-ALLOW verdict is logged and the payment proceeds.
+  Landed in the same change: a synthetic (fail-open) verdict is now distinguishable from a real one
+  at the outcome (`FraudScoreOutcome.synthetic`), in the per-payment log line, and in the
+  `openbank_fraud_scoring_degraded` gauge / `openbank_fraud_scoring_outcomes_total` counters, with
+  alerts in `gitops/components/payments/prometheus-rules.yaml`. The adapter also now contains an
+  `Error` rather than letting it escape the fail-open path. **Risk class = detectability** — no
+  behaviour, boundary, data flow or DB schema changes; the fail-open posture is unchanged and
+  deliberate (the verdict is observed, never enforced). This is a correction of the record and an
+  added signal, not a new control. Rollback = revert the commit.
 
 - **2026-08-02** — **New inbound trust edge: the `delegation` namespace.** `#3414` added
   `delegation` as an allowed ingress peer in this component's `network-policies.yaml`, so
