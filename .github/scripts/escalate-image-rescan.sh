@@ -11,10 +11,12 @@
 # — named in image-rescan.yml's own header as sharing its escalation pattern — actually
 # has one. image-rescan.yml did not. That asymmetry is the defect this closes.
 #
-# The finding itself (a fleet-wide base-image CVE) is deliberately NOT fixed here: it is
-# a base-image bump plus a fleet redeploy, or ~50 VEX verdicts, and it needs its own PR.
-# What this script guarantees is that the next such finding is addressed to a human
-# within a day instead of a month.
+# The finding itself (a fleet-wide base-image CVE) was deliberately NOT fixed here: it is
+# a base-image bump plus a fleet redeploy, or ~50 VEX verdicts, and it needed its own PR.
+# That PR bumped the pinned base digest and put `.github/workflows/Dockerfile.deploy` — the
+# one recipe every published image is built from — under Dependabot, which is why it had sat
+# at a 2026-07-16 base while upstream had already rebuilt it. What this script guarantees is
+# that the next such finding is addressed to a human within a day instead of a month.
 #
 # DEDUPE. One issue per finding-class, keyed on an exact title, refreshed with a comment
 # on each subsequent red run rather than opening a new issue every Monday — the same
