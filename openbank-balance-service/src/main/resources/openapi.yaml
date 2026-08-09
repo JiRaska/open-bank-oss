@@ -392,6 +392,21 @@ components:
             Deliberately credits only. Netting future-dated DEBITS in would add spendable money back
             for a payment that has not yet left, which is the unsafe direction.
           readOnly: true
+        effectiveAvailableAmount:
+          type: string
+          format: decimal
+          example: "3000.00"
+          description: >-
+            What may actually be spent right now: `availableAmount - notYetEffectiveCredit`,
+            computed per read.
+
+            Added because publishing `notYetEffectiveCredit` alone left the correction in a field
+            no consumer read — `openbank-account-service` mapped its own `available` straight from
+            `availableAmount` and dropped the tail, so every caller behind it kept spending the
+            pre-fix figure while the invariant looked fixed. A consumer deciding "can this be
+            spent" reads THIS; `availableAmount` deliberately keeps its meaning for anything
+            reconciling against the raw projection.
+          readOnly: true
 
     PlaceHoldRequest:
       type: object

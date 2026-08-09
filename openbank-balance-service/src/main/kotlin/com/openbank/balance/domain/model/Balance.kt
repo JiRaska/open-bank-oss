@@ -80,6 +80,26 @@ data class Balance(
      */
     fun effectiveAvailable(): BigDecimal = availableAmount - notYetEffectiveCredit
 
+    /**
+     * The spendable figure, ON THE WIRE (#1745).
+     *
+     * A property rather than a second function, because `BalanceResource` serialises this object
+     * directly and Jackson does not see `fun effectiveAvailable()` — a Kotlin function compiles to
+     * `effectiveAvailable()`, not `getEffectiveAvailable()`, and a `val`'s getter does carry that
+     * name. Declared without a Jackson annotation on purpose: this is the domain layer and it must
+     * stay framework-free (ADR-0002) — the enforced domain-purity gate rejects the import, which
+     * is how I found out. Without this the payload carried
+     * `availableAmount` and a `notYetEffectiveCredit` field no consumer read, so every caller
+     * outside balance-service kept spending the pre-fix number while the invariant looked fixed:
+     * `openbank-account-service`'s `BalanceServiceClient.toView()` maps `available = availableAmount`
+     * and drops the tail entirely.
+     *
+     * `availableAmount` deliberately keeps its meaning. Consumers that want "what may be spent now"
+     * read this; anything reconciling against the raw projection still has the unmodified figure.
+     */
+    val effectiveAvailableAmount: BigDecimal
+        get() = effectiveAvailable()
+
     /** Drawn overdraft (credit exposure for AnaCredit): how far booked is below zero, else zero. */
     fun overdraftUsed(): BigDecimal = bookedAmount.negate().max(BigDecimal.ZERO)
 
