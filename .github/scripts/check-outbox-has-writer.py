@@ -67,6 +67,13 @@ BASELINE = {
 
 DISPATCHER_RE = re.compile(r"class\s+\w*OutboxDispatcher\b")
 DECLARATION_RE = re.compile(r"(data\s+)?class\s+OutboxMessage\s*\(")
+# A row written by direct SQL is just as much a write as one built through the domain type, and
+# some services cannot use the domain type at all: a Temporal activity thread carries no Vert.x
+# context, so reactive Panache throws HR000068 there and the service inserts through plain JDBC
+# instead (case-coordinator-agent's CaseActivitiesImpl.emitProposal, agent-service's
+# JdbcAgentProposalRepository). Matching only `OutboxMessage(` called those services writerless
+# and was wrong about them.
+SQL_INSERT_RE = re.compile(r"INSERT\s+INTO\s+\w*outbox\w*", re.IGNORECASE)
 
 
 def strip_comments_and_strings(src: str) -> str:
@@ -95,6 +102,66 @@ def strip_comments_and_strings(src: str) -> str:
     return "".join(out)
 
 
+def strip_comments_only(src: str) -> str:
+    """Remove line and NESTED block comments, keeping string literals intact.
+
+    The SQL predicate needs this: an INSERT lives inside a string literal, which
+    strip_comments_and_strings() blanks. Prose describing an insert must still not count, so the
+    comments still go.
+
+    STRING-AWARE, and it has to be. Its sibling above states the invariant this function must also
+    honour — "a `\"/*\"` inside a literal must not open a comment" — and gets it for free by
+    blanking literals first. This one cannot blank them (the SQL *is* a literal), so it has to
+    track them, which makes a regex the wrong tool: comment and string openers alias each other.
+    The first version walked `/*` blind to literals, so `val a = "/*"` opened a comment that
+    swallowed every following INSERT and reported a real writer as writerless — measured, and the
+    one case in the self-test below that separates the two implementations (#4240). Raw strings are
+    consumed first: otherwise the opening `\"\"` of a `\"\"\"…\"\"\"` reads as an empty literal.
+
+    No service in the tree trips this today — the fleet verdict is byte-identical before and after
+    (33 dispatchers, 8 baselined, 0 new, 0 stale). This is a latent-defect fix, so the self-test is
+    the only thing that can hold it: there is no failing service to point at.
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(src), 0
+    while i < n:
+        if depth:
+            if src.startswith("/*", i):
+                depth += 1
+                i += 2
+            elif src.startswith("*/", i):
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if src.startswith("/*", i):
+            depth = 1
+            i += 2
+            continue
+        if src.startswith("//", i):
+            while i < n and src[i] != "\n":
+                i += 1
+            continue
+        if src.startswith('"""', i):
+            end = src.find('"""', i + 3)
+            end = n if end == -1 else end + 3
+            out.append(src[i:end])
+            i = end
+            continue
+        if src[i] == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            j = min(j + 1, n)
+            out.append(src[i:j])
+            i = j
+            continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
 def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
     """(ships_a_dispatcher, constructs_a_message) for one service's RAW `src/main` sources.
 
@@ -107,9 +174,14 @@ def classify_service(files: dict[str, str]) -> tuple[bool, bool]:
     dispatcher = writes = False
     for raw in files.values():
         body = strip_comments_and_strings(raw)
+        # SQL lives INSIDE a string literal, which the stripper blanks — so the SQL predicate reads
+        # a comment-only strip. Prose about an insert still must not count, hence not the raw text.
+        sql_body = strip_comments_only(raw)
         if DISPATCHER_RE.search(body):
             dispatcher = True
         if "OutboxMessage(" in body and not DECLARATION_RE.search(body):
+            writes = True
+        if SQL_INSERT_RE.search(sql_body):
             writes = True
     return dispatcher, writes
 
@@ -175,6 +247,51 @@ def self_test() -> int:
     in_string = disp + '\nval s = "OutboxMessage(fake)"\n'
     expect("the constructor named inside a string literal is NOT a writer",
            classify_service({"a.kt": in_string}), (True, False))
+    # A direct SQL insert IS a write. case-coordinator-agent writes this way on purpose: a Temporal
+    # activity thread has no Vert.x context, so reactive Panache throws HR000068 and it inserts
+    # through plain JDBC. Matching only `OutboxMessage(` called it writerless and was wrong.
+    sql = disp + '''
+    conn.prepareStatement("""
+        INSERT INTO case_outbox (event_id, aggregate_id, event_type, payload, status)
+        VALUES (?, ?, ?, ?, ?)
+    """)
+'''
+    expect("a direct SQL INSERT into the outbox table IS a writer",
+           classify_service({"a.kt": sql}), (True, True))
+    # …but prose describing one is not — the same code-about-code rule as the constructor case.
+    sql_prose = disp + "\n// we should INSERT INTO case_outbox here one day\n"
+    expect("a comment describing an INSERT is NOT a writer",
+           classify_service({"a.kt": sql_prose}), (True, False))
+    sql_kdoc = disp + "\n/** Historically this did INSERT INTO case_outbox directly. */\n"
+    expect("a KDoc describing an INSERT is NOT a writer",
+           classify_service({"a.kt": sql_kdoc}), (True, False))
+
+    # The SQL strip must honour the same `"/*"` invariant its sibling states. Exactly ONE of the
+    # three below was measured failing against the regex-plus-blind-walk version this replaced —
+    # the first. The other two pass either way and are regression tests, not evidence of a defect;
+    # saying so here because a comment claiming three failures where one was measured is the kind
+    # of unverified evidence this file's own header exists to warn about.
+    #
+    # A false negative is the dangerous direction for all three: the gate reports a service that
+    # DOES write its outbox as writerless, which reads as a clean finding rather than a broken
+    # probe — the shape that put this gate on main's critical path in the first place (#4240).
+    slash_star_literal = disp + '\nval a = "/*"\nval s = """INSERT INTO case_outbox (id)"""\n'
+    expect('a "/*" inside a literal must not open a comment and swallow the INSERT',
+           classify_service({"a.kt": slash_star_literal}), (True, True))
+    # Regression: `//` stripped to end-of-line must not reach inside a literal and take a
+    # following INSERT with it.
+    url_in_sql = (
+        disp + '\nval s = """\n-- see http://wiki/outbox\nINSERT INTO case_outbox (id)\n"""\n'
+    )
+    expect("a // inside the SQL literal does not hide the INSERT",
+           classify_service({"a.kt": url_in_sql}), (True, True))
+    # Regression: a quote inside a comment must not open a string and swallow the SQL after it.
+    raw_after_comment = (
+        disp + '\n/* the "outbox" table */\nval s = """INSERT INTO case_outbox"""\n'
+    )
+    expect("a quote inside a comment does not swallow the following SQL",
+           classify_service({"a.kt": raw_after_comment}), (True, True))
+
     # …and the stripper must not swallow real code that merely follows a comment.
     after = disp + "\n/* note */\n" + write
     expect("a real construction AFTER a comment still counts",

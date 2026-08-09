@@ -129,7 +129,7 @@ class SignatureCeremonyService(
                 SignatureCeremonyCompleted(
                     ceremonyId = updated.id,
                     documentId = updated.documentId,
-                    at = now,
+                    occurredAt = now,
                 ),
             ),
         )

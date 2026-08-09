@@ -5,6 +5,7 @@
 package com.openbank.document.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.document.application.port.`in`.OpenCeremonyCommand
 import com.openbank.document.application.port.out.CeremonyRepositoryPort
@@ -19,11 +20,14 @@ import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.SignatureLevel
 import com.openbank.document.domain.model.Signer
 import com.openbank.document.domain.model.SignerStatus
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.storage.ObjectStorePort
+import com.openbank.libs.testing.audit.AuditEventTime
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -54,7 +58,11 @@ class SignatureCeremonyServiceTest {
         clientSignaturePort = clientSignaturePort,
         signerVerificationPort = signerVerificationPort,
         clock = Clock.fixed(FIXED_NOW, ZoneOffset.UTC),
-        objectMapper = ObjectMapper().registerModule(JavaTimeModule()),
+        // See DocumentRenderServiceTest for why the timestamps feature must be disabled here: a
+        // hand-built mapper that keeps it on serialises Instants as epoch numbers, which
+        // AuditConsumer's Instant.parse cannot read (#3914).
+        objectMapper = ObjectMapper().registerModule(JavaTimeModule())
+            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS),
     )
 
     @Test
@@ -94,6 +102,36 @@ class SignatureCeremonyServiceTest {
         // never match and every subsequent login re-ran the full sign ceremony.
         coVerify { documentRepo.save(match { it.status == DocumentStatus.SIGNED }) }
     }
+
+    /**
+     * #3914: red before the `at` -> `occurredAt` rename — the ceremony-completion instant was in the
+     * payload under a name `AuditConsumer` does not read, so the audit row for the completion of a
+     * qualified signature ceremony recorded the consumer's ingest clock as the signing time.
+     */
+    @Test
+    fun `the SignatureCeremonyCompleted payload carries the completion instant as the audit event time`(): Unit =
+        runBlocking {
+            val ceremony = ceremony(listOf(signer("party-1")))
+            val document = document()
+            val pdf = "pdf-bytes".toByteArray()
+            val clientSigned = "client-signed".toByteArray()
+            coEvery { ceremonyRepo.findById(ceremony.id) } returns ceremony
+            coEvery { documentRepo.findById(ceremony.documentId) } returns document
+            coEvery {
+                signerVerificationPort.verify("party-1", "evidence-1", document.sha256, ceremony.id.toString())
+            } returns true
+            coEvery { objectStore.get(document.storageKey) } returns pdf andThen clientSigned
+            coEvery { clientSignaturePort.signAsClient(pdf, "party-1", any()) } returns clientSigned
+            coEvery { objectStore.put(document.storageKey, any(), document.contentType) } returns Unit
+            coEvery { sealPort.sealPades(clientSigned, any()) } returns "sealed".toByteArray()
+            val savedMsg = slot<OutboxMessage>()
+            coEvery { ceremonyRepo.saveWithOutbox(any(), capture(savedMsg)) } answers { firstArg() }
+            coEvery { documentRepo.save(any()) } answers { firstArg() }
+
+            service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
+
+            AuditEventTime.assertRecordedAsEventTime(savedMsg.captured.payload, FIXED_NOW)
+        }
 
     @Test
     fun `sealing self-heals a document whose ceremony was opened before the pending-signature fix`(): Unit =

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.105.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.104.0...admin-ui-v0.105.0) (2026-08-08)
+
+
+### Features
+
+* **admin-ui:** swarm case list + thread view over the Temporal case history ([#4186](https://github.com/JiRaska/open-bank-oss/issues/4186)) ([#4235](https://github.com/JiRaska/open-bank-oss/issues/4235)) ([c774330](https://github.com/JiRaska/open-bank-oss/commit/c7743304b9cbcbfaa97b545008b66a3dee3150a5))
+
+## [0.104.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.2...admin-ui-v0.104.0) (2026-08-08)
+
+
+### Features
+
+* **authz-policy-auditor:** wire ADR-0148 prompt registry and LLM gateway (ADR-0167) ([#3775](https://github.com/JiRaska/open-bank-oss/issues/3775)) ([06aedd6](https://github.com/JiRaska/open-bank-oss/commit/06aedd6dd2176934298b997808d6ad23566d88ae))
+
+
+### Security
+
+* **admin-ui:** pin nanoid to 3.3.17 for CVE-2026-67213 ([#4153](https://github.com/JiRaska/open-bank-oss/issues/4153)) ([f50fb95](https://github.com/JiRaska/open-bank-oss/commit/f50fb95a23b481a2e552e3852bd403104f00ff92)), closes [#4023](https://github.com/JiRaska/open-bank-oss/issues/4023)
+
 ## [0.103.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.103.1...admin-ui-v0.103.2) (2026-08-08)
 
 

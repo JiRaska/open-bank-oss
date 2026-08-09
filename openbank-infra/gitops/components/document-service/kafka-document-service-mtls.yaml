@@ -6,9 +6,11 @@
 # document-service PRODUCES document lifecycle events to
 # openbank.documents.document.event via its outbox dispatcher (ADR-0161/ADR-0162),
 # and CONSUMES openbank.accounts.account.created (group openbank-document-service,
-# ADR-0162 D7) to issue onboarding documents off the account-opening path (ADR-0086).
-# It therefore needs a Read/Describe ACL on that topic plus a consumer-group ACL,
-# mirroring balance-service, which consumes the same topic.
+# ADR-0162 D7) to issue onboarding documents off the account-opening path (ADR-0086),
+# and openbank.billing.fee.event (same consumer group; #4217, ADR-0248) filtering
+# for the AnnualFeeSummaryReady event to render the annual statement of fees.
+# It therefore needs a Read/Describe ACL on each topic plus a consumer-group ACL,
+# mirroring balance-service, which consumes the same account.created topic.
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal
 # for all of this service's Kafka traffic. These resources live in `messaging`
@@ -46,6 +48,13 @@ spec:
       - resource:
           type: topic
           name: openbank.accounts.account.created
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # #4217, ADR-0248: consume billing's outbox topic for AnnualFeeSummaryReady.
+      - resource:
+          type: topic
+          name: openbank.billing.fee.event
           patternType: literal
         operations: [Read, Describe]
         host: "*"

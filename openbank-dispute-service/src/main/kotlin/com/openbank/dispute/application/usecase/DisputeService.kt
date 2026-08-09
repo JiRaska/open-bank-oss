@@ -267,6 +267,15 @@ class DisputeService(
         createdAt = Instant.now(clock),
     )
 
+    /**
+     * `occurredAt` is the RESOLUTION instant, not the outbox-write instant (#3914).
+     *
+     * The two are within microseconds of each other here — both come from the same injected clock
+     * inside one transaction — so the choice looks cosmetic and is not: the outbox row's own
+     * `createdAt` already records when the row was written, and duplicating it under the name of
+     * the business time would make the audit trail assert something it did not measure. The
+     * resolution is the event; `dispute.resolvedAt` is when it happened.
+     */
     private fun resolvedOutboxMessage(dispute: Dispute): OutboxMessage = OutboxMessage(
         aggregateId = dispute.id,
         eventType = "dispute.resolved",
@@ -276,7 +285,8 @@ class DisputeService(
         payload = """{"eventType":"dispute.resolved","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
             """"outcome":"${dispute.remediationOutcome}",""" +
-            """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}"}""",
+            """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}",""" +
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -295,7 +305,12 @@ class DisputeService(
             """"reference":"${dispute.reference}","accountId":"${dispute.accountId}",""" +
             """"transactionId":"${dispute.transactionId}","partyId":"${dispute.partyId}",""" +
             """"outcome":"${dispute.remediationOutcome}","amount":${dispute.remediationAmount},""" +
-            """"currency":"${dispute.currency}"}""",
+            """"currency":"${dispute.currency}",""" +
+            // Same instant as dispute.resolved above, deliberately: this event is emitted in the
+            // same transaction and describes the remediation that resolution warrants. It has no
+            // separate business instant of its own, and inventing one (a fresh clock read) would
+            // put two different "when"s on one indivisible state change.
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
         createdAt = Instant.now(clock),
     )
 

@@ -32,6 +32,8 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
+    // ADR-0244 D7: case outbox dispatches onto the proposal-events topic.
+    implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
@@ -46,6 +48,10 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
+    // Phase 2 (#4185): git-pact for the admin-ui read contract — consumer test generates
+    // pacts/openbank-admin-ui-openbank-case-coordinator-agent.json, provider replays it (ADR-0063).
+    testImplementation(libs.pact.consumer)
+    testImplementation(libs.pact.provider)
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so CaseCoordinatorLlmAdapter loads its
@@ -59,6 +65,21 @@ tasks.named<Copy>("processResources") {
     }
 }
 
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+}
+
 kover {
     reports {
         filters {
@@ -70,9 +91,10 @@ kover {
         verify {
             rule {
                 bound {
-                    // Ratchet floor (ADR-0020): initial coverage from the boot smoke test only;
-                    // raise-only from here as adapters/activities gain tests.
-                    minValue = 5
+                    // Ratchet floor (ADR-0020): raised from the boot-only 5% to the Phase 1
+                    // case-workflow coverage (workflow + open-service unit tests; the JDBC
+                    // activity paths are exercised by the boot IT in CI, not unit tests).
+                    minValue = 42
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
