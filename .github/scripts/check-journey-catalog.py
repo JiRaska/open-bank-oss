@@ -54,6 +54,11 @@ import re
 import sys
 import tempfile
 
+# The checkers run as scripts from the repo root, so this directory is not on sys.path.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+
+import gatelib  # noqa: E402  (path insert must precede the import)
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - environment guard
@@ -170,18 +175,18 @@ def alerted_journeys(root: pathlib.Path):
 
 
 def check(root: pathlib.Path):
-    """(findings, fatal) — fatal means the gate could not answer and must exit 1."""
+    """(findings, fatal, subjects) — fatal means the gate could not answer and must exit 1."""
     catalog_path = root / CATALOG
     if not catalog_path.is_file():
-        return [], f"catalog not found: {CATALOG}"
+        return [], f"catalog not found: {CATALOG}", 0
     try:
         catalog = yaml.safe_load(catalog_path.read_text(encoding="utf-8")) or {}
     except yaml.YAMLError as exc:
-        return [], f"catalog is not valid YAML ({exc})"
+        return [], f"catalog is not valid YAML ({exc})", 0
 
     journeys = catalog.get("journeys") or []
     if not journeys:
-        return [], "catalog declares no journeys — a scan that read nothing is not a pass"
+        return [], "catalog declares no journeys — a scan that read nothing is not a pass", 0
 
     findings = []
     seen_ids = set()
@@ -252,7 +257,10 @@ def check(root: pathlib.Path):
                     f"{jid}: no per-journey absent() alert in {RULES} — a regex alert cannot "
                     "detect the absence of one journey while others still report"
                 )
-    return findings, None
+    # Subjects are the catalog entries plus any journey CronJob the catalog does not claim —
+    # i.e. everything this gate had an opinion about. Counting only the entries would let a
+    # catalog emptied to one line still clear a floor set for the corpus it used to have.
+    return findings, None, len(journeys) + len(set(on_disk) - set(claimed_cronjobs))
 
 
 SELF_TEST_CATALOG_OK = """
@@ -335,7 +343,7 @@ def self_test():
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             write_tree(root, catalog, cronjob, rules, cronjob_name)
-            findings, fatal = check(root)
+            findings, fatal, _ = check(root)
             got = bool(findings) or bool(fatal)
             ok = got == expect_finding
             cases.append((label, ok, findings or ([fatal] if fatal else [])))
@@ -410,7 +418,10 @@ def main():
         return self_test()
 
     root = pathlib.Path(args.root).resolve()
-    findings, fatal = check(root)
+    findings, fatal, subjects = check(root)
+    # Printed unconditionally, including on the failure path: a gate that found its corpus and
+    # then failed on it must not also be reported as having lost the corpus.
+    gatelib.subjects(subjects, "journeys examined")
     if fatal:
         print(f"::error::check-journey-catalog: {fatal}")
         return 1

@@ -1021,6 +1021,7 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-journey-catalog.py --self-test
     selftest_expect: pass
+    min_subjects: 3   # 3 journeys today (2026-08-09): 1 active, 2 planned
     run: |
       # Falsified against the REAL tree before wiring in, not only in the self-test's temp
       # trees: moving cronjob-journey-public-edge.yaml aside makes it exit 2 naming that
