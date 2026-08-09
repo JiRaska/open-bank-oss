@@ -152,6 +152,16 @@ updates:
     directories:
       - "/openbank-*"
       - "/"
+      # The ONE recipe every published image is actually built from
+      # (auto-deploy.yml, ghcr-publish.yml and build-push-service.sh all copy it
+      # verbatim). Until #4026 it was the only Dockerfile in the tree NOT watched
+      # here, so the digest it pins could only ever be bumped by hand: the fleet
+      # shipped a 2026-07-16 base for four weeks while `Image rescan` went red every
+      # Monday on fixable HIGHs that a base rebuild had already fixed upstream. The 51
+      # `openbank-*/Dockerfile` entries this ecosystem does watch are declarations that
+      # nothing builds (#3016) — watching those and not this one is backwards.
+      - "/.github/workflows"
+      - "/openbank-infra/docker/services"
     schedule:
       interval: "weekly"
       day: "monday"
