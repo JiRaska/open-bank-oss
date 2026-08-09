@@ -257,14 +257,22 @@ gates:
       python3 .github/scripts/check-oidc-secret-convention.py --enforce
 
   - id: single-replica-rollout-strategy
-    name: "one-replica workloads declare their rollout strategy (issue #3545, enforced, baseline-ratcheted)"
+    name: "one-replica workloads declare their rollout strategy AND their canary is realisable (issues #3545/#3806, enforced, baseline-ratcheted)"
     group: gitops
     mode: enforced
     selftest: python3 .github/scripts/check-single-replica-rollout-strategy.py --self-test
     selftest_expect: pass
     run: |
+      # Two independent questions over the same manifests. The first is #3545: did the workload
+      # SAY what it wants, or inherit maxSurge 1 / maxUnavailable 0 by accident. The second is
+      # #3806: a canary block counted as "declared" and stopped there, which is how 21 of 21
+      # canary Rollouts (17 money-path) declaring `setWeight: 10` on ONE replica were never
+      # findings — without trafficRouting a weight is pods-out-of-pods, so one pod expresses 0 or
+      # 100 and nothing else, while status.phase reads Healthy throughout. Separate baselines:
+      # #3545's is empty on purpose and must stay that way.
       python3 .github/scripts/check-single-replica-rollout-strategy.py --enforce \
-        --baseline .github/single-replica-rollout-strategy-baseline.txt
+        --baseline .github/single-replica-rollout-strategy-baseline.txt \
+        --canary-baseline .github/canary-rollout-realisable-baseline.txt
 
   - id: gen-network-policies-drift-gate
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
