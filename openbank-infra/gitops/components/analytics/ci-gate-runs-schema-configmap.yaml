@@ -1,0 +1,83 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ClickHouse schema for the CI gate-run history (ADR-0255 Tier 2).
+#
+# WHY A SEPARATE CONFIGMAP, NOT A NEW KEY IN clickhouse-init-configmap.yaml
+# --------------------------------------------------------------------------
+# clickhouse-init-configmap.yaml's own header says its .sql files are applied "on first
+# boot ... when the data dir is empty" (docker-entrypoint-initdb.d semantics). ClickHouse is
+# ALREADY running with bronze_events and the onboarding-funnel gold views — adding a key
+# there would sit in the desired-state file forever without ever executing against the live
+# database. This table needs a DIFFERENT delivery mechanism: a ConfigMap that a PostSync hook
+# Job (ci-gate-runs-schema-apply-job.yaml, next to this file) mounts and applies with
+# `CREATE TABLE IF NOT EXISTS`, which is safe to (and designed to) re-run on every sync.
+#
+# This is the SAME lesson temporal-namespace-registration.yaml already learned the hard way
+# (issue #3507): "the list and the script are not [in the hook Job] ... this Job is a HOOK,
+# and ArgoCD does not diff hooks. Editing this file alone produces no diff, so no sync
+# operation runs and this hook never fires." Putting the DDL in a ConfigMap — a resource
+# ArgoCD DOES diff — means changing this file is what makes the Application OutOfSync and
+# triggers the sync that re-runs the apply Job. Do not move this SQL into the Job spec.
+#
+# ONE ROW PER (gate, shard-run) — the natural key `run-gates.py --json` already emits
+# (json_records() in .github/scripts/run-gates.py): one JSON record per gate per invocation,
+# uploaded as the `gate-results-<group>` artifact per shard, per CI run. The puller CronJob
+# (cronjob-gate-health-puller.yaml) reads exactly those artifacts and inserts one row here per
+# record — same field names, deliberately, so there is one schema to reason about rather than
+# a translation layer that can drift from what run-gates.py actually writes.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ci-gate-runs-schema
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+data:
+  ci-gate-runs.sql: |
+    -- SPDX-License-Identifier: Apache-2.0
+    -- Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    --
+    -- CI gate-run history (ADR-0255 Tier 2). One row per gate per CI run.
+    --
+    -- ReplacingMergeTree keyed on (run_id, gate_id): the puller's own artifact-retention
+    -- window (default last 20 runs, see the CronJob) can overlap a previous run's pull, and
+    -- a re-run of the CronJob (retry after a transient GitHub API failure) must not duplicate
+    -- rows. inserted_at is the ReplacingMergeTree version column, so a re-insert of the same
+    -- (run_id, gate_id) with a LATER inserted_at wins — the intended behaviour is "last write
+    -- wins", not "first write wins", since a retry's data is what actually happened.
+    CREATE DATABASE IF NOT EXISTS openbank_analytics;
+
+    CREATE TABLE IF NOT EXISTS openbank_analytics.ci_gate_runs
+    (
+        -- Run identity
+        run_id       UInt64,
+        sha          FixedString(40),
+        event        LowCardinality(String),   -- push | pull_request | workflow_dispatch
+        pr_number    Nullable(UInt32),
+        run_created_at DateTime64(3, 'UTC'),
+
+        -- Gate identity (matches run-gates.py's json_records() field names verbatim —
+        -- see the header comment above for why)
+        shard        LowCardinality(String),    -- gates.yaml `group:`
+        gate_id      String,
+        mode         LowCardinality(String),    -- enforced | advisory
+        status       LowCardinality(String),    -- ok | failed | warned | skipped | unfalsified
+        seconds      Float64,
+        subjects     Nullable(Int64),
+        selftest_declared Bool,
+        selftest_passed   Nullable(Bool),
+        budget_seconds    Nullable(Float64),
+        min_subjects      Nullable(Int64),
+
+        inserted_at  DateTime64(3, 'UTC') DEFAULT now64(3)
+    )
+    ENGINE = ReplacingMergeTree(inserted_at)
+    ORDER BY (gate_id, run_id)
+    PARTITION BY toYYYYMM(run_created_at)
+    -- 13 months: a year of trend plus headroom for a slow quarter-end review. Gate-run rows
+    -- carry no customer or regulated data (id/status/timing only), so there is no regulatory
+    -- retention floor pulling the other way, unlike bronze_events' 10-year minimum.
+    TTL toDateTime(run_created_at) + INTERVAL 13 MONTH
+    SETTINGS index_granularity = 8192;

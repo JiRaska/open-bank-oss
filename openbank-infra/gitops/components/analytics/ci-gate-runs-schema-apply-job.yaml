@@ -1,0 +1,103 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Applies ci-gate-runs-schema-configmap.yaml's DDL to the live ClickHouse (ADR-0255 Tier 2).
+#
+# Hook choice — PostSync, same reasoning as temporal-namespace-registration.yaml: runs after
+# the Application's own resources (the ClickHouse StatefulSet, the ConfigMap this Job mounts)
+# are synced, so the CREATE TABLE runs against a service that is actually there. The SQL is
+# `CREATE TABLE IF NOT EXISTS` / `CREATE DATABASE IF NOT EXISTS` — idempotent by construction,
+# safe to re-run on every sync where the ConfigMap (or anything else in this directory)
+# changes, which is what BeforeHookCreation causes to happen.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ci-gate-runs-schema-apply
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: 5
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: analytics
+        app.kubernetes.io/component: ci-gate-observability
+    spec:
+      restartPolicy: Never
+      # No Kubernetes API calls (only ClickHouse HTTP) — drop the token, same as the
+      # temporal-namespace-registration hook.
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: apply-schema
+          # curl is sufficient: ClickHouse's HTTP interface accepts a raw SQL script as the
+          # POST body on /?database=... — no clickhouse-client binary needed, one fewer image
+          # to pin and patch.
+          image: docker.io/curlimages/curl:8.7.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: CLICKHOUSE_URL
+              value: http://clickhouse.analytics.svc:8123
+            - name: CLICKHOUSE_USER
+              value: analytics
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: clickhouse-auth
+                  key: password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -euo pipefail
+              # ClickHouse's HTTP interface runs exactly ONE statement per request when the
+              # body contains a single query, but accepts a multi-statement script if
+              # `multi_statements=1` isn't needed here since each statement in the mounted
+              # .sql file is separated by `;` and this endpoint's default parser handles a
+              # script with `--` comments and multiple `CREATE ... ;` statements as one body.
+              # Verified against the shape ci-gate-runs.sql actually contains (two statements,
+              # comments, no client-side macros) — a script with `\g`/`\G` or client-only
+              # syntax would need clickhouse-client instead.
+              echo "Applying ci-gate-runs.sql to ${CLICKHOUSE_URL}"
+              code="$(curl -sS -o /tmp/ch-apply.out -w '%{http_code}' \
+                -u "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+                --data-binary @/sql/ci-gate-runs.sql \
+                "${CLICKHOUSE_URL}/")"
+              cat /tmp/ch-apply.out
+              [ "$code" -lt 300 ] || { echo "::error::schema apply failed (HTTP $code)"; exit 1; }
+              echo "ci_gate_runs schema applied (HTTP $code)"
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: sql
+          configMap:
+            name: ci-gate-runs-schema

@@ -215,6 +215,13 @@ V9.1 openbank-infra/gitops/components/onboarding/onboarding-service.yaml:134: pl
 # this line is the mesh-mTLS work (baseline Layer 1), not a per-service change.
 V9.1 openbank-infra/gitops/components/onboarding/onboarding-service.yaml:138: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/analytics/analytics-sink.yaml:79: plaintext http:// env value http://clickhouse.analytics.svc:8123
+# Same declared debt, same URL, two more callers (ADR-0255 Tier 2): the schema-apply hook Job
+# and the gate-health-puller CronJob both talk to ClickHouse's HTTP interface, which — per
+# clickhouse-grafana-network-policy.yaml's own comment — has no TLS listener in this fleet
+# (port 8123 HTTP only; the native protocol on 9000 is deliberately not opened either). Not a
+# new edge, the same one three other callers already have.
+V9.1 openbank-infra/gitops/components/analytics/ci-gate-runs-schema-apply-job.yaml:56: plaintext http:// env value http://clickhouse.analytics.svc:8123
+V9.1 openbank-infra/gitops/components/analytics/cronjob-gate-health-puller.yaml:82: plaintext http:// env value http://clickhouse.analytics.svc:8123
 # analytics-sink -> Apicurio schema registry (issue #1916). Same declared debt as every other
 # in-cluster edge here: the Service exposes exactly one port, named `http`, on 8080
 # (gitops/components/apicurio/registry.yaml) — there is no TLS listener to point at, so https
