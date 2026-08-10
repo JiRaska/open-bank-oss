@@ -72,7 +72,7 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
      * names one. A default that trusted anybody would be the hole this filter exists to close.
      */
     @ConfigProperty(name = "openbank.synthetic.trusted-principals")
-    var trustedPrincipals: Optional<String> = Optional.empty()
+    lateinit var trustedPrincipals: Optional<String>
 
     private val log = Logger.getLogger(SyntheticTaintRequestFilter::class.java)
 
@@ -100,11 +100,22 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
         MDC.put(MDC_SYNTHETIC, "true")
     }
 
-    private fun trustedNames(): Set<String> = trustedPrincipals.orElse("")
-        .split(",")
-        .map(String::trim)
-        .filter(String::isNotEmpty)
-        .toSet()
+    // `isInitialized` rather than a Kotlin default on the field. A Kotlin default on a
+    // @ConfigProperty generates a synthetic constructor that ArC builds the bean through, and the
+    // annotation is then never consulted — the field keeps its fallback whatever the environment
+    // says, with no error anywhere (the lending intake case, #4348's sibling gate
+    // check-configproperty-kotlin-defaults.py). For THIS field that failure is silent in the worst
+    // direction: the trusted list would be permanently empty, the taint could never be honoured,
+    // and the canaries would look like they were simply not configured yet.
+    //
+    // Uninitialized therefore means "trust nobody", which is the same answer as an empty list —
+    // fail-to-real, consistent with everything else here.
+    private fun trustedNames(): Set<String> =
+        (if (::trustedPrincipals.isInitialized) trustedPrincipals.orElse("") else "")
+            .split(",")
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .toSet()
 }
 
 /**
