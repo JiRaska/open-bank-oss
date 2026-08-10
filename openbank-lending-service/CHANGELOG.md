@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.1...lending-service-v0.24.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **lending:** stamp business event time on the money-path audit producers ([#4412](https://github.com/JiRaska/open-bank-oss/issues/4412)) ([6e43ccc](https://github.com/JiRaska/open-bank-oss/commit/6e43ccc78ac8cd4f4a8af63743f6a530056a7510)), closes [#3914](https://github.com/JiRaska/open-bank-oss/issues/3914)
+
 ## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.0...lending-service-v0.24.1) (2026-08-09)
 
 
