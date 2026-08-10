@@ -30,43 +30,65 @@ class ClearingEventPublisherImpl @Inject constructor(
         val message = OutboxMessage(
             aggregateId = batch.id,
             eventType = BATCH_SETTLED_EVENT,
-            payload = objectMapper.writeValueAsString(
-                mapOf(
-                    // eventType is also on OutboxMessage.eventType (-> Kafka header, ce-type), but
-                    // AuditConsumer (PR #1007) reads only the JSON body, so it is duplicated here.
-                    "eventType" to BATCH_SETTLED_EVENT,
-                    "batchId" to batch.id,
-                    "batchReference" to batch.batchReference,
-                    "rail" to batch.rail.name,
-                    "cycleId" to batch.cycleId,
-                    "totalDebit" to batch.totalDebit,
-                    "totalCredit" to batch.totalCredit,
-                    "netPosition" to batch.netPosition,
-                    "itemCount" to batch.itemCount,
-                    "settledAt" to batch.settledAt?.toString(),
-                ),
-            ),
+            payload = batchSettledPayload(batch),
         )
         return Panache.withTransaction { outboxRepo.persistInTransaction(message) }
     }
+
+    /**
+     * The `batch.settled` JSON body, split out from [publishBatchSettled] so it can be asserted
+     * without a Vert.x context (`Panache.withTransaction` needs one; a payload does not). #3914.
+     */
+    internal fun batchSettledPayload(batch: ClearingBatch): String = objectMapper.writeValueAsString(
+        mapOf(
+            // eventType is also on OutboxMessage.eventType (-> Kafka header, ce-type), but
+            // AuditConsumer (PR #1007) reads only the JSON body, so it is duplicated here.
+            "eventType" to BATCH_SETTLED_EVENT,
+            "batchId" to batch.id,
+            "batchReference" to batch.batchReference,
+            "rail" to batch.rail.name,
+            "cycleId" to batch.cycleId,
+            "totalDebit" to batch.totalDebit,
+            "totalCredit" to batch.totalCredit,
+            "netPosition" to batch.netPosition,
+            "itemCount" to batch.itemCount,
+            "settledAt" to batch.settledAt?.toString(),
+            // #3914: the business event time, not the serialisation time. `settledAt` IS
+            // the settlement instant (ClearingService.settleBatch sets it on the aggregate
+            // before this publisher ever runs); `updatedAt` is the fallback for a batch
+            // whose settledAt was never stamped. Emitted as an Instant, NOT via
+            // OffsetDateTime.toString() — AuditConsumer.eventTime() parses with
+            // Instant.parse, which rejects a non-Z offset ("...+01:00") and would fall
+            // back to ingest time, i.e. exactly the defect this line exists to fix.
+            "occurredAt" to (batch.settledAt ?: batch.updatedAt).toInstant().toString(),
+        ),
+    )
 
     override fun publishItemCleared(item: ClearingItem): Uni<Void> {
         val message = OutboxMessage(
             aggregateId = item.id,
             eventType = ITEM_CLEARED_EVENT,
-            payload = objectMapper.writeValueAsString(
-                mapOf(
-                    "eventType" to ITEM_CLEARED_EVENT,
-                    "itemId" to item.id,
-                    "batchId" to item.batchId,
-                    "paymentId" to item.paymentId,
-                    "paymentReference" to item.paymentReference,
-                    "amount" to item.amount,
-                    "currency" to item.currency,
-                    "status" to item.status.name,
-                ),
-            ),
+            payload = itemClearedPayload(item),
         )
         return Panache.withTransaction { outboxRepo.persistInTransaction(message) }
     }
+
+    /** The `item.cleared` JSON body. See [batchSettledPayload] for why this is split out. */
+    internal fun itemClearedPayload(item: ClearingItem): String = objectMapper.writeValueAsString(
+        mapOf(
+            "eventType" to ITEM_CLEARED_EVENT,
+            "itemId" to item.id,
+            "batchId" to item.batchId,
+            "paymentId" to item.paymentId,
+            "paymentReference" to item.paymentReference,
+            "amount" to item.amount,
+            "currency" to item.currency,
+            "status" to item.status.name,
+            // #3914: ClearingItem has no per-transition instant, so `updatedAt` — the
+            // instant the row last changed state, which for a cleared item IS the clearing
+            // — is the truest available business time. Same Instant-vs-offset note as
+            // publishBatchSettled above.
+            "occurredAt" to item.updatedAt.toInstant().toString(),
+        ),
+    )
 }

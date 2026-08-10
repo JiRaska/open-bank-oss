@@ -1659,4 +1659,161 @@ class LendingServiceTest {
         verify(exactly = 0) { ledger.post(any()) }
         verify(exactly = 0) { provisioning.save(any()) }
     }
+
+    // --- #3914: business event time on the six payloads that carried none -------------------------
+    //
+    // Without `occurredAt`, `AuditConsumer.eventTime()` returns null and `audit_entries.occurred_at`
+    // stores the CONSUMER's ingest time as the business time (GDPR Art. 30 "when", DORA Art. 17
+    // evidence) — arbitrarily wrong under consumer lag or a replay.
+    //
+    // Every assertion is an EXACT expected instant, parsed back out of the JSON. Never
+    // `isNotNull()`: that passes against `Instant.EPOCH`. Never a substring/emptiness check on the
+    // raw text: Jackson's `asText()` yields the four-character string "null" for a JSON null, which
+    // passes every existence check. The `Instant.parse` round-trip also proves the value is in the
+    // Z-normalised form the consumer can actually parse.
+
+    private val expectedEventTime: Instant = Instant.parse("2024-01-01T00:00:00Z")
+
+    private fun occurredAtOf(message: LendingOutboxMessage): Instant = Instant.parse(
+        com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get("occurredAt").asText(),
+    )
+
+    @Test
+    fun `loan disbursed carries the disbursement instant as occurredAt`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        val loan = service.disburse(app.id, "dave").await().indefinitely()
+
+        val disbursed = emitted.single { it.eventType == "loan.disbursed" }
+        assertThat(occurredAtOf(disbursed)).isEqualTo(loan.disbursedAt.toInstant())
+        assertThat(occurredAtOf(disbursed)).isEqualTo(expectedEventTime)
+    }
+
+    @Test
+    fun `loan interest_accrued carries the accrual instant as occurredAt`() {
+        val loanId = LoanId.random()
+        val due = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { installments.findAccruable(any(), any()) } returns Uni.createFrom().item(due)
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500).await().indefinitely()
+
+        assertThat(occurredAtOf(emitted.single { it.eventType == "loan.interest_accrued" }))
+            .isEqualTo(expectedEventTime)
+    }
+
+    @Test
+    fun `loan written_off carries the derecognition instant as occurredAt`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol", reason = "insolvency"))
+            .await().indefinitely()
+
+        assertThat(occurredAtOf(emitted.single { it.eventType == "loan.written_off" }))
+            .isEqualTo(expectedEventTime)
+    }
+
+    @Test
+    fun `loan rescheduled carries the reschedule instant as occurredAt`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        assertThat(occurredAtOf(emitted.single { it.eventType == "loan.rescheduled" }))
+            .isEqualTo(expectedEventTime)
+    }
+
+    @Test
+    fun `loan stage_changed and loan provisioned carry the provisioning-cycle instant as occurredAt`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val asOf = firstDue.plusDays(40)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-06",
+            asOf = firstDue,
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+
+        // Both events describe the same provisioning cycle, so both carry that cycle's instant —
+        // NOT `asOf`, which is the accounting DATE and a different fact.
+        assertThat(occurredAtOf(emitted.single { it.eventType == "loan.stage_changed" }))
+            .isEqualTo(expectedEventTime)
+        assertThat(occurredAtOf(emitted.single { it.eventType == "loan.provisioned" }))
+            .isEqualTo(expectedEventTime)
+    }
 }
