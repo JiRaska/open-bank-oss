@@ -12,7 +12,9 @@ import com.openbank.balance.application.port.out.BalanceEventPublisher
 import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.application.port.out.LedgerProjectionPort
 import com.openbank.balance.domain.model.BalanceEvent
+import com.openbank.balance.domain.model.BalanceEventActors
 import com.openbank.balance.domain.model.BalanceEventType
+import com.openbank.libs.domain.event.EventActor
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -79,6 +81,8 @@ class LedgerProjectionService(
                     availableAmount = applied.availableAmount,
                     reservedAmount = applied.reservedAmount,
                     occurredAt = OffsetDateTime.now(clock),
+                    actorId = BalanceEventActors.LEDGER_PROJECTION,
+                    actorType = EventActor.TYPE_SYSTEM,
                 ),
             )
         }

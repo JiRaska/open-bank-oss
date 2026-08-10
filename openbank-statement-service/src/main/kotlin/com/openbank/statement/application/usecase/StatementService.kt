@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.openbank.libs.domain.event.EventActor
 import com.openbank.statement.application.port.`in`.AdHocExportUseCase
 import com.openbank.statement.application.port.`in`.ClosePeriodUseCase
 import com.openbank.statement.application.port.`in`.ClosePocketUseCase
@@ -19,6 +20,7 @@ import com.openbank.statement.application.port.out.StatementPeriodRepository
 import com.openbank.statement.domain.model.BalanceAnchor
 import com.openbank.statement.domain.model.PeriodCloseStatus
 import com.openbank.statement.domain.model.StatementEntry
+import com.openbank.statement.domain.model.StatementEventActors
 import com.openbank.statement.domain.model.StatementFormat
 import com.openbank.statement.domain.model.StatementModel
 import com.openbank.statement.domain.model.StatementPeriod
@@ -306,7 +308,9 @@ class StatementService(
             "closingBalance":${period.closingBalance.toPlainString()},
             "entryCount":${period.entryCount},
             "closedAt":"${period.closedAt}",
-            "occurredAt":"${period.closedAt}"}
+            "occurredAt":"${period.closedAt}",
+            "actorId":"${StatementEventActors.PERIOD_CLOSE}",
+            "actorType":"${EventActor.TYPE_SYSTEM}"}
         """.trimIndent().replace("\n", "")
         return StatementOutboxMessage(
             eventId = UUID.randomUUID(),
