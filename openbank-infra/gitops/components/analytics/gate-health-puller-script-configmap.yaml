@@ -72,12 +72,29 @@ data:
             return json.loads(resp.read())
 
 
+    class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
+        """Stop urllib from auto-following the artifact-download redirect.
+
+        An earlier version of this function asserted "urllib's default redirect handling
+        already drops custom headers on cross-host redirects" and relied on that being
+        true. It is not: measured against a real GitHub artifact, urllib carries the
+        Authorization header straight through to the blob-storage host, which then
+        rejects the request outright — `InvalidAuthenticationInfo: Server failed to
+        authenticate the request`, HTTP 401, on every single artifact, always. That
+        shipped to the live cluster before anyone (including the person who wrote the
+        confident comment) had run it against a real artifact. It is being run now:
+        returning None here makes urlopen surface the 302 as an HTTPError instead of
+        transparently following it, so gh_bytes can fetch the Location URL itself, with
+        no headers of its own — the blob URL's own query-string signature is the only
+        auth it wants or will accept.
+        """
+
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    _no_redirect_opener = urllib.request.build_opener(_NoAutoRedirect)
+
     def gh_bytes(path):
-        # Artifact download is a 302 to a time-limited blob URL; urllib follows redirects
-        # for GET by default, but the redirect target must NOT carry the Authorization
-        # header (GitHub's blob storage rejects a request that does) — urllib's default
-        # redirect handling already drops custom headers on cross-host redirects, which is
-        # exactly the behaviour needed here, not worked around.
         req = urllib.request.Request(
             f"{API}{path}",
             headers={
@@ -86,8 +103,20 @@ data:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.read()
+        try:
+            with _no_redirect_opener.open(req, timeout=30) as resp:
+                # No redirect happened (unexpected, but handle it rather than assume) —
+                # the artifact endpoint answered directly.
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (301, 302, 303, 307, 308):
+                raise
+            location = exc.headers.get("Location")
+            if not location:
+                raise urllib.error.URLError(f"redirect with no Location header: {exc.code}")
+            # Deliberately a bare urlopen with NO custom headers — this is the fix.
+            with urllib.request.urlopen(location, timeout=60) as resp:
+                return resp.read()
 
 
     def gate_records_for_run(run):
