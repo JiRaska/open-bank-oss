@@ -40,6 +40,7 @@ data:
       "schemaVersion": 39,
       "version": 1,
       "refresh": "5m",
+      "tags": ["ci", "openbank"],
       "time": {
         "from": "now-30d",
         "to": "now"
