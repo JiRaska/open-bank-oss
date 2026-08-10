@@ -78,6 +78,8 @@ import pathlib
 import re
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 CONTRACTS_DIRNAME = "openbank-contracts"
 
@@ -100,6 +102,25 @@ EVENT_TYPE_CONST_RE = re.compile(
 
 # A top-level `data class Name(` opening a primary constructor.
 DATA_CLASS_RE = re.compile(r"^data class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
+
+# The hand-built-outbox idiom (fraud-service, case-coordinator-agent): the payload is a raw
+# string template or a `mapOf(...)` literal, not a `data class`, so DATA_CLASS_RE never fires —
+# these are the two shapes that idiom uses to name its own event type, found FILE-WIDE rather than
+# inside any one class's body. Neither compares payload properties (no constructor to read them
+# off), so a literal found this way is recorded with `props=None`, and check_contract()'s
+# property-agreement pass (C) is skipped for it rather than guessed at.
+#
+# `eventType = "Prefix.${...}"` — a discriminated-union event type built as PREFIX + a `.name` of
+# some enum, the shape engagement-service's `EngagementEventRepositoryImpl.save` uses
+# (`"EngagementEvent.${event.type.name}"`). The static PREFIX (without the trailing dot) is what
+# the contract names its message after — the per-value suffix is documented on the payload's own
+# discriminator property instead, so there is no single literal to match per contract message.
+TEMPLATE_PREFIX_RE = re.compile(r"""eventType\s*=\s*["']([A-Za-z0-9_]+)\.\$\{""")
+
+# `eventType = "X"` as a plain named argument or map entry OUTSIDE a data class — fraud-service's
+# `OutboxMessage(eventType = "fraud.hold_changed", ...)`. Excludes `${` so it never double-counts
+# a TEMPLATE_PREFIX_RE match.
+BARE_EVENT_TYPE_RE = re.compile(r"""eventType\s*=\s*["']([^"'$]+)["']""")
 
 
 def strip_kotlin_comments(src: str) -> str:
@@ -277,6 +298,33 @@ def parse_event_classes(service_dir: pathlib.Path) -> dict[str, dict]:
     return by_event_type
 
 
+def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
+    """The hand-built-outbox idiom's event-type literals — see the regexes' own docstrings.
+
+    File-wide, not class-scoped: there is no `data class` to bound the search to. `props` is
+    always `None` here, so check_contract()'s payload-property comparison (C) is skipped for
+    these entries rather than compared against a constructor this idiom does not have.
+    """
+    by_event_type: dict[str, dict] = {}
+    src_root = service_dir / "src" / "main" / "kotlin"
+    if not src_root.is_dir():
+        return by_event_type
+    for kt in sorted(src_root.rglob("*.kt")):
+        src = strip_kotlin_comments(kt.read_text(encoding="utf-8", errors="replace"))
+        for rx in (TEMPLATE_PREFIX_RE, BARE_EVENT_TYPE_RE):
+            for m in rx.finditer(src):
+                literal = m.group(1)
+                if literal in by_event_type:
+                    continue
+                by_event_type[literal] = {
+                    "class": None,
+                    "props": None,
+                    "domain_event": False,
+                    "path": str(kt.relative_to(REPO)),
+                }
+    return by_event_type
+
+
 def produced_topics(service_dir: pathlib.Path) -> set[str]:
     import yaml
 
@@ -402,6 +450,8 @@ def check_contract(path: pathlib.Path) -> list[str]:
     # ---- B. message names vs event-type literals ----------------------------------------
     messages = ((doc.get("components") or {}).get("messages")) or {}
     declared = parse_event_classes(service_dir)
+    for literal, info in parse_outbox_literals(service_dir).items():
+        declared.setdefault(literal, info)
     doc_names: set[str] = set()
     for key, msg in messages.items():
         if not isinstance(msg, dict):
@@ -417,8 +467,8 @@ def check_contract(path: pathlib.Path) -> list[str]:
     for name in sorted(set(declared) - doc_names):
         info = declared[name]
         errors.append(
-            f"{rel}: {info['path']} declares event type `{name}` ({info['class']}) and the contract "
-            f"has no message for it — an emitted event no consumer has been told about."
+            f"{rel}: {info['path']} declares event type `{name}` ({info['class'] or 'hand-built outbox'}) "
+            f"and the contract has no message for it — an emitted event no consumer has been told about."
         )
 
     # ---- C. payload properties vs constructor properties --------------------------------
@@ -429,6 +479,8 @@ def check_contract(path: pathlib.Path) -> list[str]:
         info = declared.get(name)
         if info is None:
             continue  # already reported by B; do not double-report
+        if info["props"] is None:
+            continue  # hand-built outbox literal — no constructor to compare properties against
         payload = msg.get("payload")
         if payload is None:
             errors.append(f"{rel}: message `{name}` declares no payload schema.")
@@ -458,6 +510,7 @@ def contracts() -> list[pathlib.Path]:
 
 def run() -> int:
     found = contracts()
+    gatelib.subjects(len(found), "openbank-contracts/*/asyncapi.yaml")
     if not found:
         print(f"OK: no {CONTRACTS_DIRNAME}/*/asyncapi.yaml in the tree — nothing to verify.")
         return 0

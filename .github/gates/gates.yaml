@@ -2082,6 +2082,7 @@ gates:
     name: "event contract vs code agreement (ADR-0006, enforced)"
     group: data
     mode: enforced
+    min_subjects: 2
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
     selftest_expect: pass
