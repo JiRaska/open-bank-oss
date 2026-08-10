@@ -11,6 +11,7 @@ import com.openbank.ledger.application.port.`in`.GetTrialBalanceQuery
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.PostJournalCommand
 import com.openbank.ledger.application.port.`in`.RevalueFxCommand
+import com.openbank.ledger.application.port.out.CnbFixing
 import com.openbank.ledger.application.port.out.CnbRateProvider
 import com.openbank.ledger.application.port.out.GlAccountRepository
 import com.openbank.ledger.domain.model.GlAccount
@@ -21,8 +22,10 @@ import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
 import com.openbank.ledger.domain.model.TrialBalance
 import com.openbank.ledger.domain.model.TrialBalanceLine
+import com.openbank.ledger.infrastructure.observability.FxFixingFreshnessGauge
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -32,6 +35,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
@@ -50,9 +54,25 @@ class FxRevaluationServiceTest {
     private val objectMapper = ObjectMapper()
         .registerModule(JavaTimeModule())
         .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-    private val clock = Clock.fixed(Instant.parse("2026-05-30T15:00:00Z"), ZoneOffset.UTC)
+    private val now = Instant.parse("2026-05-30T15:00:00Z")
+    private val clock = Clock.fixed(now, ZoneOffset.UTC)
 
-    private val service = FxRevaluationService(ledger, glAccounts, cnbRates, objectMapper, clock)
+    // The REAL Micrometer adapter over a SimpleMeterRegistry, not a mock port: the assertions
+    // below are on published gauge values, and a mock would only prove the call was made — which
+    // says nothing about what an alert would read at scrape time (#3921).
+    private val registry = SimpleMeterRegistry()
+    private val freshness = FxFixingFreshnessGauge(registry, clock)
+
+    private val service = FxRevaluationService(ledger, glAccounts, cnbRates, objectMapper, clock, freshness)
+
+    /** ČNB publishes the fixing early afternoon Prague time; the date is what matters. */
+    private fun fixing(rate: String, validFrom: Instant? = Instant.parse("2026-05-30T13:15:00Z")) =
+        CnbFixing(BigDecimal(rate), validFrom)
+
+    private fun age(currency: String): Double? = registry.find(FxFixingFreshnessGauge.FIXING_AGE_SECONDS)
+        .tag(FxFixingFreshnessGauge.CURRENCY_TAG, currency)
+        .gauge()
+        ?.value()
 
     private val eurCvId = UUID.randomUUID()
     private val pnlId = UUID.randomUUID()
@@ -121,7 +141,7 @@ class FxRevaluationServiceTest {
             asOf = date,
             lines = listOf(position("1991", debit = "0", credit = "1000000")),
         )
-        coEvery { cnbRates.cnbRate("EUR") } returns BigDecimal("25.145")
+        coEvery { cnbRates.cnbRate("EUR") } returns fixing("25.145")
         coEvery { cnbRates.cnbRate("USD") } returns null
         coEvery { cnbRates.cnbRate("GBP") } returns null
         coEvery { glAccounts.findByCode("1995") } returns gl(eurCvId, "1995")
@@ -178,7 +198,7 @@ class FxRevaluationServiceTest {
                 ),
             ),
         )
-        coEvery { cnbRates.cnbRate("EUR") } returns BigDecimal("25.145")
+        coEvery { cnbRates.cnbRate("EUR") } returns fixing("25.145")
         coEvery { cnbRates.cnbRate("USD") } returns null
         coEvery { cnbRates.cnbRate("GBP") } returns null
         coEvery { glAccounts.findByCode("1995") } returns gl(eurCvId, "1995")
@@ -189,4 +209,84 @@ class FxRevaluationServiceTest {
         assertThat(result.movements).isEmpty()
         coVerify(exactly = 0) { ledger.postJournal(any()) }
     }
+
+    // ── #3921: the fixing's age is observable, and the entry says which fixing it used ────────
+
+    @Test
+    fun `publishes the age of the fixing each leg was marked at, and records it on the entry`() = runBlocking<Unit> {
+        // A Friday fixing marking a Monday position: three days old, inside fx-service's
+        // date-blind three-day validity window, so nothing else on the run reports a problem.
+        val friday = now.minus(Duration.ofDays(3))
+        coEvery { ledger.getTrialBalance(GetTrialBalanceQuery(date)) } returns TrialBalance(
+            asOf = date,
+            lines = listOf(position("1991", debit = "0", credit = "1000000")),
+        )
+        coEvery { cnbRates.cnbRate("EUR") } returns fixing("25.145", validFrom = friday)
+        coEvery { cnbRates.cnbRate("USD") } returns null
+        coEvery { cnbRates.cnbRate("GBP") } returns null
+        coEvery { glAccounts.findByCode("1995") } returns gl(eurCvId, "1995")
+        coEvery { glAccounts.findByCode("5900") } returns gl(pnlId, "5900")
+        val cmd = slot<PostJournalCommand>()
+        coEvery { ledger.postJournal(capture(cmd)) } returns stubEntry()
+
+        val result = service.revalue(RevalueFxCommand(date))
+
+        // The run itself is a perfectly ordinary success — that is the point.
+        assertThat(result.posted).isTrue()
+        // The age is the FIXING's, not the run's: 3 days, not ~0.
+        assertThat(age("EUR")).isEqualTo(Duration.ofDays(3).seconds.toDouble())
+        // And the posting now answers "which rate valued this position", which the ledger
+        // could not answer at all before — the question that matters the moment a corrected
+        // fixing arrives after the run.
+        assertThat(cmd.captured.description)
+            .isEqualTo("Daily FX revaluation at ČNB fixing 2026-05-30 [fixings EUR@2026-05-27T15:00:00Z]")
+    }
+
+    @Test
+    fun `a currency with no fixing still publishes an age, so a quiet feed is visible`() = runBlocking<Unit> {
+        coEvery { ledger.getTrialBalance(GetTrialBalanceQuery(date)) } returns TrialBalance(
+            asOf = date,
+            lines = listOf(position("1991", debit = "0", credit = "1000000")),
+        )
+        coEvery { cnbRates.cnbRate("EUR") } returns fixing("25.145")
+        coEvery { cnbRates.cnbRate("USD") } returns null
+        coEvery { cnbRates.cnbRate("GBP") } returns null
+        coEvery { glAccounts.findByCode("1995") } returns gl(eurCvId, "1995")
+        coEvery { glAccounts.findByCode("5900") } returns gl(pnlId, "5900")
+        coEvery { ledger.postJournal(any()) } returns stubEntry()
+
+        service.revalue(RevalueFxCommand(date))
+
+        // USD and GBP resolved to nothing, and each still has a series. An absent series is
+        // how "no rate for two days" reads as "nothing to see" on every dashboard.
+        assertThat(age("USD")).isNotNull()
+        assertThat(age("GBP")).isNotNull()
+        assertThat(
+            registry.find(FxFixingFreshnessGauge.FIXING_AGE_SECONDS).gauges().map { it.id.getTag("currency") },
+        ).containsExactlyInAnyOrder("EUR", "USD", "GBP")
+    }
+
+    @Test
+    fun `an fx-service answer without a fixing date leaves the description and the age untouched`() =
+        runBlocking<Unit> {
+            coEvery { ledger.getTrialBalance(GetTrialBalanceQuery(date)) } returns TrialBalance(
+                asOf = date,
+                lines = listOf(position("1991", debit = "0", credit = "1000000")),
+            )
+            coEvery { cnbRates.cnbRate("EUR") } returns fixing("25.145", validFrom = null)
+            coEvery { cnbRates.cnbRate("USD") } returns null
+            coEvery { cnbRates.cnbRate("GBP") } returns null
+            coEvery { glAccounts.findByCode("1995") } returns gl(eurCvId, "1995")
+            coEvery { glAccounts.findByCode("5900") } returns gl(pnlId, "5900")
+            val cmd = slot<PostJournalCommand>()
+            coEvery { ledger.postJournal(capture(cmd)) } returns stubEntry()
+
+            service.revalue(RevalueFxCommand(date))
+
+            // "Age unknown" must never render as "just now" — the holder is seeded at
+            // registration, so EUR reads as pod-age (0 under the fixed clock), and the
+            // description gains no empty bracket.
+            assertThat(cmd.captured.description).isEqualTo("Daily FX revaluation at ČNB fixing 2026-05-30")
+            assertThat(age("EUR")).isEqualTo(0.0)
+        }
 }

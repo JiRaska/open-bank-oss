@@ -209,7 +209,7 @@ def main() -> int:
         if not gated:
             violations.append((file, line, action, path))
 
-    print(f"psd2 anonymous-grant path guard (issue #2169)")
+    print("psd2 anonymous-grant path guard (issue #2169)")
     print(f"  granted to ANONYMOUS : {', '.join(sorted(actions))}")
     print(f"  gated prefixes       : {', '.join(sorted(included))}")
     print(f"  excluded prefixes    : {', '.join(sorted(excluded)) or '(none)'}")

@@ -31,6 +31,17 @@ service — read-only access to internal data, write-only to the regulator's end
 - All internal REST endpoints: `@RolesAllowed("ROLE_ADMIN", "ROLE_COMPLIANCE")` (verified by `AnaCreditSecurityTest`).
 - Outbound ECB/CNB calls use a service-level credential stored in **OpenBao** (never in-image).
 - OPA sidecar (ADR-0034) enforces service-to-service authz for read calls to lending/ledger.
+- **`anacredit.create` is HUMANS-ONLY (GHSA-58jq-9hq3-66jr, #4228).**
+  `anacredit_rest_ext.rego`'s `operator-anacredit-create` now carries
+  `not startswith(input.principal.id, "service-account-")`. Without it the rule was role-only, and
+  `service-account-openbank-services` — the identity nearly every backend service authenticates
+  as — carries ROLE_OPERATOR in the docker and CI realms and is classified HUMAN by
+  `AuthorizeInterceptor`, so any backend service could feed the ECB regulatory return. Measured
+  against `anacredit-opa-bundle.yaml` before the change it resolved exactly
+  `["operator-anacredit-create"]`. The exclusion strands no caller: no REST client in the fleet
+  targets this service, which the extension's own header had already asserted and #4228
+  re-confirmed. `AUTHZ_ENFORCE=false` here, so the exposure was latent — the exclusion lands
+  before the enforce flip rather than after it. Covered by `anacredit_rest_ext_test.rego`.
 
 ## 4. STRIDE
 
@@ -50,4 +61,7 @@ service — read-only access to internal data, write-only to the regulator's end
 
 ## 6. Change log
 
+- **2026-08-09** — `anacredit.create` narrowed to humans only (GHSA-58jq-9hq3-66jr, issue #4228);
+  the extension also moved out of the generator heredoc into `anacredit_rest_ext.rego` so
+  `opa-policy.yml`'s file-pair discovery can cover it — until then it had no test at all.
 - **2026-06-19** — Initial lightweight threat model (ADR-0030 D2).

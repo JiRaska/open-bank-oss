@@ -1,0 +1,154 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# nothing validates its content against what the code actually sends, and no schema is registered
+# in Apicurio. Everything below is DERIVED from `FraudHoldService.emitHoldChanged`, the only
+# producer, and each claim names its source — same convention as the engagement-service contract.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Fraud Service — events
+  version: 1.0.0
+  description: |
+    fraud-service's first-ever published topic (ADR-0220 D3.5, issue #2749). Everything else the
+    service does — `POST /api/v1/fraud/score` — is synchronous request/response with no event;
+    this is the sole exception, a side-effect signal for the fraud-hold marketing-suppression
+    exclusion, not a scoring-decision feed.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS — `KafkaUser
+      fraud-service` (`openbank-infra/gitops/components/fraud-service/kafka-fraud-mtls.yaml`)
+      grants Write + Describe on this topic, its first-ever producer grant.
+
+channels:
+  fraudHoldChanged:
+    address: openbank.fraud.hold.changed
+    title: Fraud-hold raised or cleared for a party
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/fraud-service/kafka-topics.yaml` (a
+      per-service `KafkaTopic`, unlike the fleet's shared `components/kafka/kafka.yaml` file,
+      since this is the first topic fraud-service itself owns).
+
+      **Not a change feed of every scoring decision** — `fraud_scores` (one row per
+      `POST /api/v1/fraud/score` call) is never published. Only a hold's state TRANSITIONS
+      (raised / auto-expired) are events on this topic.
+
+      **Partitioning key: `aggregateId`**, set to `partyId`
+      (`OutboxKafkaHeaders.partitionKey` reads `entry.aggregateId`, and
+      `FraudHoldService.emitHoldChanged` sets `OutboxMessage.aggregateId = partyId`). All hold
+      transitions for one party land on one partition and are ordered with respect to each other.
+    messages:
+      FraudHoldChanged:
+        $ref: '#/components/messages/FraudHoldChanged'
+
+operations:
+  publishFraudHoldChanged:
+    action: send
+    title: Publish a fraud-hold state transition
+    channel:
+      $ref: '#/channels/fraudHoldChanged'
+    description: |
+      **Producer: `openbank-fraud-service`** — the sole producer, and the owner of this
+      contract. Configured as `mp.messaging.outgoing.fraud-outbox-out` in its
+      `application.yaml`, dispatched via `FraudOutboxDispatcher` (ADR-0050 transactional outbox).
+
+      **Consumer: `openbank-engagement-service`** — `FraudHoldEventConsumer`
+      (`mp.messaging.incoming.fraud-hold-events-in`), materialising
+      `EligibilitySnapshot.adverseState`'s `FRAUD_HOLD` value (ADR-0220 D3.5) for the marketing
+      contact-policy exclusion. No other consumer exists; this signal never reaches
+      account/payment restrictions — those stay the separate, manual, `ROLE_OPERATOR`-gated
+      account-service freeze.
+    messages:
+      - $ref: '#/channels/fraudHoldChanged/messages/FraudHoldChanged'
+
+components:
+  messageTraits:
+    outboxHeaders:
+      headers:
+        type: object
+        required: [ce-id, ce-type, idempotency-key]
+        properties:
+          ce-id:
+            type: string
+            format: uuid
+            description: Event id (the outbox row's own `event_id`, UUIDv7). Stable across redeliveries.
+          ce-type:
+            type: string
+            description: Literal `fraud.hold_changed` — set by `FraudHoldService.emitHoldChanged`.
+          idempotency-key:
+            type: string
+            format: uuid
+            description: |
+              Equal to `ce-id`. The outbox dispatcher offers at-least-once delivery, so a consumer
+              MUST deduplicate on this value rather than assume each event arrives once.
+              `FraudHoldEventConsumer` is naturally idempotent regardless — it re-applies the same
+              `active`/`reason` state rather than accumulating.
+
+  schemas:
+    holdReason:
+      type: string
+      description: >-
+        Why the hold changed state. `repeated_review` when raised (3 REVIEW verdicts for the
+        account within the rolling window, `FraudHoldService.REASON_REPEATED_REVIEW`);
+        `expired` when auto-cleared by the TTL sweep (`FraudHoldService.REASON_EXPIRED`). There is
+        no manual-clear reason — fraud-service has no case/investigation lifecycle to resolve one
+        from, so every hold either expires or is still active.
+      enum: [repeated_review, expired]
+
+  messages:
+    FraudHoldChanged:
+      name: FraudHoldChanged
+      title: A fraud-hold was raised or cleared for a party
+      summary: |
+        Not a `DomainEvent` envelope — this payload is the exact string template
+        `FraudHoldService.emitHoldChanged` builds, no wrapper, no `aggregateType`/`version`
+        fields (there is no aggregate here to version).
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        type: object
+        required: [partyId, accountId, active, reason, ruleVersion, occurredAt]
+        properties:
+          partyId:
+            type: string
+            format: uuid
+            description: >-
+              The party the hold applies to, resolved from `accountId` via
+              `AccountPartyLookupPort` (fraud-service's first-ever outbound REST call). Also the
+              partition key.
+          accountId:
+            type: string
+            format: uuid
+            description: The account whose repeated REVIEW verdicts triggered the hold.
+          active:
+            type: boolean
+            description: >-
+              `true` when the hold is raised, `false` when it is cleared (always by expiry — see
+              `reason`).
+          reason:
+            $ref: '#/components/schemas/holdReason'
+          ruleVersion:
+            type: string
+            description: >-
+              Literal `fraud-hold-v1` (`FraudHoldService.RULE_VERSION`) — pins the trigger
+              definition (3 REVIEW verdicts / 30-day window / 30-day TTL) for the audit trail,
+              independent of `FraudRuleEngine`'s own `ruleVersion` on `fraud_scores` rows.
+          occurredAt:
+            type: string
+            format: date-time
+            description: `Instant.toString()` — ISO-8601. The moment the transition was decided.

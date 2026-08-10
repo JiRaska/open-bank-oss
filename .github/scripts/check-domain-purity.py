@@ -165,10 +165,25 @@ def strip_kotlin_noise(src: str) -> str:
             i = j
             continue
         if ch == '"':
+            # A single-quoted literal ends at its closing quote — or at a newline, because
+            # Kotlin has no line continuation inside one. Both terminators must be LEFT IN
+            # PLACE: this function's contract is that it preserves line structure, and the
+            # caller pairs `text.splitlines()` with `clean.splitlines()` index by index.
+            #
+            # The previous form did `j = min(j + 1, n)` unconditionally, so when the loop
+            # stopped on a newline it swallowed it. Measured across the fleet: 47 files came
+            # back one or more lines SHORT, which desynchronises the pairing from that point
+            # on — every later violation is reported against the wrong line, and the tail
+            # beyond the shorter list is never examined at all. An escaped char at the end of
+            # a line could jump the newline the same way. Found by ruff's B905 (a zip() with
+            # no strict=): asserting the invariant is what made the violation of it visible.
             j = i + 1
             while j < n and src[j] != '"' and src[j] != "\n":
+                if src[j] == "\\" and j + 1 < n and src[j + 1] == "\n":
+                    break
                 j += 2 if src[j] == "\\" else 1
-            j = min(j + 1, n)
+            if j < n and src[j] == '"':
+                j += 1
             out.append(" " * (j - i))
             i = j
             continue
@@ -219,7 +234,9 @@ def scan(root: Path) -> tuple[list[str], int]:
                 continue
             scanned += 1
             clean = strip_kotlin_noise(text)
-            for raw, stripped in zip(text.splitlines(), clean.splitlines()):
+            # strict: strip_kotlin_noise rewrites in place and must not change the line
+            # count — if it ever does, the pairing is wrong and lines go unchecked.
+            for raw, stripped in zip(text.splitlines(), clean.splitlines(), strict=True):
                 if not FQ_REF.search(stripped):
                     continue
                 # Report the ORIGINAL line so a baseline entry stays human-readable and the

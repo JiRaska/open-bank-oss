@@ -287,6 +287,19 @@ class BalanceServiceTest {
 
         override suspend fun sumFutureValueDatedByCurrency(asOf: java.time.LocalDate): Map<String, BigDecimal> =
             mapOf(seed.currency to futureDelta)
+
+        /** Not-yet-effective CREDIT tail the test wants reported (ADR-0178 Phase 2, #1745). */
+        var notYetEffectiveCredit: BigDecimal = BigDecimal.ZERO
+
+        override suspend fun sumNotYetEffectiveCredit(
+            accountId: UUID,
+            currency: String,
+            asOf: java.time.LocalDate,
+        ): BigDecimal = notYetEffectiveCredit
+
+        override suspend fun findCreditsMaturingOn(
+            date: java.time.LocalDate,
+        ): List<com.openbank.balance.application.port.out.AccountCurrency> = emptyList()
     }
 
     /**

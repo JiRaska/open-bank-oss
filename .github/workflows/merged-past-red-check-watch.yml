@@ -1,0 +1,225 @@
+# -----------------------------------------------------------------------------
+# Merges past an actively FAILING required check (issue #4240).
+#
+# All reasoning lives in .github/scripts/check-merged-past-red-check.py's header,
+# never in a `run:` block: an oversized `run:` step makes the WHOLE workflow
+# unparseable and GitHub reports no size error (#3135, ceiling ~20k chars/step).
+#
+# Short form. `main-protection` can be bypassed; GitHub records the bypass in
+# `rulesets/rule-suites` and tells nobody. That endpoint DEFAULTS to
+# `time_period=day`, so the obvious query returns one row and reads like proof the
+# incident was isolated — with `month` there are 7. And 22 of the 29 failed
+# status-check evaluations in that window are `expected`/`in progress` and benign,
+# so the classifier keys on the per-suite `failing` detail, never on
+# `result: bypass`.
+#
+# ESCALATION, not redness (#4019): a red scheduled workflow is addressed to
+# nobody, which is the very blind spot this closes. One issue, refreshed in place.
+#
+# TOKEN. rule-suites needs Administration:read. The Actions `permissions:` block
+# has no `administration:` key, so a job's GITHUB_TOKEN can NEVER read it — the
+# runtime lane uses secrets.RULESET_AUDIT_TOKEN and skips loudly without it. The
+# `capability` step measures that claim under the CI identity on every PR instead
+# of asserting it from documentation.
+#
+# WHY IT IS NOT A REQUIRED CHECK. Scheduled and paths-filtered workflows cannot be
+# required contexts here. The BINDING copy of the declaration half is the
+# `merged-past-red-check-declaration` gate in .github/gates/gates.yaml, which runs
+# unconditionally inside `Validate manifests`; this file's pull_request lane is a
+# fast echo.
+# -----------------------------------------------------------------------------
+name: merged past red check watch
+
+on:
+  schedule:
+    # D5: the bypass is by definition the last push, so a push-triggered-only
+    # detector cannot notice it on a quiet day. Twice daily.
+    - cron: "17 6,18 * * *"
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - ".github/workflows/merged-past-red-check-watch.yml"
+      - ".github/scripts/check-merged-past-red-check.py"
+      - ".github/gates/gates.yaml"
+  workflow_dispatch:
+    inputs:
+      period:
+        description: "rule-suites window (day|week|month). Never leave it defaulted."
+        required: false
+        default: month
+
+permissions:
+  contents: read
+
+concurrency:
+  group: merged-past-red-check-watch
+  cancel-in-progress: false
+
+jobs:
+  # PR lane: offline, cheap, and the only lane that runs on a PR. It proves the
+  # classifier separates the 7 from the 22 and that the workflow still satisfies
+  # D1-D6, then measures what the CI identity can actually read.
+  declaration:
+    name: merged-past-red-check declaration
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the classifier
+        run: python3 .github/scripts/check-merged-past-red-check.py --self-test
+
+      - name: The watch still satisfies D1-D6
+        run: python3 .github/scripts/check-merged-past-red-check.py --check-declaration
+
+      # Measured, never assumed: can the identity CI runs as read this endpoint?
+      # Never fails the job — it reports a fact about the workflow token.
+      - name: Can the workflow GITHUB_TOKEN read rule-suites?
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_REPO: ${{ github.repository }}
+        run: |
+          set +e
+          out=$(gh api "repos/${TARGET_REPO}/rulesets/rule-suites?time_period=month&per_page=1" 2>&1)
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "::notice::GITHUB_TOKEN CAN read rule-suites."
+          else
+            echo "::notice::GITHUB_TOKEN CANNOT read rule-suites (exit $code) — this is expected;"
+            echo "::notice::the endpoint needs Administration:read and permissions: has no such key."
+            printf '%s\n' "$out" | head -5
+          fi
+
+  watch:
+    name: merged past red check watch
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A verdict that has only ever said "clean" is indistinguishable from a
+      # classifier that finds nothing. This step failing voids the run.
+      - name: Self-test the classifier
+        run: python3 .github/scripts/check-merged-past-red-check.py --self-test
+
+      - name: Scan the ruleset bypass log
+        id: verdict
+        env:
+          RULESET_AUDIT_TOKEN: ${{ secrets.RULESET_AUDIT_TOKEN }}
+          TARGET_REPO: ${{ github.repository }}
+          PERIOD: ${{ inputs.period || 'month' }}
+        run: |
+          set +e
+          python3 .github/scripts/check-merged-past-red-check.py --scan \
+            --repo "$TARGET_REPO" --period "$PERIOD" --require-token \
+            --json /tmp/merged-past-red.json | tee /tmp/merged-past-red.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          case "$code" in
+            0) : ;;
+            1) echo "::error::The watch could not answer. That is a failure of THIS WATCH,"
+               echo "::error::not a 'nothing was bypassed' verdict. Most likely"
+               echo "::error::secrets.RULESET_AUDIT_TOKEN is unset or lacks Administration:read."
+               exit 1 ;;
+            2) echo "::warning::a merge past an actively failing required check — escalating." ;;
+            *) echo "::error::Unexpected exit $code."; exit "$code" ;;
+          esac
+
+      - name: Escalate or stand down
+        if: ${{ github.event_name != 'workflow_dispatch' && steps.verdict.outputs.code != '1' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs')
+            const v = JSON.parse(fs.readFileSync('/tmp/merged-past-red.json', 'utf8'))
+            const LABEL = 'fleet-health'
+            const marker = '<!-- merged-past-red-check -->'
+            const REOPEN_WINDOW_DAYS = 14
+
+            // Find by MARKER, not by title: the title carries a count and moves.
+            const findByMarker = async (state) => {
+              const issues = await github.paginate(github.rest.issues.listForRepo, {
+                ...context.repo, state, labels: LABEL, per_page: 100,
+                sort: 'updated', direction: 'desc',
+              })
+              return issues.find(i => (i.body || '').includes(marker))
+            }
+
+            if (v.status !== 'dirty') {
+              const open = await findByMarker('open')
+              if (open) {
+                await github.rest.issues.createComment({
+                  ...context.repo, issue_number: open.number,
+                  body: `No merge past an actively failing required check remains in the last \`${v.period}\` — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+                })
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: open.number, state: 'closed',
+                })
+                core.info(`closed #${open.number}`)
+              } else {
+                core.info('clean window; nothing open.')
+              }
+              return
+            }
+
+            const n = v.offenders.length
+            const title = `${n} merge${n === 1 ? '' : 's'} past an actively failing required check (last ${v.period})`
+            const body = [
+              marker,
+              '## A PR was merged while a required check was FAILING',
+              '',
+              'Nothing else would have told you. The bypass is recorded only in',
+              '`rulesets/rule-suites`; no PR carries it, no check turns red, and the merge',
+              'commit looks like every other merge commit.',
+              '',
+              '| when | PR | head | failing required check |',
+              '|---|---|---|---|',
+              ...v.offenders.map(o =>
+                `| \`${o.pushed_at}\` | ${o.pr ? '#' + o.pr : '_none_'} | \`${String(o.head_sha).slice(0, 9)}\` | ${o.details.map(d => d.replace(/\|/g, '\\|')).join('<br>')} |`),
+              '',
+              `Window \`${v.period}\`, ${v.suites_examined} bypass suites examined. The window is`,
+              'explicit on purpose: `rule-suites` defaults to `time_period=day`, which returns one',
+              'row and reads exactly like confirmation that an incident was isolated.',
+              '',
+              'Rows where a required context was merely `expected` or `in progress` are NOT listed —',
+              'those are the common, benign case and flagging them would make this issue noise.',
+              '',
+              'This issue is refreshed in place while offending merges remain in the window and is',
+              'closed by the watch itself when the window comes back clean. Each row ages out on its',
+              'own; closing it by hand does not.',
+              '',
+              `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4240)._`,
+            ].join('\n')
+
+            const open = await findByMarker('open')
+            if (open) {
+              await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
+              core.info(`refreshed #${open.number}`)
+              return
+            }
+            const closed = await findByMarker('closed')
+            const fresh = closed && closed.closed_at &&
+              (Date.now() - Date.parse(closed.closed_at)) < REOPEN_WINDOW_DAYS * 864e5
+            if (fresh) {
+              await github.rest.issues.update({
+                ...context.repo, issue_number: closed.number, title, body, state: 'open',
+              })
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: closed.number,
+                body: `Another merge past a failing required check — reopening rather than stacking a new issue. _(\`${context.workflow}\` run ${context.runId})_`,
+              })
+              core.info(`reopened #${closed.number}`)
+              return
+            }
+            const created = await github.rest.issues.create({
+              ...context.repo, title, body, labels: [LABEL],
+            })
+            core.info(`opened #${created.data.number}`)

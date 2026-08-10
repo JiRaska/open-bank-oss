@@ -9,4 +9,10 @@
     <file name="src/main/kotlin/com/openbank/delegation/application/port/out/DelegationPorts.kt">
         <error line="5" column="9" source="standard:package-name" />
     </file>
+    <file name="src/main/kotlin/com/openbank/delegation/application/port/in/SpendReservationUseCases.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
+    <file name="src/main/kotlin/com/openbank/delegation/application/port/out/SpendReservationPorts.kt">
+        <error line="5" column="9" source="standard:package-name" />
+    </file>
 </baseline>

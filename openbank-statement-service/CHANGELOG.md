@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.2...statement-service-v0.8.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **statement:** freeze render inputs at close so a closed period re-renders byte-identically ([#4271](https://github.com/JiRaska/open-bank-oss/issues/4271)) ([20b8d85](https://github.com/JiRaska/open-bank-oss/commit/20b8d85508791854704cbaacd24c94b9a28f8b28)), closes [#3986](https://github.com/JiRaska/open-bank-oss/issues/3986) [#1302](https://github.com/JiRaska/open-bank-oss/issues/1302) [#3920](https://github.com/JiRaska/open-bank-oss/issues/3920)
+
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.1...statement-service-v0.8.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **customer-edge:** answer 400, not 500, for a missing required query parameter ([#4211](https://github.com/JiRaska/open-bank-oss/issues/4211)) ([4ddb6ef](https://github.com/JiRaska/open-bank-oss/commit/4ddb6efeb23864fe65a4f2624f8722e1fcae04fb)), closes [#3624](https://github.com/JiRaska/open-bank-oss/issues/3624)
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.0...statement-service-v0.8.1) (2026-08-08)
 
 

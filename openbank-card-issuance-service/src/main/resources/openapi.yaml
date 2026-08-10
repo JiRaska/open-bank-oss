@@ -642,7 +642,27 @@ components:
           type: string
         status:
           type: string
-          enum: [PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED]
+          enum: [PENDING, ACTIVE, SUSPENDED, BLOCKED, EXPIRED, CANCELLED, CONSUMED]
+          description: >
+            CONSUMED is terminal and applies only to SINGLE_USE cards: the card authorised once and
+            closed itself. Kept distinct from CANCELLED because it is the promise being kept, not a
+            failure — telling a customer their disposable card was "cancelled" reads as something
+            going wrong.
+        closedReason:
+          type: string
+          nullable: true
+          enum: [SINGLE_USE_CONSUMED, VALIDITY_EXPIRED, LOST_OR_STOLEN, CUSTOMER_CANCEL]
+          description: >
+            Why the card reached a terminal status; absent while it is alive. Without it, "cancelled"
+            covered a customer closing a card, a lost card, and a disposable card doing exactly what
+            it promised — three things a customer is owed three different sentences about.
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >
+            SINGLE_USE only: when the card stops being usable even if never presented. A disposable
+            card that is never spent must still stop being a live PAN.
         expiryDate:
           type: string
           example: "12/27"

@@ -46,7 +46,6 @@ class PartyServiceMarketingConsentTest {
         partyRepo = mockk()
         documentRepo = mockk()
         documentFileRepo = mockk()
-        eventPublisher = mockk(relaxed = true)
         metrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         marketingConsentForwarding = mockk()
@@ -93,7 +92,7 @@ class PartyServiceMarketingConsentTest {
         assertThat(result.consentCapturedAt).isEqualTo(Instant.parse("2026-01-01T00:00:00Z"))
         coVerify(exactly = 1) { service.marketingConsentForwarding.grant(partyId) }
         coVerify(exactly = 0) { service.partyRepo.update(any()) }
-        coVerify(exactly = 0) { service.eventPublisher.publishPartyUpdated(any()) }
+        coVerify(exactly = 0) { service.partyRepo.update(any(), any()) }
     }
 
     @Test

@@ -67,6 +67,10 @@ data class CardResponse(
     val delegationGrantId: UUID? = null,
     /** True when this card was issued to a delegate rather than the account owner (ADR-0249 D1). */
     val delegated: Boolean = false,
+    /** SINGLE_USE only: when the card stops being usable even if never presented. */
+    val expiresAt: Instant? = null,
+    /** Why the card reached a terminal status; null while it is alive. */
+    val closedReason: CardClosedReason? = null,
 )
 
 fun Card.toResponse() = CardResponse(
@@ -76,6 +80,7 @@ fun Card.toResponse() = CardResponse(
     activatedAt, blockedAt, blockedReason, createdAt, updatedAt,
     contactlessEnabled, onlineEnabled, atmEnabled, abroadEnabled,
     delegationGrantId, isDelegated,
+    expiresAt, closedReason,
 )
 
 /**

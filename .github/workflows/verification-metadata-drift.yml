@@ -17,8 +17,15 @@
 #
 # Sharded on purpose: one fleet-wide regeneration needs ~12g of heap (measured;
 # 6g died with `Java heap space` after 3h40m on the quarkusBuild variant), which is
-# more than a 16 GB runner can safely hand a single JVM. Eight shards of ~7 modules
+# more than a 16 GB runner can safely hand a single JVM. TWELVE shards of ~5 modules
 # each keep every job well inside that budget and run concurrently.
+#
+# Was eight. Raised after three of eight shards died of `Java heap space` on
+# 2026-08-08 (run 31239958766): the comment said "~7 modules" but shard 1 was
+# regenerating NINE, because the shard count is fixed while the fleet grows. The
+# heap is a ratchet with nothing measuring it, exactly as dependency-submission
+# already records — expect to raise this again, and prefer more shards over more
+# heap, since 6g of 16 GB is already the safe per-JVM ceiling.
 #
 # Eight rather than four costs nothing: this repo is public, so ubuntu-latest minutes
 # are free and unmetered, and GitHub-hosted runners are outside our VPC so no NAT
@@ -40,13 +47,13 @@ concurrency:
 
 jobs:
   sweep:
-    name: sweep ${{ matrix.shard }}/8
+    name: sweep ${{ matrix.shard }}/12
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false # one shard's gap must not hide another's
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
     steps:
       - uses: actions/checkout@v7
 
@@ -64,10 +71,33 @@ jobs:
       # warm cache Gradle does not re-resolve metadata artifacts, so a regeneration
       # check reports "no gaps" even with an entry demonstrably deleted. CI caches are
       # always warm. Do not "optimise" that flag away.
+      # Exit 2 means the checker could not run (Gradle died) and is NOT a verdict about
+      # the metadata. Record which it was as an ARTIFACT rather than leaving raise-issue to
+      # grep a log: a job log contains the step's own `run:` script, so a grep matches
+      # strings that never executed.
       - name: Sweep shard for unpinned artifacts
+        id: sweep
         run: |
+          set +e
           python3 .github/scripts/check-verification-metadata-complete.py \
-            --modules all --shard "${{ matrix.shard }}/8" --enforce
+            --modules all --shard "${{ matrix.shard }}/12" --enforce
+          rc=$?
+          set -e
+          mkdir -p /tmp/sweep-verdict
+          case "$rc" in
+            0) exit 0 ;;
+            2) echo "could-not-run" > "/tmp/sweep-verdict/shard-${{ matrix.shard }}" ;;
+            *) echo "gap" > "/tmp/sweep-verdict/shard-${{ matrix.shard }}" ;;
+          esac
+          exit "$rc"
+
+      - name: Upload this shard's verdict
+        if: ${{ always() && hashFiles('/tmp/sweep-verdict/**') != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: sweep-verdict-${{ matrix.shard }}
+          path: /tmp/sweep-verdict/
+          retention-days: 7
 
   # A red schedule is addressed to nobody. Turn a real gap into an owned ticket —
   # the same reason fleet-attestation.yml and dependency-submission.yml do this.
@@ -82,15 +112,57 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@v7
+
+      # Read what the shards actually concluded. `if: failure()` fires on ANY shard
+      # failure, so without this the drift template is published whenever the sweep
+      # itself dies — which is how #4162 asserted "unpinned artifacts on main" while
+      # all three failing shards had died of `Java heap space`.
+      - name: Download shard verdicts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: sweep-verdict-*
+          path: /tmp/verdicts
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Classify the failure
+        id: classify
+        run: bash .github/scripts/classify-verification-sweep-failure.sh /tmp/verdicts
+
       - name: Open or refresh the tracking issue
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          TITLE="verification-metadata drift: unpinned artifacts on main"
+          # The title states what was MEASURED. A sweep that never reached a verdict is a
+          # build problem, and filing it as drift makes the backlog assert something nobody
+          # checked (#4162). Separate titles also keep the two from refreshing each other.
+          if [ "${{ steps.classify.outputs.kind }}" = "gap" ]; then
+            TITLE="verification-metadata drift: unpinned artifacts on main"
+          else
+            TITLE="verification-metadata sweep could not run on main"
+          fi
           # Flush-left heredoc: `run: |` strips only the common YAML indent, so an
           # indented body would carry leading spaces into the issue markdown.
+          if [ "${{ steps.classify.outputs.kind }}" != "gap" ]; then
+          BODY=$(cat <<EOF
+          The daily verification-metadata sweep did not reach a verdict:
+          ${{ steps.classify.outputs.could_not_run }} shard(s) exited 2 (the checker could not
+          run), ${{ steps.classify.outputs.gaps }} reported a gap.
+
+          Run: ${RUN_URL}
+
+          **This says NOTHING about whether the metadata is complete.** Read the failing
+          shard's own error before assuming drift — the usual cause is \`Java heap space\`
+          during regeneration, which is a build problem, not a metadata gap. If it is the heap
+          again, prefer raising the shard count over raising \`-Xmx\`: 6g of a 16 GB runner is
+          already the safe per-JVM ceiling, and the shard count is fixed while the fleet grows.
+
+          Context: #4162, #3131.
+          EOF
+          )
+          else
           BODY=$(cat <<EOF
           The daily verification-metadata sweep FAILED: at least one Gradle module on
           \`main\` resolves an artifact that \`gradle/verification-metadata.xml\` does not pin.
@@ -118,6 +190,7 @@ jobs:
           Context: #3131.
           EOF
           )
+          fi
           existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --body "$BODY"

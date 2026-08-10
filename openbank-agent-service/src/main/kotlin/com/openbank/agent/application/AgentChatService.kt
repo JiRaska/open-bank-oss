@@ -102,6 +102,14 @@ class AgentChatService {
         modelId: String?,
         trigger: String,
     ): ChatOutcome {
+        // ADR-0031 D5 (#3667): resolve the acting model ONCE, up front, and carry it on the identity
+        // for the whole run. Every AI-attributed audit event this run emits — the policy gate's
+        // ALLOW/DENY, the tool-execution outcome, the guardrail detection — then names the same
+        // model as the run-level event below. The identity constants (ASSISTANT_IDENTITY,
+        // OVERSIGHT_IDENTITY) carry no model, so without this the per-step events would all say
+        // "unknown" while the run event named a real model.
+        @Suppress("NAME_SHADOWING")
+        val identity = identity.copy(modelId = modelId ?: gateway.defaultModelId())
         // D7: wrap the whole governed run in one span. Parented off the inbound HTTP span for a
         // chat turn, or a root span for a scheduled sweep (OversightService) — either way "one run
         // = one trace" in Tempo, carrying the same agent attributes the D5 audit event records so

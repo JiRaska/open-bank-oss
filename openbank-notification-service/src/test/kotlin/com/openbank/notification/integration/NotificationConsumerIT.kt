@@ -103,6 +103,10 @@ class NotificationConsumerIT {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.body
 
+    private fun failureReasonFor(partyId: UUID): String? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.failureReason
+
     private fun notificationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.notificationId
@@ -439,6 +443,41 @@ class NotificationConsumerIT {
         // The provider-rejected token was retired in the same transaction (pre-fix: stayed ACTIVE).
         assertThat(deviceStatusFor(OffContextPushSender.BAD_TOKEN)).isEqualTo("INVALID")
         assertThat(deviceStatusFor(OffContextPushSender.GOOD_TOKEN)).isEqualTo("ACTIVE")
+        // A delivered push carries no failure reason — the column means "why this FAILED", so a
+        // stale value on a SENT row would be worse than none.
+        assertThat(failureReasonFor(partyId)).isNull()
+    }
+
+    /**
+     * ADR-0252 phase 0 — a fan-out where every adapter is DISABLED must not read as a delivery.
+     *
+     * This is the production shape that hid a dead push channel: `ApnsPushSender` is
+     * `enabled=false` by default and returns `PushResult.skipped(...)`, which is `success = true`.
+     * The fan-out counted `success`, so the row committed SENT with `sentAt` set, and an
+     * environment holding no APNs credentials was indistinguishable from a working one — in the
+     * status column, in the outcome stream, and in the logs.
+     *
+     * Asserted through the real consumer path rather than on the mapping function alone: the unit
+     * test pins the mapping, this pins that the fan-out actually calls it.
+     */
+    @Test
+    fun `PUSH with every adapter disabled is SUPPRESSED, never SENT`() {
+        val partyId = UUID.randomUUID()
+        seedActiveDevice(partyId, OffContextPushSender.DISABLED_TOKEN)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.WELCOME,
+                recipient = "push-disabled@example.com",
+                variables = mapOf("name" to "Push"),
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
+        // Nothing was rejected, so the token stays usable the moment the adapter is switched on.
+        assertThat(deviceStatusFor(OffContextPushSender.DISABLED_TOKEN)).isEqualTo("ACTIVE")
     }
 
     /**
@@ -481,6 +520,28 @@ class NotificationConsumerIT {
         assertThat(msg.title).doesNotContain(amount).doesNotContain(account)
         assertThat(msg.body).doesNotContain(amount).doesNotContain(account)
     }
+
+    @Test
+    fun `a push to a party with no device records WHY it failed, not just that it did`() {
+        // No seedActiveDevice: this party has never registered one, which is the overwhelmingly
+        // common case in the live estate — 40 of the 43 parties with a failed push.
+        val partyId = UUID.randomUUID()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.TRANSACTION_COMPLETED,
+                recipient = "no-device@example.com",
+                variables = mapOf("amount" to "10.00", "currency" to "CZK"),
+            ),
+        )
+
+        assertThat(statusFor(partyId)).isEqualTo("FAILED")
+        // The point of the change: FAILED alone cannot distinguish "no device registered" from
+        // "the provider rejected the token", and those need entirely different fixes.
+        assertThat(failureReasonFor(partyId)).isEqualTo("no_active_device")
+    }
 }
 
 /**
@@ -497,10 +558,11 @@ class OffContextPushSender : PushSender {
         // Record what actually crosses the transport boundary so a test can assert the payload
         // is PII-free (ADR-0135 §3, issue #1182).
         SENT.add(message)
-        val result = if (message.token == GOOD_TOKEN) {
-            PushResult.ok("apns-id-it")
-        } else {
-            PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
+        val result = when (message.token) {
+            GOOD_TOKEN -> PushResult.ok("apns-id-it")
+            // ADR-0252 phase 0: what a DISABLED adapter returns — a successful no-op.
+            DISABLED_TOKEN -> PushResult.skipped("adapter disabled")
+            else -> PushResult.failed("BadDeviceToken", "invalid token", invalidToken = true)
         }
         return Uni.createFrom().completionStage(CompletableFuture.supplyAsync({ result }, EXECUTOR))
     }
@@ -508,6 +570,9 @@ class OffContextPushSender : PushSender {
     companion object {
         const val GOOD_TOKEN = "apns-good-token-it"
         const val BAD_TOKEN = "apns-bad-token-it"
+
+        /** Token whose send comes back *skipped*, i.e. the adapter is switched off. */
+        const val DISABLED_TOKEN = "apns-disabled-adapter-token-it"
         private val EXECUTOR = Executors.newSingleThreadExecutor()
 
         /** Messages the adapter was asked to deliver, in order — inspected by the PII assertion. */

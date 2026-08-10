@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.8](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.7...kyc-service-v0.10.8) (2026-08-09)
+
+
+### Bug Fixes
+
+* **kyc:** write KYC case events to the outbox, retire the direct emitter ([#4378](https://github.com/JiRaska/open-bank-oss/issues/4378)) ([78be93d](https://github.com/JiRaska/open-bank-oss/commit/78be93d1d60ee909606acb531a434b5efe7a4c47)), closes [#4007](https://github.com/JiRaska/open-bank-oss/issues/4007)
+
+## [0.10.7](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.6...kyc-service-v0.10.7) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
 ## [0.10.6](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.5...kyc-service-v0.10.6) (2026-08-02)
 
 
