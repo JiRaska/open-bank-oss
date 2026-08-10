@@ -4,6 +4,7 @@
 
 package com.openbank.balance.domain.model
 
+import com.openbank.libs.domain.event.EventActor
 import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -172,6 +173,26 @@ data class BalanceHold(
     val releasedAt: OffsetDateTime?,
 )
 
+/**
+ * The three origins this service publishes from (#3994). See [BalanceEvent.actorId] for why all
+ * three are `SYSTEM` and none is a person.
+ *
+ * Named constants rather than string literals at five call sites: the audit trail groups on this
+ * value, so a typo at one site would silently create a fourth origin that looks real.
+ */
+object BalanceEventActors {
+    private const val SERVICE = "balance-service"
+
+    /** An inbound command on the balance API — hold, release, credit, debit. */
+    val API: String = EventActor.system(SERVICE, "balance-api")
+
+    /** The read model catching up to a posting the ledger already made (ADR-0039 Phase D). */
+    val LEDGER_PROJECTION: String = EventActor.system(SERVICE, "ledger-projection")
+
+    /** The daily value-date roll scheduler (ADR-0178, #1745). */
+    val VALUE_DATE_ROLL: String = EventActor.system(SERVICE, "value-date-roll")
+}
+
 enum class BalanceEventType {
     BALANCE_UPDATED,
     HOLD_PLACED,
@@ -189,4 +210,32 @@ data class BalanceEvent(
     val availableAmount: BigDecimal,
     val reservedAmount: BigDecimal,
     val occurredAt: OffsetDateTime,
+    /**
+     * Who originated this balance movement (#3994).
+     *
+     * **Always a `SYSTEM` id here, and that is the finding, not a shortcut.** Every one of this
+     * service's five publish sites is reached either by a machine-to-machine call from the payment
+     * orchestration (`placeHold`/`releaseHold`/`credit`/`debit`) or by this service's own
+     * projection and scheduler — none of them has, or could have, a human identity to record. The
+     * commands (`PlaceHoldCommand`, `CreditAccountCommand`, …) carry no principal, and the REST
+     * layer above them is service-to-service. So the honest answer is that no person did this, and
+     * `EventActor.system` says exactly that instead of leaving a NULL that reads identically to a
+     * lost human identity — 542 of the 1341 unattributed audit rows are these three event types.
+     *
+     * The mechanism segment is what makes the value worth storing: `balance-api` (an inbound
+     * command), `ledger-projection` (catching up to a posting the ledger already made) and
+     * `value-date-roll` (the daily scheduler) are three genuinely different origins that were all
+     * one NULL before.
+     *
+     * **This is a serialised data class, not a hand-built map** — the wire keys are these Kotlin
+     * property names, so `KafkaBalanceEventPublisher.mapper.writeValueAsString` emits `actorId` and
+     * `actorType` with no literal appearing anywhere in this module. A grep for `"actorId"` over
+     * balance-service therefore found nothing before this change and finds nothing after it, which
+     * is the exact blind spot that hides half of this fleet's event fields.
+     *
+     * Nullable with a null default only so the many test constructions of this class keep
+     * compiling; every production site sets it.
+     */
+    val actorId: String? = null,
+    val actorType: String? = null,
 )

@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.testing.audit.AuditEventTime
 import com.openbank.statement.Fixtures
 import com.openbank.statement.application.port.out.AccountInfoPort
@@ -108,6 +109,33 @@ class StatementServiceTest {
         val closed = service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely().first()
 
         AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, closed.closedAt)
+    }
+
+    /**
+     * #3994 — red against `origin/main`, where the period-close payload carried no actor key and
+     * the 86 statement audit rows (78 closed + 8 close_failed) stored NULL.
+     *
+     * A statutory period-close is scheduled, not pressed: nobody is the honest answer, and this
+     * asserts the payload SAYS so with the exact canonical id rather than leaving a NULL that reads
+     * identically to a human identity we lost. Parsed as JSON rather than substring-matched — the
+     * payload is a hand-built `"""` template, so a `contains("SYSTEM")` would also match a value
+     * that landed under some other key.
+     */
+    @Test
+    fun `the period-closed payload names the scheduled close as its system origin`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(7L)
+        val msg = slot<StatementOutboxMessage>()
+        every { periods.saveWithOutbox(any(), capture(msg)) } answers
+            { Uni.createFrom().item(firstArg<StatementPeriod>()) }
+
+        service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely()
+
+        val json = ObjectMapper().readTree(msg.captured.payload)
+        assertThat(json.get("actorId").asText()).isEqualTo("system:statement-service:period-close")
+        assertThat(json.get("actorType").asText()).isEqualTo("SYSTEM")
     }
 
     @Test

@@ -4,6 +4,7 @@
 
 package com.openbank.kyc.domain.model
 
+import com.openbank.libs.domain.event.EventActor
 import java.time.Instant
 import java.util.UUID
 
@@ -54,6 +55,42 @@ object KycEvents {
             "status" to case.status,
             "riskLevel" to case.riskLevel,
             "occurredAt" to at,
+            EventActor.FIELD_ACTOR_ID to actorId(case),
+            EventActor.FIELD_ACTOR_TYPE to actorType(case),
         ),
     )
+
+    /**
+     * Who caused this transition (#3994).
+     *
+     * This service is the one place in the survey where the aggregate ALREADY knows the human:
+     * `approveCase`/`rejectCase` take the reviewer from the authenticated security context — never
+     * from the request body, per the ČNB AML/KYC §8 four-eyes mandate (ADR-0068) — and store it on
+     * [KycCase.reviewedBy]. It was simply never put on the wire, so 117 audit rows
+     * (`KYC_CASE_OPENED` + `KYC_CASE_APPROVED`) recorded a four-eyes decision with no eyes.
+     *
+     * A case with no reviewer has genuinely had no human touch it: `KYC_CASE_OPENED` is opened by
+     * the `PARTY_CREATED` consumer, and the check-result transitions are screening callbacks. Those
+     * get the `SYSTEM` id rather than a borrowed identity.
+     *
+     * Note the sandbox path: `autoEvaluateAndApprove` writes the literal `"sandbox-auto-approval"`
+     * into `reviewedBy`, so that string flows through here as-is. That is deliberate — it is what
+     * actually approved the case, it is already the stored value, and rewriting it to a `SYSTEM` id
+     * here would make the event disagree with the row it describes. It is also self-evidently not a
+     * person, which is the property that matters.
+     */
+    private fun actorId(case: KycCase): String = case.reviewedBy?.takeIf { it.isNotBlank() }
+        ?: EventActor.system(SERVICE, "case-lifecycle")
+
+    private fun actorType(case: KycCase): String =
+        if (case.reviewedBy.isNullOrBlank()) EventActor.TYPE_SYSTEM else ACTOR_TYPE_REVIEWER
+
+    private const val SERVICE = "kyc-service"
+
+    /**
+     * A named human reviewer. Not `OPERATOR`: the audit trail's existing `actorType` vocabulary uses
+     * `CUSTOMER` for a self-service subject, and a KYC reviewer is neither the subject nor a generic
+     * operator — the four-eyes record is specifically about the reviewing analyst.
+     */
+    private const val ACTOR_TYPE_REVIEWER = "REVIEWER"
 }
