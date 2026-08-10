@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sdd-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "0d6ffeead298ace7"
+        openbank.tech/policy-checksum: "8e0f99066014f337"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -103,28 +103,41 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
-            # OPA advisory mode (ADR-0034 Phase 5). STILL false — deliberately, and this is the
-            # one remaining step of #3679, not an oversight.
+            # OPA ENFORCING (ADR-0034 Phase 5) — the last step of #3679 for this service.
+            # sdd-service is in rules.yaml: money_path_services (it posts a real debtor debit
+            # through TransactionServiceClient for every authorised collection, #1478), so
+            # advisory mode here meant a valid bearer token was the whole authorization check.
             #
-            # The comment that stood here was wrong on its own terms: it justified advisory mode
-            # with "non-money-path services run authz advisory", and sdd-service IS in
-            # rules.yaml: money_path_services — it posts a real debtor debit through
-            # TransactionServiceClient for every authorised collection (#1478). It also asserted
-            # that no sidecar existed, which was true and is what this change fixes: the `opa`
-            # container below now serves data.openbank.rest.allow, so every @Authorize decision is
-            # EVALUATED and LOGGED ("advisory: would DENY") instead of failing at the PDP call with
-            # nothing to record.
+            # WHY THE PRECONDITION THE PREVIOUS COMMENT SET IS NOT THE ONE THAT WAS MET. It said
+            # to flip "once the live decision log confirms the would-DENY population is empty for
+            # real callers". That criterion is unsatisfiable on this service and would have read
+            # as satisfied anyway: the `opa` sidecar has served ZERO policy queries since the
+            # bundle was deployed (its log contains /health and nothing else), and the app log has
+            # 23 lines, all boot. So "no would-DENY lines" is a fact about there being no traffic,
+            # not about the deny set — the absent-subject trap, and it fails in the reassuring
+            # direction.
             #
-            # Flipping this to "true" is a separate, deliberate change and must not ride along with
-            # the bootstrap: enforcement is only safe once the live decision log confirms the
-            # would-DENY population is empty for real callers. Two callers exist today — admin-ui
-            # operators (their own session token) and customer-edge (service-account-openbank-edge)
-            # — and sdd_rest_ext.rego grants both; the log is what proves there is no third.
-            # Access meanwhile stays enforced by JAX-RS @RolesAllowed and, for customer traffic, by
-            # the customer-edge ownership (IDOR) check before it ever reaches this service.
-            # Refs #1730, #3679.
+            # Replaced with a strictly stronger criterion: EXHAUSTIVE enumeration. Every action
+            # the two @Authorize-bearing resources declare (sdd.create/list/read/approve/update/
+            # delete/authorise) was evaluated with `opa eval` against this namespace's DEPLOYED
+            # sdd-opa-bundle ConfigMap, materialised to the sidecar's own layout, for every
+            # principal shape a real caller can present, with a must-DENY control (zzz.frobnicate,
+            # false for all) and must-ALLOW controls in the same run. That covers actions no
+            # traffic has ever exercised, which a decision log by construction cannot.
+            #
+            # The caller set is derived from the code, not assumed: customer-edge's five sdd
+            # routes (UpstreamClient authenticates client_credentials as `openbank-edge`, so
+            # principal.id == service-account-openbank-edge) and admin-ui's /sdd page, whose BFF
+            # forwards the operator's OWN session token. Nothing else calls this service — the
+            # only other repo hits for "sdd" outside it are comments.
+            #
+            # That enumeration found a regression the flip would otherwise have caused: both read
+            # resources admit ROLE_VIEWER, and the seeded demo@ / compliance@ users hold
+            # VIEWER / COMPLIANCE+VIEWER, yet base rest.rego granted them nothing on sdd.list.
+            # sdd_rest_ext.rego's `sdd-oversight-read` (added in the same change) closes it,
+            # read-only and as a closed two-action literal. Refs #1730, #3679.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
