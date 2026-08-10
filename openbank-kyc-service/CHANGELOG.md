@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.9](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.8...kyc-service-v0.10.9) (2026-08-10)
+
+
+### Bug Fixes
+
+* **audit:** give the unattributed producers a real actor, and a way to say nobody did it ([#4424](https://github.com/JiRaska/open-bank-oss/issues/4424)) ([0cadda3](https://github.com/JiRaska/open-bank-oss/commit/0cadda3725280119a86dba722efa692e1f783fc9))
+
 ## [0.10.8](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.7...kyc-service-v0.10.8) (2026-08-09)
 
 
