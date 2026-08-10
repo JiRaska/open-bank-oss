@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.8](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.7...clearing-service-v0.7.8) (2026-08-10)
+
+
+### Bug Fixes
+
+* **lending:** stamp business event time on the money-path audit producers ([#4412](https://github.com/JiRaska/open-bank-oss/issues/4412)) ([6e43ccc](https://github.com/JiRaska/open-bank-oss/commit/6e43ccc78ac8cd4f4a8af63743f6a530056a7510)), closes [#3914](https://github.com/JiRaska/open-bank-oss/issues/3914)
+
 ## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.6...clearing-service-v0.7.7) (2026-08-02)
 
 
