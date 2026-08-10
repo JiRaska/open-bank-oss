@@ -12,10 +12,15 @@ import com.openbank.libs.lending.compliance.CompiledCompliancePack
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
 import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /**
  * Converges this pod's [CompliancePackRegistry] onto the activations that are committed in the
@@ -52,8 +57,18 @@ import org.jboss.logging.Logger
 class CompliancePackRefresher(
     private val activations: CompliancePackActivationRepository,
     private val registry: CompliancePackRegistry,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(CompliancePackRefresher::class.java)
+
+    // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
+    // because its observability wiring was not initialised.
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run.
+    fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
+    }
 
     @Scheduled(
         every = "{lending.compliance.refresh-interval}",
@@ -76,6 +91,14 @@ class CompliancePackRefresher(
             // The only signal that this replica WAS behind. Silence here is the healthy state.
             log.infof("compliance packs converged from the activation table: %d pack(s) newly enforceable", added)
         }
+        // ADR-0160 mechanism 3: record after the pass completes, whether or not it found anything to
+        // converge — an empty pass IS success (this replica was already caught up).
+        liveness?.recordSuccess()
+    }
+
+    private companion object {
+        /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
+        const val WORKFLOW_NAME = "lending-compliance-pack-refresh"
     }
 }
 
