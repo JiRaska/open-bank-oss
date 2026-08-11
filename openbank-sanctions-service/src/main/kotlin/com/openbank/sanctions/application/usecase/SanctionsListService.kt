@@ -4,7 +4,11 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.domain.model.SanctionsList
+import com.openbank.sanctions.domain.model.SanctionsListChangeSet
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
@@ -21,6 +25,7 @@ import java.util.UUID
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
     private val importer: SanctionsImportService,
+    private val outbox: SanctionsOutboxRepository,
     private val clock: Clock,
 ) {
 
@@ -30,7 +35,8 @@ class SanctionsListService(
     constructor(
         repo: SanctionsListRepositoryImpl,
         importer: SanctionsImportService,
-    ) : this(repo, importer, Clock.systemUTC())
+        outbox: SanctionsOutboxRepository,
+    ) : this(repo, importer, outbox, Clock.systemUTC())
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -55,10 +61,11 @@ class SanctionsListService(
         val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
         val count = if (enumType != null) {
-            val imported = importer.importList(enumType, list.sourceUrl)
-            // If importer returned 0 (format stub / network error), fall back to stored count
-            if (imported > 0) {
-                imported
+            val changeSet = importer.importList(enumType, list.sourceUrl)
+            publishChangeEvent(list.id, changeSet)
+            // If importer found nothing (format stub / network error), fall back to stored count
+            if (changeSet.changeCount > 0) {
+                changeSet.changeCount
             } else {
                 list.lastEntryCount ?: 0
             }
@@ -67,6 +74,43 @@ class SanctionsListService(
         }
         return repo.markUpdated(listType, count)
             ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
+    }
+
+    /**
+     * Publish a `SANCTIONS_LIST_CHANGED` outbox event when a refresh produced a content-level
+     * diff (ADR-0256 D1). A content-identical refresh ([SanctionsListChangeSet.isEmpty]) raises
+     * nothing — otherwise the daily cron would be a daily fleet-wide re-screening. The event
+     * carries the changed/deactivated external_ids so the consumer (kyc-service) can re-screen
+     * only the affected customers, not the whole book.
+     *
+     * Failure to persist the outbox row fails the refresh loudly: a list that *did* change but
+     * emitted no event is precisely the screening gap this exists to close, so it must not pass
+     * silently.
+     */
+    private suspend fun publishChangeEvent(listId: UUID, changeSet: SanctionsListChangeSet) {
+        if (changeSet.isEmpty) return
+        val payload = mapper.writeValueAsString(
+            mapOf(
+                "listType" to changeSet.listType.name,
+                "changedExternalIds" to changeSet.changedExternalIds.sorted(),
+                "deactivatedExternalIds" to changeSet.deactivatedExternalIds.sorted(),
+                "changeCount" to changeSet.changeCount,
+            ),
+        )
+        outbox.persistStandalone(
+            OutboxMessage(
+                aggregateId = listId,
+                eventType = EVENT_SANCTIONS_LIST_CHANGED,
+                payload = payload,
+            ),
+        )
+        Log.infof(
+            "Published %s for %s (%d changed, %d deactivated)",
+            EVENT_SANCTIONS_LIST_CHANGED,
+            changeSet.listType,
+            changeSet.changedExternalIds.size,
+            changeSet.deactivatedExternalIds.size,
+        )
     }
 
     suspend fun refreshAll(): List<SanctionsList> {
@@ -163,5 +207,7 @@ class SanctionsListService(
 
     companion object {
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+        const val EVENT_SANCTIONS_LIST_CHANGED = "SANCTIONS_LIST_CHANGED"
+        private val mapper = jacksonObjectMapper().findAndRegisterModules()
     }
 }

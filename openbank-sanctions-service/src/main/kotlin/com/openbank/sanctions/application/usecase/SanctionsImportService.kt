@@ -7,6 +7,7 @@ package com.openbank.sanctions.application.usecase
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
+import com.openbank.sanctions.domain.model.SanctionsListChangeSet
 import com.openbank.sanctions.domain.model.SanctionsListType
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
@@ -56,9 +57,12 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
 
     /**
      * Downloads and imports [listType] from [sourceUrl].
-     * @return number of entries upserted (0 if format not yet implemented).
+     * @return the content-level change set (which entries were written/changed vs dropped) so a
+     *   caller can fire a `SANCTIONS_LIST_CHANGED` trigger (ADR-0256 D1); an empty change set
+     *   means the import was content-identical and nothing is raised. The [SanctionsListChangeSet.changeCount]
+     *   is also the "entries upserted" count legacy callers used to read from the Int return.
      */
-    suspend fun importList(listType: SanctionsListType, sourceUrl: String): Int {
+    suspend fun importList(listType: SanctionsListType, sourceUrl: String): SanctionsListChangeSet {
         Log.infof("Importing %s from %s", listType, sourceUrl)
         return try {
             when (listType) {
@@ -71,11 +75,11 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
                 SanctionsListType.HM_TREASURY -> importOpenSanctionsCsv(sourceUrl, listType, listOf("HMT-SANCTIONS"))
                 SanctionsListType.FATF_HIGH_RISK -> {
                     Log.info("FATF is country-risk — skipping import")
-                    0
+                    SanctionsListChangeSet(listType)
                 }
                 SanctionsListType.CNB_DOMESTIC -> {
                     Log.info("CNB has no machine-readable feed — entries seeded via migration")
-                    0
+                    SanctionsListChangeSet(listType)
                 }
             }
         } catch (ex: Exception) {
@@ -85,7 +89,7 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
                 ex.javaClass.simpleName,
                 ex.message,
             )
-            0
+            SanctionsListChangeSet(listType)
         }
     }
 
@@ -93,7 +97,7 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
     // OFAC SDN  (sdn.xml) — SAX streaming, O(1) peak memory per entry
     // ──────────────────────────────────────────────────────────────────────────
 
-    private suspend fun importOfacSdn(url: String): Int = withContext(Dispatchers.IO) {
+    private suspend fun importOfacSdn(url: String): SanctionsListChangeSet = withContext(Dispatchers.IO) {
         val inputStream = httpGetStream(url)
         val allEntries = mutableListOf<SanctionsEntry>()
 
@@ -199,12 +203,14 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
         )
 
         Log.infof("SAX-parsed %d OFAC SDN entries", allEntries.size)
-        var total = 0
+        val changed = mutableSetOf<String>()
         for (chunk in allEntries.chunked(IMPORT_BATCH_SIZE)) {
-            total += entryRepo.upsertAll(chunk)
+            changed += entryRepo.upsertAllReturningChanged(chunk)
         }
-        Log.infof("Upserted %d OFAC SDN entries", total)
-        total
+        // OFAC SDN deliberately runs no deactivation sweep — unlike the OpenSanctions CSV path,
+        // it never has, and adding one is a behavioural change beyond diff detection.
+        Log.infof("Upserted %d OFAC SDN entries (%d changed)", allEntries.size, changed.size)
+        SanctionsListChangeSet(SanctionsListType.OFAC_SDN, changedExternalIds = changed)
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -222,113 +228,97 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
         url: String,
         listType: SanctionsListType,
         defaultPrograms: List<String> = listOf("PEP"),
-    ): Int {
+    ): SanctionsListChangeSet {
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { reader.readLine() } ?: return 0
-        val headers = parseCsvLine(headerLine)
+        val headerLine = withContext(Dispatchers.IO) { reader.readLine() } ?: return SanctionsListChangeSet(listType)
+        val headers = OpenSanctionsCsvColumns.parseCsvLine(headerLine)
 
-        // Resolve column indexes from actual header (format-safe)
-        val idxId = headers.indexOf("id")
-        val idxSchema = headers.indexOf("schema")
-        val idxName = headers.indexOf("name")
-        val idxAliases = headers.indexOf("aliases")
-        val idxBirthDate = headers.indexOf("birth_date")
-        val idxCountries = headers.indexOf("countries")
-        val idxProgramIds = headers.indexOf("program_ids")
-
-        if (idxId < 0 || idxName < 0) {
+        val idx = OpenSanctionsCsvColumns.from(headers)
+        if (idx == null) {
             Log.warnf("Unexpected CSV header for %s — missing 'id' or 'name' column. Headers: %s", listType, headers)
             reader.close()
-            return 0
+            return SanctionsListChangeSet(listType)
         }
 
-        var total = 0
-        val batch = mutableListOf<SanctionsEntry>()
+        val changed = mutableSetOf<String>()
         // Present-set for the end-of-stream reconciliation sweep below — NOT a deactivate-first
-        // pass. Deactivating stale entries used to run BEFORE this loop, unconditionally, for
+        // pass. Deactivating stale entries used to run BEFORE the read loop, unconditionally, for
         // every row in the list; that made a failed refresh (network drop mid-stream) leave the
         // whole list wiped with only the partial replacement reactivated, and doubled the WAL
         // cost of every successful refresh by rewriting the still-present majority twice
         // (deactivate, then reactivate on upsert). See #1432.
         val seenExternalIds = mutableSetOf<String>()
+        val total = streamBatches(reader, idx, listType, defaultPrograms, seenExternalIds, changed)
 
-        fun col(cols: List<String>, idx: Int) = if (idx >= 0) cols.getOrElse(idx) { "" }.trim() else ""
+        // Only reached if the stream completed without throwing — a mid-stream failure (network
+        // drop, malformed line) propagates out of streamBatches instead, and the existing list is
+        // left untouched rather than partially wiped.
+        val deactivated = entryRepo.deactivateMissingReturning(listType, seenExternalIds)
+        Log.infof(
+            "Imported %d OpenSanctions entries for %s (%d changed, %d no longer present, deactivated)",
+            total,
+            listType,
+            changed.size,
+            deactivated.size,
+        )
+        return SanctionsListChangeSet(listType, changed, deactivated)
+    }
 
+    /** Read the whole CSV body, upserting in [IMPORT_BATCH_SIZE] chunks; returns rows read. */
+    private suspend fun streamBatches(
+        reader: BufferedReader,
+        idx: OpenSanctionsCsvColumns,
+        listType: SanctionsListType,
+        defaultPrograms: List<String>,
+        seenExternalIds: MutableSet<String>,
+        changed: MutableSet<String>,
+    ): Int {
+        var total = 0
+        val batch = mutableListOf<SanctionsEntry>()
         try {
             while (true) {
                 val rawLine = withContext(Dispatchers.IO) { reader.readLine() } ?: break
-                if (rawLine.isBlank()) continue
-
-                val cols = parseCsvLine(rawLine)
-                val id = col(cols, idxId)
-                val schema = col(cols, idxSchema)
-                val name = col(cols, idxName)
-                val aliasesRaw = col(cols, idxAliases)
-                val birthDate = col(cols, idxBirthDate)
-                val countriesRaw = col(cols, idxCountries)
-                val programRaw = col(cols, idxProgramIds)
-
-                if (name.isBlank()) continue
-                id.takeIf { it.isNotBlank() }?.let { seenExternalIds += it }
-
-                val aliases = aliasesRaw.split(";")
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() && it != name }
-                    .distinct()
-
-                val nationalities = countriesRaw.split(";")
-                    .map { it.trim() }
-                    .filter { it.isNotBlank() }
-
-                val programs = if (programRaw.isNotBlank()) {
-                    programRaw.split(";").map { it.trim() }.filter { it.isNotBlank() }
-                } else {
-                    defaultPrograms
-                }
-
-                val entityType = when {
-                    schema in listOf("Organization", "Company", "PublicBody", "LegalEntity") -> EntityType.ORGANIZATION
-                    schema == "Vessel" -> EntityType.VESSEL
-                    schema == "Aircraft" -> EntityType.AIRCRAFT
-                    else -> EntityType.INDIVIDUAL
-                }
-
-                batch += buildEntry(
-                    listType = listType,
-                    externalId = id.takeIf { it.isNotBlank() },
-                    entityType = entityType,
-                    primaryName = name,
-                    aliases = aliases,
-                    dateOfBirth = birthDate.takeIf { it.isNotBlank() },
-                    nationalities = nationalities,
-                    programs = programs,
-                )
-
-                if (batch.size >= IMPORT_BATCH_SIZE) {
-                    total += entryRepo.upsertAll(batch)
-                    batch.clear()
-                    if (total % 10_000 == 0) Log.infof("OpenSanctions %s: %d entries imported so far…", listType, total)
-                }
+                val entry = parseOpenSanctionsRow(rawLine, idx, listType, defaultPrograms) ?: continue
+                entry.externalId?.let { seenExternalIds += it }
+                batch += entry
+                if (batch.size >= IMPORT_BATCH_SIZE) total += flushBatch(batch, changed)
             }
         } finally {
-            reader.close()
+            withContext(Dispatchers.IO) { reader.close() }
         }
-
-        if (batch.isNotEmpty()) total += entryRepo.upsertAll(batch)
-
-        // Only reached if the loop above completed without throwing — a mid-stream failure
-        // (network drop, malformed line) propagates out of this function instead, and the
-        // existing list is left untouched rather than partially wiped.
-        val deactivated = entryRepo.deactivateMissing(listType, seenExternalIds)
-        Log.infof(
-            "Imported %d OpenSanctions entries for %s (%d no longer present, deactivated)",
-            total,
-            listType,
-            deactivated,
-        )
+        total += flushBatch(batch, changed)
+        if (total % 10_000 == 0 || total >= 10_000) Log.infof("OpenSanctions %s: %d entries imported", listType, total)
         return total
+    }
+
+    /** Upsert [batch] into the store, accumulating its changed ids into [changed]; returns rows flushed. */
+    private suspend fun flushBatch(batch: MutableList<SanctionsEntry>, changed: MutableSet<String>): Int {
+        if (batch.isEmpty()) return 0
+        changed += entryRepo.upsertAllReturningChanged(batch)
+        val flushed = batch.size
+        batch.clear()
+        return flushed
+    }
+
+    private fun parseOpenSanctionsRow(
+        rawLine: String,
+        idx: OpenSanctionsCsvColumns,
+        listType: SanctionsListType,
+        defaultPrograms: List<String>,
+    ): SanctionsEntry? {
+        val parsed = idx.parseRow(rawLine) ?: return null
+        return buildEntry(
+            listType = listType,
+            externalId = parsed.id,
+            entityType = parsed.entityType,
+            primaryName = parsed.name,
+            aliases = parsed.aliases,
+            dateOfBirth = parsed.birthDate,
+            nationalities = parsed.nationalities,
+            programs = parsed.programs.ifEmpty { defaultPrograms },
+        )
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -374,33 +364,6 @@ class SanctionsImportService(private val entryRepo: SanctionsEntryRepository, pr
         .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
         .lowercase()
         .trim()
-
-    /** RFC 4180-compatible CSV line parser (handles quoted fields with embedded commas/quotes). */
-    private fun parseCsvLine(line: String): List<String> {
-        val result = mutableListOf<String>()
-        val current = StringBuilder()
-        var inQuote = false
-        var i = 0
-        while (i < line.length) {
-            val ch = line[i]
-            when {
-                ch == '"' && !inQuote -> inQuote = true
-                ch == '"' && inQuote && i + 1 < line.length && line[i + 1] == '"' -> {
-                    current.append('"')
-                    i++
-                }
-                ch == '"' && inQuote -> inQuote = false
-                ch == ',' && !inQuote -> {
-                    result += current.toString()
-                    current.clear()
-                }
-                else -> current.append(ch)
-            }
-            i++
-        }
-        result += current.toString()
-        return result
-    }
 
     companion object {
         const val IMPORT_BATCH_SIZE = 500

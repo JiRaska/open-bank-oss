@@ -40,6 +40,18 @@ interface SanctionsEntryRepository {
     suspend fun upsertAll(entries: List<SanctionsEntry>): Int
 
     /**
+     * Same upsert as [upsertAll], but returns the `external_id`s of the rows actually written
+     * (inserted, reactivated, or content-changed), not just their count. Used to detect *which*
+     * entries a refresh changed so a downstream consumer (perpetual KYC re-screening, ADR-0256)
+     * can re-screen only the affected customers instead of the whole book.
+     *
+     * The set is derived from the same `RETURNING` clause that backs the count — so it cannot
+     * disagree with what was written. Entries with a null `external_id` are unidentifiable across
+     * refreshes and are excluded by construction (the `ON CONFLICT` path requires non-null).
+     */
+    suspend fun upsertAllReturningChanged(entries: List<SanctionsEntry>): Set<String>
+
+    /**
      * Soft-delete every active entry of [listType] whose `external_id` is NOT in
      * [presentExternalIds] — i.e. it was dropped from the upstream source between this refresh
      * and the last one.
@@ -59,6 +71,13 @@ interface SanctionsEntryRepository {
      * @return number of rows deactivated.
      */
     suspend fun deactivateMissing(listType: SanctionsListType, presentExternalIds: Set<String>): Int
+
+    /**
+     * Same deactivation as [deactivateMissing], but returns the `external_id`s of the rows it
+     * deactivated, so a downstream consumer (ADR-0256) can re-screen customers that previously
+     * matched an entry the upstream source has now dropped.
+     */
+    suspend fun deactivateMissingReturning(listType: SanctionsListType, presentExternalIds: Set<String>): Set<String>
 
     suspend fun countByListType(listType: SanctionsListType): Long
 }

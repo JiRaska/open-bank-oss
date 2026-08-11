@@ -147,6 +147,76 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
         return total
     }
 
+    override suspend fun upsertAllReturningChanged(entries: List<SanctionsEntry>): Set<String> {
+        if (entries.isEmpty()) return emptySet()
+        // Same INSERT … ON CONFLICT … WHERE-guard as upsertAll, but RETURNING external_id so the
+        // caller learns *which* entries changed, not just how many. Kept as a separate statement
+        // (not a flag on upsertAll) so the hot refresh path pays zero cost for a set it ignores.
+        val sql = """
+            INSERT INTO sanctions_entries
+                (list_type, external_id, entity_type, primary_name, aliases_json,
+                 date_of_birth, nationalities, programs, search_text, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, true)
+            ON CONFLICT (list_type, external_id) WHERE external_id IS NOT NULL DO UPDATE SET
+                entity_type  = EXCLUDED.entity_type,
+                primary_name = EXCLUDED.primary_name,
+                aliases_json = EXCLUDED.aliases_json,
+                date_of_birth= EXCLUDED.date_of_birth,
+                nationalities= EXCLUDED.nationalities,
+                programs     = EXCLUDED.programs,
+                search_text  = EXCLUDED.search_text,
+                active       = true,
+                updated_at   = NOW()
+            WHERE
+                sanctions_entries.active        IS NOT TRUE
+                OR sanctions_entries.entity_type   IS DISTINCT FROM EXCLUDED.entity_type
+                OR sanctions_entries.primary_name  IS DISTINCT FROM EXCLUDED.primary_name
+                OR sanctions_entries.aliases_json  IS DISTINCT FROM EXCLUDED.aliases_json
+                OR sanctions_entries.date_of_birth IS DISTINCT FROM EXCLUDED.date_of_birth
+                OR sanctions_entries.nationalities IS DISTINCT FROM EXCLUDED.nationalities
+                OR sanctions_entries.programs      IS DISTINCT FROM EXCLUDED.programs
+                OR sanctions_entries.search_text   IS DISTINCT FROM EXCLUDED.search_text
+            RETURNING external_id
+        """.trimIndent()
+
+        val tuples: List<Tuple> = entries.map { e ->
+            Tuple.newInstance(
+                CoreTuple.wrap(
+                    listOf(
+                        e.listType.name,
+                        e.externalId,
+                        e.entityType.name,
+                        e.primaryName,
+                        mapper.writeValueAsString(e.aliases),
+                        e.dateOfBirth,
+                        mapper.writeValueAsString(e.nationalities),
+                        mapper.writeValueAsString(e.programs),
+                        e.searchText,
+                    ),
+                ),
+            )
+        }
+
+        val changed = mutableSetOf<String>()
+        for (chunk in tuples.chunked(500)) {
+            changed += pool.preparedQuery(sql).executeBatch(chunk).awaitSuspending().collectChangedIds()
+        }
+        return changed
+    }
+
+    /** Drain a batched `RETURNING external_id` result set (possibly multi-rowset) into a set. */
+    private fun RowSet<Row>.collectChangedIds(): Set<String> {
+        val ids = mutableSetOf<String>()
+        var rowSet: RowSet<Row>? = this
+        while (rowSet != null) {
+            for (row in rowSet) {
+                row.getString("external_id")?.let { ids += it }
+            }
+            rowSet = rowSet.next()
+        }
+        return ids
+    }
+
     override suspend fun deactivateMissing(listType: SanctionsListType, presentExternalIds: Set<String>): Int {
         // Array-parameter anti-join, not a temp table: vertx-pg-client binds a Kotlin
         // Array<String> as a native Postgres text[] parameter, so this is one round trip
@@ -169,6 +239,33 @@ class SanctionsEntryRepositoryImpl(private val pool: PgPool, private val clock: 
             .execute(Tuple.of(listType.name, presentExternalIds.toTypedArray()))
             .awaitSuspending()
         return result.rowCount()
+    }
+
+    override suspend fun deactivateMissingReturning(
+        listType: SanctionsListType,
+        presentExternalIds: Set<String>,
+    ): Set<String> {
+        // Same anti-join predicate as deactivateMissing (see its comment for why `NOT (= ANY)`),
+        // with RETURNING external_id so the caller learns which entries were dropped upstream.
+        val rows = pool
+            .preparedQuery(
+                """
+                UPDATE sanctions_entries
+                SET active = false, updated_at = NOW()
+                WHERE list_type = $1
+                  AND active = true
+                  AND external_id IS NOT NULL
+                  AND NOT (external_id = ANY($2))
+                RETURNING external_id
+                """.trimIndent(),
+            )
+            .execute(Tuple.of(listType.name, presentExternalIds.toTypedArray()))
+            .awaitSuspending()
+        val changed = mutableSetOf<String>()
+        for (row in rows) {
+            row.getString("external_id")?.let { changed += it }
+        }
+        return changed
     }
 
     override suspend fun countByListType(listType: SanctionsListType): Long {

@@ -26,6 +26,10 @@ class SanctionsOutboxRepositoryImpl(private val clock: Clock) :
 
     override fun persistInTransaction(message: OutboxMessage): Uni<Void> = persist(message.toEntity()).replaceWithVoid()
 
+    override suspend fun persistStandalone(message: OutboxMessage) {
+        Panache.withTransaction { persist(message.toEntity()) }.awaitSuspending()
+    }
+
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
         find(
             "status in (?1, ?2) order by createdAt asc",
