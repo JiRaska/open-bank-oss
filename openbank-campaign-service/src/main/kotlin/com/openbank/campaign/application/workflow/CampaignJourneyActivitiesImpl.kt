@@ -8,6 +8,8 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.domain.model.CampaignState
+import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
@@ -37,6 +39,7 @@ import java.util.UUID
  * rethrows so the Temporal activity retries instead of terminating a journey on a transient blip.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // One method per activity declared by CampaignJourneyActivities.
 open class CampaignJourneyActivitiesImpl(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
@@ -53,13 +56,18 @@ open class CampaignJourneyActivitiesImpl(
      */
     @ConfigProperty(name = "openbank.campaign.dry-run", defaultValue = "true")
     private val dryRun: Boolean,
-    @ConfigProperty(name = "openbank.campaign.marketing-scope", defaultValue = "MARKETING_COMMS_EMAIL")
-    private val marketingScope: String,
 ) : CampaignJourneyActivities {
 
     override fun loadDefinition(campaignId: UUID): JourneyDefinition = runBlockingOnWorker {
         val campaign = campaigns.findById(campaignId)
         JourneyDefinition(campaign?.steps ?: emptyList(), campaign?.stopCondition)
+    }
+
+    override fun controlState(campaignId: UUID, partyId: UUID): JourneyControlState = runBlockingOnWorker {
+        JourneyControlState(
+            campaignState = campaigns.findById(campaignId)?.state,
+            goalReached = sendLog.conversionContextFor(campaignId, partyId).alreadyConverted,
+        )
     }
 
     override fun sendsSoFar(campaignId: UUID, partyId: UUID): Int = runBlockingOnWorker {
@@ -97,7 +105,18 @@ open class CampaignJourneyActivitiesImpl(
     @Suppress("TooGenericExceptionCaught")
     @MarketingCallSite
     internal suspend fun deliverStepGated(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome {
-        val campaign = campaigns.findById(campaignId) ?: return StepOutcome.SUPPRESSED
+        val campaign = campaigns.findById(campaignId) ?: return StepOutcome.CAMPAIGN_CLOSED
+        when (campaign.state) {
+            CampaignState.PAUSED -> return StepOutcome.CAMPAIGN_PAUSED
+            CampaignState.CLOSED -> return StepOutcome.CAMPAIGN_CLOSED
+            CampaignState.ACTIVE -> Unit
+            CampaignState.DRAFT,
+            CampaignState.PENDING_APPROVAL,
+            -> return StepOutcome.CAMPAIGN_CLOSED
+        }
+        if (sendLog.conversionContextFor(campaignId, partyId).alreadyConverted) {
+            return StepOutcome.GOAL_REACHED
+        }
         val step = campaign.steps.firstOrNull { it.order == stepOrder } ?: return StepOutcome.SUPPRESSED
 
         // ADR-0219 (#3656): one gate call wraps the suppression list, the frequency cap, quiet
@@ -106,7 +125,7 @@ open class CampaignJourneyActivitiesImpl(
             val decision = contactGate.check(
                 partyId,
                 ContactClass.OUTBOUND_SEND,
-                marketingScope,
+                marketingScopeFor(step.channel),
                 topic = campaign.goal,
             )
         ) {
@@ -178,6 +197,8 @@ open class CampaignJourneyActivitiesImpl(
     override fun markTerminated(campaignId: UUID, partyId: UUID, reason: TerminationReason) = runBlockingOnWorker {
         val state = when (reason) {
             TerminationReason.CONSENT_REVOKED -> EnrolmentState.TERMINATED_CONSENT_REVOKED
+            TerminationReason.CAMPAIGN_CLOSED -> EnrolmentState.TERMINATED_CAMPAIGN_CLOSED
+            TerminationReason.GOAL_REACHED -> EnrolmentState.COMPLETED_GOAL_REACHED
             TerminationReason.SUPPRESSED -> EnrolmentState.TERMINATED_SUPPRESSED
             TerminationReason.STOPPED_MAX_SENDS -> EnrolmentState.STOPPED_MAX_SENDS
         }
@@ -200,6 +221,12 @@ open class CampaignJourneyActivitiesImpl(
         VertxContextSupport.subscribeAndAwait { CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni() }
 
     companion object {
+        /** ADR-0198 D4: marketing consent is channel-specific, never one service-wide setting. */
+        private fun marketingScopeFor(channel: Channel): String = when (channel) {
+            Channel.EMAIL -> "MARKETING_COMMS_EMAIL"
+            Channel.PUSH -> "MARKETING_COMMS_PUSH"
+        }
+
         /** Gate deny reasons that are POLICY outcomes, recorded per step (ADR-0219). */
         private fun outcomeFor(reason: ContactDenyReason?): SendOutcome = when (reason) {
             ContactDenyReason.SUPPRESSED_LIST -> SendOutcome.SUPPRESSED_LIST

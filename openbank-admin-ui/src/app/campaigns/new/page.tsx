@@ -80,6 +80,9 @@ export default function NewCampaignPage() {
   const [stopAfter, setStopAfter] = useState<number | null>(null)
   // Null = measure nothing, which is the service's default and an honest state rather than a gap.
   const [conversionRule, setConversionRule] = useState<string | null>(null)
+  // A bounded, explicit control group is the only way to compare outcome rates with no-contact
+  // peers; zero preserves the existing all-treatment behaviour.
+  const [holdoutPercent, setHoldoutPercent] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -164,6 +167,7 @@ export default function NewCampaignPage() {
         segmentVersion: Number(segVersion),
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
         ...(conversionRule ? { conversionRule } : {}),
+        ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
@@ -338,7 +342,10 @@ export default function NewCampaignPage() {
                 type="button"
                 data-conversion-pick={r ?? 'NONE'}
                 data-selected={conversionRule === r ? 'true' : 'false'}
-                onClick={() => setConversionRule(r)}
+                onClick={() => {
+                  setConversionRule(r)
+                  if (r === null) setHoldoutPercent(0)
+                }}
                 className="btn"
                 style={
                   conversionRule === r
@@ -359,6 +366,39 @@ export default function NewCampaignPage() {
               'Počítá se skutečná událost v bance, ne otevření e-mailu ani proklik — ty se nesledují.',
               'Counted from a real banking event, never an email open or a click — those are not tracked.',
             )}
+          </p>
+        </div>
+
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium" htmlFor="c-holdout">
+            {t('Kontrolní skupina', 'Control group')}
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              id="c-holdout"
+              data-holdout-percent
+              type="number"
+              min="0"
+              max="50"
+              step="5"
+              className="input"
+              style={{ width: '5.5rem' }}
+              value={holdoutPercent}
+              disabled={!conversionRule}
+              onChange={e => setHoldoutPercent(Math.min(50, Math.max(0, Number(e.target.value) || 0)))}
+            />
+            <span className="text-sm text-muted-foreground">%</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {conversionRule
+              ? t(
+                  'Tito lidé dostanou trvale stejné zařazení, ale žádnou zprávu. Porovnáme jejich skutečnou konverzi s osloveným publikem.',
+                  'These people keep a stable assignment but receive no message. Their real conversion rate is compared with the contacted audience.',
+                )
+              : t(
+                  'Nejdřív vyberte měřitelný cíl. Bez něj by kontrolní skupina jen zadržela komunikaci bez možnosti zjistit výsledek.',
+                  'Choose a measurable success event first. Without it, a control group would withhold communication without any way to learn from it.',
+                )}
           </p>
         </div>
 

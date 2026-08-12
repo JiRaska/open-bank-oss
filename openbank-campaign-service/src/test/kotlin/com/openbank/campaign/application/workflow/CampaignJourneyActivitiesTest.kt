@@ -61,6 +61,8 @@ class CampaignJourneyActivitiesTest {
 
     private inner class Harness {
         var consent = true
+        var consentScope: String? = null
+        var channel = Channel.EMAIL
         var sends = 0
         var entries = listOf<SuppressionEntry>()
         var failWith: RuntimeException? = null
@@ -71,7 +73,22 @@ class CampaignJourneyActivitiesTest {
         val correlationIds = mutableListOf<UUID>()
 
         val campaigns = object : CampaignRepository {
-            override suspend fun findById(id: UUID) = if (id == campaignId) campaign else null
+            override suspend fun findById(id: UUID) = if (id == campaignId) {
+                campaign.copy(
+                    steps = listOf(
+                        campaign.steps.single().copy(
+                            channel = channel,
+                            template = if (channel == Channel.PUSH) {
+                                "MARKETING_PRODUCT_OFFER_PUSH"
+                            } else {
+                                "MARKETING_PRODUCT_OFFER"
+                            },
+                        ),
+                    ),
+                )
+            } else {
+                null
+            }
             override suspend fun list() = listOf(campaign)
             override suspend fun save(campaign: Campaign) = campaign
             override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
@@ -127,7 +144,8 @@ class CampaignJourneyActivitiesTest {
         }
 
         val gate = ContactPolicyGate(
-            consent = ContactConsentPort { _, _ ->
+            consent = ContactConsentPort { _, scope ->
+                consentScope = scope
                 failWith?.let { throw it }
                 consent
             },
@@ -154,7 +172,6 @@ class CampaignJourneyActivitiesTest {
                 gate,
                 notificationSend,
                 dryRun = false,
-                marketingScope = "MARKETING_COMMS_EMAIL",
             )
     }
 
@@ -234,6 +251,24 @@ class CampaignJourneyActivitiesTest {
             },
         ).isEqualTo(StepOutcome.SUPPRESSED)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SUPPRESSED_CONSENT)
+    }
+
+    @Test
+    fun `email delivery checks the email-specific marketing consent`() {
+        val h = Harness()
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_EMAIL")
+    }
+
+    @Test
+    fun `push delivery checks push consent rather than borrowing email consent`() {
+        val h = Harness().apply { channel = Channel.PUSH }
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_PUSH")
     }
 
     @Test

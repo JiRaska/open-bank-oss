@@ -4,6 +4,9 @@
 
 package com.openbank.campaign.domain.model
 
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -27,6 +30,13 @@ data class Campaign(
      */
     val conversionRule: String? = null,
     /**
+     * Percentage of the eligible audience assigned to a no-contact control cohort. A control is
+     * meaningful only when there is an observed outcome to compare, so it is unavailable without
+     * a [conversionRule]. Fifty percent is an intentional safety ceiling: an author can measure a
+     * campaign without accidentally withholding it from most of the audience.
+     */
+    val holdoutPercent: Int = 0,
+    /**
      * Cadence key from [ScheduleCatalog], or null for the one-shot campaign that was the only kind
      * until now. Null means `POST /{id}/enrol` is the only way in, exactly as before.
      */
@@ -47,6 +57,12 @@ data class Campaign(
         require(name.isNotBlank()) { "campaign name must not be blank" }
         require(steps.isNotEmpty()) { "campaign must have at least one step" }
         require(steps.size <= MAX_STEPS) { "journeys are capped at $MAX_STEPS steps in the first slice" }
+        require(holdoutPercent in 0..MAX_HOLDOUT_PERCENT) {
+            "holdoutPercent must be between 0 and $MAX_HOLDOUT_PERCENT"
+        }
+        require(holdoutPercent == 0 || conversionRule != null) {
+            "a holdout requires a conversionRule to measure its outcome"
+        }
     }
 
     /** DRAFT → PENDING_APPROVAL → ACTIVE ⇄ PAUSED → CLOSED. Terminal states never leave. */
@@ -80,6 +96,36 @@ data class Campaign(
 
     companion object {
         const val MAX_STEPS = 5
+        const val MAX_HOLDOUT_PERCENT = 50
+    }
+}
+
+/**
+ * A stable experimental assignment. It is stored with the enrolment as well as derived here: the
+ * stored value is the audit record, while deriving before creating a journey makes retries choose
+ * exactly the same customer cohort. SHA-256 is used instead of `UUID.hashCode()`, whose intent is
+ * object hashing rather than a documented experiment bucket.
+ */
+enum class ExperimentCohort {
+    TREATMENT,
+    HOLDOUT,
+    ;
+
+    companion object {
+        fun assign(campaignId: UUID, partyId: UUID, holdoutPercent: Int): ExperimentCohort {
+            require(holdoutPercent in 0..Campaign.MAX_HOLDOUT_PERCENT) {
+                "holdoutPercent must be between 0 and ${Campaign.MAX_HOLDOUT_PERCENT}"
+            }
+            if (holdoutPercent == 0) return TREATMENT
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest("$campaignId:$partyId".toByteArray(StandardCharsets.UTF_8))
+            val bucket = (ByteBuffer.wrap(digest, 0, Int.SIZE_BYTES).int.toLong() and UNSIGNED_INT_MASK) % BUCKETS
+            return if (bucket < holdoutPercent * PERCENT_TO_BUCKET) HOLDOUT else TREATMENT
+        }
+
+        private const val UNSIGNED_INT_MASK = 0xffff_ffffL
+        private const val BUCKETS = 10_000L
+        private const val PERCENT_TO_BUCKET = 100L
     }
 }
 

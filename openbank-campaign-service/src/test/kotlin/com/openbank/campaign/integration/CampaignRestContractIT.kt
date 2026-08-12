@@ -5,6 +5,7 @@
 package com.openbank.campaign.integration
 
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
+import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -14,8 +15,11 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.containsInAnyOrder
 import org.junit.jupiter.api.Test
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -38,6 +42,9 @@ import java.util.UUID
 @QuarkusTestResource(CampaignPostgresRedisTestResource::class)
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR"])
 class CampaignRestContractIT {
+
+    @Inject
+    lateinit var dataSource: AgroalDataSource
 
     /**
      * No Kafka and no Temporal worker. Neither is on the path of these endpoints, and starting them
@@ -74,6 +81,51 @@ class CampaignRestContractIT {
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
+
+    private fun insertEnrolment(
+        campaignId: UUID,
+        state: String,
+        cohort: String = "TREATMENT",
+        partyId: UUID = UUID.randomUUID(),
+    ): UUID {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO enrolments (id, campaign_id, party_id, state, current_step, started_at, experiment_cohort)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setObject(3, partyId)
+                statement.setString(4, state)
+                statement.setInt(5, 1)
+                statement.setObject(6, OffsetDateTime.now())
+                statement.setString(7, cohort)
+                statement.executeUpdate()
+            }
+        }
+        return partyId
+    }
+
+    private fun insertConversion(campaignId: UUID, partyId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO send_log (id, campaign_id, party_id, step_order, outcome, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setObject(3, partyId)
+                statement.setInt(4, 1)
+                statement.setString(5, "CONVERTED")
+                statement.setObject(6, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
 
     /**
      * The regression this file exists for, and the reason a manual check was not enough.
@@ -218,6 +270,66 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("steps[0].channel", org.hamcrest.Matchers.equalTo("EMAIL"))
+        }
+    }
+
+    /**
+     * These terminal reasons are operator-visible contract values, not internal workflow detail.
+     * Drive the real endpoint over rows that can only be produced by live journey control: a test
+     * of the enum alone would pass while REST serialization or the repository mapping rejected it.
+     */
+    @Test
+    fun `journey control terminal reasons survive persistence and the HTTP contract`() {
+        val campaignId = UUID.fromString(createDraft())
+        insertEnrolment(campaignId, "TERMINATED_CAMPAIGN_CLOSED")
+        insertEnrolment(campaignId, "COMPLETED_GOAL_REACHED")
+
+        When {
+            get("/api/v1/campaigns/$campaignId/enrolments")
+        } Then {
+            statusCode(200)
+            body(
+                "state",
+                containsInAnyOrder("TERMINATED_CAMPAIGN_CLOSED", "COMPLETED_GOAL_REACHED"),
+            )
+        }
+    }
+
+    @Test
+    fun `holdout is durable and its experiment compares two independently counted cohorts`() {
+        val body = """
+            {"name":"experiment-${UUID.randomUUID()}","goal":"measure incremental account opening",
+             "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED","holdoutPercent":20,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("holdoutPercent", org.hamcrest.Matchers.equalTo(20))
+        } Extract {
+            path<String>("id")
+        }
+        val campaignId = UUID.fromString(id)
+        val treatmentParty = insertEnrolment(campaignId, "ACTIVE")
+        insertEnrolment(campaignId, "HOLDOUT", cohort = "HOLDOUT")
+        insertConversion(campaignId, treatmentParty)
+
+        When {
+            get("/api/v1/campaigns/$id/experiment")
+        } Then {
+            statusCode(200)
+            body("treatment.assigned", org.hamcrest.Matchers.equalTo(1))
+            body("treatment.converted", org.hamcrest.Matchers.equalTo(1))
+            body("holdout.assigned", org.hamcrest.Matchers.equalTo(1))
+            body("decision.state", org.hamcrest.Matchers.equalTo("COLLECTING_DATA"))
+            body("decision.minimumAssignedPerCohort", org.hamcrest.Matchers.equalTo(100))
+            body("holdout.converted", org.hamcrest.Matchers.equalTo(0))
+            body("observedLiftPercentagePoints", org.hamcrest.Matchers.equalTo(100.0f))
         }
     }
 

@@ -6,6 +6,7 @@ package com.openbank.campaign.application.workflow
 
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ConsentCheckPort
+import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
@@ -80,7 +81,6 @@ class CampaignJourneyActivitiesImplTest {
             gate,
             notificationSend,
             dryRun = false,
-            marketingScope = "MARKETING_COMMS_EMAIL",
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
         }
@@ -108,6 +108,7 @@ class CampaignJourneyActivitiesImplTest {
             updatedAt = Instant.now(),
         )
         coEvery { sendLog.countRecentForParty(partyId, any()) } returns 0
+        coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
     }

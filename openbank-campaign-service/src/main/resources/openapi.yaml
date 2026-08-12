@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.15.0
+  version: 1.18.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -234,6 +234,30 @@ paths:
                 items:
                   $ref: '#/components/schemas/Enrolment'
 
+  /api/v1/campaigns/{id}/experiment:
+    get:
+      tags: [Campaigns]
+      summary: Compare treatment and no-contact holdout outcomes
+      description: >-
+        A descriptive cohort comparison for a campaign explicitly configured with a holdout. The
+        observed lift is a percentage-point difference. The response also supplies a conservative
+        readiness signal built from 95% Wilson intervals; it never changes a campaign and is not a
+        claim of causality.
+      operationId: campaignExperiment
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Cohort assignment and observed conversion outcomes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignExperimentSummary'
+        '404':
+          description: Campaign not found
+        '409':
+          description: Campaign has no holdout experiment configured
+
   /api/v1/campaigns/{id}/journey:
     get:
       tags: [Campaigns]
@@ -455,6 +479,15 @@ components:
             (ADR-0245 D5).
           type: string
           enum: [ACCOUNT_OPENED, CARD_ISSUED]
+        holdoutPercent:
+          type: integer
+          minimum: 0
+          maximum: 50
+          default: 0
+          description: >-
+            Percentage of the audience assigned deterministically to the durable no-contact
+            control cohort. A non-zero value requires conversionRule; zero retains the campaign's
+            historical all-treatment behaviour.
         state:
           type: string
           enum: [DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED]
@@ -540,6 +573,14 @@ components:
             (ADR-0245 D5).
           type: string
           enum: [ACCOUNT_OPENED, CARD_ISSUED]
+        holdoutPercent:
+          type: integer
+          minimum: 0
+          maximum: 50
+          default: 0
+          description: >-
+            Percentage assigned to a no-contact control cohort. Requires conversionRule so an
+            author cannot withhold a message from people without a measurable outcome.
     CampaignSchedule:
       type: object
       required: [cadence]
@@ -585,6 +626,62 @@ components:
         approver:
           type: string
           deprecated: true
+
+    CohortOutcome:
+      type: object
+      required: [assigned, converted, conversionRate]
+      properties:
+        assigned: { type: integer, format: int64 }
+        converted: { type: integer, format: int64 }
+        conversionRate:
+          type: number
+          format: double
+          nullable: true
+          description: Null until at least one party belongs to this cohort.
+
+    CampaignExperimentSummary:
+      type: object
+      required: [campaignId, holdoutPercent, treatment, holdout, observedLiftPercentagePoints, decision]
+      properties:
+        campaignId: { type: string, format: uuid }
+        holdoutPercent: { type: integer, minimum: 1, maximum: 50 }
+        treatment: { $ref: '#/components/schemas/CohortOutcome' }
+        holdout: { $ref: '#/components/schemas/CohortOutcome' }
+        observedLiftPercentagePoints:
+          type: number
+          format: double
+          nullable: true
+          description: >-
+            Treatment conversion rate minus holdout conversion rate, in percentage points. This
+            is descriptive and is not a statistical-significance verdict.
+        decision: { $ref: '#/components/schemas/ExperimentDecision' }
+
+    RateConfidenceInterval:
+      type: object
+      required: [lower, upper]
+      description: A 95% Wilson confidence interval for an observed conversion rate.
+      properties:
+        lower: { type: number, format: double, minimum: 0, maximum: 1 }
+        upper: { type: number, format: double, minimum: 0, maximum: 1 }
+
+    ExperimentDecision:
+      type: object
+      required: [state, minimumAssignedPerCohort, treatmentConfidenceInterval, holdoutConfidenceInterval]
+      description: >-
+        Conservative decision readiness only. It does not modify a campaign. A separating state
+        needs at least the configured minimum in both cohorts and non-overlapping 95% Wilson
+        intervals; it is not a causal-effect claim.
+      properties:
+        state:
+          type: string
+          enum: [COLLECTING_DATA, INCONCLUSIVE, TREATMENT_OUTPERFORMS_HOLDOUT, HOLDOUT_OUTPERFORMS_TREATMENT]
+        minimumAssignedPerCohort: { type: integer, minimum: 1 }
+        treatmentConfidenceInterval:
+          allOf: [{ $ref: '#/components/schemas/RateConfidenceInterval' }]
+          nullable: true
+        holdoutConfidenceInterval:
+          allOf: [{ $ref: '#/components/schemas/RateConfidenceInterval' }]
+          nullable: true
 
     StepFunnel:
       type: object
@@ -688,7 +785,18 @@ components:
         partyId: { type: string, format: uuid }
         state:
           type: string
-          enum: [ACTIVE, COMPLETED, TERMINATED_CONSENT_REVOKED, TERMINATED_SUPPRESSED]
+          enum:
+            - ACTIVE
+            - COMPLETED
+            - TERMINATED_CONSENT_REVOKED
+            - TERMINATED_CAMPAIGN_CLOSED
+            - COMPLETED_GOAL_REACHED
+            - TERMINATED_SUPPRESSED
+            - STOPPED_MAX_SENDS
+            - HOLDOUT
         currentStep: { type: integer }
         startedAt: { type: string, format: date-time }
         completedAt: { type: string, format: date-time, nullable: true }
+        experimentCohort:
+          type: string
+          enum: [TREATMENT, HOLDOUT]

@@ -25,6 +25,8 @@ interface Campaign {
   steps: { order: number; template: string; delaySeconds: number }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
+  /** Percentage deliberately kept in the no-contact control cohort. */
+  holdoutPercent?: number
 }
 
 interface Enrolment {
@@ -56,6 +58,20 @@ interface SendPage {
   size: number
 }
 
+interface Experiment {
+  holdoutPercent: number
+  treatment: { assigned: number; converted: number; conversionRate: number | null }
+  holdout: { assigned: number; converted: number; conversionRate: number | null }
+  observedLiftPercentagePoints: number | null
+  /** Optional during a mixed-version rollout; absence is not an experiment verdict. */
+  decision?: {
+    state: 'COLLECTING_DATA' | 'INCONCLUSIVE' | 'TREATMENT_OUTPERFORMS_HOLDOUT' | 'HOLDOUT_OUTPERFORMS_TREATMENT'
+    minimumAssignedPerCohort: number
+    treatmentConfidenceInterval: { lower: number; upper: number } | null
+    holdoutConfidenceInterval: { lower: number; upper: number } | null
+  }
+}
+
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -63,6 +79,7 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
+  experiment: Experiment | null;
   sources: Record<string, string>
 }
 
@@ -224,6 +241,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     loadSends(0, outcome)
   }
   const summary = detail?.sendSummary ?? {}
+  const experiment = detail?.experiment
 
   // From the server-side summary, never from the loaded page: a headline derived from the rows on
   // screen understates every campaign larger than one page.
@@ -237,6 +255,40 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           dateStyle: 'medium', timeStyle: 'short',
         }).format(new Date(iso))
       : '—'
+
+  const fmtRate = (rate: number | null | undefined) =>
+    rate === null || rate === undefined ? '—' : `${(rate * 100).toFixed(1)} %`
+
+  const experimentDecisionText = (decision: Experiment['decision']) => {
+    if (!decision) {
+      return t(
+        'Tato verze služby zatím neposkytuje bránu připravenosti rozhodnutí.',
+        'This service version does not yet provide a decision-readiness gate.',
+      )
+    }
+    switch (decision.state) {
+      case 'COLLECTING_DATA':
+        return t(
+          `Sbíráme data: pro obě skupiny je potřeba alespoň ${decision.minimumAssignedPerCohort} zařazených lidí.`,
+          `Collecting data: each cohort needs at least ${decision.minimumAssignedPerCohort} assigned people.`,
+        )
+      case 'INCONCLUSIVE':
+        return t(
+          'Požadovaný rozsah dat už máme, ale 95% intervaly se překrývají. Strategii teď neměňte.',
+          'The sample threshold is met, but the 95% intervals overlap. Do not change strategy yet.',
+        )
+      case 'TREATMENT_OUTPERFORMS_HOLDOUT':
+        return t(
+          '95% intervaly se oddělily ve prospěch oslovené skupiny. Je to konzervativní signál, ne automatická změna kampaně.',
+          'The 95% intervals separate in favour of treatment. It is a conservative signal, not an automatic campaign change.',
+        )
+      case 'HOLDOUT_OUTPERFORMS_TREATMENT':
+        return t(
+          '95% intervaly se oddělily ve prospěch kontroly. Zkontrolujte obsah a provedení kampaně; systém nic automaticky nevypíná.',
+          'The 95% intervals separate in favour of holdout. Review campaign content and delivery; the system does not stop anything automatically.',
+        )
+    }
+  }
 
   /**
    * Human phrasing for a send outcome. The raw enum is what the API returns and what an engineer
@@ -288,8 +340,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       case 'ACTIVE': return t('Aktivní', 'Active')
       case 'COMPLETED': return t('Dokončeno', 'Completed')
       case 'TERMINATED_CONSENT_REVOKED': return t('Ukončeno — odvolaný souhlas', 'Ended — consent withdrawn')
+      case 'TERMINATED_CAMPAIGN_CLOSED': return t('Ukončeno — kampaň uzavřena', 'Ended — campaign closed')
+      case 'COMPLETED_GOAL_REACHED': return t('Dokončeno — cíl splněn', 'Completed — goal reached')
       case 'TERMINATED_SUPPRESSED': return t('Ukončeno — potlačeno', 'Ended — suppressed')
       case 'STOPPED_MAX_SENDS': return t('Zastaveno — limit odeslání', 'Stopped — send cap reached')
+      case 'HOLDOUT': return t('Kontrolní skupina — neosloveno', 'Control group — not contacted')
       default: return s
     }
   }
@@ -389,6 +444,64 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               </div>
             )}
           </div>
+
+          {c.holdoutPercent && c.holdoutPercent > 0 && (
+            <section className="space-y-2 rounded-lg border p-3" data-experiment>
+              <div>
+                <h2 className="text-sm font-semibold">{t('Kontrolní skupina', 'Control group')}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'Porovnáváme skutečné bankovní konverze osloveného publika s lidmi, kterým kampaň záměrně neposlala zprávu.',
+                    'Compares real banking conversions of contacted people with people deliberately sent no campaign message.',
+                  )}
+                </p>
+              </div>
+              {detail?.sources?.experiment === 'ok' && experiment ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <StatCard
+                      label={t('Oslovení', 'Treatment')}
+                      value={`${fmtRate(experiment.treatment.conversionRate)} · ${experiment.treatment.converted}/${experiment.treatment.assigned}`}
+                    />
+                    <StatCard
+                      label={t('Kontrola', 'Holdout')}
+                      value={`${fmtRate(experiment.holdout.conversionRate)} · ${experiment.holdout.converted}/${experiment.holdout.assigned}`}
+                    />
+                    <StatCard
+                      label={t('Rozdíl (p. b.)', 'Difference (pp)')}
+                      value={experiment.observedLiftPercentagePoints === null ? '—' : experiment.observedLiftPercentagePoints.toFixed(1)}
+                    />
+                  </div>
+                  <div className="rounded-md bg-muted p-2 text-xs text-muted-foreground" data-experiment-decision>
+                    <span className="font-medium text-foreground">{t('Připravenost rozhodnutí: ', 'Decision readiness: ')}</span>
+                    {experimentDecisionText(experiment.decision)}
+                    {experiment.decision?.treatmentConfidenceInterval && experiment.decision?.holdoutConfidenceInterval && (
+                      <span>
+                        {' '}
+                        {t('95% intervaly — oslovení ', '95% intervals — treatment ')}
+                        {fmtRate(experiment.decision.treatmentConfidenceInterval.lower)}–{fmtRate(experiment.decision.treatmentConfidenceInterval.upper)}
+                        {t(', kontrola ', ', holdout ')}
+                        {fmtRate(experiment.decision.holdoutConfidenceInterval.lower)}–{fmtRate(experiment.decision.holdoutConfidenceInterval.upper)}.
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <DataUnavailable
+                  kind={detail?.sources?.experiment === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                  service="Campaign-service"
+                  feature={t('Vyhodnocení kontrolní skupiny', 'Control-group result')}
+                  dense
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Rozdíl je popisný. Brána používá konzervativní 95% Wilsonovy intervaly a nemůže sama prokázat příčinu ani změnit běžící kampaň.',
+                  'The difference is descriptive. The gate uses conservative 95% Wilson intervals; it cannot prove causality or change a running campaign itself.',
+                )}
+              </p>
+            </section>
+          )}
 
           {Object.keys(byReason).length > 0 && (
             <p className="text-xs text-muted-foreground">

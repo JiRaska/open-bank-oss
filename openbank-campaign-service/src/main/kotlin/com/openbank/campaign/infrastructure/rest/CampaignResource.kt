@@ -31,6 +31,8 @@ data class CreateCampaignRequest(
     val stopCondition: StopConditionRequest? = null,
     /** ADR-0245 D1: a ConversionCatalog key, or absent to measure no conversion. */
     val conversionRule: String? = null,
+    /** Percentage assigned to a durable no-contact control cohort, 0..50. Requires conversionRule. */
+    val holdoutPercent: Int = 0,
     /** Absent means one-shot: enrolment happens only on POST /{id}/enrol, as it always has. */
     val schedule: ScheduleRequest? = null,
     /**
@@ -134,6 +136,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             createdBy,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
+            request.holdoutPercent,
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
             request.trigger,
         )
