@@ -296,6 +296,63 @@ main {
 .stat-card:hover::before {
   background: var(--ob-accent);
 }
+
+/* ── Campaign Studio companion surfaces ── */
+.campaign-studio-companion-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(19rem, 0.85fr);
+  gap: 1rem;
+  margin-top: 1rem;
+}
+.campaign-experience-preview,
+.campaign-launch-readiness {
+  border: 1px solid var(--border);
+  border-radius: var(--r-xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+.campaign-experience-preview { background: radial-gradient(circle at 76% 15%, #dbeafe 0, transparent 32%), linear-gradient(135deg, #111827 0%, #172554 55%, #312e81 100%); color: #fff; padding: 1.15rem; }
+.campaign-preview-heading, .campaign-readiness-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
+.campaign-preview-kicker { color: inherit; font-size: 0.67rem; font-weight: 800; letter-spacing: 0.09em; opacity: 0.65; text-transform: uppercase; }
+.campaign-preview-heading h3, .campaign-readiness-heading h3 { font-size: 1rem; font-weight: 700; margin-top: 0.2rem; }
+.campaign-preview-live { background: rgba(255,255,255,0.14); border: 1px solid rgba(255,255,255,0.16); border-radius: 99px; font-size: 0.68rem; font-weight: 700; padding: 0.3rem 0.55rem; white-space: nowrap; }
+.campaign-preview-stage { display: flex; align-items: center; gap: 0.75rem; min-height: 15rem; padding: 1rem 0.35rem 0.65rem; }
+.campaign-phone { width: 8.65rem; height: 14.8rem; background: #f8fafc; border: 4px solid #020617; border-radius: 1.55rem; box-shadow: 0 18px 32px rgba(0,0,0,.3); color: #0f172a; flex: 0 0 auto; overflow: hidden; position: relative; }
+.campaign-phone-island { background: #020617; border-radius: 0 0 0.8rem 0.8rem; height: 0.9rem; left: 50%; position: absolute; top: 0; transform: translateX(-50%); width: 3.5rem; }
+.campaign-phone-content { padding: 1.3rem 0.68rem 0.65rem; }
+.campaign-phone-topline { display: flex; justify-content: space-between; color: #6366f1; font-size: 0.55rem; font-weight: 800; }
+.campaign-phone-eyebrow { color: #64748b; font-size: 0.48rem; margin-top: 0.85rem; }
+.campaign-phone h4 { font-size: 0.82rem; font-weight: 800; line-height: 1.1; margin-top: 0.18rem; }
+.campaign-phone-hero { background: linear-gradient(145deg, #ede9fe, #dbeafe); border-radius: 0.75rem; margin-top: 0.65rem; padding: 0.58rem; }
+.campaign-phone-hero span { color: #4f46e5; display: block; font-size: 0.43rem; font-weight: 800; text-transform: uppercase; }
+.campaign-phone-hero strong { display: block; font-size: 0.62rem; line-height: 1.15; margin: 0.28rem 0; }
+.campaign-phone-hero button { background: #4f46e5; border: 0; border-radius: 0.4rem; color: #fff; font-size: 0.45rem; font-weight: 700; padding: 0.28rem 0.42rem; }
+.campaign-phone-row { display: flex; gap: 0.28rem; margin-top: 0.58rem; }
+.campaign-phone-row span { background: #e2e8f0; border-radius: 0.25rem; height: 1.45rem; flex: 1; }
+.campaign-push-card { background: rgba(255,255,255,0.95); border: 1px solid rgba(255,255,255,0.75); border-radius: 0.9rem; box-shadow: 0 12px 28px rgba(0,0,0,.18); color: #0f172a; display: flex; gap: 0.48rem; max-width: 15.5rem; padding: 0.62rem; transform: rotate(-2deg); }
+.campaign-push-icon { align-items: center; background: linear-gradient(140deg, #4f46e5, #7c3aed); border-radius: 0.45rem; color: #fff; display: flex; font-size: 0.85rem; font-weight: 800; height: 1.65rem; justify-content: center; width: 1.65rem; }
+.campaign-push-meta { color: #64748b; font-size: 0.43rem; font-weight: 800; letter-spacing: 0.04em; }
+.campaign-push-title { font-size: 0.66rem; font-weight: 800; line-height: 1.15; margin-top: 0.15rem; }
+.campaign-push-card p:last-child { color: #475569; font-size: 0.52rem; line-height: 1.25; margin-top: 0.25rem; }
+.campaign-preview-route { align-items: center; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.13); border-radius: 0.65rem; display: flex; flex-wrap: wrap; font-size: 0.67rem; gap: 0.35rem 0.55rem; padding: 0.55rem 0.65rem; }
+.campaign-preview-route span { opacity: .68; }
+.campaign-preview-route strong { font-size: 0.67rem; }
+.campaign-preview-route code { font-size: 0.59rem; opacity: .74; }
+.campaign-launch-readiness { background: var(--surface); padding: 1.15rem; }
+.campaign-readiness-heading strong { align-items: center; background: var(--ob-accent-light); border-radius: 99px; color: var(--ob-accent-text); display: inline-flex; font-size: 0.75rem; min-height: 2rem; padding: 0 0.7rem; }
+.campaign-readiness-intro { color: var(--text-secondary); font-size: 0.75rem; margin: 0.75rem 0; }
+.campaign-readiness-list { display: grid; gap: 0.55rem; list-style: none; }
+.campaign-readiness-list li { align-items: flex-start; border-radius: 0.65rem; display: flex; gap: 0.55rem; padding: 0.42rem; }
+.campaign-readiness-list li > span { align-items: center; border-radius: 99px; display: inline-flex; flex: 0 0 auto; font-size: 0.68rem; font-weight: 800; height: 1.2rem; justify-content: center; margin-top: 0.1rem; width: 1.2rem; }
+.campaign-readiness-list strong { display: block; font-size: 0.74rem; line-height: 1.25; }
+.campaign-readiness-list p { color: var(--text-secondary); font-size: 0.66rem; line-height: 1.32; margin-top: 0.12rem; }
+.campaign-readiness-list [data-state='ready'] > span { background: var(--success-bg); color: var(--success-text); }
+.campaign-readiness-list [data-state='attention'] { background: var(--warning-bg); }
+.campaign-readiness-list [data-state='attention'] > span { background: #fef3c7; color: var(--warning-text); }
+.campaign-readiness-list [data-state='waiting'] { background: var(--surface-2); }
+.campaign-readiness-list [data-state='waiting'] > span { background: var(--surface-4); color: var(--text-secondary); }
+@media (max-width: 960px) { .campaign-studio-companion-grid { grid-template-columns: 1fr; } }
+@media (max-width: 450px) { .campaign-preview-stage { gap: 0.4rem; } .campaign-phone { transform: scale(.9); transform-origin: left center; margin-right: -0.75rem; } .campaign-push-card { transform: rotate(-2deg) scale(.9); transform-origin: left center; } }
 /* Stat-card internals (ADR-0208 D1). `.stat-card` only ever styled the container, so every page
    hand-rolled the label/value typography inline — including colour values derived from a literal
    (`background: ${k.color}18`), which is the duplication D2 exists to remove. These three classes
