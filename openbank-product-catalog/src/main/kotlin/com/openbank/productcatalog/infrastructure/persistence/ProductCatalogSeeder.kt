@@ -13,8 +13,10 @@ import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
+import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.interceptor.Interceptor
 import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
 import java.util.UUID
@@ -35,8 +37,8 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
     // The broad catch is deliberate: subscribeAndAwait wraps the reactive failure in an opaque
     // RuntimeException, so we inspect the cause chain (isUniqueViolation) and rethrow everything
     // that is NOT a lost seed race — a genuine DB fault must still fail the boot.
-    @Suppress("TooGenericExceptionCaught")
-    fun onStart(@Observes ev: StartupEvent) {
+    @Suppress("TooGenericExceptionCaught", "UnusedParameter")
+    fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION) ev: StartupEvent) {
         val inserted = try {
             seed()
         } catch (e: RuntimeException) {

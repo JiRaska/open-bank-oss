@@ -50,7 +50,7 @@ Katalog je **poskytovatel referenčních dat**: sídlí proti proudu od provozn�
 | Validace proti důvěryhodnému oborovému schématu | `POST /api/v2/types/{code}/versions/{version}:validate` | — |
 | Autorská revize nabídky | `POST/PUT /api/v2/offerings/{id}/revisions...` | `CatalogChangeEvent` v outboxu |
 | Publikace schválené revize | `POST /api/v2/offerings/{id}/revisions/{revisionId}:publish` | audit + schválení + `CatalogChangeEvent` |
-| Kontextový výpis publikovaného produktu | `GET /api/v2/products/{productId}` | — |
+| Výpis publikované nabídky k danému času | `GET /api/v2/products/{offeringId}` | — |
 
 Každá přijatá změna v2 zapisuje doménový stav, audit a transportně neutrální outbox atomicky. Služba zatím nemá Kafka dispatcher; samotná spolehlivost důkazu proto nezávisí na brokeru.
 

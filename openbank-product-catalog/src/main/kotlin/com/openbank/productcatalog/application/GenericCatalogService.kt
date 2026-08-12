@@ -27,7 +27,7 @@ class CatalogNotFoundException(message: String) : RuntimeException(message)
 class CatalogValidationException(val violations: List<SchemaViolation>) : RuntimeException("catalog content is invalid")
 class CatalogPreconditionFailedException(message: String) : RuntimeException(message)
 class CatalogPreconditionRequiredException(message: String) : RuntimeException(message)
-class CatalogConflictException(message: String) : RuntimeException(message)
+class CatalogConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
 class CatalogForbiddenException(message: String) : RuntimeException(message)
 
 @ApplicationScoped
@@ -89,7 +89,7 @@ class GenericCatalogService(
         return repository.createDraft(
             ProductRevision(
                 offeringId = offeringId,
-                number = repository.nextRevisionNumber(offeringId),
+                number = 1, // repository allocates the offering-scoped number while holding its lock
                 schemaRef = specification.schemaRef,
                 content = content,
                 effectiveFrom = effectiveFrom,
@@ -124,6 +124,10 @@ class GenericCatalogService(
                 content = content,
                 effectiveFrom = effectiveFrom,
                 effectiveTo = effectiveTo,
+                makerId = actorId,
+                checkerId = null,
+                reason = null,
+                contentHash = null,
                 updatedAt = Instant.now(clock),
             ),
             actorId,
@@ -152,9 +156,9 @@ class GenericCatalogService(
         )
     }
 
-    suspend fun findPublished(specificationId: UUID, effectiveAt: Instant): ProductRevision =
-        repository.findPublished(specificationId, effectiveAt)
-            ?: throw CatalogNotFoundException("no published product $specificationId is effective at $effectiveAt")
+    suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision =
+        repository.findPublished(offeringId, effectiveAt)
+            ?: throw CatalogNotFoundException("no published offering $offeringId is effective at $effectiveAt")
 
     private suspend fun validateOrThrow(
         ref: SchemaRef,

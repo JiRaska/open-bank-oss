@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+asyncapi: 3.0.0
+info:
+  title: OpenBank Product Catalog change stream
+  version: 1.0.0
+  description: |
+    Transport contract for the immutable `catalog_outbox`. No Kafka dispatcher ships yet: the
+    same committed envelope may later be delivered by Kafka, cursor API or webhook without
+    changing the source transaction (ADR-0257). Consumers must be idempotent on `eventId`.
+defaultContentType: application/json
+channels:
+  catalogChanges:
+    address: openbank.catalog.changes
+    description: |
+      Partition key is `aggregateId`, preserving order for one catalog aggregate. A future Kafka
+      declaration must use delete retention of at least 2,592,000,000 ms (30 days); the PostgreSQL
+      audit and revisions remain the durable evidentiary source beyond transport retention.
+    x-partition-key: aggregateId
+    x-retention-ms: 2592000000
+    messages:
+      CatalogChangeEvent:
+        $ref: '#/components/messages/CatalogChangeEvent'
+operations:
+  publishCatalogChange:
+    action: send
+    channel:
+      $ref: '#/channels/catalogChanges'
+    summary: Deliver a catalog change already committed in the transactional outbox.
+components:
+  messages:
+    CatalogChangeEvent:
+      name: CatalogChangeEvent
+      contentType: application/json
+      headers:
+        type: object
+        additionalProperties: false
+        required: [ce_specversion, ce_id, ce_source, ce_type, content-type]
+        properties:
+          ce_specversion: { const: '1.0' }
+          ce_id: { type: string, format: uuid }
+          ce_source: { const: openbank-product-catalog }
+          ce_type: { type: string, pattern: '^com\.openbank\.catalog\.[a-z0-9_]+$' }
+          content-type: { const: application/json }
+      payload:
+        $ref: '#/components/schemas/CatalogChangeEventPayload'
+  schemas:
+    CatalogChangeEventPayload:
+      type: object
+      additionalProperties: false
+      required: [eventId, aggregateType, aggregateId, eventType, schemaVersion, occurredAt, actorId]
+      properties:
+        eventId: { type: string, format: uuid }
+        aggregateType: { type: string, minLength: 1 }
+        aggregateId: { type: string, format: uuid }
+        eventType: { type: string, pattern: '^com\.openbank\.catalog\.[a-z0-9_]+$' }
+        schemaVersion: { const: 1 }
+        occurredAt: { type: string, format: date-time }
+        actorId: { type: string, minLength: 1 }

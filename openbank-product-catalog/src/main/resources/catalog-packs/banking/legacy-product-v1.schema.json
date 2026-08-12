@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.banking.legacy-product:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["productType", "currency", "legacyDocument"],
+  "properties": {
+    "productType": {
+      "type": "string",
+      "enum": [
+        "SAVINGS",
+        "CURRENT",
+        "LOAN",
+        "MORTGAGE",
+        "CREDIT_CARD",
+        "TERM_DEPOSIT",
+        "OVERDRAFT",
+        "INVESTMENT"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "legacyDocument": {
+      "type": "string",
+      "contentMediaType": "application/json",
+      "description": "Lossless transitional /api/v1 banking projection; interpreted only by the banking adapter."
+    }
+  }
+}

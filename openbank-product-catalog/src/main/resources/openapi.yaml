@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-openapi: 3.0.3
+openapi: 3.1.0
 info:
   title: Product Catalog API
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
@@ -516,13 +516,13 @@ paths:
         '428': { $ref: '#/components/responses/PreconditionRequired' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
-  /api/v2/products/{specificationId}:
+  /api/v2/products/{offeringId}:
     get:
       tags: [Published Catalog]
-      summary: Resolve the effective published product projection
+      summary: Resolve one offering's effective published product projection
       operationId: getPublishedProductV2
       parameters:
-        - { name: specificationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
         - { name: effectiveAt, in: query, required: false, schema: { type: string, format: date-time } }
       responses:
         '200':
@@ -723,11 +723,16 @@ components:
       properties:
         code: { type: string }
         kind: { type: string, enum: [AMOUNT, RATE] }
-        value: { type: number, format: decimal, minimum: 0 }
-        currency: { type: string, pattern: '^[A-Z]{3}$', nullable: true }
+        value:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'
+          description: Exact decimal string; v2 never exposes monetary or rate values as binary floating point.
+        currency: { type: [string, 'null'], pattern: '^[A-Z]{3}$' }
         unit: { type: string }
         cadence: { type: string, enum: [ONCE, DAILY, MONTHLY, QUARTERLY, ANNUALLY, USAGE] }
         taxTreatment: { type: string, enum: [INCLUSIVE, EXCLUSIVE, EXEMPT, UNSPECIFIED] }
+        effectiveFrom: { type: [string, 'null'], format: date-time }
+        effectiveTo: { type: [string, 'null'], format: date-time }
       required: [code, kind, value, unit, cadence]
     EligibilityRule:
       type: object
@@ -758,10 +763,9 @@ components:
           minProperties: 1
           additionalProperties: { type: string, minLength: 1 }
         description:
-          type: object
+          type: [object, 'null']
           minProperties: 1
           additionalProperties: { type: string, minLength: 1 }
-          nullable: true
         attributes: { type: object, additionalProperties: true }
         prices:
           type: array
@@ -776,8 +780,8 @@ components:
           type: array
           uniqueItems: true
           items: { type: string, minLength: 1 }
-        effectiveFrom: { type: string, format: date-time, nullable: true }
-        effectiveTo: { type: string, format: date-time, nullable: true }
+        effectiveFrom: { type: [string, 'null'], format: date-time }
+        effectiveTo: { type: [string, 'null'], format: date-time }
       required: [name, attributes]
     RevisionContent:
       type: object
@@ -788,10 +792,9 @@ components:
           minProperties: 1
           additionalProperties: { type: string, minLength: 1 }
         description:
-          type: object
+          type: [object, 'null']
           minProperties: 1
           additionalProperties: { type: string, minLength: 1 }
-          nullable: true
         attributes: { type: object, additionalProperties: true }
         prices:
           type: array
@@ -817,12 +820,12 @@ components:
         schemaRef: { $ref: '#/components/schemas/SchemaRef' }
         state: { type: string, enum: [DRAFT, PUBLISHED, SUPERSEDED] }
         content: { $ref: '#/components/schemas/RevisionContent' }
-        effectiveFrom: { type: string, format: date-time, nullable: true }
-        effectiveTo: { type: string, format: date-time, nullable: true }
+        effectiveFrom: { type: [string, 'null'], format: date-time }
+        effectiveTo: { type: [string, 'null'], format: date-time }
         makerId: { type: string }
-        checkerId: { type: string, nullable: true }
-        reason: { type: string, nullable: true }
-        contentHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
+        checkerId: { type: [string, 'null'] }
+        reason: { type: [string, 'null'] }
+        contentHash: { type: [string, 'null'], pattern: '^[0-9a-f]{64}$' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }
@@ -852,9 +855,9 @@ components:
         amount: { type: number }
         currency: { $ref: '#/components/schemas/CurrencyCode' }
         frequency: { type: string }
-        description: { type: string, nullable: true }
+        description: { type: [string, 'null'] }
         waivable: { type: boolean }
-        waiveCondition: { type: string, nullable: true }
+        waiveCondition: { type: [string, 'null'] }
       required: [id, name, type, amount, currency, frequency, waivable]
     FeeScheduleItem:
       type: object
@@ -867,22 +870,21 @@ components:
         amount: { type: number }
         currency: { $ref: '#/components/schemas/CurrencyCode' }
         frequency: { type: string }
-        description: { type: string, nullable: true }
+        description: { type: [string, 'null'] }
         waivable: { type: boolean }
-        waiveCondition: { type: string, nullable: true }
+        waiveCondition: { type: [string, 'null'] }
         waiverEvaluable:
           type: boolean
           description: "ADR-0138: true when waiveCondition parsed into a machine-executable rule."
         waiverRule:
-          type: object
-          nullable: true
+          type: [object, 'null']
           description: "ADR-0138: executable form of the waiver condition; null when not evaluable."
           properties:
             attribute: { type: string, description: "BALANCE | MONTHLY_TURNOVER | AGGREGATE_POCKET_BALANCE | SEGMENT | CURRENCY" }
             operator: { type: string, description: "One of > >= < <= == !=" }
-            threshold: { type: string, nullable: true, description: "Decimal string for numeric rules." }
-            thresholdCurrency: { type: string, nullable: true }
-            textValue: { type: string, nullable: true, description: "Value for segment/currency rules." }
+            threshold: { type: [string, 'null'], description: "Decimal string for numeric rules." }
+            thresholdCurrency: { type: [string, 'null'] }
+            textValue: { type: [string, 'null'], description: "Value for segment/currency rules." }
         productId: { type: string }
         productCode: { type: string }
         productName: { type: string }
@@ -914,38 +916,34 @@ components:
         type: { $ref: '#/components/schemas/BankingProductType' }
         currency: { $ref: '#/components/schemas/CurrencyCode' }
         status: { $ref: '#/components/schemas/NullableProductStatus' }
-        isPublic: { type: boolean, nullable: true }
-        version: { type: string, nullable: true }
-        validFrom: { type: string, format: date, nullable: true }
-        validTo: { type: string, format: date, nullable: true }
-        baseRate: { type: number, nullable: true }
-        fee: { type: number, minimum: 0, nullable: true }
+        isPublic: { type: [boolean, 'null'] }
+        version: { type: [string, 'null'] }
+        validFrom: { type: [string, 'null'], format: date }
+        validTo: { type: [string, 'null'], format: date }
+        baseRate: { type: [number, 'null'] }
+        fee: { type: [number, 'null'], minimum: 0 }
         fees:
-          type: array
-          nullable: true
+          type: [array, 'null']
           items: { $ref: '#/components/schemas/FeeRequest' }
-        description: { type: string, nullable: true }
-        shortDescription: { type: string, nullable: true }
-        minBalance: { type: number, minimum: 0, nullable: true }
-        maxBalance: { type: number, minimum: 0, nullable: true }
+        description: { type: [string, 'null'] }
+        shortDescription: { type: [string, 'null'] }
+        minBalance: { type: [number, 'null'], minimum: 0 }
+        maxBalance: { type: [number, 'null'], minimum: 0 }
         cardConfig: { $ref: '#/components/schemas/NullableCardConfig' }
         multiCurrencyConfig: { $ref: '#/components/schemas/NullableMultiCurrencyConfig' }
         overdraftConfig: { $ref: '#/components/schemas/NullableOverdraftConfig' }
         termDepositConfig: { $ref: '#/components/schemas/NullableTermDepositConfig' }
         savingsConfig: { $ref: '#/components/schemas/NullableSavingsConfig' }
         termsAndConditions:
-          type: array
-          nullable: true
+          type: [array, 'null']
           items: { $ref: '#/components/schemas/TermsAndConditions' }
         tags:
-          type: array
-          nullable: true
+          type: [array, 'null']
           items: { type: string }
         eligibilitySegments:
-          type: array
-          nullable: true
+          type: [array, 'null']
           items: { $ref: '#/components/schemas/EligibilitySegment' }
-        revision: { type: integer, format: int64, minimum: 0, nullable: true }
+        revision: { type: [integer, 'null'], format: int64, minimum: 0 }
       required: [code, name, type, currency]
     Product:
       type: object
@@ -960,14 +958,14 @@ components:
         status: { $ref: '#/components/schemas/ProductStatus' }
         isPublic: { type: boolean }
         version: { type: string }
-        validFrom: { type: string, format: date, nullable: true }
-        validTo: { type: string, format: date, nullable: true }
+        validFrom: { type: [string, 'null'], format: date }
+        validTo: { type: [string, 'null'], format: date }
         baseRate: { type: number }
         fee: { type: number }
-        description: { type: string, nullable: true }
-        shortDescription: { type: string, nullable: true }
-        minBalance: { type: number, nullable: true }
-        maxBalance: { type: number, nullable: true }
+        description: { type: [string, 'null'] }
+        shortDescription: { type: [string, 'null'] }
+        minBalance: { type: [number, 'null'] }
+        maxBalance: { type: [number, 'null'] }
         fees:
           type: array
           items: { $ref: '#/components/schemas/Fee' }
@@ -1019,9 +1017,9 @@ components:
         amount: { type: number, minimum: 0 }
         currency: { $ref: '#/components/schemas/CurrencyCode' }
         frequency: { type: string }
-        description: { type: string, nullable: true }
+        description: { type: [string, 'null'] }
         waivable: { type: boolean }
-        waiveCondition: { type: string, nullable: true }
+        waiveCondition: { type: [string, 'null'] }
       required: [name, type, amount, currency, frequency]
     CurrencyCode:
       type: string
@@ -1033,8 +1031,7 @@ components:
       type: string
       enum: [ACTIVE, INACTIVE, DRAFT, DEPRECATED, ARCHIVED]
     NullableProductStatus:
-      allOf: [{ $ref: '#/components/schemas/ProductStatus' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/ProductStatus' }, { type: 'null' }]
     EligibilitySegment:
       type: string
       enum: [RETAIL, STUDENT, SENIOR, BUSINESS, PREMIUM, ALL]
@@ -1049,13 +1046,12 @@ components:
         tiers: { type: array, items: { type: string, enum: [STANDARD, GOLD, PLATINUM, INFINITE] } }
         virtualCardAllowed: { type: boolean }
         contactlessEnabled: { type: boolean }
-        eligibilityMinAge: { type: integer, minimum: 0, nullable: true }
+        eligibilityMinAge: { type: [integer, 'null'], minimum: 0 }
         eligibilitySegments: { type: array, items: { $ref: '#/components/schemas/EligibilitySegment' } }
         monthlyFeePerCard: { type: number, minimum: 0 }
         cardCurrency: { $ref: '#/components/schemas/NullableCurrencyCode' }
     NullableCardConfig:
-      allOf: [{ $ref: '#/components/schemas/CardConfig' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/CardConfig' }, { type: 'null' }]
     MultiCurrencyConfig:
       type: object
       additionalProperties: false
@@ -1064,12 +1060,11 @@ components:
         supportedCurrencies: { type: array, items: { $ref: '#/components/schemas/CurrencyCode' } }
         defaultCurrency: { $ref: '#/components/schemas/CurrencyCode' }
         fxMarginPct: { type: number }
-        fxMarginBuyPct: { type: number, nullable: true }
-        fxMarginSellPct: { type: number, nullable: true }
+        fxMarginBuyPct: { type: [number, 'null'] }
+        fxMarginSellPct: { type: [number, 'null'] }
         crossCurrencyTransferAllowed: { type: boolean }
     NullableMultiCurrencyConfig:
-      allOf: [{ $ref: '#/components/schemas/MultiCurrencyConfig' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/MultiCurrencyConfig' }, { type: 'null' }]
     OverdraftConfig:
       type: object
       additionalProperties: false
@@ -1078,20 +1073,19 @@ components:
         maxLimitAmount: { type: number, exclusiveMinimum: 0 }
         interestRateAnnual: { type: number }
         gracePeriodDays: { type: integer, minimum: 0 }
-        unarrangedDailyFee: { type: number, minimum: 0, nullable: true }
-        unarrangedRateAnnual: { type: number, nullable: true }
+        unarrangedDailyFee: { type: [number, 'null'], minimum: 0 }
+        unarrangedRateAnnual: { type: [number, 'null'] }
         autoApprovalEnabled: { type: boolean }
       required: [maxLimitAmount, interestRateAnnual]
     NullableOverdraftConfig:
-      allOf: [{ $ref: '#/components/schemas/OverdraftConfig' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/OverdraftConfig' }, { type: 'null' }]
     TermDepositConfig:
       type: object
       additionalProperties: false
       properties:
         termMonths: { type: integer, minimum: 1 }
-        minTermMonths: { type: integer, minimum: 1, nullable: true }
-        maxTermMonths: { type: integer, minimum: 1, nullable: true }
+        minTermMonths: { type: [integer, 'null'], minimum: 1 }
+        maxTermMonths: { type: [integer, 'null'], minimum: 1 }
         interestRateAnnual: { type: number }
         payoutFrequency:
           type: string
@@ -1101,14 +1095,13 @@ components:
         earlyWithdrawalNoticeDays: { type: integer, minimum: 0 }
       required: [termMonths, interestRateAnnual]
     NullableTermDepositConfig:
-      allOf: [{ $ref: '#/components/schemas/TermDepositConfig' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/TermDepositConfig' }, { type: 'null' }]
     InterestTier:
       type: object
       additionalProperties: false
       properties:
         fromAmount: { type: number }
-        toAmount: { type: number, nullable: true }
+        toAmount: { type: [number, 'null'] }
         rateAnnual: { type: number }
       required: [fromAmount, rateAnnual]
     SavingsConfig:
@@ -1119,11 +1112,10 @@ components:
         withdrawalNotice: { type: string, enum: [NONE, DAYS_7, DAYS_14, DAYS_30, DAYS_60, DAYS_90] }
         freeWithdrawalsPerMonth: { type: integer, minimum: 0 }
         excessWithdrawalFee: { type: number, minimum: 0 }
-        bonusRateCondition: { type: string, nullable: true }
-        bonusRateAnnual: { type: number, nullable: true }
+        bonusRateCondition: { type: [string, 'null'] }
+        bonusRateAnnual: { type: [number, 'null'] }
     NullableSavingsConfig:
-      allOf: [{ $ref: '#/components/schemas/SavingsConfig' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/SavingsConfig' }, { type: 'null' }]
     TermsAndConditions:
       type: object
       additionalProperties: false
@@ -1132,10 +1124,10 @@ components:
         version: { type: string }
         url: { type: string, format: uri }
         effectiveFrom: { type: string, format: date }
-        effectiveTo: { type: string, format: date, nullable: true }
+        effectiveTo: { type: [string, 'null'], format: date }
         language: { type: string }
-        summary: { type: string, nullable: true }
-        documentTemplateCode: { type: string, nullable: true }
+        summary: { type: [string, 'null'] }
+        documentTemplateCode: { type: [string, 'null'] }
       required: [version, url, effectiveFrom]
     ProductVersion:
       type: object
@@ -1143,11 +1135,10 @@ components:
       properties:
         version: { type: string }
         validFrom: { type: string, format: date }
-        validTo: { type: string, format: date, nullable: true }
+        validTo: { type: [string, 'null'], format: date }
         isPublic: { type: boolean }
-        changeNote: { type: string, nullable: true }
+        changeNote: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
       required: [version, validFrom, isPublic, createdAt]
     NullableCurrencyCode:
-      allOf: [{ $ref: '#/components/schemas/CurrencyCode' }]
-      nullable: true
+      anyOf: [{ $ref: '#/components/schemas/CurrencyCode' }, { type: 'null' }]

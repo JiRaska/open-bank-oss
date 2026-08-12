@@ -35,6 +35,7 @@ class PostgresGenericCatalogRepository(
     private val mapper: ObjectMapper,
     private val catalogJson: CatalogJson,
     private val clock: Clock,
+    private val bankCompatibility: BankV1CompatibilityProjector,
 ) : GenericCatalogRepository {
     override suspend fun registerSchema(schema: CatalogSchema) {
         sessions.withTransaction { session ->
@@ -65,43 +66,55 @@ class PostgresGenericCatalogRepository(
     override suspend fun createSpecification(
         specification: ProductSpecification,
         actorId: String,
-    ): ProductSpecification = sessions.withTransaction { session ->
-        session.persist(specification.toEntity())
-            .flatMap {
-                recordChange(session, "SPECIFICATION", specification.id, "SPECIFICATION_CREATED", actorId)
-            }
-            .map { specification }
-    }.awaitSuspending()
+    ): ProductSpecification = translatePersistenceConflict("specification code already exists") {
+        sessions.withTransaction { session ->
+            session.persist(specification.toEntity())
+                .flatMap {
+                    recordChange(session, "SPECIFICATION", specification.id, "SPECIFICATION_CREATED", actorId)
+                }
+                .map { specification }
+        }.awaitSuspending()
+    }
 
     override suspend fun findSpecification(id: UUID): ProductSpecification? = sessions.withSession { session ->
         session.find(CatalogSpecificationEntity::class.java, id)
     }.map { it?.toDomain() }.awaitSuspending()
 
     override suspend fun createOffering(offering: ProductOffering, actorId: String): ProductOffering =
-        sessions.withTransaction { session ->
-            session.persist(offering.toEntity())
-                .flatMap { recordChange(session, "OFFERING", offering.id, "OFFERING_CREATED", actorId) }
-                .map { offering }
-        }.awaitSuspending()
+        translatePersistenceConflict("offering code already exists") {
+            sessions.withTransaction { session ->
+                session.persist(offering.toEntity())
+                    .flatMap { recordChange(session, "OFFERING", offering.id, "OFFERING_CREATED", actorId) }
+                    .map { offering }
+            }.awaitSuspending()
+        }
 
     override suspend fun findOffering(id: UUID): ProductOffering? = sessions.withSession { session ->
         session.find(CatalogOfferingEntity::class.java, id)
     }.map { it?.toDomain() }.awaitSuspending()
 
     override suspend fun createDraft(revision: ProductRevision, actorId: String): ProductRevision =
-        sessions.withTransaction { session ->
-            session.persist(revision.toEntity())
-                .flatMap { persistRevisionChildren(session, revision) }
-                .flatMap { recordChange(session, "REVISION", revision.id, "REVISION_DRAFTED", actorId) }
-                .map { revision }
-        }.awaitSuspending()
-
-    override suspend fun nextRevisionNumber(offeringId: UUID): Long = sessions.withSession { session ->
-        session.createQuery(
-            "SELECT COALESCE(MAX(number), 0) FROM CatalogRevisionEntity WHERE offeringId = :offeringId",
-            Long::class.javaObjectType,
-        ).setParameter("offeringId", offeringId).singleResult
-    }.map { it + 1 }.awaitSuspending()
+        translatePersistenceConflict("revision number already exists") {
+            sessions.withTransaction { session ->
+                session.find(CatalogOfferingEntity::class.java, revision.offeringId, LockMode.PESSIMISTIC_WRITE)
+                    .flatMap { offering ->
+                        checkNotNull(offering) { "offering ${revision.offeringId} disappeared" }
+                        session.createQuery(
+                            "SELECT COALESCE(MAX(number), 0) FROM CatalogRevisionEntity WHERE offeringId = :id",
+                            Long::class.javaObjectType,
+                        ).setParameter("id", revision.offeringId).singleResult
+                    }
+                    .map { number -> revision.copy(number = number + 1) }
+                    .flatMap { allocated ->
+                        session.persist(allocated.toEntity())
+                            .flatMap { persistRevisionChildren(session, allocated) }
+                            .flatMap {
+                                recordChange(session, "REVISION", allocated.id, "REVISION_DRAFTED", actorId)
+                            }
+                            .map { allocated }
+                    }
+            }.awaitSuspending()
+        }
 
     override suspend fun findRevision(id: UUID): ProductRevision? = sessions.withSession { session ->
         session.find(CatalogRevisionEntity::class.java, id)
@@ -160,7 +173,7 @@ class PostgresGenericCatalogRepository(
                     session.find(CatalogOfferingEntity::class.java, draft.offeringId, LockMode.PESSIMISTIC_WRITE)
                         .flatMap { offering ->
                             checkNotNull(offering) { "offering ${draft.offeringId} disappeared during publication" }
-                            preparePublication(session, draft, at).flatMap {
+                            preparePublication(session, draft, at, checkerId).flatMap {
                                 draft.state = RevisionState.PUBLISHED.name
                                 draft.checkerId = checkerId
                                 draft.reason = reason
@@ -169,44 +182,56 @@ class PostgresGenericCatalogRepository(
                                 session.persist(approval(draft, checkerId, reason, at))
                             }.flatMap {
                                 recordChange(session, "REVISION", draft.id, "REVISION_PUBLISHED", checkerId)
+                            }.flatMap {
+                                bankCompatibility.refreshLegacyProjection(session, draft, at)
                             }.map { draft.toDomain().copy(revision = draft.revision + 1) }
                         }
                 }
         }.awaitSuspending()
     }
 
-    override suspend fun findPublished(specificationId: UUID, effectiveAt: Instant): ProductRevision? =
+    override suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision? =
         sessions.withSession { session ->
             session.createQuery(
-                """FROM CatalogRevisionEntity r WHERE r.offeringId IN """ +
-                    """(SELECT o.id FROM CatalogOfferingEntity o WHERE o.specificationId = :specificationId) """ +
+                """FROM CatalogRevisionEntity r WHERE r.offeringId = :offeringId """ +
                     """AND r.state IN ('PUBLISHED', 'SUPERSEDED') """ +
                     """AND (r.effectiveFrom IS NULL OR r.effectiveFrom <= :at) """ +
-                    """AND (r.effectiveTo IS NULL OR r.effectiveTo > :at) ORDER BY r.number DESC""",
+                    """AND (r.effectiveTo IS NULL OR r.effectiveTo > :at) ORDER BY r.number DESC, r.id""",
                 CatalogRevisionEntity::class.java,
-            ).setParameter("specificationId", specificationId).setParameter("at", effectiveAt).resultList
+            ).setParameter("offeringId", offeringId).setParameter("at", effectiveAt).resultList
         }.map { it.firstOrNull()?.toDomain() }.awaitSuspending()
 
-    private fun preparePublication(session: Mutiny.Session, draft: CatalogRevisionEntity, at: Instant): Uni<Void> =
-        session.createQuery(
-            "FROM CatalogRevisionEntity WHERE offeringId = :offeringId AND state IN ('PUBLISHED', 'SUPERSEDED')",
-            CatalogRevisionEntity::class.java,
-        ).setParameter("offeringId", draft.offeringId).resultList.invoke { published ->
-            val newStart = draft.effectiveFrom ?: at
-            if (draft.effectiveTo != null && !draft.effectiveTo!!.isAfter(newStart)) {
-                throw CatalogConflictException("published effectiveTo must be after its effectiveFrom")
-            }
-            val overlaps = published.filter { existing -> intervalsOverlap(existing, newStart, draft.effectiveTo) }
-            val predecessors = overlaps.filter { (it.effectiveFrom ?: Instant.MIN).isBefore(newStart) }
-            if (predecessors.size > 1 || overlaps.size != predecessors.size) {
-                throw CatalogConflictException("published effective intervals must not overlap")
-            }
-            predecessors.singleOrNull()?.let { previous ->
-                previous.state = RevisionState.SUPERSEDED.name
-                previous.effectiveTo = newStart
-                previous.updatedAt = at
-            }
-        }.replaceWithVoid()
+    private fun preparePublication(
+        session: Mutiny.Session,
+        draft: CatalogRevisionEntity,
+        at: Instant,
+        actorId: String,
+    ): Uni<Void> = session.createQuery(
+        "FROM CatalogRevisionEntity WHERE offeringId = :offeringId AND state IN ('PUBLISHED', 'SUPERSEDED')",
+        CatalogRevisionEntity::class.java,
+    ).setParameter("offeringId", draft.offeringId).resultList.flatMap { published ->
+        val newStart = draft.effectiveFrom ?: at
+        draft.effectiveFrom = newStart
+        if (draft.effectiveTo != null && !draft.effectiveTo!!.isAfter(newStart)) {
+            throw CatalogConflictException("published effectiveTo must be after its effectiveFrom")
+        }
+        val overlaps = published.filter { existing -> intervalsOverlap(existing, newStart, draft.effectiveTo) }
+        val predecessors = overlaps.filter { (it.effectiveFrom ?: Instant.MIN).isBefore(newStart) }
+        if (predecessors.size > 1 || overlaps.size != predecessors.size) {
+            throw CatalogConflictException("published effective intervals must not overlap")
+        }
+        val previous = predecessors.singleOrNull()
+        previous?.let {
+            it.state = RevisionState.SUPERSEDED.name
+            it.effectiveTo = newStart
+            it.updatedAt = at
+        }
+        if (previous == null) {
+            Uni.createFrom().voidItem()
+        } else {
+            recordChange(session, "REVISION", previous.id, "REVISION_SUPERSEDED", actorId)
+        }
+    }
 
     private fun intervalsOverlap(existing: CatalogRevisionEntity, newStart: Instant, newEnd: Instant?): Boolean {
         val existingStart = existing.effectiveFrom ?: Instant.MIN
@@ -228,6 +253,8 @@ class PostgresGenericCatalogRepository(
                 unit = price.unit
                 cadence = price.cadence.name
                 taxTreatment = price.taxTreatment.name
+                effectiveFrom = price.effectiveFrom
+                effectiveTo = price.effectiveTo
             }
         }
         val relationships = revision.content.relationships.map { relationship ->
@@ -288,6 +315,8 @@ class PostgresGenericCatalogRepository(
             schemaVersion = event.schemaVersion
             occurredAt = at
             payload = JsonObject(mapper.writeValueAsString(event))
+            headers = eventHeaders(event)
+            createdAt = at
         }
         return session.persistAll(audit, outbox)
     }
@@ -303,6 +332,14 @@ class PostgresGenericCatalogRepository(
         if (optimistic) {
             throw CatalogPreconditionFailedException("revision was modified concurrently")
         }
+        throw failure
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun <T> translatePersistenceConflict(message: String, block: suspend () -> T): T = try {
+        block()
+    } catch (failure: RuntimeException) {
+        if (PostgresConflicts.isUniqueViolation(failure)) throw CatalogConflictException(message)
         throw failure
     }
 
@@ -409,4 +446,14 @@ class PostgresGenericCatalogRepository(
     )
 
     private fun SchemaRef.key(): String = "$id:$version"
+
+    private fun eventHeaders(event: CatalogChangeEvent): JsonObject = JsonObject(
+        mapOf(
+            "ce_specversion" to "1.0",
+            "ce_id" to event.eventId.toString(),
+            "ce_source" to "openbank-product-catalog",
+            "ce_type" to event.eventType,
+            "content-type" to "application/json",
+        ),
+    )
 }

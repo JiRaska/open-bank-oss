@@ -23,8 +23,11 @@ import java.util.UUID
  * column via Jackson; identity/filter attributes are mirrored into scalar columns for querying.
  */
 @ApplicationScoped
-class PostgresProductRepository(private val sf: Mutiny.SessionFactory, private val mapper: ObjectMapper) :
-    ProductRepository {
+class PostgresProductRepository(
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: ObjectMapper,
+    private val compatibilityProjector: BankV1CompatibilityProjector,
+) : ProductRepository {
 
     override suspend fun findAll(): List<Product> = sf.withSession { s ->
         s.createQuery("FROM ProductEntity ORDER BY code", ProductEntity::class.java).resultList
@@ -44,7 +47,11 @@ class PostgresProductRepository(private val sf: Mutiny.SessionFactory, private v
     // Hibernate Reactive may wrap a driver constraint in RuntimeException; classify its cause chain.
     @Suppress("TooGenericExceptionCaught")
     override suspend fun save(product: Product, legacyCode: String?): Product = try {
-        sf.withTransaction { s -> s.persist(newEntity(product, legacyCode)) }
+        sf.withTransaction { s ->
+            s.persist(newEntity(product, legacyCode))
+                .flatMap { s.flush() }
+                .flatMap { compatibilityProjector.ensureMapped(s, product, legacyCode, "legacy-v1-api") }
+        }
             .replaceWith(product)
             .awaitSuspending()
     } catch (e: RuntimeException) {
@@ -68,7 +75,7 @@ class PostgresProductRepository(private val sf: Mutiny.SessionFactory, private v
                     if (existing != null) {
                         val updated = product.copy(revision = product.revision + 1)
                         existing.applyFrom(updated) // managed — flushes on commit; legacy_code preserved
-                        Uni.createFrom().item(updated)
+                        compatibilityProjector.syncDraft(s, updated, "legacy-v1-api").replaceWith(updated)
                     } else {
                         throw ProductUpdateConflictException(
                             "Product ${product.id} was modified concurrently (expected revision ${product.revision})",

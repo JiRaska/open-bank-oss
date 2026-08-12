@@ -35,8 +35,8 @@ class CatalogJson(private val mapper: ObjectMapper) {
         else -> error("unsupported JSON node type ${node.nodeType}")
     }
 
-    fun toObject(node: JsonNode): CatalogValue.ObjectValue =
-        toValue(node) as? CatalogValue.ObjectValue ?: error("attributes must be a JSON object")
+    fun toObject(node: JsonNode): CatalogValue.ObjectValue = toValue(node) as? CatalogValue.ObjectValue
+        ?: throw IllegalArgumentException("attributes must be a JSON object")
 
     fun toNode(value: CatalogValue): JsonNode = when (value) {
         CatalogValue.NullValue -> mapper.nodeFactory.nullNode()
@@ -61,7 +61,24 @@ class CatalogJson(private val mapper: ObjectMapper) {
         set<JsonNode>("name", mapper.valueToTree(content.name.values))
         content.description?.let { set<JsonNode>("description", mapper.valueToTree(it.values)) }
         set<JsonNode>("attributes", toNode(content.attributes))
-        set<JsonNode>("prices", mapper.valueToTree(content.prices))
+        set<JsonNode>(
+            "prices",
+            mapper.valueToTree(
+                content.prices.map { price ->
+                    mapOf(
+                        "code" to price.code,
+                        "kind" to price.kind.name,
+                        "value" to price.value.toPlainString(),
+                        "currency" to price.currency,
+                        "unit" to price.unit,
+                        "cadence" to price.cadence.name,
+                        "taxTreatment" to price.taxTreatment.name,
+                        "effectiveFrom" to price.effectiveFrom,
+                        "effectiveTo" to price.effectiveTo,
+                    )
+                },
+            ),
+        )
         set<JsonNode>("eligibility", mapper.valueToTree(content.eligibility.map(::eligibilityToMap)))
         set<JsonNode>("relationships", mapper.valueToTree(content.relationships))
         set<JsonNode>("documentCodes", mapper.valueToTree(content.documentCodes))
@@ -75,11 +92,17 @@ class CatalogJson(private val mapper: ObjectMapper) {
             PriceComponent(
                 code = it.get("code").asText(),
                 kind = PriceKind.valueOf(it.get("kind").asText()),
-                value = it.get("value").decimalValue(),
+                value = it.get("value").asText().toBigDecimal(),
                 currency = it.get("currency")?.takeUnless(JsonNode::isNull)?.asText(),
                 unit = it.get("unit").asText(),
                 cadence = PriceCadence.valueOf(it.get("cadence").asText()),
                 taxTreatment = TaxTreatment.valueOf(it.get("taxTreatment").asText()),
+                effectiveFrom = it.get("effectiveFrom")?.takeUnless(JsonNode::isNull)?.let { value ->
+                    java.time.Instant.parse(value.asText())
+                },
+                effectiveTo = it.get("effectiveTo")?.takeUnless(JsonNode::isNull)?.let { value ->
+                    java.time.Instant.parse(value.asText())
+                },
             )
         }.orEmpty(),
         eligibility = node.get("eligibility")?.map {

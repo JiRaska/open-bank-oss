@@ -77,6 +77,10 @@ authz:
   enforce: "${AUTHZ_ENFORCE:false}"
 
 openbank:
+  catalog:
+    # Current OpenBank deployment enables both reference packs. Standalone charts override this to
+    # an empty value and let the operator opt in explicitly.
+    packs: ${OPENBANK_CATALOG_PACKS:banking,insurance}
   api:
     # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
     version: "2"

@@ -29,9 +29,11 @@ class JsonSchemaCatalogValidator(private val catalogJson: CatalogJson, private v
 
     override fun validate(schema: CatalogSchema, attributes: CatalogValue.ObjectValue): SchemaValidationResult {
         val document = catalogJson.toNode(schema.document)
+        val instance = catalogJson.toNode(attributes)
         profile.requireValid(document, "urn:catalog-schema:${schema.ref.id}:${schema.ref.version}")
+        profile.requireValidInstance(instance)
         val compiled = schemas.computeIfAbsent(schema.sha256) { factory.getSchema(document, config) }
-        val messages = compiled.validate(catalogJson.toNode(attributes))
+        val messages = compiled.validate(instance)
             .sortedWith(compareBy({ it.instanceLocation.toString() }, { it.code }, { it.message }))
             .take(MAX_VIOLATIONS)
         if (messages.isEmpty()) return SchemaValidationResult.Valid

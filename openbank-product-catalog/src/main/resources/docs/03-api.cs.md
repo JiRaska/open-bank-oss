@@ -4,7 +4,7 @@
 
 - **In-cluster base:** `http://openbank-product-catalog:8104/api/v1` a `/api/v2`
 - **Lokální dev:** `http://localhost:8104/api/v1` a `/api/v2`
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) na management portu (zdroj pravdy: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.0.3)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) na management portu (zdroj pravdy: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.1.0)
 - **Swagger UI:** `http://localhost:8085/api/docs` (nastaveno přes `quarkus.swagger-ui.path`, `always-include: true`)
 
 Major nejnovějšího kontraktu z `openapi.yaml:info.version` se rovná `openbank.api.version` a URL `/api/v2` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). Stejný dokument zachovává kompatibilní `/api/v1`; response filtr odvozuje `X-API-Version` ze skutečné cesty. Release verze (`version.txt`) je samostatná osa.
@@ -41,7 +41,7 @@ Mechanismus `Idempotency-Key` není implementován. Create chrání unikátní `
 
 ### Generický katalog v2
 
-V2 odděluje důvěryhodné typy/schémata, kanonické specifikace, tržní nabídky, autorské revize a publikované kontextové čtení. Základní povrch tvoří `/api/v2/types`, `/api/v2/specifications`, `/api/v2/offerings`, `/api/v2/offerings/{id}/revisions` a `/api/v2/products/{productId}`. Oborová data jsou pouze v `attributes` a vždy odkazují přesnou dvojici typu a verze schématu.
+V2 odděluje důvěryhodné typy/schémata, kanonické specifikace, tržní nabídky, autorské revize a publikované čtení. Základní povrch tvoří `/api/v2/types`, `/api/v2/specifications`, `/api/v2/offerings`, `/api/v2/offerings/{id}/revisions` a `/api/v2/products/{offeringId}`. Čtení je v tomto řezu záměrně deterministické pro jednu nabídku; výběr podle trhu přijde až s explicitními pravidly specificity. Oborová data jsou pouze v `attributes` a vždy odkazují přesnou dvojici typu a verze schématu.
 
 Mutace existující revize a publikace vyžadují silný `If-Match`: chybějící podmínka vrací `428 Precondition Required`, zastaralá `412 Precondition Failed`. Publikovat musí jiný člověk než autor draftu; identita autora i schvalovatele pochází z ověřeného JWT, nikdy z request body.
 

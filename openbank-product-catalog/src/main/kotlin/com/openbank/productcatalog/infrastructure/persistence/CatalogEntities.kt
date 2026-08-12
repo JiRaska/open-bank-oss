@@ -139,6 +139,12 @@ class CatalogPriceEntity {
 
     @Column(name = "tax_treatment")
     lateinit var taxTreatment: String
+
+    @Column(name = "effective_from")
+    var effectiveFrom: Instant? = null
+
+    @Column(name = "effective_to")
+    var effectiveTo: Instant? = null
 }
 
 @Entity
@@ -218,6 +224,13 @@ class CatalogOutboxEntity {
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
+    lateinit var headers: JsonObject
+
+    @Column(name = "created_at")
+    lateinit var createdAt: Instant
+
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
     lateinit var payload: JsonObject
 
     @Column(name = "published_at")
@@ -225,4 +238,24 @@ class CatalogOutboxEntity {
 
     @Column(name = "attempt_count")
     var attemptCount: Int = 0
+}
+
+@Entity
+@Table(name = "bank_v1_product_mapping")
+class BankV1ProductMappingEntity {
+    @Id
+    @Column(name = "product_id")
+    lateinit var productId: UUID
+
+    @Column(name = "default_offering_id")
+    lateinit var defaultOfferingId: UUID
+
+    @Column(name = "legacy_code")
+    var legacyCode: String? = null
+
+    @Column(name = "projected_revision_id")
+    var projectedRevisionId: UUID? = null
+
+    @Column(name = "created_at")
+    lateinit var createdAt: Instant
 }

@@ -56,7 +56,7 @@ The catalog is a **reference-data provider**: it sits upstream of the operationa
 | Validate attributes against an exact product type | `POST /api/v2/product-types/{id}/versions/{version}/validate` | — |
 | Author specification, offering and draft revision | `/api/v2/specifications`, `/offerings`, `/revisions` | durable audit + outbox |
 | Publish with an independent checker | `POST /api/v2/offerings/{id}/revisions/{revisionId}/publish` | `catalog.revision_published` v1 |
-| Resolve an effective published product | `GET /api/v2/products/{specificationId}` | — |
+| Resolve one effective published offering | `GET /api/v2/products/{offeringId}` | — |
 
 Every accepted v2 change records append-only audit evidence and a versioned outbox event in the
 same PostgreSQL transaction. No Kafka dispatcher is enabled yet; delivery adapters are a later phase.

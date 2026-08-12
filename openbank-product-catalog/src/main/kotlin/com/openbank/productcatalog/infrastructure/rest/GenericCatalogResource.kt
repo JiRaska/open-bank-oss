@@ -42,7 +42,6 @@ import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.EntityTag
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
-import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -53,11 +52,13 @@ data class OfferingRequest(val specificationId: UUID, val code: String, val mark
 data class PriceRequest(
     val code: String,
     val kind: PriceKind,
-    val value: BigDecimal,
+    val value: String,
     val currency: String? = null,
     val unit: String,
     val cadence: PriceCadence,
     val taxTreatment: TaxTreatment = TaxTreatment.UNSPECIFIED,
+    val effectiveFrom: Instant? = null,
+    val effectiveTo: Instant? = null,
 )
 data class EligibilityRequest(
     val field: String,
@@ -236,14 +237,14 @@ class GenericCatalogResource(
     }
 
     @GET
-    @Path("/products/{specificationId}")
+    @Path("/products/{offeringId}")
     @Authenticated
-    @Authorize(action = "catalog.read", resource = "#specificationId")
+    @Authorize(action = "catalog.read", resource = "#offeringId")
     suspend fun getPublished(
-        @PathParam("specificationId") specificationId: UUID,
+        @PathParam("offeringId") offeringId: UUID,
         @QueryParam("effectiveAt") effectiveAt: Instant?,
     ): Map<String, Any?> = revisionResponse(
-        service.findPublished(specificationId, effectiveAt ?: Instant.now(clock)),
+        service.findPublished(offeringId, effectiveAt ?: Instant.now(clock)),
     )
 
     private fun RevisionRequest.toContent() = RevisionContent(
@@ -251,7 +252,17 @@ class GenericCatalogResource(
         description = description?.let(::LocalizedText),
         attributes = catalogJson.toObject(attributes),
         prices = prices.map {
-            PriceComponent(it.code, it.kind, it.value, it.currency, it.unit, it.cadence, it.taxTreatment)
+            PriceComponent(
+                it.code,
+                it.kind,
+                it.value.toBigDecimal(),
+                it.currency,
+                it.unit,
+                it.cadence,
+                it.taxTreatment,
+                it.effectiveFrom,
+                it.effectiveTo,
+            )
         },
         eligibility = eligibility.map {
             EligibilityRule(it.field, it.operator, catalogJson.toValue(it.expected), LocalizedText(it.explanation))

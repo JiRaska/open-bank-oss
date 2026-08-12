@@ -86,6 +86,8 @@ data class PriceComponent(
     val unit: String,
     val cadence: PriceCadence,
     val taxTreatment: TaxTreatment = TaxTreatment.UNSPECIFIED,
+    val effectiveFrom: Instant? = null,
+    val effectiveTo: Instant? = null,
 ) {
     init {
         require(code.isNotBlank()) { "price code must not be blank" }
@@ -94,6 +96,9 @@ data class PriceComponent(
             "amount price requires an uppercase ISO currency code"
         }
         require(unit.isNotBlank()) { "price unit must not be blank" }
+        require(effectiveFrom == null || effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
+            "price effectiveTo must be after effectiveFrom"
+        }
     }
 }
 

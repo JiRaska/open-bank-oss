@@ -21,6 +21,7 @@ import org.hamcrest.Matchers.greaterThanOrEqualTo
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
@@ -76,29 +77,8 @@ class CatalogPlatformResourceTest {
 
         setMaker(revisionId, "independent-maker")
         assertPublishPreconditions(publishPath)
-
-        Given {
-            contentType("application/json")
-            body("""{"reason":"approved product launch"}""")
-            header("If-Match", "\"0\"")
-        } When {
-            post(publishPath)
-        } Then {
-            statusCode(200)
-            header("ETag", equalTo("\"1\""))
-            body("state", equalTo("PUBLISHED"))
-            body("checkerId", equalTo("test-operator"))
-        }
-
-        Given { this } When {
-            get("/api/v2/products/$specificationId")
-        } Then {
-            statusCode(200)
-            body("state", equalTo("PUBLISHED"))
-            body("content.attributes.currency", nullValue())
-            body("content.attributes.coverage.currency", equalTo("EUR"))
-            body("content.attributes.premium.amount", equalTo("12.3400"))
-        }
+        val beforePublication = Instant.now().minusSeconds(1)
+        publishAndAssertProjection(publishPath, offeringId, beforePublication)
 
         Given {
             contentType("application/json")
@@ -119,12 +99,46 @@ class CatalogPlatformResourceTest {
         assertPublishedSnapshotIsDatabaseImmutable(revisionId)
     }
 
+    private fun publishAndAssertProjection(publishPath: String, offeringId: UUID, beforePublication: Instant) {
+        Given {
+            contentType("application/json")
+            body("""{"reason":"approved product launch"}""")
+            header("If-Match", "\"0\"")
+        } When {
+            post(publishPath)
+        } Then {
+            statusCode(200)
+            header("ETag", equalTo("\"1\""))
+            body("state", equalTo("PUBLISHED"))
+            body("checkerId", equalTo("test-operator"))
+        }
+
+        Given { this } When {
+            get("/api/v2/products/$offeringId?effectiveAt=$beforePublication")
+        } Then {
+            statusCode(404)
+        }
+
+        Given { this } When {
+            get("/api/v2/products/$offeringId")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.currency", nullValue())
+            body("content.attributes.coverage.currency", equalTo("EUR"))
+            body("content.attributes.premium.amount", equalTo("12.3400"))
+            body("content.prices[0].value", equalTo(EXACT_PRICE))
+        }
+    }
+
     @Test
     fun onlyOneConcurrentDraftUpdateWins() {
         val specificationId = createSpecification("INS_TERM_LIFE_RACE")
         val offeringId = createOffering(specificationId, "INS_TERM_LIFE_RACE_CZ")
         val revisionId = createRevision(offeringId, "Before concurrent update")
         val path = "/api/v2/offerings/$offeringId/revisions/$revisionId"
+        val auditsBefore = actionCount("catalog_audit", "REVISION_UPDATED")
+        val eventsBefore = eventCount("com.openbank.catalog.revision_updated")
         val start = CountDownLatch(1)
         val executor = Executors.newFixedThreadPool(2)
 
@@ -147,8 +161,38 @@ class CatalogPlatformResourceTest {
         }
 
         assertThat(results).containsExactly(200, 412)
-        assertThat(actionCount("catalog_audit", "REVISION_UPDATED")).isEqualTo(1)
-        assertThat(eventCount("com.openbank.catalog.revision_updated")).isEqualTo(1)
+        assertThat(actionCount("catalog_audit", "REVISION_UPDATED") - auditsBefore).isEqualTo(1)
+        assertThat(eventCount("com.openbank.catalog.revision_updated") - eventsBefore).isEqualTo(1)
+    }
+
+    @Test
+    fun lastContentEditorBecomesMakerAndCannotSelfPublish() {
+        val specificationId = createSpecification("INS_TERM_LIFE_EDITOR")
+        val offeringId = createOffering(specificationId, "INS_TERM_LIFE_EDITOR_CZ")
+        val revisionId = createRevision(offeringId, "Initial author")
+        setMaker(revisionId, "original-maker")
+
+        Given {
+            contentType("application/json")
+            body(revisionPayload("Changed by test operator"))
+            header("If-Match", "\"0\"")
+        } When {
+            put("/api/v2/offerings/$offeringId/revisions/$revisionId")
+        } Then {
+            statusCode(200)
+            body("makerId", equalTo("test-operator"))
+        }
+
+        Given {
+            contentType("application/json")
+            body("""{"reason":"attempt to approve own edit"}""")
+            header("If-Match", "\"1\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(403)
+            body("code", equalTo("FOUR_EYES_REQUIRED"))
+        }
     }
 
     @Test
@@ -261,7 +305,7 @@ class CatalogPlatformResourceTest {
 
     private fun revisionPayload(name: String): String =
         """{"name":{"en":"$name"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{""" +
-            """"code":"PREMIUM","kind":"AMOUNT","value":$EXACT_PRICE,"currency":"EUR","unit":"policy",""" +
+            """"code":"PREMIUM","kind":"AMOUNT","value":"$EXACT_PRICE","currency":"EUR","unit":"policy",""" +
             """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}]}"""
 
     private fun setMaker(revisionId: UUID, maker: String) {

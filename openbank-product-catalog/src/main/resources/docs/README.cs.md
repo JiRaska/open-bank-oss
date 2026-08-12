@@ -20,8 +20,8 @@ Tuto dokumentaci publikuje přímo služba na management endpointu `/q/openbank/
 - **Tech stack:** Kotlin 2.3 / Quarkus 3.33 LTS / JDK 25 / RESTEasy Reactive + Jackson / SmallRye OpenAPI + Health
 - **Port:** 8104 (aplikace), 8085 (management health/metrics)
 - **Perzistence:** PostgreSQL přes reactive Panache; schéma spravuje Flyway a 15 bankovních příkladů se seeduje pouze do prázdné databáze (viz [04 — Data](./04-data.md)).
-- **Outbox / události:** žádné — služba nepublikuje Kafka události a nemá outbox.
-- **Souběh:** mutace vracejí ETag; klient může poslat `If-Match` a zastaralá revize vrátí 409.
+- **Outbox / události:** v2 zapisuje audit a transportně neutrální outbox atomicky; Kafka dispatcher zatím není součástí služby.
+- **Souběh:** v1 přijímá `If-Match` volitelně a drží legacy 409; v2 jej vyžaduje (chybí 428, zastaralý 412).
 - **Autentizace:** OIDC resource server; čtení vyžaduje autentizaci a zápis role OPERATOR/ADMIN. OPA je v bankovním profilu zatím advisory. Viz [03 — API](./03-api.md) a [06 — Compliance](./06-compliance.md).
 - **Money-path:** **Ne** (není v `rules.yaml: money_path_services`).
-- **API kontrakt:** `openapi.yaml` přítomen, `info.version` 1.1.0, base path `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+- **API kontrakt:** OpenAPI 3.1, `info.version` 2.0.0; kompatibilní `/api/v1` a generické `/api/v2` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).

@@ -4,7 +4,7 @@
 
 - **In-cluster bases:** `http://openbank-product-catalog:8104/api/v1` and `/api/v2`
 - **Local dev:** `http://localhost:8104/api/v1` and `/api/v2`
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) on the management port (source of truth: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.0.3)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) on the management port (source of truth: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.1.0)
 - **Swagger UI:** `http://localhost:8085/api/docs` (configured via `quarkus.swagger-ui.path`, `always-include: true`)
 
 The newest served major of `openapi.yaml:info.version` equals `openbank.api.version` and `/api/v2`.
@@ -55,7 +55,7 @@ a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 | POST | `/api/v2/offerings/{id}/revisions` | Author a DRAFT revision |
 | GET / PUT | `/api/v2/offerings/{id}/revisions/{revisionId}` | Read/update a draft; PUT requires `If-Match` |
 | POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish` | Four-eyes publish with reason and `If-Match` |
-| GET | `/api/v2/products/{specificationId}?effectiveAt=` | Resolve published effective content only |
+| GET | `/api/v2/products/{offeringId}?effectiveAt=` | Resolve published effective content for one deterministic offering |
 
 ### Example — create a product
 

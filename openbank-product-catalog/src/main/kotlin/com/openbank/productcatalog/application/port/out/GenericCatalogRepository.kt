@@ -22,7 +22,6 @@ interface GenericCatalogRepository {
     suspend fun createOffering(offering: ProductOffering, actorId: String): ProductOffering
     suspend fun findOffering(id: UUID): ProductOffering?
     suspend fun createDraft(revision: ProductRevision, actorId: String): ProductRevision
-    suspend fun nextRevisionNumber(offeringId: UUID): Long
     suspend fun findRevision(id: UUID): ProductRevision?
     suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision
     suspend fun publishDraft(
@@ -33,5 +32,5 @@ interface GenericCatalogRepository {
         contentHash: String,
         at: Instant,
     ): ProductRevision
-    suspend fun findPublished(specificationId: UUID, effectiveAt: Instant): ProductRevision?
+    suspend fun findPublished(offeringId: UUID, effectiveAt: Instant): ProductRevision?
 }

@@ -20,12 +20,21 @@ class CatalogSchemaProfile {
         visit(document, depth = 0)
     }
 
+    fun requireValidInstance(document: JsonNode) {
+        require(document.toString().toByteArray().size <= MAX_INSTANCE_BYTES) { "catalog instance is too large" }
+        visitInstance(document, depth = 0)
+    }
+
     private fun visit(node: JsonNode, depth: Int) {
         require(depth <= MAX_NESTING_DEPTH) { "catalog schema nesting exceeds $MAX_NESTING_DEPTH" }
         when {
             node.isObject -> {
                 val ref = node.get("\$ref")?.asText()
-                require(ref == null || ref.startsWith("#/")) { "catalog schema contains a non-local reference" }
+                require(ref == null || ref.startsWith("#/\$defs/")) {
+                    "catalog schema references must target local \$defs"
+                }
+                require(!node.has("\$dynamicRef")) { "catalog schema must not use dynamic references" }
+                require(depth == 0 || !node.has("\$id")) { "nested schema ids are forbidden" }
                 if (node.get("type")?.asText() == "object") {
                     require(
                         node.get("additionalProperties")?.isBoolean == true &&
@@ -40,9 +49,17 @@ class CatalogSchemaProfile {
         }
     }
 
+    private fun visitInstance(node: JsonNode, depth: Int) {
+        require(depth <= MAX_NESTING_DEPTH) { "catalog instance nesting exceeds $MAX_NESTING_DEPTH" }
+        when {
+            node.isObject || node.isArray -> node.elements().forEachRemaining { visitInstance(it, depth + 1) }
+        }
+    }
+
     companion object {
         const val DIALECT = "https://json-schema.org/draft/2020-12/schema"
         const val MAX_SCHEMA_BYTES = 256 * 1024
+        const val MAX_INSTANCE_BYTES = 1024 * 1024
         const val MAX_NESTING_DEPTH = 64
     }
 }
