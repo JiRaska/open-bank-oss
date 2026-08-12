@@ -126,6 +126,14 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     readExperiment(headers, id),
   ])
 
+  // Stable catalogue keys belong on the campaign record. Resolve the human label only for a
+  // configured entry source, so an ordinary detail page does not pay two calls to explain nulls.
+  const entry = campaign.data as { schedule?: unknown; trigger?: unknown } | null
+  const [cadences, triggers] = await Promise.all([
+    entry?.schedule ? read(headers, '/api/v1/campaigns/cadences', []) : Promise.resolve({ data: [], state: 'ok' as PartState }),
+    entry?.trigger ? read(headers, '/api/v1/campaigns/triggers', []) : Promise.resolve({ data: [], state: 'ok' as PartState }),
+  ])
+
   // Names for every party on this screen, resolved once and deduplicated. Done here rather than in
   // the component so the client never fans out one request per row, and so an unresolved name
   // degrades to the id instead of blanking the screen (lib/campaigns/party-names).
@@ -147,6 +155,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     sendSummary: sendSummary.data,
     journey: journey.data,
     experiment: experiment.data,
+    entryCatalogues: { cadences: cadences.data, triggers: triggers.data },
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
     // exact misreading this screen exists to prevent.
@@ -157,6 +166,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       sendSummary: sendSummary.state,
       journey: journey.state,
       experiment: experiment.state,
+      cadences: cadences.state,
+      triggers: triggers.state,
     },
   })
 }

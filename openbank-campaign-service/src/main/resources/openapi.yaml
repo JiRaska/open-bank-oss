@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.18.0
+  version: 1.19.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -98,6 +98,29 @@ paths:
                       description: >-
                         Never UTC. A cron evaluated in UTC reaches Czech customers an hour or two
                         off their morning, and the offset moves twice a year.
+  /api/v1/campaigns/triggers:
+    get:
+      tags: [Campaigns]
+      summary: Product events that may start a campaign journey
+      operationId: listCampaignTriggers
+      description: >-
+        The closed trigger catalogue, served so the authoring surface cannot offer a product event
+        nobody consumes. The event determines when a journey is considered; the campaign's
+        versioned segment still determines who may enter it.
+        NOTE the literal path segment: it must keep matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Every supported product-event trigger with an operator-facing description
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [trigger, humanForm]
+                  properties:
+                    trigger: { type: string, example: ACCOUNT_OPENED }
+                    humanForm: { type: string, example: when an account is opened }
   /api/v1/campaigns/{id}:
     get:
       tags: [Campaigns]

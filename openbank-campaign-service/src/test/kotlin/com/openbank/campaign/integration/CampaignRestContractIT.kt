@@ -482,6 +482,21 @@ class CampaignRestContractIT {
         }
     }
 
+    /** Studio reads these labels from the service instead of duplicating an executable event list. */
+    @Test
+    fun `the trigger catalogue is served with its operator-facing meaning`() {
+        When {
+            get("/api/v1/campaigns/triggers")
+        } Then {
+            statusCode(200)
+            body("trigger", org.hamcrest.Matchers.hasItem("ACCOUNT_OPENED"))
+            body(
+                "find { it.trigger == 'ACCOUNT_OPENED' }.humanForm",
+                org.hamcrest.Matchers.equalTo("when an account is opened"),
+            )
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {

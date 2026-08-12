@@ -44,6 +44,19 @@ interface Segment {
   rules: string[]
 }
 
+interface Cadence {
+  cadence: string
+  humanForm: string
+  zone: string
+}
+
+interface CampaignTrigger {
+  trigger: string
+  humanForm: string
+}
+
+type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
+
 /** Mirrors the service's catalogue; the service rejects anything not in its own copy. */
 const TEMPLATES: Record<string, string[]> = {
   MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
@@ -73,6 +86,12 @@ export default function NewCampaignPage() {
   const [goal, setGoal] = useState('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+  const [cadences, setCadences] = useState<Cadence[]>([])
+  const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
+  const [entryMode, setEntryMode] = useState<EntryMode>('MANUAL')
+  const [cadence, setCadence] = useState('')
+  const [trigger, setTrigger] = useState('')
+  const [entryUnavailable, setEntryUnavailable] = useState(false)
   const [steps, setSteps] = useState<EditorStep[]>([newStep()])
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
@@ -117,6 +136,25 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }, [])
 
+  // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
+  // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
+  // cron field that looks valid while doing something different in Temporal.
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/campaigns/cadences').then(r => r.json()),
+      fetch('/api/campaigns/triggers').then(r => r.json()),
+    ])
+      .then(([cadenceResponse, triggerResponse]: [
+        { items?: Cadence[]; state?: string },
+        { items?: CampaignTrigger[]; state?: string },
+      ]) => {
+        if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
+        if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
+        if (cadenceResponse.state !== 'ok' || triggerResponse.state !== 'ok') setEntryUnavailable(true)
+      })
+      .catch(() => setEntryUnavailable(true))
+  }, [])
+
   // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
   // A number computed here from a different query would agree with the send only by luck.
   const previewReach = (ref: string) => {
@@ -151,7 +189,17 @@ export default function NewCampaignPage() {
   const incomplete = steps.some(s =>
     (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()),
   )
-  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 && !incomplete
+  const entryConfigured =
+    entryMode === 'MANUAL' ||
+    (entryMode === 'SCHEDULE' && cadence !== '') ||
+    (entryMode === 'TRIGGER' && trigger !== '')
+  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 && !incomplete && entryConfigured
+
+  const chooseEntryMode = (next: EntryMode) => {
+    setEntryMode(next)
+    if (next === 'SCHEDULE' && cadence === '' && cadences[0]) setCadence(cadences[0].cadence)
+    if (next === 'TRIGGER' && trigger === '' && triggers[0]) setTrigger(triggers[0].trigger)
+  }
 
   const submit = () => {
     setSaving(true)
@@ -168,6 +216,8 @@ export default function NewCampaignPage() {
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
         ...(conversionRule ? { conversionRule } : {}),
         ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
+        ...(entryMode === 'SCHEDULE' && cadence ? { schedule: { cadence } } : {}),
+        ...(entryMode === 'TRIGGER' && trigger ? { trigger } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
@@ -289,6 +339,95 @@ export default function NewCampaignPage() {
               'Segments are defined in code and versioned. A new segment is a pull request, not a UI action.',
             )}
           </p>
+        </div>
+
+        <div className="space-y-3" data-entry-mode={entryMode}>
+          <div>
+            <h2 className="text-sm font-semibold">{t('Kdy cesta začne', 'When the journey starts')}</h2>
+            <p className="text-xs text-muted-foreground" style={{ marginTop: '0.25rem' }}>
+              {t(
+                'Vyberte jeden přezkoumatelný zdroj vstupu. Publikum stále určuje segment výše.',
+                'Choose one reviewable entry source. The segment above still decides who may enter.',
+              )}
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              data-entry-pick="MANUAL"
+              data-selected={entryMode === 'MANUAL' ? 'true' : 'false'}
+              onClick={() => chooseEntryMode('MANUAL')}
+              className="rounded-lg border p-3 text-left text-sm"
+              style={entryMode === 'MANUAL' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
+            >
+              <span className="font-medium">{t('Jednorázově', 'One time')}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t('Po spuštění ručně zařadíte aktuální publikum.', 'After activation, enrol the current audience manually.')}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-entry-pick="SCHEDULE"
+              data-selected={entryMode === 'SCHEDULE' ? 'true' : 'false'}
+              onClick={() => chooseEntryMode('SCHEDULE')}
+              disabled={cadences.length === 0}
+              className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
+              style={entryMode === 'SCHEDULE' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
+            >
+              <span className="font-medium">{t('Opakovaně', 'Recurring')}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t('Pravidelně zkontroluje, kdo do segmentu nově patří.', 'Rechecks who newly belongs to the segment on a schedule.')}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-entry-pick="TRIGGER"
+              data-selected={entryMode === 'TRIGGER' ? 'true' : 'false'}
+              onClick={() => chooseEntryMode('TRIGGER')}
+              disabled={triggers.length === 0}
+              className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
+              style={entryMode === 'TRIGGER' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
+            >
+              <span className="font-medium">{t('Při události', 'On an event')}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t('Zařadí člověka hned po sledované bankovní události.', 'Enrols a person as soon as the observed banking event happens.')}
+              </span>
+            </button>
+          </div>
+          {entryMode === 'SCHEDULE' && (
+            <label className="block max-w-xl text-sm">
+              <span className="font-medium">{t('Rytmus', 'Cadence')}</span>
+              <select
+                className="input mt-1 block w-full"
+                value={cadence}
+                onChange={e => setCadence(e.target.value)}
+                data-cadence
+              >
+                {cadences.map(c => <option key={c.cadence} value={c.cadence}>{c.humanForm} ({c.zone})</option>)}
+              </select>
+            </label>
+          )}
+          {entryMode === 'TRIGGER' && (
+            <label className="block max-w-xl text-sm">
+              <span className="font-medium">{t('Událost', 'Event')}</span>
+              <select
+                className="input mt-1 block w-full"
+                value={trigger}
+                onChange={e => setTrigger(e.target.value)}
+                data-trigger
+              >
+                {triggers.map(x => <option key={x.trigger} value={x.trigger}>{x.humanForm}</option>)}
+              </select>
+            </label>
+          )}
+          {entryUnavailable && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Některý katalog vstupů teď není dostupný; nenabízíme jeho neověřené volby.',
+                'One entry catalogue is unavailable; its unverified choices are not offered.',
+              )}
+            </p>
+          )}
         </div>
       </section>
 

@@ -4,7 +4,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { SessionProvider } from 'next-auth/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
@@ -17,6 +17,16 @@ const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
 const SEGMENTS = {
   state: 'ok',
   items: [{ name: 'actives', version: 1, rules: ['party status is ACTIVE'] }],
+}
+
+const CADENCES = {
+  state: 'ok',
+  items: [{ cadence: 'DAILY_MORNING', humanForm: 'every day at 09:00', zone: 'Europe/Prague' }],
+}
+
+const TRIGGERS = {
+  state: 'ok',
+  items: [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
 }
 
 function detail(state: string) {
@@ -106,6 +116,37 @@ describe('campaign studio', () => {
     expect(document.querySelectorAll('[id^="var-0-"]').length).toBe(3)
   }, 15000)
 
+  it('creates a recurring campaign from the served cadence catalogue', async () => {
+    let createBody: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
+      if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
+      if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url === '/api/campaigns') {
+        createBody = JSON.parse(String(init?.body))
+        return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Recurring welcome' } })
+    fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Keep new customers engaged' } })
+    fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Welcome' } })
+    fireEvent.change(document.getElementById('var-0-offerText')!, { target: { value: 'Thanks for joining.' } })
+    fireEvent.change(document.getElementById('var-0-ctaText')!, { target: { value: 'Explore' } })
+    fireEvent.click(document.querySelector('[data-entry-pick="SCHEDULE"]')!)
+
+    await waitFor(() => expect(document.querySelector('[data-cadence]')).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+
+    await waitFor(() => expect(createBody).toMatchObject({ schedule: { cadence: 'DAILY_MORNING' } }))
+    expect(createBody).not.toHaveProperty('trigger')
+  }, 15000)
+
   it('a draft can be submitted but not activated from the same screen', async () => {
     vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: detail('DRAFT') }))
     renderDetail()
@@ -138,5 +179,24 @@ describe('campaign studio', () => {
     // red messages are normal, which is how a real refusal stops being read.
     expect(screen.queryByText('Submit for approval')).toBeNull()
     expect(screen.queryByText('Resume')).toBeNull()
+  }, 15000)
+
+  it('states the configured recurring entry in the campaign detail', async () => {
+    const recurring = {
+      ...detail('ACTIVE'),
+      campaign: {
+        ...detail('ACTIVE').campaign,
+        schedule: { cadence: 'DAILY_MORNING', endAt: null },
+      },
+      entryCatalogues: {
+        cadences: [{ cadence: 'DAILY_MORNING', humanForm: 'every day at 09:00', zone: 'Europe/Prague' }],
+        triggers: [],
+      },
+    }
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: recurring }))
+    renderDetail()
+
+    await waitFor(() => expect(document.querySelector('[data-campaign-entry]')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText(/every day at 09:00 \(Europe\/Prague\)/)).toBeTruthy()
   }, 15000)
 })

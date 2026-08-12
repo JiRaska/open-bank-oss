@@ -39,16 +39,23 @@ object TriggerCatalog {
      *   `openbank.cards.events` is a shared topic where matching the topic alone would enrol a
      *   party on a limit change.
      */
-    data class Trigger(val topic: String, val eventTypes: Set<String>)
+    data class Trigger(
+        val topic: String,
+        val eventTypes: Set<String>,
+        /** The sentence an operator approves; topic and event type are integration detail. */
+        val humanForm: String,
+    )
 
     val ALL: Map<String, Trigger> = mapOf(
         "ACCOUNT_OPENED" to Trigger(
             topic = "openbank.accounts.account.created",
             eventTypes = setOf("AccountCreated", "account.created.v1"),
+            humanForm = "when an account is opened",
         ),
         "CARD_ISSUED" to Trigger(
             topic = "openbank.cards.events",
             eventTypes = setOf("card.issued.v1", "CardIssued"),
+            humanForm = "when a card is issued",
         ),
     )
 

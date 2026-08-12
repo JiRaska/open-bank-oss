@@ -27,6 +27,8 @@ interface Campaign {
   conversionRule?: string | null
   /** Percentage deliberately kept in the no-contact control cohort. */
   holdoutPercent?: number
+  schedule?: { cadence: string; endAt?: string | null } | null
+  trigger?: string | null
 }
 
 interface Enrolment {
@@ -80,6 +82,10 @@ type Detail = {
   sendSummary: Record<string, number>
   journey: StepFunnel[]
   experiment: Experiment | null;
+  entryCatalogues?: {
+    cadences: { cadence: string; humanForm: string; zone: string }[]
+    triggers: { trigger: string; humanForm: string }[]
+  }
   sources: Record<string, string>
 }
 
@@ -242,6 +248,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
   const summary = detail?.sendSummary ?? {}
   const experiment = detail?.experiment
+  const cadence = c?.schedule
+    ? detail?.entryCatalogues?.cadences.find(x => x.cadence === c.schedule?.cadence)
+    : undefined
+  const trigger = c?.trigger
+    ? detail?.entryCatalogues?.triggers.find(x => x.trigger === c.trigger)
+    : undefined
 
   // From the server-side summary, never from the loaded page: a headline derived from the rows on
   // screen understates every campaign larger than one page.
@@ -415,6 +427,35 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 contacted" is the question the send log exists to answer (#2895). */}
             <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
           </div>
+
+          <section className="rounded-lg border p-3 text-sm" data-campaign-entry>
+            <h2 className="font-semibold">{t('Vstup do cesty', 'Journey entry')}</h2>
+            {c.trigger ? (
+              <p className="mt-1 text-muted-foreground">
+                {t('Při události: ', 'On an event: ')}
+                <span className="font-medium text-foreground">{trigger?.humanForm ?? c.trigger}</span>
+                {t(
+                  ' — událost určí okamžik, ale člověk musí stále patřit do schváleného segmentu.',
+                  ' — the event chooses the moment, but the person must still belong to the approved segment.',
+                )}
+              </p>
+            ) : c.schedule ? (
+              <p className="mt-1 text-muted-foreground">
+                {t('Opakovaně: ', 'Recurring: ')}
+                <span className="font-medium text-foreground">
+                  {cadence ? `${cadence.humanForm} (${cadence.zone})` : c.schedule.cadence}
+                </span>
+                {c.schedule.endAt && ` · ${t('do ', 'until ')}${fmtDateTime(c.schedule.endAt)}`}
+              </p>
+            ) : (
+              <p className="mt-1 text-muted-foreground">
+                {t(
+                  'Jednorázově — po spuštění se aktuální publikum zařadí ručně.',
+                  'One time — the current audience is enrolled manually after activation.',
+                )}
+              </p>
+            )}
+          </section>
 
           {/* Absent rule and zero conversions are different facts and must never render the same:
               a campaign measuring nothing has no number, and saying so is the honest empty state
