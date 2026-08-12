@@ -39,7 +39,7 @@ class ApiVersionResponseFilter(
         resp.headers.apply {
             // Two version axes (ADR-0048): X-API-Version is the public REST contract major
             // (the URL /api/v{N} boundary); X-Service-Version is the deployable artifact's release SemVer.
-            putSingleHeader("X-API-Version", "v$apiVersion")
+            putSingleHeader("X-API-Version", "v${pathMajor(req.uriInfo.path) ?: apiVersion}")
             putSingleHeader("X-Service-Version", serviceVersion)
             putSingleHeader("X-Service-Name", serviceName)
             putSingleHeader(
@@ -54,12 +54,13 @@ class ApiVersionResponseFilter(
                     ?: UUID.randomUUID().toString(),
             )
             if (isDeprecatedPath(req.uriInfo.path)) {
-                val nextMajor = apiVersion.toIntOrNull()?.plus(1) ?: apiVersion
+                val currentMajor = pathMajor(req.uriInfo.path) ?: apiVersion
+                val nextMajor = currentMajor.toIntOrNull()?.plus(1)?.toString() ?: currentMajor
                 putSingleHeader("Deprecation", "true")
                 sunsetDate.ifPresent { putSingleHeader("Sunset", it) }
                 putSingleHeader(
                     "Link",
-                    "<${req.uriInfo.path.replaceFirst("/api/v$apiVersion/", "/api/v$nextMajor/")}>" +
+                    "<${replacePathMajor(req.uriInfo.path, currentMajor, nextMajor)}>" +
                         "; rel=\"successor-version\"",
                 )
             }
@@ -70,11 +71,17 @@ class ApiVersionResponseFilter(
     private fun isDeprecatedPath(path: String): Boolean =
         deprecatedPaths.map { paths -> paths.any { path.startsWith(it) } }.orElse(false)
 
+    private fun pathMajor(path: String): String? = API_PATH_VERSION.find(path)?.groupValues?.get(1)
+
+    private fun replacePathMajor(path: String, current: String, next: String): String =
+        path.replaceFirst("api/v$current", "api/v$next")
+
     private fun jakarta.ws.rs.core.MultivaluedMap<String, Any>.putSingleHeader(key: String, value: String) {
         if (!containsKey(key)) putSingle(key, value)
     }
 
     companion object {
         const val CORRELATION_ID_KEY = "openbank.correlationId"
+        private val API_PATH_VERSION = Regex("(?:^|/)api/v([0-9]+)(?:/|$)")
     }
 }
