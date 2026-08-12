@@ -22,7 +22,7 @@ interface Campaign {
   state: string
   createdBy: string
   approvedBy: string | null
-  steps: { order: number; template: string; delaySeconds: number }[]
+  steps: { order: number; template: string; delaySeconds: number; variantBVariables?: Record<string, string> | null }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
   /** Percentage deliberately kept in the no-contact control cohort. */
@@ -74,6 +74,18 @@ interface Experiment {
   }
 }
 
+interface ContentExperiment {
+  a: { assigned: number; converted: number; conversionRate: number | null }
+  b: { assigned: number; converted: number; conversionRate: number | null }
+  observedLiftPercentagePoints: number | null
+  decision?: {
+    state: 'COLLECTING_DATA' | 'INCONCLUSIVE' | 'A_OUTPERFORMS_B' | 'B_OUTPERFORMS_A'
+    minimumAssignedPerVariant: number
+    aConfidenceInterval: { lower: number; upper: number } | null
+    bConfidenceInterval: { lower: number; upper: number } | null
+  }
+}
+
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -81,7 +93,8 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
-  experiment: Experiment | null;
+  experiment: Experiment | null
+  contentExperiment: ContentExperiment | null
   entryCatalogues?: {
     cadences: { cadence: string; humanForm: string; zone: string }[]
     triggers: { trigger: string; humanForm: string }[]
@@ -248,6 +261,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
   const summary = detail?.sendSummary ?? {}
   const experiment = detail?.experiment
+  const contentExperiment = detail?.contentExperiment
   const cadence = c?.schedule
     ? detail?.entryCatalogues?.cadences.find(x => x.cadence === c.schedule?.cadence)
     : undefined
@@ -298,6 +312,32 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         return t(
           '95% intervaly se oddělily ve prospěch kontroly. Zkontrolujte obsah a provedení kampaně; systém nic automaticky nevypíná.',
           'The 95% intervals separate in favour of holdout. Review campaign content and delivery; the system does not stop anything automatically.',
+        )
+    }
+  }
+
+  const contentExperimentDecisionText = (decision: ContentExperiment['decision']) => {
+    if (!decision) return t('Tato verze služby zatím neposkytuje bránu připravenosti rozhodnutí.', 'This service version does not yet provide a decision-readiness gate.')
+    switch (decision.state) {
+      case 'COLLECTING_DATA':
+        return t(
+          `Sbíráme data: pro obě varianty je potřeba alespoň ${decision.minimumAssignedPerVariant} zařazených lidí.`,
+          `Collecting data: each variant needs at least ${decision.minimumAssignedPerVariant} assigned people.`,
+        )
+      case 'INCONCLUSIVE':
+        return t(
+          'Požadovaný rozsah dat už máme, ale 95% intervaly se překrývají. Obsah teď neměňte.',
+          'The sample threshold is met, but the 95% intervals overlap. Do not change the content yet.',
+        )
+      case 'A_OUTPERFORMS_B':
+        return t(
+          '95% intervaly se oddělily ve prospěch varianty A. Je to konzervativní signál, ne automatická změna kampaně.',
+          'The 95% intervals separate in favour of variant A. It is a conservative signal, not an automatic campaign change.',
+        )
+      case 'B_OUTPERFORMS_A':
+        return t(
+          '95% intervaly se oddělily ve prospěch varianty B. Zkontrolujte výsledek; systém ji sám nenasazuje.',
+          'The 95% intervals separate in favour of variant B. Review the result; the system does not deploy it automatically.',
         )
     }
   }
@@ -539,6 +579,54 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 {t(
                   'Rozdíl je popisný. Brána používá konzervativní 95% Wilsonovy intervaly a nemůže sama prokázat příčinu ani změnit běžící kampaň.',
                   'The difference is descriptive. The gate uses conservative 95% Wilson intervals; it cannot prove causality or change a running campaign itself.',
+                )}
+              </p>
+            </section>
+          )}
+
+          {c.steps.some(step => step.variantBVariables) && (
+            <section className="space-y-2 rounded-lg border p-3" data-content-experiment>
+              <div>
+                <h2 className="text-sm font-semibold">{t('Porovnání obsahu A/B', 'A/B content comparison')}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'Každý oslovený člověk zůstává ve variantě A nebo B po celou cestu. Porovnává se jen skutečná bankovní konverze.',
+                    'Each contacted person stays in A or B throughout the journey. Only real banking conversion is compared.',
+                  )}
+                </p>
+              </div>
+              {detail?.sources?.contentExperiment === 'ok' && contentExperiment ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <StatCard label={t('Varianta A', 'Variant A')} value={`${fmtRate(contentExperiment.a.conversionRate)} · ${contentExperiment.a.converted}/${contentExperiment.a.assigned}`} />
+                    <StatCard label={t('Varianta B', 'Variant B')} value={`${fmtRate(contentExperiment.b.conversionRate)} · ${contentExperiment.b.converted}/${contentExperiment.b.assigned}`} />
+                    <StatCard label={t('B − A (p. b.)', 'B − A (pp)')} value={contentExperiment.observedLiftPercentagePoints === null ? '—' : contentExperiment.observedLiftPercentagePoints.toFixed(1)} />
+                  </div>
+                  <div className="rounded-md bg-muted p-2 text-xs text-muted-foreground" data-content-experiment-decision>
+                    <span className="font-medium text-foreground">{t('Připravenost rozhodnutí: ', 'Decision readiness: ')}</span>
+                    {contentExperimentDecisionText(contentExperiment.decision)}
+                    {contentExperiment.decision?.aConfidenceInterval && contentExperiment.decision?.bConfidenceInterval && (
+                      <span>
+                        {' '}{t('95% intervaly — A ', '95% intervals — A ')}
+                        {fmtRate(contentExperiment.decision.aConfidenceInterval.lower)}–{fmtRate(contentExperiment.decision.aConfidenceInterval.upper)}
+                        {t(', B ', ', B ')}
+                        {fmtRate(contentExperiment.decision.bConfidenceInterval.lower)}–{fmtRate(contentExperiment.decision.bConfidenceInterval.upper)}.
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <DataUnavailable
+                  kind={detail?.sources?.contentExperiment === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                  service="Campaign-service"
+                  feature={t('Vyhodnocení variant obsahu', 'Content-variant result')}
+                  dense
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Rozdíl je popisný. Brána používá 95% Wilsonovy intervaly, automaticky nemění aktivní cestu a sama nedokazuje příčinu.',
+                  'The difference is descriptive. The 95% Wilson gate never changes an active journey and does not establish causality itself.',
                 )}
               </p>
             </section>

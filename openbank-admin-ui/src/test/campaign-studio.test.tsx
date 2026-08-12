@@ -147,6 +147,43 @@ describe('campaign studio', () => {
     expect(createBody).not.toHaveProperty('trigger')
   }, 15000)
 
+  it('authors both content arms and submits a measurable A/B experiment', async () => {
+    let createBody: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
+      if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
+      if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url === '/api/campaigns') {
+        createBody = JSON.parse(String(init?.body))
+        return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
+      }
+      return { ok: true, status: 200, json: async () => ({}) }
+    }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Two headlines' } })
+    fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
+    fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'A headline' } })
+    fireEvent.change(document.getElementById('var-0-offerText')!, { target: { value: 'A copy' } })
+    fireEvent.change(document.getElementById('var-0-ctaText')!, { target: { value: 'Open' } })
+    fireEvent.click(document.querySelector('[data-conversion-pick="ACCOUNT_OPENED"]')!)
+    fireEvent.click(document.getElementById('c-content-experiment')!)
+
+    await waitFor(() => expect(document.getElementById('var-b-0-offerTitle')).toBeTruthy())
+    fireEvent.change(document.getElementById('var-b-0-offerTitle')!, { target: { value: 'B headline' } })
+    fireEvent.change(document.getElementById('var-b-0-offerText')!, { target: { value: 'B copy' } })
+    fireEvent.change(document.getElementById('var-b-0-ctaText')!, { target: { value: 'Try' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft' }))
+
+    await waitFor(() => expect(createBody).toMatchObject({
+      conversionRule: 'ACCOUNT_OPENED',
+      steps: [{ variables: { offerTitle: 'A headline' }, variantBVariables: { offerTitle: 'B headline' } }],
+    }))
+  }, 15000)
+
   it('a draft can be submitted but not activated from the same screen', async () => {
     vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: detail('DRAFT') }))
     renderDetail()
@@ -198,5 +235,35 @@ describe('campaign studio', () => {
 
     await waitFor(() => expect(document.querySelector('[data-campaign-entry]')).toBeTruthy(), { timeout: 8000 })
     expect(screen.getByText(/every day at 09:00 \(Europe\/Prague\)/)).toBeTruthy()
+  }, 15000)
+
+  it('renders a content experiment as A and B measurements, never an automatic winner', async () => {
+    const experimentDetail = {
+      ...detail('ACTIVE'),
+      campaign: {
+        ...detail('ACTIVE').campaign,
+        conversionRule: 'ACCOUNT_OPENED',
+        steps: [{ order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, variantBVariables: { offerTitle: 'B' } }],
+      },
+      contentExperiment: {
+        a: { assigned: 120, converted: 10, conversionRate: 10 / 120 },
+        b: { assigned: 120, converted: 30, conversionRate: 0.25 },
+        observedLiftPercentagePoints: 16.666667,
+        decision: {
+          state: 'B_OUTPERFORMS_A',
+          minimumAssignedPerVariant: 100,
+          aConfidenceInterval: { lower: 0.04, upper: 0.16 },
+          bConfidenceInterval: { lower: 0.18, upper: 0.34 },
+        },
+      },
+      sources: { campaign: 'ok', enrolments: 'ok', sends: 'ok', sendSummary: 'ok', journey: 'ok', contentExperiment: 'ok' },
+    }
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: experimentDetail }))
+    renderDetail()
+
+    await waitFor(() => expect(document.querySelector('[data-content-experiment]')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('A/B content comparison')).toBeTruthy()
+    expect(screen.getAllByText(/variant B/i)).not.toHaveLength(0)
+    expect(screen.getByText(/does not deploy it automatically/i)).toBeTruthy()
   }, 15000)
 })

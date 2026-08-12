@@ -26,6 +26,7 @@ export function StepEditor({
   templateChannel,
   templateLabels,
   variableLabels,
+  contentExperiment = false,
   onChange,
   onClose,
   attached = false,
@@ -45,6 +46,8 @@ export function StepEditor({
    * actual question and a bare box does not answer it.
    */
   variableLabels: Record<string, { label: string; example: string }>
+  /** When enabled, every step has a B-arm copy to compare against its original A-arm values. */
+  contentExperiment?: boolean
   onChange: (next: EditorStep) => void
   onClose: () => void
   /**
@@ -104,7 +107,13 @@ export function StepEditor({
                 data-channel-pick={c}
                 data-selected={active ? 'true' : 'false'}
                 disabled={!first}
-                onClick={() => first && onChange({ ...step, channel: c, template: first, variables: {} })}
+                onClick={() => first && onChange({
+                  ...step,
+                  channel: c,
+                  template: first,
+                  variables: {},
+                  ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
+                })}
                 // `.btn` again rather than a hand-rolled box — the third time tonight that a
                 // house primitive existed and a worse copy was written next to it. `py-1.5` is not
                 // even generated in this build, so the copy rendered cramped.
@@ -138,7 +147,12 @@ export function StepEditor({
           id={`tpl-${index}`}
           className={field}
           value={step.template}
-          onChange={e => onChange({ ...step, template: e.target.value, variables: {} })}
+          onChange={e => onChange({
+            ...step,
+            template: e.target.value,
+            variables: {},
+            ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
+          })}
         >
           {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel).map(tpl => (
             <option key={tpl} value={tpl}>
@@ -174,6 +188,37 @@ export function StepEditor({
           />
         </div>
       ))}
+
+      {contentExperiment && (
+        <div className="rounded-md border border-dashed p-3 space-y-3" data-variant-b-editor={index}>
+          <div>
+            <p className="text-sm font-medium">{t('Varianta B', 'Variant B')}</p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Každý člověk zůstane po celou cestu ve stejné variantě. Změňte jen hodnoty, které chcete porovnat.',
+                'Each person stays in the same variant throughout the journey. Change only the values you want to compare.',
+              )}
+            </p>
+          </div>
+          {declared.map(v => (
+            <div key={v} className="space-y-1.5">
+              <label htmlFor={`var-b-${index}-${v}`} className="text-sm font-medium">
+                {variableLabels[v]?.label ?? v}
+              </label>
+              <input
+                id={`var-b-${index}-${v}`}
+                className={field}
+                placeholder={variableLabels[v]?.example ?? ''}
+                value={step.variantBVariables?.[v] ?? ''}
+                onChange={e => onChange({
+                  ...step,
+                  variantBVariables: { ...step.variantBVariables, [v]: e.target.value },
+                })}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* The gate, next to the delay, because the two together answer "when does this go out, and to
           whom". `CONFIRMED` is delivery as notification-service reports it (ADR-0239 D3) — never

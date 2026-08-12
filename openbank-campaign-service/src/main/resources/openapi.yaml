@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.19.0
+  version: 1.20.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -281,6 +281,29 @@ paths:
         '409':
           description: Campaign has no holdout experiment configured
 
+  /api/v1/campaigns/{id}/content-experiment:
+    get:
+      tags: [Campaigns]
+      summary: Compare two assigned message-content variants
+      description: >-
+        A durable 50/50 A/B assignment for campaigns that declare alternate B values on every
+        step. Outcomes are conversion-rule events, not inferred opens or clicks. The response is
+        a conservative measurement aid; it never selects a winner or changes a live campaign.
+      operationId: campaignContentExperiment
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Variant assignment and observed conversion outcomes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignContentExperimentSummary'
+        '404':
+          description: Campaign not found
+        '409':
+          description: Campaign has no measured A/B content experiment configured
+
   /api/v1/campaigns/{id}/journey:
     get:
       tags: [Campaigns]
@@ -545,6 +568,15 @@ components:
         variables:
           type: object
           additionalProperties: { type: string }
+        variantBVariables:
+          type: object
+          nullable: true
+          additionalProperties: { type: string }
+          description: >-
+            Alternative declared template values for the B arm. Its presence turns the entire
+            campaign into a two-arm experiment, so every step must provide it and conversionRule
+            is required. `variables` remains the A arm. Assignment is persisted at enrolment and
+            neither an activity retry nor a later code change can switch a person between arms.
         delaySeconds: { type: integer, minimum: 0 }
         condition:
           description: >-
@@ -679,6 +711,20 @@ components:
             is descriptive and is not a statistical-significance verdict.
         decision: { $ref: '#/components/schemas/ExperimentDecision' }
 
+    CampaignContentExperimentSummary:
+      type: object
+      required: [campaignId, a, b, observedLiftPercentagePoints, decision]
+      properties:
+        campaignId: { type: string, format: uuid }
+        a: { $ref: '#/components/schemas/CohortOutcome' }
+        b: { $ref: '#/components/schemas/CohortOutcome' }
+        observedLiftPercentagePoints:
+          type: number
+          format: double
+          nullable: true
+          description: B conversion rate minus A conversion rate, in percentage points.
+        decision: { $ref: '#/components/schemas/ContentExperimentDecision' }
+
     RateConfidenceInterval:
       type: object
       required: [lower, upper]
@@ -703,6 +749,25 @@ components:
           allOf: [{ $ref: '#/components/schemas/RateConfidenceInterval' }]
           nullable: true
         holdoutConfidenceInterval:
+          allOf: [{ $ref: '#/components/schemas/RateConfidenceInterval' }]
+          nullable: true
+
+    ContentExperimentDecision:
+      type: object
+      required: [state, minimumAssignedPerVariant, aConfidenceInterval, bConfidenceInterval]
+      description: >-
+        Conservative decision readiness only. Non-overlapping 95% Wilson intervals with the
+        minimum sample in each arm are necessary before a result is shown; no automatic action is
+        taken and the result is not a causal-effect claim.
+      properties:
+        state:
+          type: string
+          enum: [COLLECTING_DATA, INCONCLUSIVE, A_OUTPERFORMS_B, B_OUTPERFORMS_A]
+        minimumAssignedPerVariant: { type: integer, minimum: 1 }
+        aConfidenceInterval:
+          allOf: [{ $ref: '#/components/schemas/RateConfidenceInterval' }]
+          nullable: true
+        bConfidenceInterval:
           allOf: [{ $ref: '#/components/schemas/RateConfidenceInterval' }]
           nullable: true
 
@@ -823,3 +888,10 @@ components:
         experimentCohort:
           type: string
           enum: [TREATMENT, HOLDOUT]
+        contentVariant:
+          type: string
+          nullable: true
+          enum: [A, B]
+          description: >-
+            Durable A/B content arm, null when the campaign has one message or this enrolment is
+            a no-contact holdout.

@@ -118,6 +118,15 @@ open class CampaignJourneyActivitiesImpl(
             return StepOutcome.GOAL_REACHED
         }
         val step = campaign.steps.firstOrNull { it.order == stepOrder } ?: return StepOutcome.SUPPRESSED
+        // The assignment is stored on the enrolment before its workflow starts. Do not choose an
+        // arm at this point: a retry must send the same treatment, and an audit must explain which
+        // wording the person was actually offered.
+        val contentVariant = if (campaign.hasContentExperiment) {
+            enrolments.findByCampaignAndParty(campaignId, partyId)?.contentVariant
+        } else {
+            null
+        }
+        val variables = step.variablesFor(contentVariant)
 
         // ADR-0219 (#3656): one gate call wraps the suppression list, the frequency cap, quiet
         // hours and the live consent pull, in the gate's ordering.
@@ -156,7 +165,7 @@ open class CampaignJourneyActivitiesImpl(
                             step.channel,
                             step.template,
                             recipientFor(partyId),
-                            step.variables,
+                            variables,
                             correlationId = sendId,
                         )
                     } catch (e: Exception) {

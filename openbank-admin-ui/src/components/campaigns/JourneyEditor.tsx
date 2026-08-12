@@ -34,10 +34,12 @@ export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRM
 export interface EditorStep {
   template: string
   channel: EditorChannel
-  variables: Record<string, string>
+  variables: { [key: string]: string }
   delaySeconds: number
   /** Absent means the step always runs. Evaluated against the previous send's delivery status. */
   condition?: EditorCondition
+  /** Alternative B-arm values in a campaign-wide content experiment. */
+  variantBVariables?: { [key: string]: string }
 }
 
 export const MAX_STEPS = 5

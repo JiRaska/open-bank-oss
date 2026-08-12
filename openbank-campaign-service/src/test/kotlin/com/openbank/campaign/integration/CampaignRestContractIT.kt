@@ -497,6 +497,45 @@ class CampaignRestContractIT {
         }
     }
 
+    /** A/B content survives HTTP and has a measured endpoint even before either arm has enrolled. */
+    @Test
+    fun `a content experiment keeps both declared arms and exposes its empty measurement`() {
+        val body = """
+            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip",
+             "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
+                       "variantBVariables":{"offerTitle":"B","offerText":"B copy","ctaText":"Try"},
+                       "delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].variantBVariables.offerTitle", org.hamcrest.Matchers.equalTo("B"))
+        }
+        When {
+            get("/api/v1/campaigns/$id/content-experiment")
+        } Then {
+            statusCode(200)
+            body("a.assigned", org.hamcrest.Matchers.equalTo(0))
+            body("b.assigned", org.hamcrest.Matchers.equalTo(0))
+            body("decision.state", org.hamcrest.Matchers.equalTo("COLLECTING_DATA"))
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {

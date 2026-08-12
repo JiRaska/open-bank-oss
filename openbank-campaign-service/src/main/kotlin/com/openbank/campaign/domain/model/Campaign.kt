@@ -63,7 +63,21 @@ data class Campaign(
         require(holdoutPercent == 0 || conversionRule != null) {
             "a holdout requires a conversionRule to measure its outcome"
         }
+        // A/B assignment is campaign-wide, not a step-level surprise. Letting the first message
+        // have two variants while a later one silently collapses them would turn the result into
+        // an unreviewable mixture of different treatments. Existing campaigns have no B variables
+        // on any step and keep their exact pre-experiment path.
+        val contentExperiment = steps.firstOrNull()?.variantBVariables != null
+        require(steps.all { (it.variantBVariables != null) == contentExperiment }) {
+            "a content experiment must define variant B for every campaign step"
+        }
+        require(!contentExperiment || conversionRule != null) {
+            "a content experiment requires a conversionRule to measure its outcome"
+        }
     }
+
+    /** Both variants exist on every step; a null B map means this is not a content experiment. */
+    val hasContentExperiment: Boolean get() = steps.firstOrNull()?.variantBVariables != null
 
     /** DRAFT → PENDING_APPROVAL → ACTIVE ⇄ PAUSED → CLOSED. Terminal states never leave. */
     fun submit(): Campaign {
@@ -129,6 +143,29 @@ enum class ExperimentCohort {
     }
 }
 
+/**
+ * The durable arm of a content experiment. `A` is the author's original declared values and `B`
+ * is the alternative. Keeping the names neutral avoids declaring a winner before there is data.
+ */
+enum class ContentVariant {
+    A,
+    B,
+    ;
+
+    companion object {
+        /** A stable 50/50 split, independent from the campaign's no-contact holdout split. */
+        fun assign(campaignId: UUID, partyId: UUID): ContentVariant {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest("content:$campaignId:$partyId".toByteArray(StandardCharsets.UTF_8))
+            val bucket = (ByteBuffer.wrap(digest, 0, Int.SIZE_BYTES).int.toLong() and UNSIGNED_INT_MASK) % BUCKETS
+            return if (bucket < BUCKETS / 2) A else B
+        }
+
+        private const val UNSIGNED_INT_MASK = 0xffff_ffffL
+        private const val BUCKETS = 10_000L
+    }
+}
+
 enum class CampaignState { DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED }
 
 /**
@@ -156,6 +193,12 @@ data class CampaignStep(
      * it took before. See [StepCondition].
      */
     val condition: StepCondition? = null,
+    /**
+     * Alternative declared values for the B arm of a campaign-wide A/B content experiment.
+     * Null preserves the historical single-content step; when present every step must provide it
+     * (enforced by [Campaign]) so one party keeps the same treatment throughout the journey.
+     */
+    val variantBVariables: Map<String, String>? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -181,7 +224,16 @@ data class CampaignStep(
         TemplateCatalog.unknownVariables(template, variables).let {
             require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
         }
+        variantBVariables?.let { alternative ->
+            TemplateCatalog.unknownVariables(template, alternative).let {
+                require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
+            }
+        }
     }
+
+    /** Resolves content after the durable enrolment assignment, never randomly at send time. */
+    fun variablesFor(variant: ContentVariant?): Map<String, String> =
+        if (variant == ContentVariant.B) variantBVariables ?: variables else variables
 }
 
 /**

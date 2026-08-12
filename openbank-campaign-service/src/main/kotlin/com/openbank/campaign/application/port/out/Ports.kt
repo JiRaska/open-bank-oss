@@ -6,6 +6,7 @@ package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
@@ -50,6 +51,13 @@ data class ExperimentCohortMetrics(val cohort: ExperimentCohort, val assigned: L
  */
 interface CampaignExperimentRepository {
     suspend fun metrics(campaignId: UUID): List<ExperimentCohortMetrics>
+}
+
+/** Counts remain in SQL so an A/B read stays bounded for a campaign with millions of enrolments. */
+data class ContentVariantMetrics(val variant: ContentVariant, val assigned: Long, val converted: Long)
+
+interface CampaignContentExperimentRepository {
+    suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics>
 }
 
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */

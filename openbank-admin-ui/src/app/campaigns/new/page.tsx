@@ -102,6 +102,9 @@ export default function NewCampaignPage() {
   // A bounded, explicit control group is the only way to compare outcome rates with no-contact
   // peers; zero preserves the existing all-treatment behaviour.
   const [holdoutPercent, setHoldoutPercent] = useState(0)
+  // A/B compares two contacted content arms. It needs the same observed conversion fact as a
+  // holdout, but it never withholds a message and never chooses a winner automatically.
+  const [contentExperiment, setContentExperiment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -176,7 +179,10 @@ export default function NewCampaignPage() {
     setSteps(prev => {
       if (prev.length >= MAX_STEPS) return prev
       setSelected(prev.length)
-      return [...prev, newStep()]
+      return [...prev, {
+        ...newStep(),
+        ...(contentExperiment ? { variantBVariables: {} } : {}),
+      }]
     })
 
   const removeStep = (i: number) =>
@@ -187,13 +193,25 @@ export default function NewCampaignPage() {
     })
 
   const incomplete = steps.some(s =>
-    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()),
+    (TEMPLATES[s.template] ?? []).some(v =>
+      !(s.variables[v] ?? '').trim() || (contentExperiment && !(s.variantBVariables?.[v] ?? '').trim()),
+    ),
   )
   const entryConfigured =
     entryMode === 'MANUAL' ||
     (entryMode === 'SCHEDULE' && cadence !== '') ||
     (entryMode === 'TRIGGER' && trigger !== '')
-  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 && !incomplete && entryConfigured
+  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
+    !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+
+  const setContentExperimentEnabled = (enabled: boolean) => {
+    setContentExperiment(enabled)
+    if (enabled) {
+      // Copy A once when the test is enabled. Later edits intentionally diverge, otherwise both
+      // arms would change together and the test would be a convincing-looking no-op.
+      setSteps(prev => prev.map(s => ({ ...s, variantBVariables: { ...s.variables } })))
+    }
+  }
 
   const chooseEntryMode = (next: EntryMode) => {
     setEntryMode(next)
@@ -224,6 +242,7 @@ export default function NewCampaignPage() {
           channel: s.channel,
           ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
+          ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -461,6 +480,7 @@ export default function NewCampaignPage() {
             templateChannel={TEMPLATE_CHANNEL}
             templateLabels={templateLabels}
             variableLabels={variableLabels}
+            contentExperiment={contentExperiment}
             onChange={next => updateStep(selected, next)}
             onClose={() => setSelected(null)}
           />
@@ -483,7 +503,10 @@ export default function NewCampaignPage() {
                 data-selected={conversionRule === r ? 'true' : 'false'}
                 onClick={() => {
                   setConversionRule(r)
-                  if (r === null) setHoldoutPercent(0)
+                  if (r === null) {
+                    setHoldoutPercent(0)
+                    setContentExperiment(false)
+                  }
                 }}
                 className="btn"
                 style={
@@ -505,6 +528,30 @@ export default function NewCampaignPage() {
               'Počítá se skutečná událost v bance, ne otevření e-mailu ani proklik — ty se nesledují.',
               'Counted from a real banking event, never an email open or a click — those are not tracked.',
             )}
+          </p>
+        </div>
+
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2" data-content-experiment={contentExperiment ? 'true' : 'false'}>
+          <label className="flex items-center gap-2 text-sm font-medium" htmlFor="c-content-experiment">
+            <input
+              id="c-content-experiment"
+              type="checkbox"
+              checked={contentExperiment}
+              disabled={!conversionRule}
+              onChange={e => setContentExperimentEnabled(e.target.checked)}
+            />
+            {t('Porovnat variantu A a B', 'Compare variant A and B')}
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {conversionRule
+              ? t(
+                  'Každý člověk dostane stabilně A nebo B; u každého kroku pak upravíte hodnoty varianty B. Výsledek vychází jen ze skutečné bankovní konverze.',
+                  'Each person consistently receives A or B; edit B values in every step. The result comes only from a real banking conversion.',
+                )
+              : t(
+                  'Nejdřív vyberte měřitelný cíl. Bez něj by dvě verze obsahu neměly důvěryhodný výsledek.',
+                  'Choose a measurable success event first. Without it, two content versions have no credible outcome.',
+                )}
           </p>
         </div>
 
