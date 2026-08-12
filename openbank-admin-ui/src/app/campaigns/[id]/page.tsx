@@ -57,6 +57,8 @@ interface Send {
    */
   deliveryStatus?: string
   deliveryReason?: string | null
+  /** Actual request medium, including a consent-authorized EMAIL → PUSH fallback. */
+  channel?: 'EMAIL' | 'PUSH' | null
 }
 
 interface SendPage {
@@ -802,6 +804,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                         'Co se se zprávou skutečně stalo, podle notification-service.',
                         'What actually became of the message, as reported by notification-service.',
                       )}>{t('Doručení', 'Delivery')}</th>
+                      <th title={t(
+                        'Kanál, který campaign-service skutečně předal notification-service.',
+                        'The channel campaign-service actually handed to notification-service.',
+                      )}>{t('Kanál', 'Channel')}</th>
                       <th>{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
@@ -831,6 +837,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
+                        </td>
+                        <td>
+                          {s.channel === 'EMAIL'
+                            ? t('E-mail', 'Email')
+                            : s.channel === 'PUSH'
+                              ? t('Push', 'Push')
+                              : <span className="text-xs text-muted-foreground">—</span>}
                         </td>
                         <td className="text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>

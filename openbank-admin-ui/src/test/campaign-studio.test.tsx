@@ -280,6 +280,23 @@ describe('campaign studio', () => {
     expect(screen.getByText(/never triggers a second message/i)).toBeTruthy()
   }, 15000)
 
+  it('shows the actual push channel in the send log instead of inferring it from the step', async () => {
+    const auditDetail = {
+      ...detail('ACTIVE'),
+      sends: {
+        items: [{
+          id: 'send-1', partyId: 'party-1', stepOrder: 1, outcome: 'SENT', channel: 'PUSH',
+          deliveryStatus: 'CONFIRMED', occurredAt: '2026-08-12T10:00:00Z',
+        }], total: 1, page: 0, size: 50,
+      },
+    }
+    vi.stubGlobal('fetch', mockFetch({ [`/api/campaigns/${CAMPAIGN_ID}`]: auditDetail }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByText('Channel')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Push')).toBeTruthy()
+  }, 15000)
+
   it('renders a content experiment as A and B measurements, never an automatic winner', async () => {
     const experimentDetail = {
       ...detail('ACTIVE'),
