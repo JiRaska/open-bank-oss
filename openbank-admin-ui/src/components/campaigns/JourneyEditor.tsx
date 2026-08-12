@@ -29,6 +29,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export type EditorChannel = 'EMAIL' | 'PUSH'
 
+export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
+
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 
 export interface EditorStep {
@@ -42,6 +44,8 @@ export interface EditorStep {
   variantBVariables?: { [key: string]: string }
   /** Try the catalogue's safe app-push counterpart only when email consent is absent. */
   fallbackToPush?: boolean
+  /** Closed app context reached after a push tap; never an arbitrary URL. */
+  mobileDestination?: EditorMobileDestination
 }
 
 export const MAX_STEPS = 5

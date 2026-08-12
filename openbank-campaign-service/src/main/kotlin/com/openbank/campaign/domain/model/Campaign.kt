@@ -207,6 +207,8 @@ data class CampaignStep(
      * to send a second message.
      */
     val fallbackToPush: Boolean = false,
+    /** A closed, app-owned destination for a push tap — never author-entered URL text. */
+    val mobileDestination: MobileDestination? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -243,6 +245,9 @@ data class CampaignStep(
         require(!fallbackToPush || template in TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL) {
             "template '$template' has no safe PUSH fallback"
         }
+        require(mobileDestination == null || channel == Channel.PUSH || fallbackToPush) {
+            "a mobile destination requires a PUSH step or an EMAIL step with PUSH fallback"
+        }
     }
 
     /** Resolves content after the durable enrolment assignment, never randomly at send time. */
@@ -250,8 +255,12 @@ data class CampaignStep(
         if (variant == ContentVariant.B) variantBVariables ?: variables else variables
 
     /** Primary delivery values, kept separate from the fallback's reduced template vocabulary. */
-    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery =
-        CampaignDelivery(channel, template, TemplateCatalog.valuesFor(template, variablesFor(variant)))
+    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery = CampaignDelivery(
+        channel,
+        template,
+        TemplateCatalog.valuesFor(template, variablesFor(variant)),
+        mobileDestination?.deepLink.takeIf { channel == Channel.PUSH },
+    )
 
     /** The only supported fallback: a consented app push after EMAIL consent was absent. */
     fun pushFallback(variant: ContentVariant?): CampaignDelivery? = TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[template]
@@ -261,12 +270,27 @@ data class CampaignStep(
                 Channel.PUSH,
                 pushTemplate,
                 TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
+                mobileDestination?.deepLink,
             )
         }
 }
 
 /** A resolved per-attempt delivery, including the channel that will be recorded for audit. */
-data class CampaignDelivery(val channel: Channel, val template: String, val variables: Map<String, String>)
+data class CampaignDelivery(
+    val channel: Channel,
+    val template: String,
+    val variables: Map<String, String>,
+    val deepLink: String? = null,
+)
+
+/** The only destinations the mobile app contract recognises for campaign pushes. */
+enum class MobileDestination(val deepLink: String) {
+    HOME("openbank://home"),
+    SAVINGS("openbank://savings"),
+    CARDS("openbank://cards"),
+    PAYMENTS("openbank://payments"),
+    PRODUCT_HUB("openbank://products"),
+}
 
 /**
  * Delivery channels a campaign step may use.

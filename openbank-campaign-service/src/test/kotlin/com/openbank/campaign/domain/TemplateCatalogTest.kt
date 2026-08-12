@@ -6,6 +6,7 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -98,6 +99,20 @@ class CampaignStepChannelTest {
             delaySeconds = 0,
         )
         assertEquals(Channel.PUSH, step.channel)
+    }
+
+    @Test
+    fun `a push step resolves an allow-listed app destination rather than an author URL`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_PUSH",
+            channel = Channel.PUSH,
+            variables = mapOf("offerTitle" to "Savings"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
     }
 
     @Test

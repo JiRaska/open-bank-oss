@@ -7,9 +7,12 @@ package com.openbank.campaign.application.workflow
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
+import com.openbank.campaign.application.port.out.NotificationSendRequest
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDelivery
 import com.openbank.campaign.domain.model.CampaignState
+import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.EnrolmentState
@@ -107,14 +110,7 @@ open class CampaignJourneyActivitiesImpl(
     @MarketingCallSite
     internal suspend fun deliverStepGated(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome {
         val campaign = campaigns.findById(campaignId) ?: return StepOutcome.CAMPAIGN_CLOSED
-        when (campaign.state) {
-            CampaignState.PAUSED -> return StepOutcome.CAMPAIGN_PAUSED
-            CampaignState.CLOSED -> return StepOutcome.CAMPAIGN_CLOSED
-            CampaignState.ACTIVE -> Unit
-            CampaignState.DRAFT,
-            CampaignState.PENDING_APPROVAL,
-            -> return StepOutcome.CAMPAIGN_CLOSED
-        }
+        campaign.deliveryStateOutcome()?.let { return it }
         if (sendLog.conversionContextFor(campaignId, partyId).alreadyConverted) {
             return StepOutcome.GOAL_REACHED
         }
@@ -127,94 +123,91 @@ open class CampaignJourneyActivitiesImpl(
         } else {
             null
         }
-        val primary = step.primaryDelivery(contentVariant)
+        return deliverEligibleStep(
+            StepDeliveryContext(campaign, step, campaignId, partyId, stepOrder, contentVariant),
+        )
+    }
 
-        suspend fun sendAllowed(delivery: CampaignDelivery): StepOutcome {
-            // The send-log row id is minted BEFORE the handoff, not by `record` after it
-            // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
-            // to exist first. It is used for whichever row this attempt ends up writing —
-            // SENT, DRY_RUN or FAILED — so an outcome that arrives for a handoff that then
-            // failed locally still lands on the right row.
-            val sendId = Ids.newId()
-            // Dry run stops HERE, after every gate above has run. Deliberately not earlier: the
-            // point of a rehearsal is that suppression, cap, quiet hours and consent are all
-            // exercised exactly as they would be, so a journey that would have been suppressed
-            // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
-            // delivery status stays PENDING forever — correctly: no message ever left.
-            if (dryRun) {
-                sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN, delivery.channel)
-            } else {
-                // ADR-0200 D3 — delivery goes through notification-service, never direct.
-                //
-                // The order below is the fix for issue #3581: the send log may only be written
-                // AFTER the handoff has been observed to succeed, and a handoff that failed must
-                // leave a FAILED row rather than nothing. What SENT claims here is exactly
-                // "notification-service accepted the request", not "the customer received it".
-                try {
-                    notificationSend.requestSend(
-                        partyId,
-                        delivery.channel,
-                        delivery.template,
-                        recipientFor(partyId),
-                        delivery.variables,
-                        correlationId = sendId,
-                    )
-                } catch (e: Exception) {
-                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED, delivery.channel)
-                    // Rethrown on purpose: Temporal retries the activity, and the FAILED row
-                    // above is the durable evidence that this attempt happened. FAILED rows do
-                    // not consume the frequency cap (SENT only), so a retry is not penalised.
-                    throw e
-                }
-                sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT, delivery.channel)
-            }
-            return StepOutcome.SENT
-        }
+    /** ADR-0219: a fallback is possible only after a NO_CONSENT decision for the primary channel. */
+    private suspend fun deliverEligibleStep(context: StepDeliveryContext): StepOutcome {
+        val primary = context.step.primaryDelivery(context.contentVariant)
+        val primaryDecision = checkDelivery(context, primary)
+        if (primaryDecision == ContactGateDecision.ALLOWED) return handoff(context, primary)
+        throwIfGateUnavailable(primaryDecision)
 
-        suspend fun checked(delivery: CampaignDelivery): ContactGateDecision = contactGate.check(
-            partyId,
+        val fallback = primaryDecision.denyReason
+            .takeIf { it == ContactDenyReason.NO_CONSENT }
+            ?.let { context.step.pushFallback(context.contentVariant) }
+            ?: return recordSuppressed(context, primaryDecision)
+        return deliverFallback(context, fallback)
+    }
+
+    private suspend fun deliverFallback(context: StepDeliveryContext, fallback: CampaignDelivery): StepOutcome {
+        val decision = checkDelivery(context, fallback)
+        if (decision == ContactGateDecision.ALLOWED) return handoff(context, fallback)
+        throwIfGateUnavailable(decision)
+        return recordSuppressed(context, decision)
+    }
+
+    private suspend fun checkDelivery(context: StepDeliveryContext, delivery: CampaignDelivery): ContactGateDecision =
+        contactGate.check(
+            context.partyId,
             ContactClass.OUTBOUND_SEND,
             marketingScopeFor(delivery.channel),
-            topic = campaign.goal,
+            topic = context.campaign.goal,
         )
 
-        // ADR-0219 (#3656): both attempts use the same complete gate. Only a missing primary
-        // consent may switch channels — quiet hours, caps and list suppression are not a reason
-        // to try a second message, and a gate outage remains a retry signal.
-        return when (val primaryDecision = checked(primary)) {
-            ContactGateDecision.ALLOWED -> sendAllowed(primary)
-            else -> {
-                if (primaryDecision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
-                    throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
-                }
-                val fallback = primaryDecision.denyReason
-                    .takeIf { it == ContactDenyReason.NO_CONSENT }
-                    ?.let { step.pushFallback(contentVariant) }
-                if (fallback != null) {
-                    when (val fallbackDecision = checked(fallback)) {
-                        ContactGateDecision.ALLOWED -> sendAllowed(fallback)
-                        else -> {
-                            if (fallbackDecision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
-                                throw ContactGateUnavailableException(
-                                    "contact gate state unavailable — activity will retry",
-                                )
-                            }
-                            sendLog.record(
-                                Ids.newId(),
-                                campaignId,
-                                partyId,
-                                stepOrder,
-                                outcomeFor(fallbackDecision.denyReason),
-                            )
-                            StepOutcome.SUPPRESSED
-                        }
-                    }
-                } else {
-                    sendLog.record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(primaryDecision.denyReason))
-                    StepOutcome.SUPPRESSED
-                }
-            }
+    // A transport failure must leave a FAILED send row whatever exception the Kafka client raises,
+    // then be rethrown so Temporal retries. Narrowing this catch would re-open that audit gap.
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun handoff(context: StepDeliveryContext, delivery: CampaignDelivery): StepOutcome {
+        // The send-log row id is minted BEFORE the handoff: it is the wire correlation id and
+        // joins asynchronous delivery outcome to precisely this attempt (ADR-0239 D1).
+        val sendId = Ids.newId()
+        if (dryRun) {
+            sendLog.record(
+                sendId,
+                context.campaignId,
+                context.partyId,
+                context.stepOrder,
+                SendOutcome.DRY_RUN,
+                delivery.channel,
+            )
+            return StepOutcome.SENT
         }
+        try {
+            notificationSend.requestDelivery(context.partyId, delivery, sendId)
+        } catch (e: Exception) {
+            sendLog.record(
+                sendId,
+                context.campaignId,
+                context.partyId,
+                context.stepOrder,
+                SendOutcome.FAILED,
+                delivery.channel,
+            )
+            throw e
+        }
+        sendLog.record(
+            sendId,
+            context.campaignId,
+            context.partyId,
+            context.stepOrder,
+            SendOutcome.SENT,
+            delivery.channel,
+        )
+        return StepOutcome.SENT
+    }
+
+    private suspend fun recordSuppressed(context: StepDeliveryContext, decision: ContactGateDecision): StepOutcome {
+        sendLog.record(
+            Ids.newId(),
+            context.campaignId,
+            context.partyId,
+            context.stepOrder,
+            outcomeFor(decision.denyReason),
+        )
+        return StepOutcome.SUPPRESSED
     }
 
     override fun advanceStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
@@ -281,6 +274,33 @@ open class CampaignJourneyActivitiesImpl(
 /** Thrown when the contact gate cannot reach its state — a retry signal, never a policy outcome. */
 class ContactGateUnavailableException(message: String) : RuntimeException(message)
 
+/** Immutable state shared by the primary attempt and the only permitted PUSH fallback. */
+private data class StepDeliveryContext(
+    val campaign: Campaign,
+    val step: CampaignStep,
+    val campaignId: UUID,
+    val partyId: UUID,
+    val stepOrder: Int,
+    val contentVariant: com.openbank.campaign.domain.model.ContentVariant?,
+)
+
+/** Only ACTIVE campaigns may enter delivery; every other state has a durable workflow outcome. */
+private fun Campaign.deliveryStateOutcome(): StepOutcome? = when (state) {
+    CampaignState.ACTIVE -> null
+    CampaignState.PAUSED -> StepOutcome.CAMPAIGN_PAUSED
+    CampaignState.CLOSED,
+    CampaignState.DRAFT,
+    CampaignState.PENDING_APPROVAL,
+    -> StepOutcome.CAMPAIGN_CLOSED
+}
+
+/** A gate outage is retriable infrastructure state, never a customer-policy suppression. */
+private fun throwIfGateUnavailable(decision: ContactGateDecision) {
+    if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+        throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
+    }
+}
+
 // Two helpers as top-level privates rather than members: CampaignJourneyActivitiesImpl sits at
 // detekt's TooManyFunctions threshold of 11, which fires AT the limit, so the branch-condition
 // activities (#3585) had to buy their room somewhere.
@@ -305,3 +325,18 @@ private suspend fun SendLogRepository.record(
 // The recipient address is resolved by notification-service from party data; the campaign never
 // carries an e-mail address itself (ADR-0200 D3 — no PII duplication).
 private fun recipientFor(partyId: UUID): String = partyId.toString()
+
+/** Build the cross-service command outside the gate's nested delivery branch. */
+private suspend fun NotificationSendPort.requestDelivery(partyId: UUID, delivery: CampaignDelivery, sendId: UUID) {
+    requestSend(
+        NotificationSendRequest(
+            partyId = partyId,
+            channel = delivery.channel,
+            template = delivery.template,
+            recipient = recipientFor(partyId),
+            variables = delivery.variables,
+            correlationId = sendId,
+            deepLink = delivery.deepLink,
+        ),
+    )
+}

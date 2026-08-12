@@ -539,6 +539,35 @@ class CampaignRestContractIT {
     }
 
     @Test
+    fun `a mobile-first push step keeps its closed app destination over the HTTP contract`() {
+        val body = """
+            {"name":"push-${UUID.randomUUID()}","goal":"savings activation",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
+                       "variables":{"offerTitle":"Savings"},"mobileDestination":"SAVINGS","delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+            body("steps[0].mobileDestination", org.hamcrest.Matchers.equalTo("SAVINGS"))
+        }
+    }
+
+    @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {
             get("/api/v1/segments")

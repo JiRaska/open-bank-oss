@@ -12,9 +12,8 @@ info:
 
     Deliberately absent: gamification (D3) and pre-approved offers (D4, blocked on ADR-0142 not
     existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
-    graduates from shadow (D5). No `@Authorize` OPA rule for these actions yet; the shared policy's
-    `default allow := false` denies both endpoints fail-closed under enforcement until that rule
-    lands.
+    graduates from shadow (D5). The customer app reaches these endpoints only through
+    customer-edge, whose narrowly scoped M2M policy injects the authoritative party id.
   version: 1.1.0
 tags:
   - name: Surfaces

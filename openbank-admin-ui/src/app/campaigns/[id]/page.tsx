@@ -28,6 +28,7 @@ interface Campaign {
     delaySeconds: number
     variantBVariables?: Record<string, string> | null
     fallbackToPush?: boolean
+    mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null
   }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
