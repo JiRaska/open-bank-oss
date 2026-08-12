@@ -7,9 +7,9 @@
 | Regulace | Vztah k této službě | Implementace / stav |
 |---|---|---|
 | **GDPR** | Nezpracovává ani neukládá žádná osobní data. | `dataClassification: internal`; pouze produktová/cenová referenční data — žádné PII, žádná dimenze subjektu údajů. |
-| **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost ICT aktiva v centrálním registru. | SmallRye Health probes, `BuildInfo`/`/api/v1/info`, bezstavový scale-to-zero tier (ADR-0057), runbooky v [05 — Provoz](./05-operations.md). |
+| **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost ICT závislosti používané při onboardingu a billingu. | SmallRye Health probes, PostgreSQL perzistence, `BuildInfo`/`/api/v1/info` a runbooky v [05 — Provoz](./05-operations.md). Důkaz obnovy a publikace zůstává delivery prací. |
 | **NIS2** | Bezpečnost sítí a informací. | mTLS v clusteru (Istio), CORS allowlist + bezpečnostní response hlavičky (CSP, HSTS, X-Frame-Options) v `application.yaml`. |
-| **Směrnice o spotřebitelském úvěru (2008/48/ES) / CCD2 (EU) 2023/2225** | Deklarované RPSN/sazby a transparentnost poplatků pro úvěr, hypotéku, povolený debet a kreditní karty. | Katalog deklaruje `baseRate`, `overdraftConfig` (povolené/nepovolené sazby), sazebník; `versionHistory` + datem účinnosti opatřené `termsAndConditions` činí platný ceník auditovatelným. |
+| **Směrnice o spotřebitelském úvěru (2008/48/ES) / CCD2 (EU) 2023/2225** | Deklarované RPSN/sazby a transparentnost poplatků pro úvěr, hypotéku, povolený debet a kreditní karty. | Katalog deklaruje `baseRate`, `overdraftConfig` a sazebník. Mutabilní v1 `versionHistory` není auditní důkaz; ADR-0257 vyžaduje neměnné schválené revize. |
 | **PAD — směrnice o platebních účtech (2014/92/EU)** | Srovnatelné informace o poplatcích pro platební účty. | `GET /api/v1/fees` poskytuje jednotný, strukturovaný, filtrovatelný sazebník (zdrojová data FID). |
 | **MiFID II** | Informace o investičních produktech. | `INVESTMENT_BASIC` modelován jako DRAFT/neveřejný; deklarovány poplatky za správu/transakci. (Spuštění investic je mimo rozsah, dokud produkt není publikován.) |
 | **ČNB pravidla ochrany spotřebitele / transparentnosti** | Přesné informace o produktu a ceně pro český trh. | CZK produkty (`CURRENT_CZK`, `SAVINGS_CZK`, `TERM_DEPOSIT_6M_CZK`) nesou obchodní podmínky v češtině. |
@@ -44,7 +44,7 @@ account / interest / fx / card služby  ──čtení definic produktů──►
 | Čl. 9 | Ochrana & prevence | bezpečnostní hlavičky, CORS allowlist; čelní gateway. |
 | Čl. 9 | Identifikace | `BuildInfo` (gitCommit, buildTime, version) na `/api/v1/info`. |
 | Čl. 10 | Detekce | metriky + health probes. |
-| Čl. 11 | Odezva & obnova | runbooky v [05 — Provoz](./05-operations.md); bezstavová, znovu naseeduje při restartu. |
+| Čl. 11 | Odezva & obnova | runbooky v [05 — Provoz](./05-operations.md); trvalý stav vlastní PostgreSQL a seeder nepřepisuje neprázdné úložiště. Důkaz obnovy zůstává mezerou. |
 | Čl. 28 | Riziko třetích stran | žádný third-party SaaS — self-hosted. |
 
 ## Bezpečnostní kontroly
@@ -54,13 +54,13 @@ account / interest / fx / card služby  ──čtení definic produktů──►
 - Bezpečnostní hlavičky: CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy`, `Permissions-Policy` — nastaveny v `application.yaml`.
 - CORS: omezený allowlist (jen origins admin-ui).
 - TLS: mTLS v clusteru (Istio), TLS terminace na gateway.
-- AuthN/AuthZ: **dnes nevynuceno na úrovni služby** — žádné `@RolesAllowed`, žádná OIDC extenze. Služba jsou referenční data za gateway; **přidání rolí chráněných mutací (create/update/activate) je doporučený hardening follow-up**, aby produktový master a ceny měnili jen oprávnění operátoři.
+- AuthN/AuthZ: služba validuje OIDC bearer tokeny; čtení vyžaduje autentizaci a mutace OPERATOR/ADMIN. `@Authorize` je přítomno, ale OPA je advisory, dokud deployment nedodá vynucující policy profil.
 - Audit: dnes žádné vydávání audit událostí (žádná outbox/Kafka). Pokud změny produktu/cen musí být auditovatelné pro regulatorní důkaz, auditní stopa je follow-up.
 
 ## Známé mezery / follow-upy (zralost)
 
-- Perzistence v DB (MongoDB / `products_schema`) — runtime změny se dnes neperzistují.
-- Autorizace na úrovni služby pro mutující endpointy.
+- Neměnné schválené revize a trvalý publikační důkaz.
+- Vynucovaný OPA profil v bankovním deploymentu a provider-neutral scopes pro samostatné OIDC.
 - Auditní stopa pro změny produktů/cen (regulatorní důkaz, kdo a kdy změnil cenu).
 - Sjednocení sdílené chybové obálky (RFC-7807 problem+json).
 

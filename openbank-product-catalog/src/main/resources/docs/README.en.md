@@ -18,10 +18,10 @@ This documentation is published directly by the service at the management endpoi
 ## TL;DR
 
 - **Tech stack:** Kotlin 2.3 / Quarkus 3.33 LTS / JDK 25 / RESTEasy Reactive + Jackson / SmallRye OpenAPI + Health
-- **Port:** 8104 (app), no separate management port
-- **Persistence:** **in-memory seed today** (`ConcurrentHashMap`, 15 seeded products). `governance.yaml` declares a future datastore `MongoDB` / schema `products_schema`; DB-backed persistence is a tracked follow-up (see [04 — Data](./04-data.md)).
+- **Port:** 8104 (application), 8085 (management health/metrics)
+- **Persistence:** PostgreSQL via reactive Panache; Flyway owns the schema and the 15 banking examples are seeded only into an empty database (see [04 — Data](./04-data.md)).
 - **Outbox / events:** none — the service publishes no Kafka events and has no outbox.
-- **Idempotency:** none required — mutations are simple create/update by id/code (409 on duplicate code).
-- **Auth:** no service-level auth wired in the code today (CORS + security headers only); fronted by the gateway. See [03 — API](./03-api.md) and [06 — Compliance](./06-compliance.md).
+- **Concurrency:** mutating clients receive an ETag and can send `If-Match`; stale revisions return 409.
+- **Auth:** OIDC resource server; reads require authentication and writes require OPERATOR/ADMIN. OPA remains advisory in the bank profile. See [03 — API](./03-api.md) and [06 — Compliance](./06-compliance.md).
 - **Money-path:** **No** (not listed in `rules.yaml: money_path_services`).
-- **API contract:** `openapi.yaml` present, `info.version` 0.1.0, base path `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+- **API contract:** `openapi.yaml` present, `info.version` 1.1.0, base path `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).

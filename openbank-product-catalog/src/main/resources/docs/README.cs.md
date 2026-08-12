@@ -18,10 +18,10 @@ Tuto dokumentaci publikuje přímo služba na management endpointu `/q/openbank/
 ## TL;DR
 
 - **Tech stack:** Kotlin 2.3 / Quarkus 3.33 LTS / JDK 25 / RESTEasy Reactive + Jackson / SmallRye OpenAPI + Health
-- **Port:** 8104 (app), bez samostatného management portu
-- **Perzistence:** **dnes in-memory seed** (`ConcurrentHashMap`, 15 nasazených produktů). `governance.yaml` deklaruje budoucí datastore `MongoDB` / schéma `products_schema`; perzistence v DB je sledovaný follow-up (viz [04 — Data](./04-data.md)).
+- **Port:** 8104 (aplikace), 8085 (management health/metrics)
+- **Perzistence:** PostgreSQL přes reactive Panache; schéma spravuje Flyway a 15 bankovních příkladů se seeduje pouze do prázdné databáze (viz [04 — Data](./04-data.md)).
 - **Outbox / události:** žádné — služba nepublikuje Kafka události a nemá outbox.
-- **Idempotence:** nevyžaduje se — mutace jsou prosté create/update podle id/code (409 při duplicitním code).
-- **Autentizace:** v kódu dnes není zapojená autentizace na úrovni služby (jen CORS + bezpečnostní hlavičky); přístup řeší gateway. Viz [03 — API](./03-api.md) a [06 — Compliance](./06-compliance.md).
+- **Souběh:** mutace vracejí ETag; klient může poslat `If-Match` a zastaralá revize vrátí 409.
+- **Autentizace:** OIDC resource server; čtení vyžaduje autentizaci a zápis role OPERATOR/ADMIN. OPA je v bankovním profilu zatím advisory. Viz [03 — API](./03-api.md) a [06 — Compliance](./06-compliance.md).
 - **Money-path:** **Ne** (není v `rules.yaml: money_path_services`).
-- **API kontrakt:** `openapi.yaml` přítomen, `info.version` 0.1.0, base path `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+- **API kontrakt:** `openapi.yaml` přítomen, `info.version` 1.1.0, base path `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).

@@ -45,7 +45,7 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
             // (code / legacy_code) constraints — its whole transaction rolls back. That is success, not
             // failure: the catalogue is seeded. Swallow only the unique-violation; rethrow anything else
             // so a genuine DB fault still fails the boot (a StartupEvent throwing crashloops the pod).
-            if (isUniqueViolation(e)) {
+            if (PostgresConflicts.isUniqueViolation(e)) {
                 log.info("Catalogue already seeded by another replica (concurrent first boot) — skipping.")
                 0
             } else {
@@ -58,7 +58,7 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
         val patched = try {
             backfillFees()
         } catch (e: RuntimeException) {
-            if (isUniqueViolation(e)) 0 else throw e
+            if (PostgresConflicts.isUniqueViolation(e)) 0 else throw e
         }
         if (patched > 0) log.info("Backfilled fee schedules for $patched catalogue product(s) from the seed.")
     }
@@ -126,22 +126,5 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
                     }
                 }
         }
-    }
-
-    /** True if [e] (or any cause) is a Postgres unique-violation (SQLState 23505) — a lost seed race. */
-    private fun isUniqueViolation(e: Throwable): Boolean {
-        var cur: Throwable? = e
-        while (cur != null) {
-            val msg = cur.message.orEmpty()
-            val byMessage = "23505" in msg || "duplicate key value" in msg
-            if ((cur as? java.sql.SQLException)?.sqlState == "23505" ||
-                cur is org.hibernate.exception.ConstraintViolationException ||
-                byMessage
-            ) {
-                return true
-            }
-            cur = cur.cause
-        }
-        return false
     }
 }

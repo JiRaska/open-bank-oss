@@ -4,23 +4,20 @@
 
 - **In-cluster base:** `http://openbank-product-catalog:8104/api/v1`
 - **Lokální dev:** `http://localhost:8104/api/v1`
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8104/q/openapi) (zdroj pravdy: `openapi.yaml`, `info.version` 0.1.0, OpenAPI 3.1.0)
-- **Swagger UI:** `/api/docs` (nastaveno přes `quarkus.swagger-ui.path`, `always-include: true`)
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) na management portu (zdroj pravdy: `openapi.yaml`, `info.version` 1.1.0, OpenAPI 3.0.3)
+- **Swagger UI:** `http://localhost:8085/api/docs` (nastaveno přes `quarkus.swagger-ui.path`, `always-include: true`)
 
 Major z `openapi.yaml:info.version` se rovná `openbank.api.version` a rovná se URL `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). Release verze (`version.txt`) je samostatná osa.
 
 ## Autentizace
 
-V kódu dnes **není zapojená žádná autentizace na úrovni služby** — resources nejsou anotované `@RolesAllowed` a na classpath není žádná Keycloak/OIDC extenze. Služba se spoléhá na:
+Služba je OIDC resource server. Čtení vyžaduje autentizovaný bearer token; create/update/lifecycle mutace vyžadují `ROLE_OPERATOR` nebo `ROLE_ADMIN`. `@Authorize` přidává policy action, ale OPA je advisory, dokud bankovní deployment nezapne vynucující profil. Prohlížeč stále používá autentizovaný BFF (ADR-0056).
 
-- API gateway / hranici sítě v clusteru pro řízení přístupu a
-- CORS + bezpečnostní response hlavičky nastavené v `application.yaml` (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'self'`, HSTS, `Permissions-Policy`, `Referrer-Policy`).
-
-CORS origins jsou omezeny na `http://localhost:3000` a `http://openbank-admin-ui:3000`. Přidání rolí chráněných mutací (např. `ROLE_PRODUCT_ADMIN` pro create/update/activate) je rozumný hardening follow-up — viz [06 — Compliance](./06-compliance.md).
+CORS omezuje origins na nakonfigurované admin UI, zpřístupňuje `ETag` a povoluje `If-Match` pro optimistické zápisy.
 
 ## Idempotence
 
-Mechanismus `Idempotency-Key` není implementován. Create je přirozeně chráněn **unikátním `code` produktu**: duplicitní code vrací `409 Conflict`. Úpravy a přechody životního cyklu probíhají podle `id` a jsou fakticky idempotentní (opakování activate dá stejný stav ACTIVE).
+Mechanismus `Idempotency-Key` není implementován. Create chrání unikátní `code`. Čtení jednoho produktu a mutace vracejí číselný `ETag`; jeho odeslání přes `If-Match` (nebo `revision` v legacy body) odmítne zastaralého zapisujícího pomocí `409 Conflict`. Ve v1 je precondition kvůli kompatibilitě volitelná, takže neversionovaný legacy read-modify-write chráněn není; v2 ji vyžaduje.
 
 ## Endpointy
 
@@ -30,10 +27,10 @@ Mechanismus `Idempotency-Key` není implementován. Create je přirozeně chrán
 |---|---|---|---|---|
 | GET | `/api/v1/products` | Výpis produktů; volitelné `?type=&status=&currency=` | 200 pole | — |
 | GET | `/api/v1/products/{id}` | Detail produktu | 200 | 404 |
-| POST | `/api/v1/products` | Vytvoření produktu (`ProductRequest`) | 201 | 409 duplicitní code |
-| PUT | `/api/v1/products/{id}` | Úprava produktu (`ProductRequest`) | 200 | 404 |
-| POST | `/api/v1/products/{id}/activate` | Nastaví status ACTIVE | 200 | 404 |
-| POST | `/api/v1/products/{id}/deactivate` | Nastaví status INACTIVE | 200 | 404 |
+| POST | `/api/v1/products` | Vytvoření produktu (`ProductRequest`) | 201 + ETag | 400 validace, 409 duplicitní code |
+| PUT | `/api/v1/products/{id}` | Úprava produktu (`ProductRequest`, volitelné `If-Match`) | 200 + ETag | 400, 404, 409 stará revize |
+| POST | `/api/v1/products/{id}/activate` | Legální přechod do ACTIVE | 200 + ETag | 404, 409, 422 |
+| POST | `/api/v1/products/{id}/deactivate` | Legální přechod do INACTIVE | 200 + ETag | 404, 409, 422 |
 | GET | `/api/v1/products/{id}/fees` | Poplatky jednoho produktu | 200 pole | 404 |
 
 ### Poplatky
@@ -65,6 +62,7 @@ Content-Type: application/json
 ```http
 201 Created
 Content-Type: application/json
+ETag: "0"
 
 {
   "id": "5e9f8b6a-7c3d-4e1f-9a2b-1c8f7e6d5a4b",
@@ -73,6 +71,7 @@ Content-Type: application/json
   "type": "SAVINGS",
   "currency": "EUR",
   "status": "DRAFT",
+  "revision": 0,
   "fees": [ … ],
   "updatedAt": "2026-06-09T10:00:00Z"
 }
@@ -89,14 +88,14 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 ```json
 [
   {
-    "id": "prod-003:<feeId>",
+    "id": "<canonical-product-uuid>:<feeId>",
     "code": "CURRENT_PERSONAL_FX_CONVERSION",
     "name": "FX Conversion",
     "type": "TRANSACTION",
     "amount": 1.5,
     "currency": "EUR",
     "frequency": "PERCENTAGE",
-    "productId": "prod-003",
+    "productId": "<canonical-product-uuid>",
     "productCode": "CURRENT_PERSONAL",
     "productName": "Personal Current Account",
     "status": "ACTIVE",
@@ -107,7 +106,7 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Chybový model
 
-Chyby se vrací jako minimální JSON objekt `{ "error": "<zpráva>" }` s odpovídajícím HTTP statusem (`404` nenalezeno, `409` duplicitní code). To je schéma `Error` v `openapi.yaml`. Sdílená obálka RFC-7807 problem+json zde zatím není zapojena — sjednocení na platformní chybovou obálku je follow-up.
+Legacy 404 odpovědi zachovávají `{ "error": "<zpráva>" }` kvůli existujícímu Paktu. Validační, lifecycle a konfliktní chyby používají fleet obálku `ApiError` s `traceId`, `status`, `code`, `message` a `timestamp`.
 
 ## Verzování
 

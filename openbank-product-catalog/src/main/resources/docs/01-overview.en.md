@@ -6,7 +6,7 @@
 
 - **Product master** — one record per product (e.g. `SAVINGS_STANDARD`, `CURRENT_PERSONAL`, `LOAN_PERSONAL_5Y`, `MORTGAGE_FIXED_20Y`, `CREDIT_CARD_CLASSIC`, `TERM_DEPOSIT_12M`, `OVERDRAFT_PERSONAL`, multi-currency umbrella). Each carries identity (`code`, `name`, `type`, `currency`), lifecycle `status` (DRAFT / ACTIVE / INACTIVE / DEPRECATED / ARCHIVED), pricing (`baseRate`, `fee`, `fees[]`), eligibility segments, version history and terms-and-conditions.
 - **Per-type configuration blocks** — `cardConfig`, `multiCurrencyConfig`, `overdraftConfig`, `termDepositConfig`, `savingsConfig` (rates, FX margins, card networks/tiers, withdrawal notice, etc.).
-- **Bank-wide fee schedule** — every product's fees flattened into one filterable schedule (`FeeScheduleItem`), each line carrying its owning product identity and a derived stable code (e.g. `CURRENT_PERSONAL_FX_CONVERSION`). This is the catalog's own source of truth for pricing so the **admin UI never hardcodes a price list**.
+- **Bank-wide fee schedule** — every product's fees flattened into one filterable schedule (`FeeScheduleItem`), each line carrying its owning product identity and a derived display code (e.g. `CURRENT_PERSONAL_FX_CONVERSION`). The display code changes when the fee name changes; only the composite id is identity. This is the catalog's own source of truth for pricing so the **admin UI never hardcodes a price list**.
 
 ## What the service **does NOT** do
 
@@ -28,9 +28,9 @@
         account-service ─────────────────────────►│  (product code, type, fees)
         interest / fx / card-issuance ────────────►│  (rates, FX margins, card config)
                                                    ▼
-                                          in-memory product store
-                                          (15 seeded products today;
-                                           MongoDB persistence planned)
+                                          PostgreSQL product store
+                                          (15 banking examples seeded
+                                           into an empty database)
 ```
 
 The catalog is a **reference-data provider**: it sits upstream of the operational money-path services, which read product definitions but never write back.
@@ -55,7 +55,7 @@ No domain events are emitted today (no Kafka/outbox) — the service is read-mos
 - **admin-ui** — operators browse/maintain the product master and render the Fees pricing screen from `GET /api/v1/fees`.
 - **account-service** — reads product definitions (type, currency, multi-currency config) at account opening.
 - **interest / fx / card-issuance services** — read declared rates, FX margins, and card configuration.
-- **customer-facing surfaces** — public product list (`isPublic=true`, status `ACTIVE`) for retail browsing.
+- **customer-facing surfaces** — no dedicated public projection exists yet; they must not expose the operator list directly.
 
 ## Dependencies
 
@@ -68,4 +68,4 @@ No domain events are emitted today (no Kafka/outbox) — the service is read-mos
 
 - **Single source of truth for products and pricing** — the price list lives in the catalog, not duplicated in the web tier; `GET /api/v1/fees` is the one place the UI reads fees.
 - **Consistent product definitions** — account, interest, FX and card services all read the same product master, removing drift between "what we sell" and "what we run".
-- **Versioned, transparent pricing** — every product carries `versionHistory` and `termsAndConditions` with effective dates, supporting consumer-transparency and audit needs (see [06 — Compliance](./06-compliance.md)).
+- **Explicit product information** — products carry effective-dated terms and legacy version notes. These support operator context but are not an immutable audit trail; ADR-0257's revisions/publication evidence will provide that guarantee.

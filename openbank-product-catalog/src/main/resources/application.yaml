@@ -7,7 +7,8 @@ quarkus:
       ~: true
       origins: "http://localhost:3000,http://openbank-admin-ui:3000"
       methods: GET,POST,PUT,DELETE,OPTIONS
-      headers: Content-Type,Authorization
+      headers: Content-Type,Authorization,If-Match
+      exposed-headers: ETag
     header:
       X-Content-Type-Options:
         value: nosniff
@@ -74,6 +75,11 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+
+openbank:
+  api:
+    # API-contract major, independent of version.txt (ADR-0048); must match /api/v1.
+    version: "1"
 
 "%test":
   quarkus:

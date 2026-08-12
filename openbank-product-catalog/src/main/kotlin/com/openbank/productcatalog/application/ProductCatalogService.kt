@@ -14,9 +14,12 @@ import com.openbank.productcatalog.domain.MultiCurrencyConfig
 import com.openbank.productcatalog.domain.OverdraftConfig
 import com.openbank.productcatalog.domain.Product
 import com.openbank.productcatalog.domain.ProductStatus
+import com.openbank.productcatalog.domain.ProductValidation
 import com.openbank.productcatalog.domain.SavingsConfig
 import com.openbank.productcatalog.domain.TermDepositConfig
 import com.openbank.productcatalog.domain.TermsAndConditions
+import com.openbank.productcatalog.domain.activate
+import com.openbank.productcatalog.domain.deactivate
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 import java.time.Instant
@@ -47,28 +50,61 @@ class ProductCatalogService(private val repo: ProductRepository, private val clo
 
     suspend fun create(req: ProductRequest): Product {
         if (repo.findByCode(req.code) != null) {
-            throw IllegalArgumentException("Product with code '${req.code}' already exists")
+            throw DuplicateProductCodeException("Product with code '${req.code}' already exists")
         }
         val product = req.toDomain(clock)
+        ProductValidation.requireValid(product)
         validateFeeWaivers(product, log)
         return repo.save(product)
     }
 
     suspend fun update(id: String, req: ProductRequest): Product {
-        val existing = findById(id) ?: throw NoSuchElementException("Product $id not found")
+        val existing = findById(id) ?: throw ProductNotFoundException("Product $id not found")
+        require(req.code == existing.code) { "code is immutable and must remain '${existing.code}'" }
+        require(req.status == null || req.status == existing.status.name) {
+            "status changes must use the dedicated lifecycle operation"
+        }
+        require(existing.status != ProductStatus.ACTIVE) {
+            "active products are immutable; deactivate or author a new revision"
+        }
+        req.revision?.let { expected ->
+            if (expected != existing.revision) {
+                throw ProductUpdateConflictException(
+                    "Product ${existing.id} was modified concurrently " +
+                        "(expected revision $expected, current revision ${existing.revision})",
+                )
+            }
+        }
         val updated = req.applyTo(existing, clock)
+        ProductValidation.requireValid(updated)
         validateFeeWaivers(updated, log)
         return repo.update(updated)
     }
 
-    suspend fun activate(id: String): Product {
-        val p = findById(id) ?: throw NoSuchElementException("Product $id not found")
-        return repo.update(p.copy(status = ProductStatus.ACTIVE, updatedAt = Instant.now(clock)))
+    suspend fun activate(id: String, expectedRevision: Long? = null): Product {
+        val p = findById(id) ?: throw ProductNotFoundException("Product $id not found")
+        requireRevision(p, expectedRevision)
+        val activated = p.activate(Instant.now(clock))
+        if (activated === p) return p
+        ProductValidation.requireValid(activated)
+        validateFeeWaivers(activated, log)
+        return repo.update(activated)
     }
 
-    suspend fun deactivate(id: String): Product {
-        val p = findById(id) ?: throw NoSuchElementException("Product $id not found")
-        return repo.update(p.copy(status = ProductStatus.INACTIVE, updatedAt = Instant.now(clock)))
+    suspend fun deactivate(id: String, expectedRevision: Long? = null): Product {
+        val p = findById(id) ?: throw ProductNotFoundException("Product $id not found")
+        requireRevision(p, expectedRevision)
+        val deactivated = p.deactivate(Instant.now(clock))
+        return if (deactivated === p) p else repo.update(deactivated)
+    }
+
+    private fun requireRevision(product: Product, expectedRevision: Long?) {
+        if (expectedRevision != null && expectedRevision != product.revision) {
+            throw ProductUpdateConflictException(
+                "Product ${product.id} was modified concurrently " +
+                    "(expected revision $expectedRevision, current revision ${product.revision})",
+            )
+        }
     }
 
     /**
@@ -195,6 +231,8 @@ data class ProductRequest(
     val termsAndConditions: List<TermsAndConditions>? = null,
     val tags: List<String>? = null,
     val eligibilitySegments: List<EligibilitySegment>? = null,
+    /** Optional v1 optimistic precondition. v2 authoring requires it on every mutation. */
+    val revision: Long? = null,
 ) {
     fun toDomain(clock: Clock) = Product(
         id = UUID.randomUUID().toString(),
@@ -202,7 +240,9 @@ data class ProductRequest(
         name = name,
         type = type,
         currency = currency,
-        status = status?.let { ProductStatus.valueOf(it) } ?: ProductStatus.DRAFT,
+        status = ProductStatus.DRAFT.also {
+            require(status == null || status == ProductStatus.DRAFT.name) { "new products must start in DRAFT" }
+        },
         isPublic = isPublic ?: true,
         version = version ?: "1.0.0",
         validFrom = validFrom?.let { LocalDate.parse(it) },
@@ -254,6 +294,12 @@ data class ProductRequest(
         updatedAt = Instant.now(clock),
     )
 }
+
+class DuplicateProductCodeException(message: String) : RuntimeException(message)
+
+class ProductUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+class ProductNotFoundException(message: String) : RuntimeException(message)
 
 /**
  * Runs the fee-waiver rule engine (ADR-0138) over a product's fees on write. A fee

@@ -36,7 +36,7 @@ erDiagram
   PRODUCT ||--o| SAVINGS_CONFIG : "optional"
 
   PRODUCT {
-    string id PK "UUID or prod-xxx"
+    string id PK "canonical UUID; prod-xxx is a legacy alias"
     string code UK "e.g. SAVINGS_STANDARD"
     string name
     string type "SAVINGS|CURRENT|LOAN|MORTGAGE|CREDIT_CARD|TERM_DEPOSIT|OVERDRAFT|INVESTMENT"
@@ -52,6 +52,7 @@ erDiagram
     double maxBalance
     timestamptz createdAt
     timestamptz updatedAt
+    long rowVersion "optimistic concurrency token"
   }
 
   FEE {
@@ -66,7 +67,7 @@ erDiagram
   }
 ```
 
-The model is the Kotlin domain in `domain/Product.kt`; under a MongoDB target each `Product` maps naturally to one document with embedded `fees[]`, `*Config`, `versionHistory[]`, and `termsAndConditions[]`.
+The model is the Kotlin domain in `domain/Product.kt`. PostgreSQL stores the complete representation in JSONB while canonical identity, lookup/filter fields and the optimistic row version remain relational and indexed.
 
 ## Seeded catalog (current fixture)
 
@@ -78,10 +79,11 @@ The product catalog holds **reference data only — no personal data**. There is
 
 ## Retention
 
-`retentionPolicy: indefinite` — product definitions and their version history are kept indefinitely. Historic product versions and effective-dated terms-and-conditions are retained for **transparency and dispute evidence** (a customer must be able to see the pricing that applied when they took the product), not deleted. There is no GDPR erasure dimension because there is no personal data (see [06 — Compliance](./06-compliance.md)).
+`retentionPolicy: indefinite` — current product definitions are kept indefinitely. The embedded legacy `versionHistory` is informational and is not sufficient dispute evidence because v1 mutates the current document. Immutable published revisions and evidence are an ADR-0257 delivery requirement. There is no GDPR erasure dimension because there is no personal data (see [06 — Compliance](./06-compliance.md)).
 
 ## Migrations
 
 | Migration | Status |
 |---|---|
-| (none yet) | No Flyway migrations exist. When the MongoDB-backed store lands, schema/seed bootstrapping will be added per the platform pattern. |
+| `V1__init_products.sql` | Creates the canonical product table and indexes. |
+| `V2__add_product_row_version.sql` | Adds the expand-only optimistic-concurrency token; old binaries ignore it. |

@@ -11,7 +11,7 @@ graph LR
   card[card-issuance-service]
 
   pc[(product-catalog<br/>:8104)]:::svc
-  store[(in-memory úložiště<br/>15 nasazených produktů)]
+  store[(PostgreSQL<br/>products JSONB + indexované sloupce)]
 
   admin -- "GET/POST/PUT /products<br/>GET /fees" --> pc
   acc -. "čte definice produktů" .-> pc
@@ -35,12 +35,14 @@ graph TB
     rest[REST adaptéry<br/>ProductCatalogResource<br/>FeesResource]
     app[Aplikace<br/>ProductCatalogService<br/>ProductRequest / FeeScheduleItem]
     dom[Doména<br/>Product + konfig value objekty<br/>Fee / InterestTier / *Config]
-    store[Perzistence<br/>ConcurrentHashMap úložiště<br/>naseedováno při startu]
+    port[Odchozí port<br/>ProductRepository]
+    store[Perzistenční adaptér<br/>Reactive Panache + PostgreSQL<br/>Flyway schéma]
   end
 
   rest --> app
   app --> dom
-  app --> store
+  app --> port
+  port --> store
 ```
 
 ## Hexagonální vrstvy (ADR-0002)
@@ -63,12 +65,14 @@ com.openbank.productcatalog/
 │                                  ProductRequest (DTO ↔ doména),
 │                                  FeeScheduleItem (zploštělý řádek poplatku)
 │
-└── infrastructure/rest/         ◄── vstupní adaptéry (JAX-RS)
-    ├── ProductCatalogResource   /api/v1/products
-    └── FeesResource             /api/v1/fees
+└── infrastructure/
+    ├── persistence/             ◄── odchozí adaptér (Reactive Panache/PostgreSQL)
+    └── rest/                    ◄── vstupní adaptéry (JAX-RS)
+        ├── ProductCatalogResource   /api/v1/products
+        └── FeesResource             /api/v1/fees
 ```
 
-> Poznámka k aktuální zralosti: aplikační služba drží úložiště přímo (`ConcurrentHashMap`), nikoli za výstupním repository **portem**. Čisté oddělení doména→port→adaptér pro perzistenci je sledovaný follow-up, který přijde s DB úložištěm (viz [04 — Data](./04-data.md)). Samotná doménová vrstva je bez frameworků.
+`ProductRepository` je odchozí perzistenční port. Registrace reflexe pro native image žije v infrastruktuře, takže doména nemá frameworkové importy (ADR-0002).
 
 ## Doménový model
 
@@ -82,18 +86,18 @@ Kořen agregátu je **`Product`** (identita `id`/`code`, `name`, `type`, `curren
 | `termDepositConfig` | TERM_DEPOSIT | délka v měsících, frekvence výplaty, sankce za předčasný výběr |
 | `savingsConfig` | SAVINGS | úroková pásma, výpovědní lhůta, počet výběrů zdarma, bonusová sazba |
 
-Auditní/transparentní atributy: `versionHistory[]` (datem účinnosti opatřené poznámky k verzím) a `termsAndConditions[]` (verzované URL OP s daty účinnosti).
+`versionHistory[]` jsou legacy informativní data, nikoli neměnný auditní důkaz. `termsAndConditions[]` nese reference s dobou účinnosti. Autoritativní neměnné revize zavádí v2 dle ADR-0257.
 
 ## Zploštění sazebníku
 
 `ProductCatalogService.listFeeSchedule()` zploští `fees[]` všech produktů do jednoho celobankovního sazebníku. Každý `FeeScheduleItem` nese:
 
 - stabilní složené id `"<productId>:<feeId>"`,
-- odvozený stabilní kód `"<PRODUCT_CODE>_<FEE_SLUG>"` (např. `CURRENT_PERSONAL_FX_CONVERSION`),
+- odvozený zobrazovací kód `"<PRODUCT_CODE>_<FEE_SLUG>"` (např. `CURRENT_PERSONAL_FX_CONVERSION`), který se mění s metadaty poplatku,
 - identitu vlastnícího produktu (`productId`, `productCode`, `productName`) a jeho `status`, plus `updatedAt`.
 
 Toto poskytuje `GET /api/v1/fees`, takže admin UI vykreslí ceny bez opětovného načítání každého produktu a nikdy nezadrátuje ceník napevno.
 
 ## Události / outbox
 
-**Žádné.** Služba neprovozuje outbox dispatcher a nepublikuje žádné Kafka události. Změny stavu (create/update/activate/deactivate) mutují pouze in-memory úložiště. Pokud by se události o změně produktu staly downstream požadavkem, byly by přidány za outbox podle platformního vzoru použitého v `account-service`.
+**Zatím žádné.** Změny se perzistují v PostgreSQL, ale služba neprovozuje outbox dispatcher ani nepublikuje Kafka události. ADR-0257 vyžaduje auditní a outbox záznam ve stejné transakci před první publikační událostí v2.

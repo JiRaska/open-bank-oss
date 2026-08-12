@@ -36,7 +36,7 @@ erDiagram
   PRODUCT ||--o| SAVINGS_CONFIG : "volitelné"
 
   PRODUCT {
-    string id PK "UUID nebo prod-xxx"
+    string id PK "kanonické UUID; prod-xxx je legacy alias"
     string code UK "např. SAVINGS_STANDARD"
     string name
     string type "SAVINGS|CURRENT|LOAN|MORTGAGE|CREDIT_CARD|TERM_DEPOSIT|OVERDRAFT|INVESTMENT"
@@ -52,6 +52,7 @@ erDiagram
     double maxBalance
     timestamptz createdAt
     timestamptz updatedAt
+    long rowVersion "token optimistického souběhu"
   }
 
   FEE {
@@ -66,7 +67,7 @@ erDiagram
   }
 ```
 
-Model je kotlinová doména v `domain/Product.kt`; pod cílem MongoDB se každý `Product` přirozeně mapuje na jeden dokument s vnořenými `fees[]`, `*Config`, `versionHistory[]` a `termsAndConditions[]`.
+Model je kotlinová doména v `domain/Product.kt`. PostgreSQL ukládá úplnou reprezentaci v JSONB; kanonická identita, vyhledávací/filtrovací pole a optimistická verze řádku zůstávají relační a indexované.
 
 ## Naseedovaný katalog (aktuální fixture)
 
@@ -78,10 +79,11 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 
 ## Retence
 
-`retentionPolicy: indefinite` — definice produktů a jejich historie verzí se uchovávají neomezeně. Historické verze produktů a datem účinnosti opatřené obchodní podmínky se uchovávají kvůli **transparentnosti a důkazům při sporu** (zákazník musí být schopen vidět ceny platné v době, kdy si produkt vzal), nemažou se. GDPR dimenze výmazu zde není, protože nejsou žádná osobní data (viz [06 — Compliance](./06-compliance.md)).
+`retentionPolicy: indefinite` — aktuální definice produktů se uchovávají neomezeně. Vnořená legacy `versionHistory` je informativní a sama není dostatečný důkaz při sporu, protože v1 mění aktuální dokument. Neměnné publikované revize a důkazy jsou podmínkou dodání ADR-0257. GDPR dimenze výmazu zde není, protože nejsou žádná osobní data (viz [06 — Compliance](./06-compliance.md)).
 
 ## Migrace
 
 | Migrace | Stav |
 |---|---|
-| (zatím žádná) | Žádné Flyway migrace neexistují. Až přijde MongoDB úložiště, doplní se bootstrapping schématu/seedu dle platformního vzoru. |
+| `V1__init_products.sql` | Vytváří tabulku kanonických produktů a indexy. |
+| `V2__add_product_row_version.sql` | Přidává expand-only token optimistického souběhu; starší binárky jej ignorují. |
