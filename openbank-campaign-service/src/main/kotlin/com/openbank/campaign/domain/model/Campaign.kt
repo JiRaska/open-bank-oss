@@ -199,6 +199,14 @@ data class CampaignStep(
      * (enforced by [Campaign]) so one party keeps the same treatment throughout the journey.
      */
     val variantBVariables: Map<String, String>? = null,
+    /**
+     * If the primary EMAIL step has no active e-mail marketing consent, retry the same offer as a
+     * PUSH only after its own full contact-policy check succeeds. This is intentionally not a
+     * generic failover: quiet hours, caps and suppression lists are channel-independent policy
+     * decisions and must never be bypassed; an asynchronous mail bounce is also not a safe prompt
+     * to send a second message.
+     */
+    val fallbackToPush: Boolean = false,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -229,12 +237,36 @@ data class CampaignStep(
                 require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
             }
         }
+        require(!fallbackToPush || channel == Channel.EMAIL) {
+            "only an EMAIL step can fall back to PUSH"
+        }
+        require(!fallbackToPush || template in TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL) {
+            "template '$template' has no safe PUSH fallback"
+        }
     }
 
     /** Resolves content after the durable enrolment assignment, never randomly at send time. */
     fun variablesFor(variant: ContentVariant?): Map<String, String> =
         if (variant == ContentVariant.B) variantBVariables ?: variables else variables
+
+    /** Primary delivery values, kept separate from the fallback's reduced template vocabulary. */
+    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery =
+        CampaignDelivery(channel, template, TemplateCatalog.valuesFor(template, variablesFor(variant)))
+
+    /** The only supported fallback: a consented app push after EMAIL consent was absent. */
+    fun pushFallback(variant: ContentVariant?): CampaignDelivery? = TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[template]
+        ?.takeIf { fallbackToPush }
+        ?.let { pushTemplate ->
+            CampaignDelivery(
+                Channel.PUSH,
+                pushTemplate,
+                TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
+            )
+        }
 }
+
+/** A resolved per-attempt delivery, including the channel that will be recorded for audit. */
+data class CampaignDelivery(val channel: Channel, val template: String, val variables: Map<String, String>)
 
 /**
  * Delivery channels a campaign step may use.

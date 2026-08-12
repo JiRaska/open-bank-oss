@@ -243,6 +243,7 @@ export default function NewCampaignPage() {
           ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
+          ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),

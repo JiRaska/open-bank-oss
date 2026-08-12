@@ -76,6 +76,8 @@ data class StepRequest(
     val condition: StepCondition? = null,
     /** The B-arm values for a campaign-wide content experiment; absent keeps one shared message. */
     val variantBVariables: Map<String, String>? = null,
+    /** Use the catalogue's safe PUSH counterpart only when this EMAIL step lacks email consent. */
+    val fallbackToPush: Boolean = false,
 )
 
 /**
@@ -136,6 +138,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
                 it.delaySeconds,
                 it.condition,
                 it.variantBVariables,
+                it.fallbackToPush,
             )
         }
         val campaign = service.createDraft(

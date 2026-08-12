@@ -148,4 +148,33 @@ class CampaignStepChannelTest {
         assertEquals(setOf("MARKETING_PRODUCT_OFFER"), TemplateCatalog.forChannel(Channel.EMAIL))
         assertEquals(setOf("MARKETING_PRODUCT_OFFER_PUSH"), TemplateCatalog.forChannel(Channel.PUSH))
     }
+
+    @Test
+    fun `an email step can safely reduce to its push fallback without carrying email body copy`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Email body", "ctaText" to "Open"),
+            delaySeconds = 0,
+            fallbackToPush = true,
+        )
+
+        assertEquals(Channel.PUSH, step.pushFallback(null)?.channel)
+        assertEquals(mapOf("offerTitle" to "Savings"), step.pushFallback(null)?.variables)
+    }
+
+    @Test
+    fun `a push step cannot declare another push fallback`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_PUSH",
+                channel = Channel.PUSH,
+                variables = mapOf("offerTitle" to "Savings"),
+                delaySeconds = 0,
+                fallbackToPush = true,
+            )
+        }
+    }
 }

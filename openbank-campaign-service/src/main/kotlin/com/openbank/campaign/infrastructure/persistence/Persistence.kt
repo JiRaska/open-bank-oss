@@ -22,6 +22,7 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.DeliveryTransition
@@ -181,6 +182,10 @@ class SendLogEntity : PanacheEntityBase() {
 
     @Column
     var deliveryUpdatedAt: Instant? = null
+
+    /** Actual request medium; nullable so migration leaves historical decision rows intact. */
+    @Column(length = 8)
+    var channel: String? = null
 }
 
 @Entity
@@ -408,6 +413,7 @@ class PanacheSendLogRepository :
                     deliveryStatus = send.deliveryStatus.name
                     deliveryReason = send.deliveryReason
                     deliveryUpdatedAt = send.deliveryUpdatedAt
+                    channel = send.channel?.name
                 },
             )
         }.awaitSuspending()
@@ -625,4 +631,5 @@ private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
     deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
     deliveryReason = deliveryReason,
     deliveryUpdatedAt = deliveryUpdatedAt,
+    channel = channel?.let(Channel::valueOf),
 )

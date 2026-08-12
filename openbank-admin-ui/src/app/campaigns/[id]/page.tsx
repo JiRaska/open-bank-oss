@@ -22,7 +22,13 @@ interface Campaign {
   state: string
   createdBy: string
   approvedBy: string | null
-  steps: { order: number; template: string; delaySeconds: number; variantBVariables?: Record<string, string> | null }[]
+  steps: {
+    order: number
+    template: string
+    delaySeconds: number
+    variantBVariables?: Record<string, string> | null
+    fallbackToPush?: boolean
+  }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
   /** Percentage deliberately kept in the no-contact control cohort. */
@@ -627,6 +633,18 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 {t(
                   'Rozdíl je popisný. Brána používá 95% Wilsonovy intervaly, automaticky nemění aktivní cestu a sama nedokazuje příčinu.',
                   'The difference is descriptive. The 95% Wilson gate never changes an active journey and does not establish causality itself.',
+                )}
+              </p>
+            </section>
+          )}
+
+          {c.steps.some(step => step.fallbackToPush) && (
+            <section className="space-y-1 rounded-lg border p-3" data-channel-fallback>
+              <h2 className="text-sm font-semibold">{t('Záložní kanál', 'Fallback channel')}</h2>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'U vybraných e-mailových kroků se při chybějícím e-mailovém souhlasu zkusí push. I ten projde vlastním souhlasem, frekvenčním limitem, quiet hours a suppression listem; po nedoručení e-mailu se druhá zpráva neposílá.',
+                  'Selected email steps may try push when email consent is absent. Push still passes its own consent, frequency cap, quiet hours and suppression list; an email delivery failure never triggers a second message.',
                 )}
               </p>
             </section>

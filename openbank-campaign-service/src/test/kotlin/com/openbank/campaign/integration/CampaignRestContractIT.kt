@@ -506,6 +506,7 @@ class CampaignRestContractIT {
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
                        "variantBVariables":{"offerTitle":"B","offerText":"B copy","ctaText":"Try"},
+                       "fallbackToPush":true,
                        "delaySeconds":0}]}
         """.trimIndent()
 
@@ -525,6 +526,7 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("steps[0].variantBVariables.offerTitle", org.hamcrest.Matchers.equalTo("B"))
+            body("steps[0].fallbackToPush", org.hamcrest.Matchers.equalTo(true))
         }
         When {
             get("/api/v1/campaigns/$id/content-experiment")

@@ -128,4 +128,18 @@ describe('step editor', () => {
     // "Offer text" would send someone hunting for a control that is not on the screen.
     expect(screen.getByText(/Offer text, Button text/)).toBeTruthy()
   })
+
+  it('lets an email step opt into push only for absent email consent', () => {
+    const onChange = vi.fn()
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.click(document.querySelector('[data-push-fallback="0"] input')!)
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fallbackToPush: true }))
+    expect(screen.getByText(/not a second attempt after an email delivery failure/i)).toBeTruthy()
+  })
 })

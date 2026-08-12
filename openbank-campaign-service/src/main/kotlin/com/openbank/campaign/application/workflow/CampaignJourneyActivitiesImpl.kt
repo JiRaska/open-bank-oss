@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.domain.model.CampaignDelivery
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
@@ -126,65 +127,92 @@ open class CampaignJourneyActivitiesImpl(
         } else {
             null
         }
-        val variables = step.variablesFor(contentVariant)
+        val primary = step.primaryDelivery(contentVariant)
 
-        // ADR-0219 (#3656): one gate call wraps the suppression list, the frequency cap, quiet
-        // hours and the live consent pull, in the gate's ordering.
-        return when (
-            val decision = contactGate.check(
-                partyId,
-                ContactClass.OUTBOUND_SEND,
-                marketingScopeFor(step.channel),
-                topic = campaign.goal,
-            )
-        ) {
-            ContactGateDecision.ALLOWED -> {
-                // The send-log row id is minted BEFORE the handoff, not by `record` after it
-                // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
-                // to exist first. It is used for whichever row this attempt ends up writing —
-                // SENT, DRY_RUN or FAILED — so an outcome that arrives for a handoff that then
-                // failed locally still lands on the right row.
-                val sendId = Ids.newId()
-                // Dry run stops HERE, after every gate above has run. Deliberately not earlier: the
-                // point of a rehearsal is that suppression, cap, quiet hours and consent are all
-                // exercised exactly as they would be, so a journey that would have been suppressed
-                // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
-                // delivery status stays PENDING forever — correctly: no message ever left.
-                if (dryRun) {
-                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN)
-                } else {
-                    // ADR-0200 D3 — delivery goes through notification-service, never direct.
-                    //
-                    // The order below is the fix for issue #3581: the send log may only be written
-                    // AFTER the handoff has been observed to succeed, and a handoff that failed must
-                    // leave a FAILED row rather than nothing. What SENT claims here is exactly
-                    // "notification-service accepted the request", not "the customer received it".
-                    try {
-                        notificationSend.requestSend(
-                            partyId,
-                            step.channel,
-                            step.template,
-                            recipientFor(partyId),
-                            variables,
-                            correlationId = sendId,
-                        )
-                    } catch (e: Exception) {
-                        sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED)
-                        // Rethrown on purpose: Temporal retries the activity, and the FAILED row
-                        // above is the durable evidence that this attempt happened. FAILED rows do
-                        // not consume the frequency cap (SENT only), so a retry is not penalised.
-                        throw e
-                    }
-                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT)
+        suspend fun sendAllowed(delivery: CampaignDelivery): StepOutcome {
+            // The send-log row id is minted BEFORE the handoff, not by `record` after it
+            // (ADR-0239 D1): it is what goes on the wire as the correlation id, so the id has
+            // to exist first. It is used for whichever row this attempt ends up writing —
+            // SENT, DRY_RUN or FAILED — so an outcome that arrives for a handoff that then
+            // failed locally still lands on the right row.
+            val sendId = Ids.newId()
+            // Dry run stops HERE, after every gate above has run. Deliberately not earlier: the
+            // point of a rehearsal is that suppression, cap, quiet hours and consent are all
+            // exercised exactly as they would be, so a journey that would have been suppressed
+            // still reports SUPPRESSED and not DRY_RUN. Nothing is handed off, so this row's
+            // delivery status stays PENDING forever — correctly: no message ever left.
+            if (dryRun) {
+                sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.DRY_RUN, delivery.channel)
+            } else {
+                // ADR-0200 D3 — delivery goes through notification-service, never direct.
+                //
+                // The order below is the fix for issue #3581: the send log may only be written
+                // AFTER the handoff has been observed to succeed, and a handoff that failed must
+                // leave a FAILED row rather than nothing. What SENT claims here is exactly
+                // "notification-service accepted the request", not "the customer received it".
+                try {
+                    notificationSend.requestSend(
+                        partyId,
+                        delivery.channel,
+                        delivery.template,
+                        recipientFor(partyId),
+                        delivery.variables,
+                        correlationId = sendId,
+                    )
+                } catch (e: Exception) {
+                    sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.FAILED, delivery.channel)
+                    // Rethrown on purpose: Temporal retries the activity, and the FAILED row
+                    // above is the durable evidence that this attempt happened. FAILED rows do
+                    // not consume the frequency cap (SENT only), so a retry is not penalised.
+                    throw e
                 }
-                StepOutcome.SENT
+                sendLog.record(sendId, campaignId, partyId, stepOrder, SendOutcome.SENT, delivery.channel)
             }
+            return StepOutcome.SENT
+        }
+
+        suspend fun checked(delivery: CampaignDelivery): ContactGateDecision = contactGate.check(
+            partyId,
+            ContactClass.OUTBOUND_SEND,
+            marketingScopeFor(delivery.channel),
+            topic = campaign.goal,
+        )
+
+        // ADR-0219 (#3656): both attempts use the same complete gate. Only a missing primary
+        // consent may switch channels — quiet hours, caps and list suppression are not a reason
+        // to try a second message, and a gate outage remains a retry signal.
+        return when (val primaryDecision = checked(primary)) {
+            ContactGateDecision.ALLOWED -> sendAllowed(primary)
             else -> {
-                if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+                if (primaryDecision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
                     throw ContactGateUnavailableException("contact gate state unavailable — activity will retry")
                 }
-                sendLog.record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(decision.denyReason))
-                StepOutcome.SUPPRESSED
+                val fallback = primaryDecision.denyReason
+                    .takeIf { it == ContactDenyReason.NO_CONSENT }
+                    ?.let { step.pushFallback(contentVariant) }
+                if (fallback != null) {
+                    when (val fallbackDecision = checked(fallback)) {
+                        ContactGateDecision.ALLOWED -> sendAllowed(fallback)
+                        else -> {
+                            if (fallbackDecision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+                                throw ContactGateUnavailableException(
+                                    "contact gate state unavailable — activity will retry",
+                                )
+                            }
+                            sendLog.record(
+                                Ids.newId(),
+                                campaignId,
+                                partyId,
+                                stepOrder,
+                                outcomeFor(fallbackDecision.denyReason),
+                            )
+                            StepOutcome.SUPPRESSED
+                        }
+                    }
+                } else {
+                    sendLog.record(Ids.newId(), campaignId, partyId, stepOrder, outcomeFor(primaryDecision.denyReason))
+                    StepOutcome.SUPPRESSED
+                }
             }
         }
     }
@@ -271,7 +299,8 @@ private suspend fun SendLogRepository.record(
     partyId: UUID,
     stepOrder: Int,
     outcome: SendOutcome,
-) = record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now()))
+    channel: Channel? = null,
+) = record(SendRecord(id, campaignId, partyId, stepOrder, outcome, Instant.now(), channel = channel))
 
 // The recipient address is resolved by notification-service from party data; the campaign never
 // carries an e-mail address itself (ADR-0200 D3 — no PII duplication).

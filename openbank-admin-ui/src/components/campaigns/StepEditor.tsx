@@ -112,6 +112,7 @@ export function StepEditor({
                   channel: c,
                   template: first,
                   variables: {},
+                  ...(c === 'PUSH' ? { fallbackToPush: false } : {}),
                   ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
                 })}
                 // `.btn` again rather than a hand-rolled box — the third time tonight that a
@@ -136,6 +137,24 @@ export function StepEditor({
               'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
             )}
           </p>
+        )}
+        {step.channel === 'EMAIL' && (
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm" data-push-fallback={index}>
+            <input
+              type="checkbox"
+              checked={step.fallbackToPush === true}
+              onChange={e => onChange({ ...step, fallbackToPush: e.target.checked })}
+            />
+            <span>
+              <span className="font-medium">{t('Když chybí e-mailový souhlas, zkusit push', 'When email consent is absent, try push')}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {t(
+                  'Push projde vlastním souhlasem i stejnými limity. Není to druhý pokus po nedoručení e-mailu.',
+                  'Push goes through its own consent and the same limits. It is not a second attempt after an email delivery failure.',
+                )}
+              </span>
+            </span>
+          </label>
         )}
       </div>
 
