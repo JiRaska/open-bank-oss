@@ -61,6 +61,7 @@ interface Product {
   termsAndConditions?: TermsAndConditions[]; versionHistory?: ProductVersion[]
   tags?: string[]; eligibilitySegments?: string[]
   createdAt?: string; updatedAt?: string
+  revision?: number
 }
 
 // Go through the BFF proxy (not a dedicated /api/product-catalog route): the proxy
@@ -164,7 +165,12 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           {product.shortDescription && <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>{product.shortDescription}</div>}
         </div>
         <div style={{ display: 'flex', gap: '6px', flexShrink: 0, marginLeft: '12px' }}>
-          <button onClick={onEdit} style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+          <button
+            onClick={onEdit}
+            disabled={product.status === 'ACTIVE'}
+            title={product.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')}
+            style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', cursor: product.status === 'ACTIVE' ? 'not-allowed' : 'pointer', opacity: product.status === 'ACTIVE' ? 0.55 : 1, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-secondary)' }}
+          >
             <Edit size={12} /> {t('Upravit', 'Edit')}
           </button>
           <button onClick={onToggleStatus} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
@@ -498,6 +504,10 @@ export default function ProductCatalogPage() {
   }
 
   const openEditModal = (p: Product) => {
+    if (p.status === 'ACTIVE') {
+      setActionError(t('Aktivní produkt nejprve deaktivujte.', 'Deactivate the active product before editing.'))
+      return
+    }
     setEditingProduct(p)
     setFormData({ ...p })
     setActionError(null)
@@ -510,7 +520,10 @@ export default function ProductCatalogPage() {
     setActionError(null)
     try {
       if (editingProduct?.id) {
-        await apiFetch(`/${editingProduct.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) })
+        if (editingProduct.revision === undefined) {
+          throw new Error(t('Katalog se právě aktualizuje; načtěte stránku znovu.', 'Catalog is upgrading; reload the page.'))
+        }
+        await apiFetch(`/${editingProduct.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'If-Match': `"${editingProduct.revision}"` }, body: JSON.stringify(formData) })
       } else {
         await apiFetch('', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(formData) })
       }
@@ -527,8 +540,11 @@ export default function ProductCatalogPage() {
     if (!p.id) return
     setActionError(null)
     try {
+      if (p.revision === undefined) {
+        throw new Error(t('Katalog se právě aktualizuje; načtěte stránku znovu.', 'Catalog is upgrading; reload the page.'))
+      }
       const action = p.status === 'ACTIVE' ? 'deactivate' : 'activate'
-      await apiFetch(`/${p.id}/${action}`, { method: 'POST' })
+      await apiFetch(`/${p.id}/${action}`, { method: 'POST', headers: { 'If-Match': `"${p.revision}"` } })
       await load()
     } catch (err: any) {
       setActionError(err.message ?? 'Failed to change status')
@@ -675,7 +691,7 @@ export default function ProductCatalogPage() {
                     </td>
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={t('Upravit', 'Edit')}>
+                        <button className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')}>
                           <Edit size={13} />
                         </button>
                         <button className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')}>
@@ -737,7 +753,7 @@ export default function ProductCatalogPage() {
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Status', 'Status')}</label>
-                  <select className="input" value={formData.status ?? 'DRAFT'} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
+                  <select className="input" disabled value={formData.status ?? 'DRAFT'} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
                     {['DRAFT', 'ACTIVE', 'INACTIVE', 'DEPRECATED', 'ARCHIVED'].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>

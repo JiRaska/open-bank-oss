@@ -103,7 +103,7 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
 
 const FORWARD_HEADERS = [
   'content-type', 'accept', 'authorization',
-  'idempotency-key', 'x-request-id', 'x-correlation-id',
+  'idempotency-key', 'if-match', 'x-request-id', 'x-correlation-id',
   // ADR-0155/ADR-0176: the maker's four-eyes retry carries this header once a checker has
   // approved (AuthorizeInterceptor). Without forwarding it, every retry looks identical to the
   // original request and gets 202'd again forever.
@@ -193,6 +193,8 @@ async function proxy(
     const responseHeaders = new Headers()
     const ct = upstream.headers.get('content-type')
     if (ct) responseHeaders.set('content-type', ct)
+    const etag = upstream.headers.get('etag')
+    if (etag) responseHeaders.set('etag', etag)
     responseHeaders.set('cache-control', 'no-store')
 
     const data = await upstream.arrayBuffer()
