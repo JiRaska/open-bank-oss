@@ -379,6 +379,26 @@ main {
 .campaign-pulse-numbers span { color: var(--text-secondary); display: block; font-size: .61rem; margin-top: .1rem; }
 .campaign-pulse-footnote { color: var(--text-secondary); font-size: .64rem; line-height: 1.35; margin-top: .85rem; }
 @media (max-width: 900px) { .campaign-decision-desk { grid-template-columns: 1fr; } }
+
+/* ── Campaign outcome brief ── */
+.campaign-outcome-brief { background: linear-gradient(110deg, #111827 0%, #172554 56%, #312e81 100%); border-radius: var(--r-xl); box-shadow: var(--shadow-lg); color: #fff; display: grid; grid-template-columns: minmax(0, 1fr) minmax(13.5rem, .32fr); overflow: hidden; }
+.campaign-outcome-main { padding: 1.25rem; }
+.campaign-outcome-title-row { align-items: center; display: flex; gap: .75rem; justify-content: space-between; margin-top: .2rem; }
+.campaign-outcome-title-row h2 { font-size: 1.05rem; font-weight: 750; }
+.campaign-outcome-title-row span { background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.18); border-radius: 99px; font-size: .62rem; font-weight: 800; padding: .28rem .55rem; }
+.campaign-outcome-metrics { display: grid; gap: .5rem; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 1rem; }
+.campaign-outcome-metrics > div { background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.1); border-radius: .7rem; min-width: 0; padding: .58rem; }
+.campaign-outcome-metrics strong { display: block; font-size: 1.02rem; font-variant-numeric: tabular-nums; }
+.campaign-outcome-metrics span { display: block; font-size: .67rem; font-weight: 700; margin-top: .12rem; }
+.campaign-outcome-metrics small { color: rgba(255,255,255,.65); display: block; font-size: .58rem; line-height: 1.2; margin-top: .08rem; }
+.campaign-outcome-conversion[data-conversion='unmeasured'] { background: rgba(255,255,255,.035); }
+.campaign-outcome-evidence { color: rgba(255,255,255,.64); font-size: .64rem; line-height: 1.35; margin-top: .72rem; }
+.campaign-outcome-action { background: rgba(255,255,255,.1); border-left: 1px solid rgba(255,255,255,.12); display: flex; flex-direction: column; justify-content: center; padding: 1.25rem; }
+.campaign-outcome-action p { color: #c7d2fe; font-size: .65rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.campaign-outcome-action strong { font-size: .92rem; line-height: 1.25; margin-top: .32rem; }
+.campaign-outcome-action span { color: rgba(255,255,255,.72); font-size: .7rem; line-height: 1.4; margin-top: .38rem; }
+@media (max-width: 840px) { .campaign-outcome-brief { grid-template-columns: 1fr; } .campaign-outcome-action { border-left: 0; border-top: 1px solid rgba(255,255,255,.12); } }
+@media (max-width: 560px) { .campaign-outcome-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 /* Stat-card internals (ADR-0208 D1). `.stat-card` only ever styled the container, so every page
    hand-rolled the label/value typography inline — including colour values derived from a literal
    (`background: ${k.color}18`), which is the duplication D2 exists to remove. These three classes
