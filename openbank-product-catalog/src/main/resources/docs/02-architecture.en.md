@@ -24,7 +24,8 @@ graph LR
   classDef svc fill:#dbeafe,stroke:#2563eb
 ```
 
-The catalog is a **reference-data provider**. It has no downstream calls, no broker, and no money-path involvement — callers read product definitions and the fee schedule.
+The catalog is a **reference-data provider**. It has no downstream calls and no money-path
+involvement. Accepted v2 changes create durable outbox records; no broker adapter is enabled yet.
 
 ## C4 — Container (internal structure)
 
@@ -32,10 +33,10 @@ The catalog is a **reference-data provider**. It has no downstream calls, no bro
 graph TB
   subgraph "openbank-product-catalog (Quarkus 3.33, JDK 25)"
     direction TB
-    rest[REST adapters<br/>ProductCatalogResource<br/>FeesResource]
-    app[Application<br/>ProductCatalogService<br/>ProductRequest / FeeScheduleItem]
-    dom[Domain<br/>Product + config value objects<br/>Fee / InterestTier / *Config]
-    port[Outbound port<br/>ProductRepository]
+    rest[REST adapters<br/>v1 banking + v2 generic catalog]
+    app[Application<br/>legacy CRUD + governed publication]
+    dom[Domain<br/>bank Product + framework-free catalog kernel]
+    port[Outbound ports<br/>legacy + generic repositories]
     store[Persistence adapter<br/>Reactive Panache + PostgreSQL<br/>Flyway schema]
   end
 
@@ -98,6 +99,16 @@ The aggregate root is **`Product`** (identity `id`/`code`, `name`, `type`, `curr
 
 This is what `GET /api/v1/fees` serves, so the admin UI renders pricing without re-fetching each product and never hardcodes a price list.
 
+## Generic v2 aggregate boundary
+
+`ProductSpecification` owns the canonical UUID, immutable code and exact `SchemaRef`.
+`ProductOffering` adds market context. `ProductRevision` owns all localized content, schema-governed
+attributes, exact decimal prices and effective dates. DRAFT is mutable behind a strong ETag;
+PUBLISHED and SUPERSEDED snapshots are database-enforced immutable. Publication requires a checker
+different from the stored maker.
+
 ## Events / outbox
 
-**None yet.** Changes persist in PostgreSQL, but the service does not run an outbox dispatcher or publish Kafka events. ADR-0257 requires same-transaction audit/outbox records before the first v2 publication event ships.
+Specification, offering, draft, update and publication changes persist the domain row, append-only
+audit evidence and a `CatalogChangeEvent` v1 envelope atomically. A failed outbox insert rolls the
+whole transaction back. The outbox is intentionally transport-neutral until a delivery adapter ships.

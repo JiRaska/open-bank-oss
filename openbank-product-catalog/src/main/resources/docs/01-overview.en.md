@@ -2,7 +2,13 @@
 
 ## What the service does
 
-`openbank-product-catalog` is the **system of record for bank products and their pricing**. It owns:
+`openbank-product-catalog` is the **system of record for governed product definitions and pricing**.
+It serves an industry-neutral v2 catalog while preserving the v1 banking contract. It owns:
+
+- **Generic catalog kernel** — immutable specifications, market-specific offerings, localized and
+  effective-dated revisions, exact decimal price components, eligibility, relationships and document codes.
+- **Trusted industry packs** — closed JSON Schema 2020-12 profiles. The initial banking-deposit and
+  term-life insurance packs prove that industry attributes do not leak into the kernel.
 
 - **Product master** — one record per product (e.g. `SAVINGS_STANDARD`, `CURRENT_PERSONAL`, `LOAN_PERSONAL_5Y`, `MORTGAGE_FIXED_20Y`, `CREDIT_CARD_CLASSIC`, `TERM_DEPOSIT_12M`, `OVERDRAFT_PERSONAL`, multi-currency umbrella). Each carries identity (`code`, `name`, `type`, `currency`), lifecycle `status` (DRAFT / ACTIVE / INACTIVE / DEPRECATED / ARCHIVED), pricing (`baseRate`, `fee`, `fees[]`), eligibility segments, version history and terms-and-conditions.
 - **Per-type configuration blocks** — `cardConfig`, `multiCurrencyConfig`, `overdraftConfig`, `termDepositConfig`, `savingsConfig` (rates, FX margins, card networks/tiers, withdrawal notice, etc.).
@@ -47,8 +53,13 @@ The catalog is a **reference-data provider**: it sits upstream of the operationa
 | Deactivate a product | `POST /api/v1/products/{id}/deactivate` | — |
 | Fees attached to one product | `GET /api/v1/products/{id}/fees` | — |
 | Bank-wide fee schedule (filterable) | `GET /api/v1/fees` | — |
+| Validate attributes against an exact product type | `POST /api/v2/product-types/{id}/versions/{version}/validate` | — |
+| Author specification, offering and draft revision | `/api/v2/specifications`, `/offerings`, `/revisions` | durable audit + outbox |
+| Publish with an independent checker | `POST /api/v2/offerings/{id}/revisions/{revisionId}/publish` | `catalog.revision_published` v1 |
+| Resolve an effective published product | `GET /api/v2/products/{specificationId}` | — |
 
-No domain events are emitted today (no Kafka/outbox) — the service is read-mostly reference data.
+Every accepted v2 change records append-only audit evidence and a versioned outbox event in the
+same PostgreSQL transaction. No Kafka dispatcher is enabled yet; delivery adapters are a later phase.
 
 ## Callers
 
@@ -62,7 +73,7 @@ No domain events are emitted today (no Kafka/outbox) — the service is read-mos
 - **openbank-libs** — shared runtime plumbing (BuildInfo / `ServiceInfoResource`, DocsResource for Docs-as-Service, API-version filter).
 - **PostgreSQL** — reactive Panache + reactive PG client for the app path, JDBC for Flyway (ADR-0009 / ADR-0105 P1); see [04 — Data](./04-data.md).
 - **Keycloak** — pure OIDC resource server (`quarkus-oidc`, realm `openbank`): it validates bearer tokens against the realm JWKS and mints none, so it needs no client secret.
-- **No** Kafka / Redis wiring in the code today.
+- **No** Kafka / Redis runtime dependency today; the transactional outbox is delivery-neutral.
 
 ## Business value
 

@@ -25,6 +25,8 @@
 |---|---|---|
 | `/api/v1/products/...` | 8104 | product master REST API |
 | `/api/v1/fees` | 8104 | bank-wide fee schedule |
+| `/api/v2/product-types/...` | 8104 | trusted schema discovery and validation |
+| `/api/v2/specifications`, `/offerings`, `/products/...` | 8104 | governed generic catalog |
 | `/api/v1/info` | 8104 | `ServiceInfoResource` (build metadata, from openbank-libs) |
 | `/q/openbank/docs` | 8085 | **Docs-as-Service** (this documentation) |
 | `/q/openapi` | 8085 | OpenAPI spec |
@@ -45,6 +47,7 @@ The service is configured via `application.yaml`. PostgreSQL and OIDC are requir
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | security headers | CSP, HSTS, X-Frame-Options, nosniff, etc. |
 | `quarkus.log.level` | `INFO` | log level |
+| `openbank.api.version` | `2` | newest contract major; path-aware headers preserve v1 |
 | `quarkus.smallrye-openapi.path` | `/q/openapi` | OpenAPI endpoint |
 | `quarkus.swagger-ui.path` | `/api/docs` | Swagger UI |
 
@@ -77,6 +80,11 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 - **Customer-facing listing requested** — there is no public projection in v1. Do not expose the authenticated operator list; use the v2 published projection once available.
 - **State missing after restart** — treat as an incident: product state is PostgreSQL-backed. Verify database target, Flyway history and restore procedure; the seeder never overwrites a non-empty store.
 - **Duplicate code on create** — `409`; pick a unique `code`.
+- **Stale v2 author** — reload the draft after 412; never retry with the old ETag.
+- **Publication rejected** — verify the checker differs from the stored maker, the reason is present,
+  the exact schema still validates and the effective interval does not overlap.
+- **Outbox insert fails** — the accepted change did not commit. Repair PostgreSQL and retry the
+  authoring operation; never manufacture audit or outbox evidence by hand.
 
 ## Release
 

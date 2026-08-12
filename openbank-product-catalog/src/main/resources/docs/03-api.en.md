@@ -2,12 +2,14 @@
 
 ## Base path
 
-- **In-cluster base:** `http://openbank-product-catalog:8104/api/v1`
-- **Local dev:** `http://localhost:8104/api/v1`
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) on the management port (source of truth: `openapi.yaml`, `info.version` 1.1.0, OpenAPI 3.0.3)
+- **In-cluster bases:** `http://openbank-product-catalog:8104/api/v1` and `/api/v2`
+- **Local dev:** `http://localhost:8104/api/v1` and `/api/v2`
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) on the management port (source of truth: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.0.3)
 - **Swagger UI:** `http://localhost:8085/api/docs` (configured via `quarkus.swagger-ui.path`, `always-include: true`)
 
-The major of `openapi.yaml:info.version` equals `openbank.api.version` equals the URL `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). The release version (`version.txt`) is a separate axis.
+The newest served major of `openapi.yaml:info.version` equals `openbank.api.version` and `/api/v2`.
+The same contract preserves `/api/v1`; the response filter reports the major of the actual request
+path. The release version (`version.txt`) is a separate axis ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
 
 ## Authentication
 
@@ -17,7 +19,9 @@ CORS origins are restricted to the configured admin UI origins and expose `ETag`
 
 ## Idempotency
 
-No `Idempotency-Key` mechanism is implemented. Create is guarded by unique product `code`. Single-product reads and mutations return a numeric `ETag`; send it as `If-Match` (or `revision` in the legacy body) to reject a stale writer with `409 Conflict`. v1 keeps the precondition optional for compatibility, so an unversioned legacy read-modify-write is not protected; v2 authoring requires it.
+No `Idempotency-Key` mechanism is implemented. Create is guarded by unique codes. v1 keeps its
+optional legacy revision and 409 behavior for compatibility. v2 draft updates and publication require
+a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 
 ## Endpoints
 
@@ -38,6 +42,20 @@ No `Idempotency-Key` mechanism is implemented. Create is guarded by unique produ
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/api/v1/fees` | Bank-wide flattened fee schedule; optional `?type=&currency=&productCode=` | 200 array |
+
+### Generic governed catalog (v2)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v2/product-types` | List immutable trusted schemas |
+| GET | `/api/v2/product-types/{id}/versions/{version}` | Get one exact schema |
+| POST | `/api/v2/product-types/{id}/versions/{version}/validate` | Validate attributes with ordered violations |
+| POST / GET | `/api/v2/specifications[/{id}]` | Create/read canonical product identity |
+| POST / GET | `/api/v2/offerings[/{id}]` | Create/read a market context |
+| POST | `/api/v2/offerings/{id}/revisions` | Author a DRAFT revision |
+| GET / PUT | `/api/v2/offerings/{id}/revisions/{revisionId}` | Read/update a draft; PUT requires `If-Match` |
+| POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish` | Four-eyes publish with reason and `If-Match` |
+| GET | `/api/v2/products/{specificationId}?effectiveAt=` | Resolve published effective content only |
 
 ### Example — create a product
 
@@ -106,9 +124,10 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Legacy not-found responses retain `{ "error": "<message>" }` for the existing Pact. Validation, lifecycle and conflict errors use the fleet `ApiError` envelope with `traceId`, `status`, `code`, `message` and `timestamp`.
+Legacy v1 wire shapes remain compatible with the existing Pacts. v2 returns `ApiError`; schema
+validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
-- URL versioning: `/api/v1`.
+- URL versioning: preserved `/api/v1`, newest `/api/v2`.
 - The OpenAPI contract version (`openapi.yaml:info.version`) is the API-contract axis; any breaking change must bump it per `oasdiff` classification and update the contract + a contract test ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).

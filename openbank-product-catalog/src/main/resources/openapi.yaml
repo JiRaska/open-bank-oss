@@ -3,12 +3,12 @@
 openapi: 3.0.3
 info:
   title: Product Catalog API
-  # API-contract version is independent of version.txt (ADR-0048); major matches /api/v1.
-  version: 1.0.0
+  # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
+  version: 2.0.0
   description: >-
-    Banking compatibility API for the product master and fee schedule. Canonical product
-    UUIDs and fee identities are stable consumer boundaries. Mutating clients should send
-    the returned ETag through If-Match to prevent lost updates.
+    Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
+    exact decimal pricing, effective-dated reads and transactional audit/outbox. The
+    banking /api/v1 surface remains as a compatibility boundary for existing consumers.
   contact:
     name: OpenBank Platform
   license:
@@ -24,6 +24,14 @@ tags:
     description: Product master lifecycle
   - name: Fees
     description: Bank-wide fee schedule (flattened from per-product fees)
+  - name: Product Types
+    description: Trusted, immutable industry-pack schemas
+  - name: Specifications
+    description: Canonical product identities
+  - name: Offerings
+    description: Market context and immutable authoring revisions
+  - name: Published Catalog
+    description: Effective-dated published projections
 security:
   - bearerAuth: []
 paths:
@@ -271,6 +279,261 @@ paths:
               schema: { type: array, items: { $ref: '#/components/schemas/FeeScheduleItem' } }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/product-types:
+    get:
+      tags: [Product Types]
+      summary: List trusted product type schemas
+      operationId: listProductTypesV2
+      responses:
+        '200':
+          description: Immutable schemas installed by trusted industry packs
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/CatalogSchema' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/product-types/{id}/versions/{version}:
+    get:
+      tags: [Product Types]
+      summary: Get an exact immutable product type schema
+      operationId: getProductTypeVersionV2
+      parameters:
+        - { $ref: '#/components/parameters/ProductTypeId' }
+        - { $ref: '#/components/parameters/ProductTypeVersion' }
+      responses:
+        '200':
+          description: Exact schema version and content hash
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogSchema' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/product-types/{id}/versions/{version}/validate:
+    post:
+      tags: [Product Types]
+      summary: Validate attributes without storing them
+      operationId: validateProductAttributesV2
+      parameters:
+        - { $ref: '#/components/parameters/ProductTypeId' }
+        - { $ref: '#/components/parameters/ProductTypeVersion' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ValidateCatalogRequest' }
+      responses:
+        '200':
+          description: Deterministically ordered validation result
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidateCatalogResponse' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/specifications:
+    post:
+      tags: [Specifications]
+      summary: Create a canonical product identity
+      operationId: createSpecificationV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SpecificationRequest' }
+      responses:
+        '201':
+          description: Specification created
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specification' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/specifications/{id}:
+    get:
+      tags: [Specifications]
+      summary: Get a canonical product identity
+      operationId: getSpecificationV2
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Specification
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Specification' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings:
+    post:
+      tags: [Offerings]
+      summary: Create a market-specific offering
+      operationId: createOfferingV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OfferingRequest' }
+      responses:
+        '201':
+          description: Offering created
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Offering' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{id}:
+    get:
+      tags: [Offerings]
+      summary: Get an offering
+      operationId: getOfferingV2
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Offering
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Offering' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{id}/revisions:
+    post:
+      tags: [Offerings]
+      summary: Author the next draft revision
+      operationId: createOfferingRevisionV2
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevisionRequest' }
+      responses:
+        '201':
+          description: Draft revision created
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '422': { $ref: '#/components/responses/CatalogValidation' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}:
+    parameters:
+      - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [Offerings]
+      summary: Get an authored revision
+      operationId: getOfferingRevisionV2
+      responses:
+        '200':
+          description: Revision
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Offerings]
+      summary: Fully replace a draft revision
+      operationId: replaceOfferingRevisionV2
+      parameters:
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RevisionRequest' }
+      responses:
+        '200':
+          description: Replaced draft
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/CatalogValidation' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish:
+    post:
+      tags: [Offerings]
+      summary: Publish with a different authenticated checker
+      operationId: publishOfferingRevisionV2
+      parameters:
+        - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: '#/components/parameters/IfMatchRequired' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PublishRequest' }
+      responses:
+        '200':
+          description: Published immutable revision
+          headers:
+            ETag: { $ref: '#/components/headers/RevisionETag' }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '409': { $ref: '#/components/responses/CatalogConflict' }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+        '422': { $ref: '#/components/responses/CatalogValidation' }
+        '428': { $ref: '#/components/responses/PreconditionRequired' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/products/{specificationId}:
+    get:
+      tags: [Published Catalog]
+      summary: Resolve the effective published product projection
+      operationId: getPublishedProductV2
+      parameters:
+        - { name: specificationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: effectiveAt, in: query, required: false, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: Published revision effective at the requested instant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductRevision' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
 components:
   securitySchemes:
     bearerAuth:
@@ -282,6 +545,39 @@ components:
       description: Missing or invalid bearer token
     Forbidden:
       description: Authenticated caller is not permitted to perform the operation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    BadRequest:
+      description: Malformed request, invalid value object, or invalid strong ETag syntax
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    CatalogNotFound:
+      description: Catalog resource not found
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    CatalogConflict:
+      description: Duplicate identity, immutable snapshot, illegal transition, or interval overlap
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    CatalogValidation:
+      description: Attributes violate the exact product type schema
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CatalogValidationProblem' }
+    PreconditionFailed:
+      description: The strong ETag is stale
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
+    PreconditionRequired:
+      description: If-Match is required for every v2 mutation of an existing resource
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ApiError' }
   parameters:
     IfMatch:
       name: If-Match
@@ -289,6 +585,22 @@ components:
       required: false
       description: Numeric ETag returned by the last read. Optional only for v1 compatibility.
       schema: { type: string, pattern: '^"[0-9]+"$' }
+    IfMatchRequired:
+      name: If-Match
+      in: header
+      required: true
+      description: Strong numeric ETag returned by the last v2 read.
+      schema: { type: string, pattern: '^"[0-9]+"$' }
+    ProductTypeId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z][a-z0-9-]*(\.[a-z][a-z0-9-]*){2,}$' }
+    ProductTypeVersion:
+      name: version
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
   headers:
     RevisionETag:
       description: Strong optimistic-concurrency token for this product representation.
@@ -309,6 +621,228 @@ components:
         message: { type: string }
         timestamp: { type: string, format: date-time }
       required: [traceId, status, code, message, timestamp]
+    SchemaRef:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        version: { type: integer, minimum: 1 }
+      required: [id, version]
+    CatalogSchema:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string }
+        version: { type: integer, minimum: 1 }
+        document: { type: object, additionalProperties: true }
+        sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        registeredAt: { type: string, format: date-time }
+      required: [id, version, document, sha256, registeredAt]
+    SchemaViolation:
+      type: object
+      additionalProperties: false
+      properties:
+        instancePath: { type: string }
+        schemaPath: { type: string }
+        keyword: { type: string }
+        message: { type: string }
+      required: [instancePath, schemaPath, keyword, message]
+    ValidateCatalogRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        attributes: { type: object, additionalProperties: true }
+      required: [attributes]
+    ValidateCatalogResponse:
+      type: object
+      additionalProperties: false
+      properties:
+        valid: { type: boolean }
+        violations:
+          type: array
+          items: { $ref: '#/components/schemas/SchemaViolation' }
+      required: [valid, violations]
+    CatalogValidationProblem:
+      type: object
+      additionalProperties: false
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer, enum: [422] }
+        violations:
+          type: array
+          items: { $ref: '#/components/schemas/SchemaViolation' }
+      required: [type, title, status, violations]
+    SpecificationRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,63}$' }
+        schemaRef: { $ref: '#/components/schemas/SchemaRef' }
+      required: [code, schemaRef]
+    Specification:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        schemaRef: { $ref: '#/components/schemas/SchemaRef' }
+        createdAt: { type: string, format: date-time }
+        revision: { type: integer, format: int64, minimum: 0 }
+      required: [id, code, schemaRef, createdAt, revision]
+    MarketContext:
+      type: object
+      additionalProperties: false
+      properties:
+        brands: { type: array, uniqueItems: true, items: { type: string } }
+        countries: { type: array, uniqueItems: true, items: { type: string, pattern: '^[A-Z]{2}$' } }
+        channels: { type: array, uniqueItems: true, items: { type: string } }
+        segments: { type: array, uniqueItems: true, items: { type: string } }
+        locales: { type: array, uniqueItems: true, items: { type: string } }
+    OfferingRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        specificationId: { type: string, format: uuid }
+        code: { type: string, pattern: '^[A-Z][A-Z0-9_]{1,63}$' }
+        market: { $ref: '#/components/schemas/MarketContext' }
+      required: [specificationId, code]
+    Offering:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        specificationId: { type: string, format: uuid }
+        code: { type: string }
+        market: { $ref: '#/components/schemas/MarketContext' }
+        revision: { type: integer, format: int64, minimum: 0 }
+      required: [id, specificationId, code, market, revision]
+    PriceComponent:
+      type: object
+      additionalProperties: false
+      properties:
+        code: { type: string }
+        kind: { type: string, enum: [AMOUNT, RATE] }
+        value: { type: number, format: decimal, minimum: 0 }
+        currency: { type: string, pattern: '^[A-Z]{3}$', nullable: true }
+        unit: { type: string }
+        cadence: { type: string, enum: [ONCE, DAILY, MONTHLY, QUARTERLY, ANNUALLY, USAGE] }
+        taxTreatment: { type: string, enum: [INCLUSIVE, EXCLUSIVE, EXEMPT, UNSPECIFIED] }
+      required: [code, kind, value, unit, cadence]
+    EligibilityRule:
+      type: object
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        operator:
+          type: string
+          enum: [EQUALS, NOT_EQUALS, IN, GREATER_THAN, GREATER_OR_EQUAL, LESS_THAN, LESS_OR_EQUAL]
+        expected: {}
+        explanation:
+          type: object
+          additionalProperties: { type: string }
+      required: [field, operator, expected, explanation]
+    OfferingRelationship:
+      type: object
+      additionalProperties: false
+      properties:
+        kind: { type: string, enum: [BUNDLE, ADD_ON, REPLACEMENT, DEPENDENCY, COMPATIBLE_WITH] }
+        targetOfferingId: { type: string, format: uuid }
+      required: [kind, targetOfferingId]
+    RevisionRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: object
+          minProperties: 1
+          additionalProperties: { type: string, minLength: 1 }
+        description:
+          type: object
+          minProperties: 1
+          additionalProperties: { type: string, minLength: 1 }
+          nullable: true
+        attributes: { type: object, additionalProperties: true }
+        prices:
+          type: array
+          items: { $ref: '#/components/schemas/PriceComponent' }
+        eligibility:
+          type: array
+          items: { $ref: '#/components/schemas/EligibilityRule' }
+        relationships:
+          type: array
+          items: { $ref: '#/components/schemas/OfferingRelationship' }
+        documentCodes:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+        effectiveFrom: { type: string, format: date-time, nullable: true }
+        effectiveTo: { type: string, format: date-time, nullable: true }
+      required: [name, attributes]
+    RevisionContent:
+      type: object
+      additionalProperties: false
+      properties:
+        name:
+          type: object
+          minProperties: 1
+          additionalProperties: { type: string, minLength: 1 }
+        description:
+          type: object
+          minProperties: 1
+          additionalProperties: { type: string, minLength: 1 }
+          nullable: true
+        attributes: { type: object, additionalProperties: true }
+        prices:
+          type: array
+          items: { $ref: '#/components/schemas/PriceComponent' }
+        eligibility:
+          type: array
+          items: { $ref: '#/components/schemas/EligibilityRule' }
+        relationships:
+          type: array
+          items: { $ref: '#/components/schemas/OfferingRelationship' }
+        documentCodes:
+          type: array
+          uniqueItems: true
+          items: { type: string, minLength: 1 }
+      required: [name, attributes, prices, eligibility, relationships, documentCodes]
+    ProductRevision:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        offeringId: { type: string, format: uuid }
+        number: { type: integer, format: int64, minimum: 1 }
+        schemaRef: { $ref: '#/components/schemas/SchemaRef' }
+        state: { type: string, enum: [DRAFT, PUBLISHED, SUPERSEDED] }
+        content: { $ref: '#/components/schemas/RevisionContent' }
+        effectiveFrom: { type: string, format: date-time, nullable: true }
+        effectiveTo: { type: string, format: date-time, nullable: true }
+        makerId: { type: string }
+        checkerId: { type: string, nullable: true }
+        reason: { type: string, nullable: true }
+        contentHash: { type: string, pattern: '^[0-9a-f]{64}$', nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        revision: { type: integer, format: int64, minimum: 0 }
+      required:
+        - id
+        - offeringId
+        - number
+        - schemaRef
+        - state
+        - content
+        - makerId
+        - createdAt
+        - updatedAt
+        - revision
+    PublishRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        reason: { type: string, minLength: 1 }
+      required: [reason]
     Fee:
       type: object
       properties:

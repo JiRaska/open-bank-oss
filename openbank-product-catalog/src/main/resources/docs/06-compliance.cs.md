@@ -7,7 +7,7 @@
 | Regulace | Vztah k této službě | Implementace / stav |
 |---|---|---|
 | **GDPR** | Nezpracovává ani neukládá žádná osobní data. | `dataClassification: internal`; pouze produktová/cenová referenční data — žádné PII, žádná dimenze subjektu údajů. |
-| **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost ICT závislosti používané při onboardingu a billingu. | SmallRye Health probes, PostgreSQL perzistence, `BuildInfo`/`/api/v1/info` a runbooky v [05 — Provoz](./05-operations.md). Důkaz obnovy a publikace zůstává delivery prací. |
+| **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost ICT závislosti používané při onboardingu a billingu. | SmallRye Health probes, PostgreSQL perzistence, `BuildInfo`/`/api/v1/info`, runbooky a atomický důkaz každé v2 změny v auditu/outboxu. Důkaz obnovy zůstává delivery prací. |
 | **NIS2** | Bezpečnost sítí a informací. | mTLS v clusteru (Istio), CORS allowlist + bezpečnostní response hlavičky (CSP, HSTS, X-Frame-Options) v `application.yaml`. |
 | **Směrnice o spotřebitelském úvěru (2008/48/ES) / CCD2 (EU) 2023/2225** | Deklarované RPSN/sazby a transparentnost poplatků pro úvěr, hypotéku, povolený debet a kreditní karty. | Katalog deklaruje `baseRate`, `overdraftConfig` a sazebník. Mutabilní v1 `versionHistory` není auditní důkaz; ADR-0257 vyžaduje neměnné schválené revize. |
 | **PAD — směrnice o platebních účtech (2014/92/EU)** | Srovnatelné informace o poplatcích pro platební účty. | `GET /api/v1/fees` poskytuje jednotný, strukturovaný, filtrovatelný sazebník (zdrojová data FID). |
@@ -34,7 +34,7 @@ account / interest / fx / card služby  ──čtení definic produktů──►
 ```
 
 - Všechny toky jsou **uvnitř OpenBank, referenční data**. Žádná osobní data, žádný pohyb peněz, žádná externí (TPP/PSD2) expozice.
-- Katalog dnes **neprovádí žádná downstream volání** a **nepublikuje žádné události**.
+- Katalog **neprovádí žádná downstream volání**. V2 zapisuje transportně neutrální události do outboxu; brokerový dispatcher zatím není součástí služby.
 
 ## Mapování DORA (Reg. (EU) 2022/2554)
 
@@ -55,13 +55,12 @@ account / interest / fx / card služby  ──čtení definic produktů──►
 - CORS: omezený allowlist (jen origins admin-ui).
 - TLS: mTLS v clusteru (Istio), TLS terminace na gateway.
 - AuthN/AuthZ: služba validuje OIDC bearer tokeny; čtení vyžaduje autentizaci a mutace OPERATOR/ADMIN. `@Authorize` je přítomno, ale OPA je advisory, dokud deployment nedodá vynucující policy profil.
-- Audit: dnes žádné vydávání audit událostí (žádná outbox/Kafka). Pokud změny produktu/cen musí být auditovatelné pro regulatorní důkaz, auditní stopa je follow-up.
+- Audit: každá přijatá v2 změna zapisuje audit a verzovanou událost ve stejné transakci; publikace navíc zapisuje maker-checker schválení. Neměnnost chrání databázové triggery. Doručení outboxu do brokeru je samostatný transportní follow-up.
 
 ## Známé mezery / follow-upy (zralost)
 
-- Neměnné schválené revize a trvalý publikační důkaz.
 - Vynucovaný OPA profil v bankovním deploymentu a provider-neutral scopes pro samostatné OIDC.
-- Auditní stopa pro změny produktů/cen (regulatorní důkaz, kdo a kdy změnil cenu).
+- Dispatcher a provozní telemetrie pro doručování transportně neutrálního outboxu.
 - Sjednocení sdílené chybové obálky (RFC-7807 problem+json).
 
 Tyto jsou rámovány jako roadmapa zralosti služby, ne jako zneužitelné specifikace.

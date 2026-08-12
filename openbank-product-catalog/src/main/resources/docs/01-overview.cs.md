@@ -47,8 +47,12 @@ Katalog je **poskytovatel referenčních dat**: sídlí proti proudu od provozn�
 | Deaktivace produktu | `POST /api/v1/products/{id}/deactivate` | — |
 | Poplatky jednoho produktu | `GET /api/v1/products/{id}/fees` | — |
 | Celobankovní sazebník (filtrovatelný) | `GET /api/v1/fees` | — |
+| Validace proti důvěryhodnému oborovému schématu | `POST /api/v2/types/{code}/versions/{version}:validate` | — |
+| Autorská revize nabídky | `POST/PUT /api/v2/offerings/{id}/revisions...` | `CatalogChangeEvent` v outboxu |
+| Publikace schválené revize | `POST /api/v2/offerings/{id}/revisions/{revisionId}:publish` | audit + schválení + `CatalogChangeEvent` |
+| Kontextový výpis publikovaného produktu | `GET /api/v2/products/{productId}` | — |
 
-Dnes se nevydávají žádné doménové události (žádná Kafka/outbox) — služba je převážně čtecí referenční data.
+Každá přijatá změna v2 zapisuje doménový stav, audit a transportně neutrální outbox atomicky. Služba zatím nemá Kafka dispatcher; samotná spolehlivost důkazu proto nezávisí na brokeru.
 
 ## Volající
 
@@ -62,7 +66,7 @@ Dnes se nevydávají žádné doménové události (žádná Kafka/outbox) — s
 - **openbank-libs** — sdílené runtime instalatérství (BuildInfo / `ServiceInfoResource`, DocsResource pro Docs-as-Service, filtr API verze).
 - **PostgreSQL** — reaktivní Panache + reaktivní PG klient pro aplikační cestu, JDBC pro Flyway (ADR-0009 / ADR-0105 P1); viz [04 — Data](./04-data.md).
 - **Keycloak** — čistý OIDC resource server (`quarkus-oidc`, realm `openbank`): validuje bearer tokeny proti JWKS realmu a žádné nevydává, takže nepotřebuje client secret.
-- **Žádné** zapojení Kafky / Redisu v kódu dnes.
+- **Žádná runtime závislost** na Kafce ani Redisu; v2 ukládá událostní obálky do PostgreSQL outboxu pro pozdější transportní adaptér.
 
 ## Obchodní hodnota
 

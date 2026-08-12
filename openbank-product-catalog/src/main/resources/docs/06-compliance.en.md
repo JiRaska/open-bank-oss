@@ -7,7 +7,7 @@
 | Regulation | Relation to this service | Implementation / status |
 |---|---|---|
 | **GDPR** | No personal data is processed or stored. | `dataClassification: internal`; product/pricing reference data only — no PII, no data-subject dimension. |
-| **DORA** (Reg. (EU) 2022/2554) | Operational resilience of an ICT dependency used during onboarding and billing. | SmallRye Health probes, PostgreSQL persistence, `BuildInfo`/`/api/v1/info`, and runbooks in [05 — Operations](./05-operations.md). Restore and publication evidence remain delivery work. |
+| **DORA** (Reg. (EU) 2022/2554) | Operational resilience of an ICT dependency used during onboarding and billing. | SmallRye Health, PostgreSQL, build identity, immutable publication evidence and same-transaction audit/outbox. Restore drills remain operational work. |
 | **NIS2** | Network & info security. | mTLS in-cluster (Istio), CORS allowlist + security response headers (CSP, HSTS, X-Frame-Options) in `application.yaml`. |
 | **Consumer Credit Directive (2008/48/EC) / CCD2 (EU) 2023/2225** | Declared APR/rates and fee transparency for loan, mortgage, overdraft and credit-card products. | Catalog declares `baseRate`, `overdraftConfig` and the fee schedule. The mutable v1 `versionHistory` is not audit evidence; immutable approved revisions are required by ADR-0257. |
 | **PAD — Payment Accounts Directive (2014/92/EU)** | Comparable fee information for payment accounts. | `GET /api/v1/fees` exposes a single, structured, filterable fee schedule (the FID source data). |
@@ -34,7 +34,8 @@ account / interest / fx / card services  ──read product defs──►  produ
 ```
 
 - All flows are **intra-OpenBank, reference data**. No personal data, no money movement, no external (TPP/PSD2) exposure.
-- The catalog makes **no downstream calls** and publishes **no events** today.
+- The catalog makes **no downstream calls**. It records transport-neutral outbox events; no broker
+  delivery adapter is enabled in this phase.
 
 ## DORA mapping (Reg. (EU) 2022/2554)
 
@@ -55,13 +56,13 @@ account / interest / fx / card services  ──read product defs──►  produ
 - CORS: restricted allowlist (admin-ui origins only).
 - TLS: mTLS in-cluster (Istio), TLS termination at gateway.
 - AuthN/AuthZ: the service validates OIDC bearer tokens; reads require authentication and mutations require OPERATOR/ADMIN. `@Authorize` is present, but OPA is advisory until the deployment ships an enforcing policy sidecar/profile.
-- Audit: no audit-event emission today (no outbox/Kafka). If product/pricing changes must be auditable for regulatory evidence, an audit trail is a follow-up.
+- Audit: every accepted v2 change writes actor/time/action evidence and a versioned event envelope
+  in the same transaction; approvals additionally record maker, checker and reason.
 
 ## Known gaps / follow-ups (maturity)
 
-- Immutable approved revisions and durable publication evidence.
 - Enforced OPA profile for the bank deployment and provider-neutral scopes for standalone OIDC.
-- Audit trail for product/pricing changes (regulatory evidence of who changed a price and when).
+- External delivery adapters and restore/replay drills for the durable outbox.
 - Shared error envelope alignment (RFC-7807 problem+json).
 
 These are framed as the service's maturity roadmap, not as exploitable specifics.

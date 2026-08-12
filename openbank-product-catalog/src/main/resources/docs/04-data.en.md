@@ -69,6 +69,12 @@ erDiagram
 
 The model is the Kotlin domain in `domain/Product.kt`. PostgreSQL stores the complete representation in JSONB while canonical identity, lookup/filter fields and the optimistic row version remain relational and indexed.
 
+The additive v2 model keeps identity, lifecycle, effective dates, locks and lookups relational:
+`catalog_schemas`, `catalog_specifications`, `catalog_offerings`, immutable
+`catalog_revisions`, exact `catalog_price_components NUMERIC(38,18)`, relationships, approvals,
+append-only audit and outbox. Schema-governed content is JSONB. There is no `tenant_id`: ADR-0152
+defines one regulated company per deployment.
+
 ## Seeded catalog (current fixture)
 
 15 products spanning every `ProductType`: e.g. `SAVINGS_STANDARD`, `SAVINGS_PREMIUM`, `CURRENT_PERSONAL`, `CURRENT_BUSINESS`, `CURRENT_STUDENT`, `CURRENT_CZK`, `CURRENT_MULTICURRENCY_UMBRELLA`, `LOAN_PERSONAL_5Y`, `MORTGAGE_FIXED_20Y`, `CREDIT_CARD_CLASSIC`, `TERM_DEPOSIT_12M`, `TERM_DEPOSIT_6M_CZK`, `OVERDRAFT_PERSONAL`, `SAVINGS_CZK`, `INVESTMENT_BASIC` (DRAFT, non-public).
@@ -79,7 +85,10 @@ The product catalog holds **reference data only — no personal data**. There is
 
 ## Retention
 
-`retentionPolicy: indefinite` — current product definitions are kept indefinitely. The embedded legacy `versionHistory` is informational and is not sufficient dispute evidence because v1 mutates the current document. Immutable published revisions and evidence are an ADR-0257 delivery requirement. There is no GDPR erasure dimension because there is no personal data (see [06 — Compliance](./06-compliance.md)).
+`retentionPolicy: indefinite` — current product definitions are kept indefinitely. The embedded
+legacy `versionHistory` remains informational because v1 mutates the current document. Published v2
+revisions, approvals, audit and event envelopes are retained as immutable evidence. There is no GDPR
+erasure dimension because there is no personal data (see [06 — Compliance](./06-compliance.md)).
 
 ## Migrations
 
@@ -87,3 +96,4 @@ The product catalog holds **reference data only — no personal data**. There is
 |---|---|
 | `V1__init_products.sql` | Creates the canonical product table and indexes. |
 | `V2__add_product_row_version.sql` | Adds the expand-only optimistic-concurrency token; old binaries ignore it. |
+| `V3__add_generic_catalog_platform.sql` | Adds the v2 schema/specification/offering/revision, approval, audit and outbox model beside v1. |

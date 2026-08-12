@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:openbank:event:catalog-change:1",
+  "title": "Catalog change event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "eventId": { "type": "string", "format": "uuid" },
+    "aggregateType": { "type": "string", "minLength": 1 },
+    "aggregateId": { "type": "string", "format": "uuid" },
+    "eventType": {
+      "type": "string",
+      "pattern": "^com\\.openbank\\.catalog\\.[a-z0-9_]+$"
+    },
+    "schemaVersion": { "const": 1 },
+    "occurredAt": { "type": "string", "format": "date-time" },
+    "actorId": { "type": "string", "minLength": 1 }
+  },
+  "required": [
+    "eventId",
+    "aggregateType",
+    "aggregateId",
+    "eventType",
+    "schemaVersion",
+    "occurredAt",
+    "actorId"
+  ]
+}

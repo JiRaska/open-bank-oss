@@ -21,6 +21,7 @@ dependencies {
     implementation(libs.quarkus.oidc)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
+    implementation("com.networknt:json-schema-validator:1.5.9")
 
     // Persistence: reactive Panache + Postgres + Flyway, the fleet standard (ADR-0009/0105 P1).
     // openbank-libs is built on reactive Panache, so a service that depends on it must use reactive

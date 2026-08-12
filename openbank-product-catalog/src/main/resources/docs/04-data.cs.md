@@ -69,6 +69,8 @@ erDiagram
 
 Model je kotlinová doména v `domain/Product.kt`. PostgreSQL ukládá úplnou reprezentaci v JSONB; kanonická identita, vyhledávací/filtrovací pole a optimistická verze řádku zůstávají relační a indexované.
 
+Generické v2 ukládá schémata, specifikace, nabídky, neměnné revize, ceny s `NUMERIC(38,18)`, vztahy, schválení, audit a outbox v samostatných relačních tabulkách. JSONB obsahuje jen payload řízený schématem. Model záměrně nemá `tenant_id`: samostatná instalace patří jedné regulované organizaci dle ADR-0152.
+
 ## Naseedovaný katalog (aktuální fixture)
 
 15 produktů pokrývajících každý `ProductType`: např. `SAVINGS_STANDARD`, `SAVINGS_PREMIUM`, `CURRENT_PERSONAL`, `CURRENT_BUSINESS`, `CURRENT_STUDENT`, `CURRENT_CZK`, `CURRENT_MULTICURRENCY_UMBRELLA`, `LOAN_PERSONAL_5Y`, `MORTGAGE_FIXED_20Y`, `CREDIT_CARD_CLASSIC`, `TERM_DEPOSIT_12M`, `TERM_DEPOSIT_6M_CZK`, `OVERDRAFT_PERSONAL`, `SAVINGS_CZK`, `INVESTMENT_BASIC` (DRAFT, neveřejný).
@@ -79,7 +81,7 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 
 ## Retence
 
-`retentionPolicy: indefinite` — aktuální definice produktů se uchovávají neomezeně. Vnořená legacy `versionHistory` je informativní a sama není dostatečný důkaz při sporu, protože v1 mění aktuální dokument. Neměnné publikované revize a důkazy jsou podmínkou dodání ADR-0257. GDPR dimenze výmazu zde není, protože nejsou žádná osobní data (viz [06 — Compliance](./06-compliance.md)).
+`retentionPolicy: indefinite` — aktuální definice produktů se uchovávají neomezeně. Vnořená legacy `versionHistory` je informativní a sama není dostatečný důkaz při sporu, protože v1 mění aktuální dokument. V2 proto uchovává neměnné publikované revize, schválení, audit a outbox důkaz. GDPR dimenze výmazu zde není, protože nejsou žádná osobní data (viz [06 — Compliance](./06-compliance.md)).
 
 ## Migrace
 
@@ -87,3 +89,4 @@ Produktový katalog drží **pouze referenční data — žádná osobní data**
 |---|---|
 | `V1__init_products.sql` | Vytváří tabulku kanonických produktů a indexy. |
 | `V2__add_product_row_version.sql` | Přidává expand-only token optimistického souběhu; starší binárky jej ignorují. |
+| `V3__add_generic_catalog_platform.sql` | Additivně přidává generické typy, specifikace, nabídky, revize, ceny, vztahy, schválení, audit a outbox; v1 tabulku nemění. |

@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.insurance.term-life:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["coverage", "termYears", "premiumModel"],
+  "properties": {
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency"],
+      "properties": {
+        "amount": { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]+)?$" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" }
+      }
+    },
+    "termYears": { "type": "integer", "minimum": 1, "maximum": 80 },
+    "smokerAccepted": { "type": "boolean" },
+    "premiumModel": { "type": "string", "enum": ["FIXED", "CALCULATED"] },
+    "premium": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["amount", "currency", "cadence"],
+      "properties": {
+        "amount": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+        "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+        "cadence": { "type": "string", "enum": ["MONTHLY", "ANNUALLY"] }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "premiumModel": { "const": "FIXED" } } },
+      "then": { "required": ["premium"] }
+    }
+  ]
+}

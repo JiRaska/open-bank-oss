@@ -78,8 +78,8 @@ authz:
 
 openbank:
   api:
-    # API-contract major, independent of version.txt (ADR-0048); must match /api/v1.
-    version: "1"
+    # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
+    version: "2"
 
 "%test":
   quarkus:

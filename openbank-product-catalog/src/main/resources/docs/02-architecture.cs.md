@@ -24,7 +24,7 @@ graph LR
   classDef svc fill:#dbeafe,stroke:#2563eb
 ```
 
-Katalog je **poskytovatel referenčních dat**. Nemá downstream volání, žádného brokera ani účast na peněžní cestě — volající čtou definice produktů a sazebník.
+Katalog je **poskytovatel referenčních dat**. Nemá downstream volání ani účast na peněžní cestě. Publikační důkazy ukládá do trvalého outboxu, ale zatím nemá brokerový transportní adaptér.
 
 ## C4 — Kontejner (vnitřní struktura)
 
@@ -100,4 +100,4 @@ Toto poskytuje `GET /api/v1/fees`, takže admin UI vykreslí ceny bez opětovné
 
 ## Události / outbox
 
-**Zatím žádné.** Změny se perzistují v PostgreSQL, ale služba neprovozuje outbox dispatcher ani nepublikuje Kafka události. ADR-0257 vyžaduje auditní a outbox záznam ve stejné transakci před první publikační událostí v2.
+Každá přijatá v2 změna perzistuje doménový stav, auditní záznam a verzovanou obálku `CatalogChangeEvent` ve stejné PostgreSQL transakci. Publikace navíc zapisuje schválení maker-checker. Publikované revize, audit a outbox jsou na úrovni databáze neměnné. Dispatcher do Kafky není součástí tohoto řezu; outbox zůstává transportně neutrální.

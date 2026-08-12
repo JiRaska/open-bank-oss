@@ -25,6 +25,10 @@
 |---|---|---|
 | `/api/v1/products/...` | 8104 | REST API produktového masteru |
 | `/api/v1/fees` | 8104 | celobankovní sazebník |
+| `/api/v2/types/...` | 8104 | důvěryhodná schémata a jejich validace |
+| `/api/v2/specifications`, `/offerings` | 8104 | generický produktový master a nabídky |
+| `/api/v2/offerings/{id}/revisions...` | 8104 | autorský a maker-checker publikační tok |
+| `/api/v2/products/{id}` | 8104 | pouze publikované kontextové čtení |
 | `/api/v1/info` | 8104 | `ServiceInfoResource` (build metadata, z openbank-libs) |
 | `/q/openbank/docs` | 8085 | **Docs-as-Service** (tato dokumentace) |
 | `/q/openapi` | 8085 | OpenAPI spec |
@@ -39,6 +43,7 @@ Služba se konfiguruje přes `application.yaml`. Bankovní profil vyžaduje Post
 |---|---|---|
 | `quarkus.http.port` | `8104` | port aplikace |
 | `quarkus.management.port` | `8085` | port health a metrik |
+| `openbank.api.version` | `2` | nejnovější major; response hlavička zohledňuje cestu v1/v2 |
 | `REACTIVE_URL` / `JDBC_URL` | lokální PostgreSQL defaulty | databázová URL aplikace a Flyway |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | lokální vývojové defaulty | databázové přihlašovací údaje |
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | lokální OpenBank realm | OIDC issuer/discovery URL |

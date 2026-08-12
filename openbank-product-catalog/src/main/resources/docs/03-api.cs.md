@@ -2,12 +2,12 @@
 
 ## Base path
 
-- **In-cluster base:** `http://openbank-product-catalog:8104/api/v1`
-- **Lokální dev:** `http://localhost:8104/api/v1`
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) na management portu (zdroj pravdy: `openapi.yaml`, `info.version` 1.1.0, OpenAPI 3.0.3)
+- **In-cluster base:** `http://openbank-product-catalog:8104/api/v1` a `/api/v2`
+- **Lokální dev:** `http://localhost:8104/api/v1` a `/api/v2`
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) na management portu (zdroj pravdy: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.0.3)
 - **Swagger UI:** `http://localhost:8085/api/docs` (nastaveno přes `quarkus.swagger-ui.path`, `always-include: true`)
 
-Major z `openapi.yaml:info.version` se rovná `openbank.api.version` a rovná se URL `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). Release verze (`version.txt`) je samostatná osa.
+Major nejnovějšího kontraktu z `openapi.yaml:info.version` se rovná `openbank.api.version` a URL `/api/v2` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). Stejný dokument zachovává kompatibilní `/api/v1`; response filtr odvozuje `X-API-Version` ze skutečné cesty. Release verze (`version.txt`) je samostatná osa.
 
 ## Autentizace
 
@@ -38,6 +38,12 @@ Mechanismus `Idempotency-Key` není implementován. Create chrání unikátní `
 | Metoda | Cesta | Účel | Úspěch |
 |---|---|---|---|
 | GET | `/api/v1/fees` | Celobankovní zploštělý sazebník; volitelné `?type=&currency=&productCode=` | 200 pole |
+
+### Generický katalog v2
+
+V2 odděluje důvěryhodné typy/schémata, kanonické specifikace, tržní nabídky, autorské revize a publikované kontextové čtení. Základní povrch tvoří `/api/v2/types`, `/api/v2/specifications`, `/api/v2/offerings`, `/api/v2/offerings/{id}/revisions` a `/api/v2/products/{productId}`. Oborová data jsou pouze v `attributes` a vždy odkazují přesnou dvojici typu a verze schématu.
+
+Mutace existující revize a publikace vyžadují silný `If-Match`: chybějící podmínka vrací `428 Precondition Required`, zastaralá `412 Precondition Failed`. Publikovat musí jiný člověk než autor draftu; identita autora i schvalovatele pochází z ověřeného JWT, nikdy z request body.
 
 ### Příklad — vytvoření produktu
 
@@ -110,5 +116,5 @@ Legacy 404 odpovědi zachovávají `{ "error": "<zpráva>" }` kvůli existujíc�
 
 ## Verzování
 
-- Verzování v URL: `/api/v1`.
+- Verzování v URL: kompatibilní `/api/v1`, nejnovější `/api/v2`.
 - Verze OpenAPI kontraktu (`openapi.yaml:info.version`) je osa API kontraktu; jakákoli breaking změna ji musí zvednout dle klasifikace `oasdiff` a aktualizovat kontrakt + kontraktní test ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
