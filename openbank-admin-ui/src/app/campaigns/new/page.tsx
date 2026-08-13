@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Megaphone } from 'lucide-react'
+import { ArrowLeft, Clock3, Megaphone, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
 import {
@@ -65,19 +65,30 @@ const TEMPLATES: Record<string, string[]> = {
   // One variable, and that is the channel's rule rather than a simplification: a push renders its
   // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
+  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
 }
 
 /** Which channel each template renders on. The service refuses a step whose two disagree. */
 const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
   MARKETING_PRODUCT_OFFER: 'EMAIL',
   MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
+  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER',
+  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER',
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER',
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER',
 }
 
 const newStep = (): EditorStep => ({
-  template: 'MARKETING_PRODUCT_OFFER',
-  channel: 'EMAIL',
+  // The studio starts with the primary owned surface: the bank app. E-mail remains a supported
+  // channel, but leading an app-first campaign with it made the canvas teach the wrong product.
+  template: 'MARKETING_PRODUCT_OFFER_PUSH',
+  channel: 'PUSH',
   variables: {},
   delaySeconds: 0,
+  mobileDestination: 'HOME',
 })
 
 export default function NewCampaignPage() {
@@ -113,6 +124,10 @@ export default function NewCampaignPage() {
   const templateLabels: Record<string, string> = {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
     MARKETING_PRODUCT_OFFER_PUSH: t('Nabídka produktu', 'Product offer'),
+    MARKETING_PRODUCT_OFFER_BANNER: t('Nabídka v banneru', 'Banner offer'),
+    MARKETING_PRODUCT_OFFER_CAROUSEL: t('Nabídka v carouselu', 'Carousel offer'),
+    MARKETING_PRODUCT_OFFER_PRODUCT_FEED: t('Nabídka ve feedu produktů', 'Product feed offer'),
+    MARKETING_PRODUCT_OFFER_REWARDS_HUB: t('Nabídka v centru odměn', 'Rewards hub offer'),
   }
 
   // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of
@@ -247,6 +262,7 @@ export default function NewCampaignPage() {
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
+          ...(s.inAppSurface ? { inAppSurface: s.inAppSurface } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -272,26 +288,41 @@ export default function NewCampaignPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
-        <ArrowLeft className="h-4 w-4" /> {t('Kampaně', 'Campaigns')}
-      </Link>
-
-      <PageHeader
-        title={t('Nová kampaň', 'New campaign')}
-        subtitle={t(
-          'Sestavte cestu, kterou lidé projdou. Spustit ji musí někdo jiný — to je smysl schvalování ve dvou.',
-          'Assemble the journey people will take. Someone else activates it — that is the point of the four-eyes gate.',
-        )}
-        icon={<Megaphone className="h-6 w-6" />}
-      />
+    <div className="campaign-composer">
+      <header className="campaign-composer-hero">
+        <Link href="/campaigns" className="campaign-composer-back">
+          <ArrowLeft className="h-4 w-4" /> {t('Kampaně', 'Campaigns')}
+        </Link>
+        <div className="campaign-composer-hero-main">
+          <div>
+            <p className="campaign-composer-eyebrow"><Sparkles className="h-3.5 w-3.5" /> {t('Campaign studio', 'Campaign studio')}</p>
+            <PageHeader
+              title={t('Nová kampaň', 'New campaign')}
+              subtitle={t(
+                'Navrhněte zážitek v aplikaci, zprávu a okamžik, kdy má přijít. Aktivaci pak vždy potvrdí druhý člověk.',
+                'Design the in-app moment, the message and when it appears. A second person always confirms activation.',
+              )}
+              icon={<Megaphone className="h-6 w-6" />}
+            />
+          </div>
+          <div className="campaign-composer-principles" aria-label={t('Principy kampaně', 'Campaign principles')}>
+            <span><Users className="h-4 w-4" /> {t('Správné publikum', 'Right audience')}</span>
+            <span><Send className="h-4 w-4" /> {t('Aplikace napřed', 'App first')}</span>
+            <span><Clock3 className="h-4 w-4" /> {t('Schválení ve dvou', 'Four eyes')}</span>
+          </div>
+        </div>
+      </header>
 
       {/* A marketer names a campaign and picks who gets it. Both were `<label>` + bare box, which is
           how a database table looks, not how a campaign brief does. The name behaves like a document
           title; the audience is a set of tiles carrying its plain-language rule and its reach, which
           is the choice being made — a dropdown hides exactly the number the choice turns on. */}
-      <section className="max-w-3xl space-y-8">
-        <div>
+      <section className="campaign-setup-grid">
+        <div className="campaign-brief-card">
+          <div className="campaign-section-heading">
+            <span className="campaign-section-number">01</span>
+            <div><p>{t('Kreativní brief', 'Creative brief')}</p><h2>{t('Začněte záměrem', 'Start with intent')}</h2></div>
+          </div>
           <input
             id="c-name"
             className="input w-full"
@@ -313,10 +344,11 @@ export default function NewCampaignPage() {
           />
         </div>
 
-        <div>
-          <h2 className="text-sm font-semibold" style={{ marginBottom: '0.75rem' }}>
-            {t('Komu to půjde', 'Who gets it')}
-          </h2>
+        <div className="campaign-audience-card">
+          <div className="campaign-section-heading">
+            <span className="campaign-section-number">02</span>
+            <div><p>{t('Publikum', 'Audience')}</p><h2>{t('Komu to půjde', 'Who gets it')}</h2></div>
+          </div>
           <div className="grid gap-3 sm:grid-cols-2">
             {segments.map(s => {
               const ref = `${s.name}@${s.version}`
@@ -364,9 +396,10 @@ export default function NewCampaignPage() {
           </p>
         </div>
 
-        <div className="space-y-3" data-entry-mode={entryMode}>
-          <div>
-            <h2 className="text-sm font-semibold">{t('Kdy cesta začne', 'When the journey starts')}</h2>
+        <div className="campaign-entry-card" data-entry-mode={entryMode}>
+          <div className="campaign-section-heading">
+            <span className="campaign-section-number">03</span>
+            <div><p>{t('Vstup do cesty', 'Journey entry')}</p><h2>{t('Kdy cesta začne', 'When the journey starts')}</h2></div>
             <p className="text-xs text-muted-foreground" style={{ marginTop: '0.25rem' }}>
               {t(
                 'Vyberte jeden přezkoumatelný zdroj vstupu. Publikum stále určuje segment výše.',
@@ -454,8 +487,15 @@ export default function NewCampaignPage() {
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold">{t('Cesta', 'The journey')}</h2>
+      <section className="campaign-journey-workbench">
+        <div className="campaign-workbench-heading">
+          <div>
+            <p className="campaign-composer-eyebrow"><Sparkles className="h-3.5 w-3.5" /> {t('Journey composer', 'Journey composer')}</p>
+            <h2>{t('Cesta, kterou lidé skutečně zažijí', 'The journey people will actually experience')}</h2>
+            <p>{t('Začněte mobilním momentem. Push otevře bezpečný deep link a obsah pokračuje uvnitř aplikace.', 'Start with a mobile moment. Push opens a secure deep link and the experience continues inside the app.')}</p>
+          </div>
+          <span className="campaign-workbench-status"><span /> {steps.length}/{MAX_STEPS} {t('kroků', 'steps')}</span>
+        </div>
         {/* space-y-0 around the canvas+panel pair: any gap between them undoes the join. */}
         <div className="space-y-0">
         <JourneyEditor
@@ -509,7 +549,8 @@ export default function NewCampaignPage() {
             attribution runs from the first send, so a rule added after the fact measures nothing
             retroactively (ADR-0245 D2). The options are a closed catalogue — a marketer picks what
             the bank already observes and cannot invent a metric (D1). */}
-        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+        <div className="campaign-measurement-grid">
+        <div className="campaign-measurement-card">
           <span className="text-sm font-medium">{t('Co znamená úspěch', 'What counts as success')}</span>
           <div className="flex flex-wrap gap-2">
             {[null, 'ACCOUNT_OPENED', 'CARD_ISSUED'].map(r => (
@@ -548,7 +589,7 @@ export default function NewCampaignPage() {
           </p>
         </div>
 
-        <div className="max-w-2xl rounded-lg border p-3 space-y-2" data-content-experiment={contentExperiment ? 'true' : 'false'}>
+        <div className="campaign-measurement-card" data-content-experiment={contentExperiment ? 'true' : 'false'}>
           <label className="flex items-center gap-2 text-sm font-medium" htmlFor="c-content-experiment">
             <input
               id="c-content-experiment"
@@ -572,7 +613,7 @@ export default function NewCampaignPage() {
           </p>
         </div>
 
-        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+        <div className="campaign-measurement-card">
           <label className="flex items-center gap-2 text-sm font-medium" htmlFor="c-holdout">
             {t('Kontrolní skupina', 'Control group')}
           </label>
@@ -607,7 +648,7 @@ export default function NewCampaignPage() {
 
         {/* The one contact rule a campaign DOES own. The platform-wide ones below are read-only; this
             cap is per-campaign by design (ADR-0200 D1), so it is offered here rather than described. */}
-        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+        <div className="campaign-measurement-card">
           <label className="flex items-center gap-2 text-sm font-medium">
             <input
               type="checkbox"
@@ -640,10 +681,11 @@ export default function NewCampaignPage() {
             )}
           </p>
         </div>
+        </div>
 
         {/* Read-only on purpose: the contact policy is a single enforcement point, and a per-campaign
             override here would make that point decorative (ADR-0219 D4, ADR-0221 D1 step 4). */}
-        <div className="max-w-2xl rounded-lg border p-3 text-xs text-muted-foreground">
+        <div className="campaign-contact-rules">
           <p className="font-medium text-foreground">{t('Pravidla kontaktu', 'Contact rules')}</p>
           <p>
             {t(
@@ -656,7 +698,12 @@ export default function NewCampaignPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
-      <div className="flex items-center gap-3">
+      <footer className="campaign-composer-footer">
+        <div>
+          <p>{t('Koncept se zatím nikomu neposílá.', 'A draft does not send anything yet.')}</p>
+          <span>{t('Po kontrole jej aktivuje jiný oprávněný člověk.', 'A different authorised person activates it after review.')}</span>
+        </div>
+        <div className="campaign-composer-footer-actions">
         <button
           onClick={submit}
           disabled={!ready || saving}
@@ -681,7 +728,8 @@ export default function NewCampaignPage() {
             )}
           </span>
         )}
-      </div>
+        </div>
+      </footer>
     </div>
   )
 }
