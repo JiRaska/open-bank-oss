@@ -178,6 +178,10 @@ jobs:
           # reached `docker run -e POSTGRES_USER=${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}`,
           # initdb rejected it, the container exited, and the boot log then blamed Flyway
           # ("Connection to localhost:5432 refused") — never the container that was already gone.
+          # Credentials are then passed EXPLICITLY below rather than left to whichever env var
+          # the service happens to read: the fleet mostly reads ${POSTGRES_PASSWORD}, which this
+          # job sets, while settlement-service reads ${QUARKUS_DATASOURCE_PASSWORD}, which it does
+          # not — so settlement met "password authentication failed" once its container did start.
           resolve_expr() {
             printf '%s' "$1" | sed -E 's/^"//; s/"$//; s/^\$\{[A-Za-z0-9_]+:([^}]*)\}$/\1/'
           }
@@ -239,6 +243,8 @@ jobs:
           ./gradlew ":${svc}:quarkusDev" \
             -Dquarkus.console.basic=true --console=plain --quiet \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.username="${DBUSER}" \
+            -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             -Dquarkus.oidc.enabled=true \
             -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
             -Dquarkus.oidc.client-id=openbank-services \
