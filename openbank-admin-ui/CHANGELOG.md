@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.1...admin-ui-v0.111.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** call agent team swarm ([#4517](https://github.com/JiRaska/open-bank-oss/issues/4517)) ([ebfc7bb](https://github.com/JiRaska/open-bank-oss/commit/ebfc7bbd0d477f59cbeb986cffe22e6e3fb310fe))
+
 ## [0.111.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.0...admin-ui-v0.111.1) (2026-08-13)
 
 
