@@ -219,6 +219,11 @@ class AnalyticsConsumer {
      * Rows already in bronze keep their original spelling; this stops the split growing, it does not
      * heal it. The backfill is tracked separately on #4553 — bronze is a `ReplacingMergeTree`, so
      * re-keying is an explicit CORRECTION ingest, not an in-place update.
+     *
+     * A downstream consumer of this invariant: `V5__party_accounts.sql`'s `silver_party_accounts`
+     * view (ADR-0210 D2, #4520) still folds `upper(aggregate_type)` itself rather than assuming every
+     * future row already arrives uppercase — the view has no way to tell a pre-fix bronze row from a
+     * post-fix one, so it keeps the defence rather than deleting it now that the source produces one.
      */
     private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = (
         node["aggregateType"]?.asText()
