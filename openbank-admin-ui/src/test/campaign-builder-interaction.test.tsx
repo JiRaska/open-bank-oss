@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import NewCampaignPage from '@/app/campaigns/new/page'
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
 
 const stub = () => vi.stubGlobal('fetch', vi.fn(async (u: string) =>
   String(u).includes('/preview')
