@@ -4,6 +4,8 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.application.port.out.BannerPlacementPort
+import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
@@ -50,6 +52,7 @@ open class CampaignJourneyActivitiesImpl(
     private val sendLog: SendLogRepository,
     private val contactGate: ContactPolicyGate,
     private val notificationSend: NotificationSendPort,
+    private val bannerPlacement: BannerPlacementPort,
     /**
      * When true, a step runs every gate and then stops short of the transport: nothing is emitted to
      * notification-service on any channel, and the send log records DRY_RUN.
@@ -152,7 +155,7 @@ open class CampaignJourneyActivitiesImpl(
     private suspend fun checkDelivery(context: StepDeliveryContext, delivery: CampaignDelivery): ContactGateDecision =
         contactGate.check(
             context.partyId,
-            ContactClass.OUTBOUND_SEND,
+            contactClassFor(delivery.channel),
             marketingScopeFor(delivery.channel),
             topic = context.campaign.goal,
         )
@@ -176,7 +179,21 @@ open class CampaignJourneyActivitiesImpl(
             return StepOutcome.SENT
         }
         try {
-            notificationSend.requestDelivery(context.partyId, delivery, sendId)
+            if (delivery.channel == Channel.BANNER) {
+                bannerPlacement.place(
+                    BannerPlacementRequest(
+                        interactionRef = sendId,
+                        partyId = context.partyId,
+                        campaignId = context.campaignId,
+                        stepOrder = context.stepOrder,
+                        template = delivery.template,
+                        variables = delivery.variables,
+                        deepLink = requireNotNull(delivery.deepLink),
+                    ),
+                )
+            } else {
+                notificationSend.requestDelivery(context.partyId, delivery, sendId)
+            }
         } catch (e: Exception) {
             sendLog.record(
                 sendId,
@@ -255,6 +272,13 @@ open class CampaignJourneyActivitiesImpl(
         private fun marketingScopeFor(channel: Channel): String = when (channel) {
             Channel.EMAIL -> "MARKETING_COMMS_EMAIL"
             Channel.PUSH -> "MARKETING_COMMS_PUSH"
+            Channel.BANNER -> "MARKETING_COMMS_INAPP"
+        }
+
+        /** Banner placement is a first-party in-app impression, never an outbound send. */
+        private fun contactClassFor(channel: Channel): ContactClass = when (channel) {
+            Channel.BANNER -> ContactClass.PROMOTIONAL_IMPRESSION
+            Channel.EMAIL, Channel.PUSH -> ContactClass.OUTBOUND_SEND
         }
 
         /** Gate deny reasons that are POLICY outcomes, recorded per step (ADR-0219). */

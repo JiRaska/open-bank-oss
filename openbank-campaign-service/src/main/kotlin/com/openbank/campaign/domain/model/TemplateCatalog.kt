@@ -38,6 +38,9 @@ object TemplateCatalog {
         // exactly one variable, and a campaign cannot smuggle body copy into a push by filling in
         // more.
         "MARKETING_PRODUCT_OFFER_PUSH" to setOf("offerTitle"),
+        // A banner renders only in the authenticated app, so its approved card may contain the
+        // offer body and CTA. It remains a closed template, never marketer-authored markup.
+        "MARKETING_PRODUCT_OFFER_BANNER" to setOf("offerTitle", "offerText", "ctaText"),
     )
 
     /**
@@ -50,6 +53,7 @@ object TemplateCatalog {
     val CHANNEL_OF: Map<String, Channel> = mapOf(
         "MARKETING_PRODUCT_OFFER" to Channel.EMAIL,
         "MARKETING_PRODUCT_OFFER_PUSH" to Channel.PUSH,
+        "MARKETING_PRODUCT_OFFER_BANNER" to Channel.BANNER,
     )
 
     /**

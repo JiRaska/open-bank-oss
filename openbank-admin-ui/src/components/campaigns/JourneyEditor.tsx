@@ -27,7 +27,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
  * that is a pull request against the catalogue.
  */
 
-export type EditorChannel = 'EMAIL' | 'PUSH'
+export type EditorChannel = 'EMAIL' | 'PUSH' | 'BANNER'
 
 export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
 
@@ -74,6 +74,11 @@ const CHANNEL: Record<EditorChannel, { tint: string; glyph: string }> = {
   PUSH: {
     tint: 'var(--success)',
     glyph: 'M7 3h10v18H7V3zm4 15h2',
+  },
+  // A home-surface card: a banner is rendered in the signed-in app, not dispatched as a message.
+  BANNER: {
+    tint: 'var(--warning)',
+    glyph: 'M3 5h18v14H3V5zm3 4h12M6 13h7',
   },
 }
 
@@ -294,7 +299,11 @@ export function JourneyEditor({
                 />
                 <text x={x + 14 + ICON + 12} y={ROW_Y - 12} fontSize="10" fill="var(--text-secondary)"
                   letterSpacing="0.06em">
-                  {t('KROK', 'STEP')} {i + 1} · {step.channel === 'PUSH' ? t('PUSH', 'PUSH') : t('E-MAIL', 'EMAIL')}
+                  {t('KROK', 'STEP')} {i + 1} · {step.channel === 'PUSH'
+                    ? t('PUSH', 'PUSH')
+                    : step.channel === 'BANNER'
+                      ? t('BANNER V APLIKACI', 'IN-APP BANNER')
+                      : t('E-MAIL', 'EMAIL')}
                 </text>
                 <text x={x + 14 + ICON + 12} y={ROW_Y + 8} fontSize="13.5" fontWeight="600"
                   fill="var(--text-primary)">

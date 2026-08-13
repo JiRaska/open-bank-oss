@@ -4,6 +4,8 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.application.port.out.BannerPlacementPort
+import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
@@ -18,6 +20,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -71,6 +74,7 @@ class CampaignJourneyActivitiesTest {
         var failWith: RuntimeException? = null
         val recorded = mutableListOf<SendRecord>()
         var sendsRequested = 0
+        val bannerPlacements = mutableListOf<BannerPlacementRequest>()
 
         /** Correlation ids put on the wire, in order (ADR-0239 D1). */
         val correlationIds = mutableListOf<UUID>()
@@ -87,12 +91,17 @@ class CampaignJourneyActivitiesTest {
                     steps = listOf(
                         campaign.steps.single().copy(
                             channel = channel,
-                            template = if (channel == Channel.PUSH) {
-                                "MARKETING_PRODUCT_OFFER_PUSH"
-                            } else {
-                                "MARKETING_PRODUCT_OFFER"
+                            template = when (channel) {
+                                Channel.PUSH -> "MARKETING_PRODUCT_OFFER_PUSH"
+                                Channel.BANNER -> "MARKETING_PRODUCT_OFFER_BANNER"
+                                Channel.EMAIL -> "MARKETING_PRODUCT_OFFER"
                             },
                             fallbackToPush = fallbackToPush,
+                            mobileDestination = if (channel == Channel.BANNER) {
+                                MobileDestination.HOME
+                            } else {
+                                campaign.steps.single().mobileDestination
+                            },
                         ),
                     ),
                 )
@@ -147,6 +156,11 @@ class CampaignJourneyActivitiesTest {
                 interactionRefs += request.interactionRef
             }
         }
+        val bannerPlacement = object : BannerPlacementPort {
+            override suspend fun place(request: BannerPlacementRequest) {
+                bannerPlacements += request
+            }
+        }
 
         val gate = ContactPolicyGate(
             consent = ContactConsentPort { _, scope ->
@@ -155,6 +169,7 @@ class CampaignJourneyActivitiesTest {
                 when (scope) {
                     "MARKETING_COMMS_EMAIL" -> emailConsent
                     "MARKETING_COMMS_PUSH" -> pushConsent
+                    "MARKETING_COMMS_INAPP" -> pushConsent
                     else -> false
                 }
             },
@@ -180,6 +195,7 @@ class CampaignJourneyActivitiesTest {
                 sendLog,
                 gate,
                 notificationSend,
+                bannerPlacement,
                 dryRun = false,
             )
     }
@@ -191,6 +207,21 @@ class CampaignJourneyActivitiesTest {
         assertThat(outcome).isEqualTo(StepOutcome.SENT)
         assertThat(h.sendsRequested).isEqualTo(1)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SENT)
+    }
+
+    @Test
+    fun `banner uses in-app consent and publishes a placement instead of a notification`() {
+        val h = Harness().apply { channel = Channel.BANNER }
+
+        val outcome = runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(outcome).isEqualTo(StepOutcome.SENT)
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_INAPP")
+        assertThat(h.sendsRequested).isZero()
+        val placement = h.bannerPlacements.single()
+        assertThat(placement.partyId).isEqualTo(partyId)
+        assertThat(placement.deepLink).isEqualTo("openbank://home")
+        assertThat(placement.template).isEqualTo("MARKETING_PRODUCT_OFFER_BANNER")
     }
 
     /**

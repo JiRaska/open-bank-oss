@@ -174,8 +174,8 @@ enum class CampaignState { DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED }
  *
  * ADR-0200 D7 shipped this EMAIL-only behind three named blockers. Two have since cleared: the
  * per-channel marketing consent scope exists (`MARKETING_COMMS_PUSH`, ADR-0198 D4) and #1182 is
- * closed — push bodies are generic by construction. IN_APP and SMS remain out for the reasons on
- * [Channel].
+ * closed — push bodies are generic by construction. BANNER is a first-party home-surface
+ * placement, consented as an in-app impression rather than as a notification.
  */
 data class CampaignStep(
     val order: Int,
@@ -245,8 +245,8 @@ data class CampaignStep(
         require(!fallbackToPush || template in TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL) {
             "template '$template' has no safe PUSH fallback"
         }
-        require(mobileDestination == null || channel == Channel.PUSH || fallbackToPush) {
-            "a mobile destination requires a PUSH step or an EMAIL step with PUSH fallback"
+        require(mobileDestination == null || channel == Channel.PUSH || channel == Channel.BANNER || fallbackToPush) {
+            "a mobile destination requires a PUSH or BANNER step, or an EMAIL step with PUSH fallback"
         }
     }
 
@@ -259,7 +259,7 @@ data class CampaignStep(
         channel,
         template,
         TemplateCatalog.valuesFor(template, variablesFor(variant)),
-        mobileDestination?.deepLink.takeIf { channel == Channel.PUSH },
+        mobileDestination?.deepLink.takeIf { channel == Channel.PUSH || channel == Channel.BANNER },
     )
 
     /** The only supported fallback: a consented app push after EMAIL consent was absent. */
@@ -283,7 +283,7 @@ data class CampaignDelivery(
     val deepLink: String? = null,
 )
 
-/** The only destinations the mobile app contract recognises for campaign pushes. */
+/** The only destinations the mobile app contract recognises for campaign push and banner taps. */
 enum class MobileDestination(val deepLink: String) {
     HOME("openbank://home"),
     SAVINGS("openbank://savings"),
@@ -295,14 +295,14 @@ enum class MobileDestination(val deepLink: String) {
 /**
  * Delivery channels a campaign step may use.
  *
- * EMAIL and PUSH only, and the omissions are decisions rather than gaps. SMS has no outbound port
+ * EMAIL, PUSH and BANNER only, and the omissions are decisions rather than gaps. SMS has no outbound port
  * anywhere in the platform (ADR-0200 D7). IN_APP was *removed* from `NotificationChannel` by #2372
  * because its dispatch branch silently dropped every message; re-adding it needs a terminal-status
  * transition and a wake-signal design, not an enum entry. Listing either here would let a campaign
  * be approved against a channel that delivers nothing — the "appearance of four channels" ADR-0200
  * D7 explicitly refuses.
  */
-enum class Channel { EMAIL, PUSH }
+enum class Channel { EMAIL, PUSH, BANNER }
 
 /**
  * The campaign's own stop condition (ADR-0200 D1, issue #3585 slice 1), evaluated by the journey

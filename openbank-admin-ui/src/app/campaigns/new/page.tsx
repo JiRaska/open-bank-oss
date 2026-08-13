@@ -65,12 +65,14 @@ const TEMPLATES: Record<string, string[]> = {
   // One variable, and that is the channel's rule rather than a simplification: a push renders its
   // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
+  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
 }
 
 /** Which channel each template renders on. The service refuses a step whose two disagree. */
 const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
   MARKETING_PRODUCT_OFFER: 'EMAIL',
   MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
+  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER',
 }
 
 const newStep = (): EditorStep => ({
@@ -116,6 +118,7 @@ export default function NewCampaignPage() {
   const templateLabels: Record<string, string> = {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
     MARKETING_PRODUCT_OFFER_PUSH: t('Nabídka produktu', 'Product offer'),
+    MARKETING_PRODUCT_OFFER_BANNER: t('Nabídka v banneru', 'Banner offer'),
   }
 
   // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of

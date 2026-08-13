@@ -2684,12 +2684,13 @@ class CustomerEdgeResource(
             val stepOrder = attribution.path("stepOrder").asInt(0)
                 .takeIf { it >= 0 && attribution.has("stepOrder") }
                 ?: return Response.status(Response.Status.BAD_GATEWAY).build()
-            if (attribution.path("channel").asText() != "PUSH") {
+            val channel = attribution.path("channel").asText()
+            if (channel !in setOf("PUSH", "BANNER")) {
                 return Response.status(Response.Status.BAD_GATEWAY).build()
             }
             event.put("campaignId", campaignId)
             event.put("stepOrder", stepOrder)
-            event.put("channel", "PUSH")
+            event.put("channel", channel)
         }
         event.put("partyId", customer.partyId.toString())
         val enriched = objectMapper.writeValueAsString(event)

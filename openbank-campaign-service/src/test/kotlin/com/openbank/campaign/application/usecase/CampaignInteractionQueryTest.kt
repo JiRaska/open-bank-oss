@@ -24,9 +24,9 @@ class CampaignInteractionQueryTest {
         val interactionRef = UUID.randomUUID()
         val partyId = UUID.randomUUID()
         val attribution = CampaignInteractionAttribution(UUID.randomUUID(), 0, Channel.PUSH)
-        coEvery { sendLog.attributionForPushInteraction(interactionRef, partyId) } returns attribution
+        coEvery { sendLog.attributionForAppInteraction(interactionRef, partyId) } returns attribution
 
         assertThat(query.resolve(interactionRef, partyId)).isEqualTo(attribution)
-        coVerify(exactly = 1) { sendLog.attributionForPushInteraction(interactionRef, partyId) }
+        coVerify(exactly = 1) { sendLog.attributionForAppInteraction(interactionRef, partyId) }
     }
 }

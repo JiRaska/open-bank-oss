@@ -19,5 +19,5 @@ import java.util.UUID
 @ApplicationScoped
 class CampaignInteractionQuery(private val sendLog: SendLogRepository) {
     suspend fun resolve(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
-        sendLog.attributionForPushInteraction(interactionRef, partyId)
+        sendLog.attributionForAppInteraction(interactionRef, partyId)
 }

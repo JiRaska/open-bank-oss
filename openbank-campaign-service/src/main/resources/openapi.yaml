@@ -23,11 +23,11 @@ paths:
   /api/v1/campaigns/interactions/{interactionRef}:
     get:
       tags: [Campaigns]
-      summary: Validate an opaque PUSH interaction reference
+      summary: Validate an opaque PUSH or BANNER interaction reference
       description: >-
         Internal customer-edge capability only. The request carries the authoritative caller party
         in `X-Customer-Party-Id`. A 404 has one meaning for every unsafe state: unknown reference,
-        wrong party, non-PUSH, or no accepted handoff.
+        wrong party, non-app placement, or no accepted handoff.
       parameters:
         - name: interactionRef
           in: path
@@ -39,7 +39,7 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "204":
-          description: The reference belongs to this party and a handed-off PUSH
+          description: The reference belongs to this party and a handed-off app placement
         "400":
           description: Missing or malformed caller party header
         "404":
@@ -51,9 +51,9 @@ paths:
   /api/v1/campaigns/interactions/{interactionRef}/attribution:
     get:
       tags: [Campaigns]
-      summary: Resolve server-owned attribution for an opaque PUSH interaction reference
+      summary: Resolve server-owned attribution for an opaque app interaction reference
       description: >-
-        Additive internal customer-edge capability. Only after ownership, PUSH channel and handoff
+        Additive internal customer-edge capability. Only after ownership, app channel and handoff
         are established does the trusted response return campaign/step/channel context for the edge
         to attach to the downstream event. The app never receives or supplies these fields.
       parameters:
@@ -76,7 +76,7 @@ paths:
                 properties:
                   campaignId: { type: string, format: uuid }
                   stepOrder: { type: integer, minimum: 0 }
-                  channel: { type: string, enum: [PUSH] }
+                  channel: { type: string, enum: [PUSH, BANNER] }
         "400":
           description: Missing or malformed caller party header
         "404":
@@ -624,11 +624,12 @@ components:
           #
           # Selectable on create since 1.11.0. Until then the create body had no channel field at
           # all and the resource hardcoded EMAIL, so PUSH was documented here and unreachable.
-          enum: [EMAIL, PUSH]
+          enum: [EMAIL, PUSH, BANNER]
           default: EMAIL
           description: >-
             Optional on create; absent means EMAIL. Must agree with the template's own channel —
-            MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH — and a
+            MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH and
+            MARKETING_PRODUCT_OFFER_BANNER on BANNER — and a
             mismatch is rejected with 400.
         variables:
           type: object
@@ -656,9 +657,9 @@ components:
           nullable: true
           enum: [HOME, SAVINGS, CARDS, PAYMENTS, PRODUCT_HUB]
           description: >-
-            Bank-owned destination opened after a PUSH tap. This is a closed app-route contract,
+            Bank-owned destination opened after a PUSH or BANNER tap. This is a closed app-route contract,
             never an author-entered URL; absent preserves existing campaigns. It is valid on a
-            PUSH step, or on an EMAIL step only when its consent-missing fallback is PUSH.
+            PUSH or BANNER step, or on an EMAIL step only when its consent-missing fallback is PUSH.
         delaySeconds: { type: integer, minimum: 0 }
         condition:
           description: >-
@@ -952,7 +953,7 @@ components:
             consent and the separate PUSH gate allowed its safe fallback; null for historical and
             non-send decision rows.
           type: [string, 'null']
-          enum: [EMAIL, PUSH, null]
+          enum: [EMAIL, PUSH, BANNER, null]
 
     Enrolment:
       type: object

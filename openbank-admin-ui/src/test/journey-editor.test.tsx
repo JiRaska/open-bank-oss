@@ -12,8 +12,13 @@ import { StepEditor } from '@/components/campaigns/StepEditor'
 const TEMPLATES = {
   MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
+  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
 }
-const TPL_CHANNEL = { MARKETING_PRODUCT_OFFER: 'EMAIL' as const, MARKETING_PRODUCT_OFFER_PUSH: 'PUSH' as const }
+const TPL_CHANNEL = {
+  MARKETING_PRODUCT_OFFER: 'EMAIL' as const,
+  MARKETING_PRODUCT_OFFER_PUSH: 'PUSH' as const,
+  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER' as const,
+}
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
 // own copy — asserting the rendered label against the same map the component reads would be vacuous.
@@ -163,5 +168,20 @@ describe('step editor', () => {
     fireEvent.change(select, { target: { value: 'SAVINGS' } })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mobileDestination: 'SAVINGS' }))
     expect(screen.getByText(/not a campaign-entered URL/i)).toBeTruthy()
+  })
+
+  it('offers a banner as an in-app placement with the same closed destination contract', () => {
+    const onChange = vi.fn()
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.click(document.querySelector('[data-channel-pick="BANNER"]')!)
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_BANNER', mobileDestination: 'HOME',
+    }))
   })
 })
