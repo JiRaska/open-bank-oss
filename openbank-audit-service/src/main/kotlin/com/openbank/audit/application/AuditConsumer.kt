@@ -6,6 +6,7 @@ package com.openbank.audit.application
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.audit.domain.model.ActorProvenance
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
@@ -101,6 +102,7 @@ class AuditConsumer {
             val node: JsonNode = objectMapper.readTree(payload)
             val eventTime = eventTime(node)
             val resolvedSource = resolveSourceService(node, address)
+            val actor = resolveActor(node)
             val entry = AuditEntry(
                 id = UUID.randomUUID(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
@@ -126,11 +128,8 @@ class AuditConsumer {
                 // its own decision, not a drive-by fix here).
                 aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
                 aggregateId = inferAggregateId(node),
-                actorId = node.textOrNull("requestedBy")
-                    ?: node.textOrNull("actorId")
-                    // transaction.initiated events carry the customer identity here (ADR-0021).
-                    ?: node.textOrNull("initiatedByPartyId"),
-                actorType = node.textOrNull("actorType"),
+                actorId = actor.first,
+                actorType = actor.second,
                 payload = payload,
                 sourceService = resolvedSource.first,
                 sourceServiceSource = resolvedSource.second,
@@ -150,6 +149,12 @@ class AuditConsumer {
                 delegationId = node.textOrNull("delegationId"),
             )
             if (eventTime == null) countMissingEventTime(entry.sourceService)
+            if (::meterRegistry.isInitialized) {
+                meterRegistry.countActorProvenance(
+                    entry.sourceService,
+                    actorProvenance(entry.actorId, entry.actorType),
+                )
+            }
             if (entry.sourceServiceSource != AttributionSource.EVENT) {
                 countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
             }
@@ -299,6 +304,113 @@ class AuditConsumer {
         /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
+}
+
+/**
+ * `openbank.audit.actor.missing{source_service,provenance}` — the third leg of #3994, and the
+ * only one of the three that had no signal at all.
+ *
+ * The issue asked for three things in increasing cost: make the gap loud, fix the producers,
+ * and decide whether an actor can be REQUIRED. This is the first, for the actor dimension:
+ * `openbank.audit.event.time.missing` and `openbank.audit.attribution.missing` already exist,
+ * and the actor gap — 75% of the live trail, the larger of the two halves in this issue's
+ * title — was observable only by hand-running a `GROUP BY` against the audit database.
+ *
+ * **What the counter can and cannot fix, and how that was established.** Asking the live
+ * database which actor-ish keys appear in actor-less payloads is the obvious probe and it
+ * gives the WRONG answer:
+ *
+ * ```
+ * SELECT DISTINCT k FROM audit_entries, jsonb_object_keys(payload::jsonb) k
+ *  WHERE actor_id IS NULL AND (k ILIKE '%by%' OR k ILIKE '%actor%' OR ...);
+ *   -> initiatedByPartyId, reviewedBy      (and reviewedBy is JSON-null on all 53 rows)
+ * ```
+ *
+ * That reads as "no actor is recoverable, every gap is a producer omission" — and it is a
+ * measurement of sandbox TRAFFIC, not of the wire contract. `openbank.cards.events`,
+ * `openbank.lending.events` and account-service's savings path have no rows here at all, and
+ * sanctions' `reviewedBy` is null only because no manual review has run. Enumerating the
+ * producers' serialised TYPES instead found three actor spellings genuinely on the wire and
+ * unread — `reviewedBy`, `changedBy`, `actorKind` — all three in data classes where the JSON
+ * key exists only as a Kotlin property name, so no grep for a quoted field name would have
+ * found them either. Those are recovered above.
+ *
+ * What remains after that is a genuine producer-side omission — the actor is known to the
+ * service and never reaches the wire (consent's `createdBy`/`revokedBy`, dispute's
+ * `resolvedBy`, domestic-payment's command `actorId` from the JWT, statement's
+ * `period.restated.v1`). This consumer must not paper over those: `actor_id` is chain-hashed
+ * into `record_hash`, so a fabricated actor is not a lesser evil than an honest NULL. This
+ * counter is what makes each producer's fix — or regression — visible without another manual
+ * query.
+ *
+ * Counted for DECLARED too, not only the two absences: a ratio needs its denominator, and a
+ * counter that only ever increments on failure cannot distinguish "no gaps" from "no traffic"
+ * — the exact shape of the zero-denials-from-an-idle-service trap. Tag cardinality is bounded
+ * by the fixed 21-topic service list times three enum values.
+ */
+internal fun MeterRegistry.countActorProvenance(sourceService: String, provenance: ActorProvenance) {
+    counter(
+        "openbank.audit.actor.missing",
+        "source_service",
+        sourceService,
+        "provenance",
+        provenance.name,
+    ).increment()
+}
+
+/**
+ * The actor identity and kind a producer put on the wire: `(actorId, actorType)` (#3994).
+ *
+ * **The first three id spellings are unchanged and stay FIRST**, so no row that is attributed
+ * today changes actor — a fix that improves 1359 unattributed rows by silently moving the 425
+ * already-correct ones is a regression, not a fix.
+ *
+ * The last two are additive recoveries: real actor identities that were already on the wire and
+ * that this consumer simply was not reading, so they landed as NULL in a column chain-hashed into
+ * `record_hash` and served to data subjects by the GDPR Art. 15 access log.
+ *
+ *  - `reviewedBy` — sanctions.screening.event serialises the `SanctionsCheck` aggregate whole, so
+ *    the four-eyes manual-review identity (the highest-value actor in the fleet) rides as a Kotlin
+ *    property name with no string literal anywhere in the producer to grep for.
+ *  - `changedBy` — cards.events: `CardStatusChanged`, `CardLimitsChanged` and `CardControlsChanged`
+ *    all carry it; only `CardIssued` omits it.
+ *  - `actorKind` — lending's transition events emit `actorId` AND `actorKind`, so the id was
+ *    already caught while the TYPE beside it was dropped. The row named the actor but could not
+ *    say whether it was a human or the automated policy engine, which is exactly what a four-eyes
+ *    or DORA Art. 17 reconstruction asks of a credit decision.
+ *
+ * Deliberately NOT recovered, though both are actor-ish and tempting: `partyId` (a data SUBJECT on
+ * most topics, an actor only on dispute/fx — a per-topic rule, not a spelling) and
+ * `delegatePartyId` (a delegate belongs in ADR-0232's `onBehalfOf`/`delegationId` pair, which this
+ * consumer already reads separately). Guessing either would write a confident wrong actor into a
+ * tamper-evident record — the same failure mode `TopicAttribution` exists to avoid.
+ *
+ * Free-standing to keep [AuditConsumer] under detekt's function-count threshold, which fires AT
+ * the threshold and not above it.
+ */
+private fun resolveActor(node: JsonNode): Pair<String?, String?> = Pair(
+    node.textOrNull("requestedBy")
+        ?: node.textOrNull("actorId")
+        // transaction.initiated events carry the customer identity here (ADR-0021).
+        ?: node.textOrNull("initiatedByPartyId")
+        ?: node.textOrNull("reviewedBy")
+        ?: node.textOrNull("changedBy"),
+    node.textOrNull("actorType") ?: node.textOrNull("actorKind"),
+)
+
+/**
+ * Classifies one row's actor claim for the [AuditConsumer.countActorProvenance] counter (#3994).
+ *
+ * Reads the RESOLVED entry fields rather than the payload, so it classifies exactly what was
+ * stored — a second pass over the JSON could disagree with the row it is supposed to describe,
+ * which is the drift that made `inferAggregateId`/`inferAggregateType` contradict each other.
+ *
+ * Free-standing to keep [AuditConsumer] under detekt's function-count threshold.
+ */
+internal fun actorProvenance(actorId: String?, actorType: String?): ActorProvenance = when {
+    actorId != null -> ActorProvenance.DECLARED
+    actorType != null -> ActorProvenance.SYSTEM
+    else -> ActorProvenance.ABSENT
 }
 
 /**
