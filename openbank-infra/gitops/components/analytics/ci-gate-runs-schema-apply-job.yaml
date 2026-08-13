@@ -5,11 +5,10 @@
 #
 # Hook choice — PostSync, same reasoning as temporal-namespace-registration.yaml: runs after
 # the Application's own resources (the ClickHouse StatefulSet, the ConfigMap this Job mounts)
-# are synced, so the CREATE TABLE runs against a service that is actually there. The SQL is
-# `CREATE TABLE IF NOT EXISTS` / `CREATE DATABASE IF NOT EXISTS` — idempotent by construction,
-# `CREATE TABLE IF NOT EXISTS` and `CREATE OR REPLACE VIEW` are idempotent, so this is safe to re-run
-# on every sync where either schema ConfigMap (or anything else in this directory)
-# changes, which is what BeforeHookCreation causes to happen.
+# are synced, so the DDL runs against a service that is actually there. `CREATE DATABASE/TABLE IF
+# NOT EXISTS` and `CREATE OR REPLACE VIEW` are idempotent, so this is safe to re-run on every sync
+# where either schema ConfigMap (or anything else in this directory) changes, which is what
+# BeforeHookCreation causes to happen.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -78,18 +77,17 @@ spec:
               # unseeded ExternalSecret, unrelated) was fixed. Never assert a database's
               # protocol behaviour without running it — this file is the lesson memorialised.
               #
-              # Split each mounted file into one statement per request instead. AWK, not a
-              # naive `split -t';'`: RS=";\n" treats "a statement, terminated by `;` at the
-              # end of a line" as one record, which matches how every statement in both
-              # mounted files actually ends (semicolon, then a newline) — a bare `;`
-              # split would also break on any `;` inside a comment or string, of which this
-              # file currently has none, but the RS approach costs nothing extra and does
-              # not depend on that staying true.
+              # Split each mounted file into one statement per request instead. Whole-line
+              # comments are stripped before AWK sees them: a prose comment in the CI schema
+              # contains an ordinary English semicolon, which otherwise looks like a statement
+              # terminator to RS=";\n". The remaining records match the repository convention:
+              # every real statement ends with a semicolon followed by a newline.
               total=0
               for script in /sql/ci/ci-gate-runs.sql /sql/campaign/campaign-engagement.sql; do
                 echo "Splitting and applying ${script} to ${CLICKHOUSE_URL}"
                 rm -f /tmp/stmt*.sql
-                awk 'BEGIN{RS=";\n"} NF{fn="/tmp/stmt" NR ".sql"; print $0";" > fn}' "$script"
+                grep -v '^[[:space:]]*--' "$script" \
+                  | awk 'BEGIN{RS=";\n"} NF{fn="/tmp/stmt" NR ".sql"; print $0";" > fn}'
                 n=0
                 for f in /tmp/stmt*.sql; do
                   [ -e "$f" ] || continue

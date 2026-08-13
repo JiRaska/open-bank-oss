@@ -4530,8 +4530,15 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Link the applicant's new Keycloak sub (KEYCLOAK_ID) to the matched existing party in pid —
-     * the ADR-0072 §5 identity merge so one human across channels maps to one golden-record party.
+     * Link the applicant's new Keycloak sub (KEYCLOAK_ID) to the matched existing party in pid, so
+     * one human arriving through another channel maps to one golden-record party (ADR-0072 §5
+     * identity unification).
+     *
+     * This is an external-id ATTACHMENT, not a party merge: it creates no `MERGED` party, moves no
+     * accounts and retires no row. The real merge is ADR-0179's `POST /api/v1/parties/{id}/merge`
+     * on party-service (four-eyes gated), whose `merged_into` pointer this service follows at
+     * request time in [PartyMergeResolver] — do not confuse the two (issue #1984).
+     *
      * Best-effort: returns true on a 2xx; failures are audited via the caller but never block
      * onboarding. The pid endpoint is idempotent and 409s a sub already linked elsewhere.
      */

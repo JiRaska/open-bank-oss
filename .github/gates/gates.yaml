@@ -677,6 +677,8 @@ gates:
     name: "admin-ui version sync guard (version.txt == package.json, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-admin-ui-version-sync.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-admin-ui-version-sync.sh .
 
@@ -831,6 +833,8 @@ gates:
     name: "quarkus.application.version override guard (release_invariant, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-app-version-override.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-app-version-override.sh .
 
@@ -842,6 +846,8 @@ gates:
     name: "gate graduation guard (ADR-0144, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-gate-graduation.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-gate-graduation.sh
 
@@ -996,6 +1002,8 @@ gates:
     name: "MCP charter data_scope binding (issue #2412, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-mcp-charter-data-scope.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
 
@@ -1103,6 +1111,8 @@ gates:
     name: "agent charter registry parity (ADR-0031/0156, enforced)"
     group: registry
     mode: enforced
+    selftest: bash .github/scripts/check-agent-charter-registry.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
@@ -1522,6 +1532,8 @@ gates:
     name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-operator-write-naming.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
@@ -1600,6 +1612,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 500   # 1184 test sources today (2026-08-09)
+    selftest: bash .github/scripts/check-test-runblocking-unit.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-test-runblocking-unit.sh .
 
@@ -1621,6 +1635,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 900   # 1889 service source files today (2026-08-09)
+    selftest: bash .github/scripts/check-exception-mapper-collision.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
@@ -1712,6 +1728,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 1500   # 3121 .kt files today (2026-08-09)
+    selftest: bash .github/scripts/check-domain-event-occuredat.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-domain-event-occuredat.sh
 
@@ -1729,6 +1747,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
+    selftest: bash .github/scripts/check-clock-injection.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-clock-injection.sh
 
@@ -2061,6 +2081,8 @@ gates:
     name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
     group: data
     mode: enforced
+    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery."
+    review_after: "2027-02-13"
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
     selftest_expect: pass
@@ -2197,6 +2219,8 @@ gates:
     name: "event contract vs code agreement (ADR-0006, enforced)"
     group: data
     mode: enforced
+    rationale: "A published event schema that drifts from its producer data class gives consumers a contract the running service cannot emit."
+    review_after: "2027-02-13"
     min_subjects: 2
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
@@ -2842,6 +2866,23 @@ gates:
     min_subjects: 3   # 5 advisory-mode gates today (2026-08-09)
     run: |
       python3 .github/scripts/check-advisory-finding-staleness.py --today "$(date -u +%F)" --enforce
+
+  # A gate must say why it exists and when to re-check that reason (#4339 followup, external
+  # review 2026-08-10). Declares its OWN rationale/review_after below rather than exempting
+  # itself — a gate about missing declarations exempting itself is the #2450 shape this repo
+  # already learned to avoid (check-advisory-gate-registration.py, check-gate-subject-floor.py
+  # both declare their own floor for the same reason).
+  - id: gate-lifecycle-metadata
+    name: "every gate declares why it exists and when to recheck (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A gate manifest that only says WHAT each gate checks accumulates entries nobody can evaluate for removal — this is the field that lets a future audit ask 'does this still catch something real' instead of re-deriving it from scratch."
+    review_after: "2027-02-10"
+    min_subjects: 100   # ~140 gates today (2026-08-10)
+    selftest: python3 .github/scripts/check-gate-lifecycle-metadata.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-gate-lifecycle-metadata.py --today "$(date -u +%F)" --enforce
 
   - id: gate-subject-floor
     name: "every gate declares how much it expects to find (#4339, enforced)"
