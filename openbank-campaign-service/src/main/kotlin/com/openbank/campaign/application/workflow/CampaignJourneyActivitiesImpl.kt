@@ -189,6 +189,7 @@ open class CampaignJourneyActivitiesImpl(
                         template = delivery.template,
                         variables = delivery.variables,
                         deepLink = requireNotNull(delivery.deepLink),
+                        inAppSurface = requireNotNull(delivery.inAppSurface),
                     ),
                 )
             } else {

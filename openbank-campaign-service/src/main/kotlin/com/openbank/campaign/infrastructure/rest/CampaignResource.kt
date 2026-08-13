@@ -8,6 +8,7 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StepCondition
@@ -81,6 +82,8 @@ data class StepRequest(
     val fallbackToPush: Boolean = false,
     /** Closed in-app destination opened when the customer taps the resulting PUSH notification. */
     val mobileDestination: MobileDestination? = null,
+    /** Closed authenticated-app inventory for a BANNER placement; absent preserves HOME_BANNER. */
+    val inAppSurface: InAppSurface? = null,
 )
 
 /**
@@ -143,6 +146,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
                 it.variantBVariables,
                 it.fallbackToPush,
                 it.mobileDestination,
+                it.inAppSurface,
             )
         }
         val campaign = service.createDraft(

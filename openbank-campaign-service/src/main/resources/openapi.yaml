@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.25.0
+  version: 1.26.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -629,7 +629,8 @@ components:
           description: >-
             Optional on create; absent means EMAIL. Must agree with the template's own channel —
             MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH and
-            MARKETING_PRODUCT_OFFER_BANNER on BANNER — and a
+            MARKETING_PRODUCT_OFFER_BANNER, MARKETING_PRODUCT_OFFER_CAROUSEL,
+            MARKETING_PRODUCT_OFFER_PRODUCT_FEED and MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
             mismatch is rejected with 400.
         variables:
           type: object
@@ -660,6 +661,14 @@ components:
             Bank-owned destination opened after a PUSH or BANNER tap. This is a closed app-route contract,
             never an author-entered URL; absent preserves existing campaigns. It is valid on a
             PUSH or BANNER step, or on an EMAIL step only when its consent-missing fallback is PUSH.
+        inAppSurface:
+          type: string
+          nullable: true
+          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          description: >-
+            Closed authenticated-app inventory for a BANNER step. Absent retains HOME_BANNER for
+            backwards-compatible placements. Each surface has its own reviewed template shape;
+            the service rejects a BANNER template that does not match this value.
         delaySeconds: { type: integer, minimum: 0 }
         condition:
           description: >-
