@@ -9,6 +9,7 @@ import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignExperimentRepository
+import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ContentVariantMetrics
@@ -536,16 +537,20 @@ class PanacheSendLogRepository :
      * status is deliberately not a precondition: a PUSH gateway acknowledgement is a later, weaker
      * signal and must not erase an app interaction the bank actually observed.
      */
-    override suspend fun hasPushInteractionForParty(interactionRef: UUID, partyId: UUID): Boolean =
-        Panache.withSession {
-            count(
-                "id = ?1 and partyId = ?2 and channel = ?3 and outcome = ?4",
-                interactionRef,
-                partyId,
-                Channel.PUSH.name,
-                SendOutcome.SENT.name,
-            ).map { it > 0 }
-        }.awaitSuspending()
+    override suspend fun attributionForPushInteraction(
+        interactionRef: UUID,
+        partyId: UUID,
+    ): CampaignInteractionAttribution? = Panache.withSession {
+        find(
+            "id = ?1 and partyId = ?2 and channel = ?3 and outcome = ?4",
+            interactionRef,
+            partyId,
+            Channel.PUSH.name,
+            SendOutcome.SENT.name,
+        ).firstResult<SendLogEntity>()
+    }.awaitSuspending()?.let {
+        CampaignInteractionAttribution(it.campaignId, it.stepOrder, Channel.valueOf(requireNotNull(it.channel)))
+    }
 
     /**
      * The predecessor send's delivery status (#3585 branch conditions).

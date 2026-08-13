@@ -2648,16 +2648,25 @@ class CustomerEdgeResource(
         val customer = customer()
         val event = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
             ?: return badRequest("Malformed engagement event")
+        // A phone can report attention, never a product outcome. Campaign-service already derives
+        // conversions from authoritative account/card events; accepting this value here would let
+        // a client turn a click into revenue attribution.
+        if (event.path("type").asText() == "CONVERSION") {
+            return badRequest("Conversions must originate from authoritative product events")
+        }
+        // These fields are server-owned. Remove any client attempt before optionally filling them
+        // from campaign-service's validated send-log row below.
+        event.remove(listOf("campaignId", "stepOrder", "channel"))
         val interactionRefNode = event.get("interactionRef")
         if (interactionRefNode != null) {
             if (!interactionRefNode.isTextual) return badRequest("Invalid interaction reference")
             val interactionRef = runCatching { UUID.fromString(interactionRefNode.asText()) }.getOrNull()
                 ?: return badRequest("Invalid interaction reference")
             val validation = upstream.get(
-                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef",
+                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef/attribution",
                 customer.partyId.toString(),
             )
-            if (validation.status != Response.Status.NO_CONTENT.statusCode) {
+            if (validation.status != Response.Status.OK.statusCode) {
                 // 400/403/404 are deliberately indistinguishable to the mobile client. Upstream
                 // failure stays a 502 so the client can safely retry instead of discarding an event.
                 return if (validation.status >= UPSTREAM_SERVER_ERROR_MIN) {
@@ -2666,9 +2675,24 @@ class CustomerEdgeResource(
                     badRequest("Invalid interaction reference")
                 }
             }
+            val attribution = runCatching {
+                objectMapper.readTree(validation.entity as? String ?: "")
+            }.getOrNull() ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val campaignId = attribution.path("campaignId").asText()
+                .takeIf { runCatching { UUID.fromString(it) }.isSuccess }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val stepOrder = attribution.path("stepOrder").asInt(0)
+                .takeIf { it >= 0 && attribution.has("stepOrder") }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            if (attribution.path("channel").asText() != "PUSH") {
+                return Response.status(Response.Status.BAD_GATEWAY).build()
+            }
+            event.put("campaignId", campaignId)
+            event.put("stepOrder", stepOrder)
+            event.put("channel", "PUSH")
         }
-        val enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
-            ?: return badRequest("Malformed engagement event")
+        event.put("partyId", customer.partyId.toString())
+        val enriched = objectMapper.writeValueAsString(event)
         return upstream.post(
             "$engagementServiceUrl/api/v1/surfaces/events",
             customer.partyId.toString(),

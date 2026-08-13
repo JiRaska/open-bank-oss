@@ -81,12 +81,19 @@ describe('campaigns console', () => {
     campaign('CLOSED', 900, 4),
   ]
 
-  function mockFetch(items = ITEMS, state = 'ok', summary?: unknown[]) {
+  function mockFetch(
+    items = ITEMS,
+    state = 'ok',
+    summary?: unknown[],
+    engagement?: { state: 'ok' | 'unavailable'; items: unknown[] },
+  ) {
     return vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/auth/session')) return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })
-      if (url.includes('/api/campaigns')) return json({ items, state, ...(summary ? { summary } : {}) })
+      if (url.includes('/api/campaigns')) {
+        return json({ items, state, ...(summary ? { summary } : {}), ...(engagement ? { engagement } : {}) })
+      }
       return json({})
     })
   }
@@ -142,22 +149,45 @@ describe('campaigns console', () => {
   })
 
   it('puts the next marketing decisions first and names delivery evidence without inventing conversion', async () => {
-    vi.stubGlobal('fetch', mockFetch(ITEMS, 'ok', [{
-      campaignId: 'ACTIVE-3', enrolled: 1240, sent: 1110, suppressed: 96, failed: 34,
-    }]))
+    vi.stubGlobal('fetch', mockFetch(
+      ITEMS,
+      'ok',
+      [{
+        campaignId: 'ACTIVE-3', enrolled: 1240, sent: 1110, suppressed: 96, failed: 34,
+        outcomes: [{ outcome: 'CONVERTED', count: 14 }],
+      }],
+      {
+        state: 'ok',
+        items: [{
+          campaignId: 'ACTIVE-3', impressions: 980, clicks: 176, dismissals: 21,
+          firstObservedAt: at(24), lastObservedAt: at(1),
+        }],
+      },
+    ))
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
     await waitFor(() => expect(screen.getByTestId('campaign-decision-desk')).toBeTruthy())
     // The control room gives the operator the complete lifecycle before they drill into the
-    // decision queue. It names operating evidence, but explicitly refuses to call it engagement.
+    // decision queue. It names handoff evidence separately from observed app response.
     expect(screen.getByTestId('campaign-control-room').textContent).toMatch(/Brief.*Review.*Live journey.*Evidence/)
-    expect(screen.getByTestId('campaign-evidence-strip').textContent).toMatch(/operating signal, not confirmed delivery, engagement or conversion/)
+    expect(screen.getByTestId('campaign-evidence-strip').textContent).toMatch(/channel handoff only/)
     const decisions = Array.from(document.querySelectorAll('[data-decision-campaign]'))
       .map(node => node.getAttribute('data-decision-campaign'))
     // Approval is a more urgent human decision than an unfinished draft or a live campaign.
     expect(decisions[0]).toBe('PENDING_APPROVAL-2')
     expect(screen.getByTestId('campaign-delivery-pulse').textContent).toMatch(/1,240|1 240/)
-    expect(screen.getByTestId('campaign-delivery-pulse').textContent).toMatch(/not conversion or engagement/)
+    expect(screen.getByTestId('campaign-engagement-pulse').textContent).toMatch(/980.*176.*21.*14/)
+    expect(screen.getByTestId('campaign-engagement-ACTIVE-3').textContent).toMatch(/980 impressions.*176 clicks/)
+  })
+
+  it('renders not observed and unavailable as states instead of fake zero metrics', async () => {
+    vi.stubGlobal('fetch', mockFetch(ITEMS, 'ok', undefined, { state: 'ok', items: [] }))
+    render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
+
+    await waitFor(() => expect(screen.getByTestId('campaign-engagement-pulse')).toBeTruthy())
+    expect(screen.getByTestId('campaign-engagement-pulse').textContent).toMatch(/Not yet observed/)
+    expect(screen.getByTestId('campaign-engagement-ACTIVE-3').textContent).toBe('Not yet observed')
+    expect(screen.getByTestId('campaign-engagement-pulse').textContent).not.toMatch(/0 impressions/)
   })
 
 })

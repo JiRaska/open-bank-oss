@@ -79,6 +79,9 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
  */
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
+/** Server-owned campaign context for one opaque app interaction reference. */
+data class CampaignInteractionAttribution(val campaignId: UUID, val stepOrder: Int, val channel: Channel)
+
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
@@ -93,7 +96,8 @@ interface SendLogRepository {
      * send-log lookup; an adapter that has not implemented attribution cannot accidentally
      * validate a client-controlled reference.
      */
-    suspend fun hasPushInteractionForParty(interactionRef: UUID, partyId: UUID): Boolean = false
+    suspend fun attributionForPushInteraction(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
+        null
 
     /**
      * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1

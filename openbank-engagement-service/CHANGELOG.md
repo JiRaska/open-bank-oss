@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.7.0...engagement-service-v0.8.0) (2026-08-13)
+
+
+### Features
+
+* add trusted campaign engagement analytics ([#4555](https://github.com/JiRaska/open-bank-oss/issues/4555)) ([22ab0ba](https://github.com/JiRaska/open-bank-oss/commit/22ab0ba6930bff0d70594ab2ee72cf5407bee0b8))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.6.0...engagement-service-v0.7.0) (2026-08-13)
 
 

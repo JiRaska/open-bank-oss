@@ -14,7 +14,7 @@ info:
     existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
     graduates from shadow (D5). The customer app reaches these endpoints only through
     customer-edge, whose narrowly scoped M2M policy injects the authoritative party id.
-  version: 1.3.0
+  version: 1.4.0
 tags:
   - name: Surfaces
   - name: Eligibility
@@ -162,3 +162,17 @@ components:
             Opaque reference to an accepted campaign PUSH handoff. customer-edge validates that it
             belongs to the authenticated party before forwarding; it is absent for unattributed
             in-app content and must never be replaced with a campaign or party identifier.
+        campaignId:
+          type: string
+          format: uuid
+          description: >-
+            Server-owned campaign id resolved by customer-edge from interactionRef. The public
+            mobile API cannot supply this value authoritatively.
+        stepOrder:
+          type: integer
+          minimum: 0
+          description: Server-owned journey step that created the PUSH interaction.
+        channel:
+          type: string
+          enum: [PUSH]
+          description: Server-owned originating channel. Present only with complete campaign attribution.

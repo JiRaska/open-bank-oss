@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.23.0
+  version: 1.24.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -23,12 +23,11 @@ paths:
   /api/v1/campaigns/interactions/{interactionRef}:
     get:
       tags: [Campaigns]
-      summary: Validate an opaque PUSH interaction reference for the caller party
+      summary: Validate an opaque PUSH interaction reference
       description: >-
         Internal customer-edge capability only. The request carries the authoritative caller party
-        in `X-Customer-Party-Id`; the response intentionally contains no campaign, step or party
-        data. A 404 has one meaning for every unsafe state: unknown reference, wrong party, a
-        non-PUSH handoff, or a send that was never accepted by notification-service.
+        in `X-Customer-Party-Id`. A 404 has one meaning for every unsafe state: unknown reference,
+        wrong party, non-PUSH, or no accepted handoff.
       parameters:
         - name: interactionRef
           in: path
@@ -40,7 +39,44 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         "204":
-          description: Reference belongs to the caller and originated from an accepted PUSH handoff
+          description: The reference belongs to this party and a handed-off PUSH
+        "400":
+          description: Missing or malformed caller party header
+        "404":
+          description: Reference is not valid for this caller; deliberately non-specific
+        "401":
+          description: Missing service token
+        "403":
+          description: Caller is not customer-edge
+  /api/v1/campaigns/interactions/{interactionRef}/attribution:
+    get:
+      tags: [Campaigns]
+      summary: Resolve server-owned attribution for an opaque PUSH interaction reference
+      description: >-
+        Additive internal customer-edge capability. Only after ownership, PUSH channel and handoff
+        are established does the trusted response return campaign/step/channel context for the edge
+        to attach to the downstream event. The app never receives or supplies these fields.
+      parameters:
+        - name: interactionRef
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Server-owned attribution context for the validated reference
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [campaignId, stepOrder, channel]
+                properties:
+                  campaignId: { type: string, format: uuid }
+                  stepOrder: { type: integer, minimum: 0 }
+                  channel: { type: string, enum: [PUSH] }
         "400":
           description: Missing or malformed caller party header
         "404":
