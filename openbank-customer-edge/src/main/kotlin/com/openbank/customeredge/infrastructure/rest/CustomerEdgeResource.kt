@@ -3136,17 +3136,39 @@ class CustomerEdgeResource(
     // the SCA-gated reveal for a virtual/single-use card. That one response carries PAN/CVV, is never
     // logged, never cached (no-store) and never audited by value.
 
-    /** List the caller's cards (masked PAN only). Party-scoped by the JWT party. */
+    /**
+     * List the caller's cards (masked PAN only), plus any card shared WITH them by a `CARD_VIEW`
+     * grant (ADR-0232 D3, #2990).
+     *
+     * Exactly the shape [listAccounts] already uses for shared accounts, and for the same reason: a
+     * `CARD_VIEW` grant could be offered, accepted and SCA-signed, and then had no consequence
+     * anywhere, because the only card surface was party-scoped by the JWT. Shared cards are
+     * APPENDED and marked `sharedWithMe`, never silently blended — a delegate must not come to
+     * believe they own what they were lent. Still masked-PAN only: a grant never widens what a card
+     * read discloses, and it does not reach the SCA-gated reveal.
+     *
+     * The caller's OWN cards survive a delegation-service outage — their cards must not disappear
+     * because a secondary service is down — while a shared card simply does not list (fail closed).
+     */
     @GET
     @Path("/cards")
     @Authorize(action = "customer.cards.read")
     @Blocking
     fun listCards(): Response {
         val customer = customer()
-        return upstream.get(
+        val own = upstream.get(
             "$cardIssuanceServiceUrl/api/v1/cards/party/${customer.partyId}",
             customer.partyId.toString(),
         )
+        if (own.statusInfo.family != Response.Status.Family.SUCCESSFUL) return own
+        val shared = sharedCardsFor(customer.partyId)
+        if (shared.isEmpty()) return own
+        val mine = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }
+            .getOrNull()?.takeIf { it.isArray } ?: return own
+        val out = objectMapper.createArrayNode()
+        mine.forEach { out.add(it) }
+        shared.forEach { out.add(it) }
+        return Response.ok(objectMapper.writeValueAsString(out)).type(MediaType.APPLICATION_JSON).build()
     }
 
     /** Freeze (temporarily suspend) one of the caller's OWN cards — the reversible self-service lock. */
@@ -3329,7 +3351,12 @@ class CustomerEdgeResource(
                 "CARD_LIMITS_INVALID",
             )
         val cardJson = fetchCard(id, customer.partyId) ?: return forbidden("Card does not belong to caller")
-        if (extractOwnerPartyId(cardJson) != customer.partyId.toString()) {
+        // Holder, or a delegate holding CARD_MANAGE_LIMITS (ADR-0232 D3 / ADR-0249 D2, #2990). The
+        // SCA rule below is unchanged and applies identically to a delegate: a delegated limit
+        // INCREASE still needs a device-signed approval bound to this card.
+        if (extractOwnerPartyId(cardJson) != customer.partyId.toString() &&
+            !mayActOnCard(id, customer.partyId, CARD_INTENT_MANAGE_LIMITS)
+        ) {
             return forbidden("Card does not belong to caller")
         }
         val current = parseLimits(objectMapper, cardJson)
@@ -3396,6 +3423,63 @@ class CustomerEdgeResource(
     private fun ownsCard(id: UUID, partyId: UUID): Boolean {
         val cardJson = fetchCard(id, partyId) ?: return false
         return extractOwnerPartyId(cardJson) == partyId.toString()
+    }
+
+    /**
+     * May this non-holder act on this card under a delegation grant (ADR-0232 D3, #2990)?
+     *
+     * **The decision is NOT made here** — the edge asks card-issuance, exactly as the money path
+     * asks account-service in [resolveDebitAuthority]. card-issuance is the only service holding
+     * both the delegation projection and the card's true holder, so it is the only place that can
+     * answer "holder OR an ACTIVE in-window grant carrying this intent" without the edge
+     * re-deriving somebody else's authority. `CardDelegationGuard` has answered that question
+     * correctly since #3058 and had no production caller until this one; ADR-0249 calls that
+     * "a wiring gap, not a design gap".
+     *
+     * Fail closed: a card-issuance that is down, slow or unparseable denies. The failure mode of
+     * guessing "probably allowed" is a stranger re-limiting someone else's card.
+     */
+    private fun mayActOnCard(cardId: UUID, partyId: UUID, intent: String): Boolean {
+        val resp = runCatching {
+            upstream.get(
+                "$cardIssuanceServiceUrl/api/v1/cards/$cardId/delegation/check" +
+                    "?partyId=$partyId&intent=$intent",
+                partyId.toString(),
+            )
+        }.getOrNull() ?: return false
+        if (resp.status != 200) return false
+        return runCatching {
+            objectMapper.readTree(resp.entity?.toString() ?: "").path("authorized").asBoolean(false)
+        }.getOrDefault(false)
+    }
+
+    /**
+     * The cards shared WITH this caller, as card JSON, for appending to their own list.
+     *
+     * `CARD_VIEW` decides visibility, and only an ACTIVE grant counts: an OFFERED grant nobody
+     * accepted is not access, and listing it would show someone a card they have not agreed to
+     * hold — the same rule [sharedAccountsFor] applies to accounts.
+     */
+    private fun sharedCardsFor(partyId: UUID): List<com.fasterxml.jackson.databind.JsonNode> {
+        val resp = runCatching {
+            upstream.get("$delegationServiceUrl/api/v1/delegations/grantee/$partyId", partyId.toString())
+        }.getOrNull() ?: return emptyList()
+        if (resp.status != 200) return emptyList()
+        val grants = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+            ?.takeIf { it.isArray } ?: return emptyList()
+        return grants.asSequence()
+            .filter { it.path("status").asText() == "ACTIVE" }
+            .filter { it.path("resourceType").asText() == "CARD" }
+            .filter { g -> g.path("capabilities").any { it.asText() == CARD_VIEW_CAPABILITY } }
+            .mapNotNull { it.path("resourceId").asText(null) }
+            .distinct()
+            .mapNotNull { id -> runCatching { UUID.fromString(id) }.getOrNull() }
+            .mapNotNull { id -> fetchCard(id, partyId) }
+            .mapNotNull { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+            .map { node ->
+                (node as com.fasterxml.jackson.databind.node.ObjectNode).put("sharedWithMe", true)
+            }
+            .toList()
     }
 
     /**
@@ -3992,6 +4076,21 @@ class CustomerEdgeResource(
 
         /** The only card types a customer may mint themselves — plastic stays an operator flow. */
         internal val SELF_SERVICE_CARD_TYPES = setOf(CARD_TYPE_VIRTUAL, CARD_TYPE_SINGLE_USE)
+
+        /**
+         * The delegation capability that makes a shared CARD worth listing. Execution capabilities
+         * are deliberately absent: `CARD_VIEW` is a read, and no grant reaches the SCA-gated PAN
+         * reveal (see [revealCardDetails], which stays holder-only).
+         */
+        internal const val CARD_VIEW_CAPABILITY = "CARD_VIEW"
+
+        /**
+         * card-issuance's `CardDelegationIntent` for "may re-limit this card". The intent -> grant
+         * capability mapping (`MANAGE_LIMITS` <-> `CARD_MANAGE_LIMITS`) lives in card-issuance's
+         * `DelegatedCardGrant.satisfies`, not here — the edge names the question, the owning
+         * service answers it.
+         */
+        internal const val CARD_INTENT_MANAGE_LIMITS = "MANAGE_LIMITS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this

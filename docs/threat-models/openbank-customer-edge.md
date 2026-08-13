@@ -184,3 +184,31 @@ Trust boundaries:
   chain; the grantor is the token party, and the optional filters can only narrow a set already
   scoped to the caller. Rollback: revert the `resolveDebitAuthority` call site — the route returns
   to owner-only.
+
+- **2026-08-13** — **A delegate can see and re-limit a shared CARD** (ADR-0232 D3, ADR-0249 D2,
+  issue #2990). `GET /customer/v1/cards` was party-scoped by the JWT and `PUT
+  /customer/v1/cards/{id}/limits` refused any non-holder, so `CARD_VIEW` and `CARD_MANAGE_LIMITS`
+  grants had no consequence anywhere: card-issuance's `CardDelegationGuard` existed, was correct,
+  and had no production caller. Risk class = **information disclosure / elevation of privilege**.
+  Properties this rests on:
+  (a) **the edge does not decide the limits question** — it asks card-issuance
+  `GET /api/v1/cards/{id}/delegation/check?partyId=&intent=MANAGE_LIMITS`, the only service holding
+  both the delegation projection and the card's true holder, exactly as the money path asks
+  account-service; (b) **fail closed** — a non-200, an unparseable body or an unreachable
+  card-issuance denies, so an outage cannot widen access; (c) **SCA is unchanged and is not bought
+  by a grant** — a delegated limit INCREASE needs the same device-signed CARD_MANAGEMENT approval a
+  holder's does, and a delegated DECREASE remains friction-free because it strictly de-risks;
+  (d) **no new disclosure surface** — shared cards list masked-PAN only, and the SCA-gated PAN
+  reveal (`POST /cards/{id}/details`) stays holder-only, deliberately not delegable;
+  (e) **a borrowed card is never presented as the caller's own** — shared cards are appended and
+  marked `sharedWithMe`, never merged silently, the same rule shared accounts follow;
+  (f) **only ACTIVE grants count** — an OFFERED grant nobody accepted does not list, so an
+  unsolicited offer cannot make someone's card visible to a stranger;
+  (g) **the holder path is unchanged and pays for nothing** — an owner is never charged a
+  delegation call, so the common case does not depend on a secondary service.
+  Residual risk worth naming: the limits verdict is served from card-issuance's Kafka-fed
+  projection, so a REVOKED grant stops working only once `openbank.delegation.events` is consumed —
+  unlike the account read path, which asks delegation-service live and is revocation-immediate.
+  That asymmetry is deliberate here (card-issuance is the only holder of the card's true holder)
+  but it is the reason no delegated card action moves money or reveals a PAN. Rollback: revert the
+  `mayActOnCard` call site and the `sharedCardsFor` append — both routes return to holder-only.

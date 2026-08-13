@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.34.0
+  version: 1.35.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1237,8 +1237,14 @@ paths:
   /cards:
     get:
       tags: [Cards]
-      summary: List the caller's cards (masked PAN only)
-      description: Party-scoped by the JWT — a caller can only ever see their own cards.
+      summary: List the caller's cards, plus any card shared with them (masked PAN only)
+      description: >-
+        Party-scoped by the JWT, plus any card carrying an ACTIVE CARD_VIEW delegation grant for the
+        caller (ADR-0232 D3). Shared cards are APPENDED and each carries "sharedWithMe": true, so the
+        app can say whose card it is rather than presenting a borrowed card as the caller's own. An
+        OFFERED grant nobody accepted does not list. Still masked-PAN only — a grant never widens
+        what a card read discloses, and it never reaches the SCA-gated reveal. Fail closed: an
+        unreachable delegation-service hides shared cards and leaves the caller's own untouched.
       operationId: listCards
       security:
         - customerOidc: [cards:read]
@@ -1486,7 +1492,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/CardError'
         '403':
-          description: Card does not belong to caller, or an increase without a valid SCA challenge
+          description: >-
+            Caller is neither the card's holder nor a delegate with CARD_MANAGE_LIMITS, or an
+            increase without a valid SCA challenge
           content:
             application/json:
               schema:
@@ -2529,6 +2537,11 @@ components:
         onlineEnabled: {type: boolean}
         atmEnabled: {type: boolean}
         abroadEnabled: {type: boolean}
+        sharedWithMe:
+          type: boolean
+          description: >-
+            Present and true only on a card the caller reaches through an ACTIVE CARD_VIEW
+            delegation grant rather than as its holder (ADR-0232 D3). Absent on the caller's own.
 
     # The ONLY payload on which a full PAN/CVV crosses the edge (POST /cards/{id}/details).
     # Returned no-store; never logged, never cached, never audited by value.

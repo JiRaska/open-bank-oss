@@ -181,6 +181,12 @@ class CustomerEdgeCardsTest {
         val upstream = mockk<UpstreamClient>()
         every { upstream.get(match { it.contains("/cards/$card") }, any()) } returns
             cardJson(card, UUID.randomUUID())
+        // #2990: a non-holder is no longer refused on ownership alone — card-issuance is asked
+        // whether a CARD_MANAGE_LIMITS grant covers them. This caller has none, so 403 stands.
+        // Before this stub existed the test asserted the un-delegated behaviour, i.e. that the
+        // question was never asked; that is the defect, not the contract.
+        every { upstream.get(match { it.contains("/delegation/check") }, any()) } returns
+            Response.ok("""{"authorized":false}""").build()
         val resp = resourceFor(upstream, caller).updateCardLimits(
             card,
             """{"dailyLimitMinorUnits":1,"monthlyLimitMinorUnits":2}""",
