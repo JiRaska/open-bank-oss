@@ -97,6 +97,7 @@ export function JourneyEditor({
   selected,
   onSelect,
   onAdd,
+  contentCatalogueReady = true,
   onRemove,
   templateLabels,
   stopAfter,
@@ -109,6 +110,8 @@ export function JourneyEditor({
   selected: number | null
   onSelect: (index: number | null) => void
   onAdd: () => void
+  /** Without the served catalogue, a new node would be an unverified template choice. */
+  contentCatalogueReady?: boolean
   onRemove: (index: number) => void
   templateLabels: Record<string, string>
   /** Campaign-level cap: the journey ends once a party has had this many sends. Null = no cap. */
@@ -128,7 +131,7 @@ export function JourneyEditor({
     return t(`za ${Math.floor(s / 60)} min`, `after ${Math.floor(s / 60)} min`)
   }
 
-  const canAdd = steps.length < MAX_STEPS
+  const canAdd = steps.length < MAX_STEPS && contentCatalogueReady
   // Entry + steps + the add affordance, which occupies a slot so the canvas does not jump when a
   // step is added.
   const cols = 1 + steps.length + (canAdd ? 1 : 0)
@@ -396,7 +399,7 @@ export function JourneyEditor({
           </g>
         )}
 
-        {!canAdd && (
+        {steps.length >= MAX_STEPS && (
           // Stated, not enforced silently: the cap is a domain rule (Campaign.MAX_STEPS), and a
           // marketer who cannot find the add button deserves to know why rather than assume a bug.
           <text

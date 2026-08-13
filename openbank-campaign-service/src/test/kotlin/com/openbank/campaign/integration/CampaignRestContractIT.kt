@@ -544,6 +544,32 @@ class CampaignRestContractIT {
         }
     }
 
+    /** Studio reads the exact catalogue the aggregate validates, including authenticated app placement. */
+    @Test
+    fun `the template catalogue serves channels declared variables and in-app surfaces`() {
+        When {
+            get("/api/v1/campaigns/templates")
+        } Then {
+            statusCode(200)
+            body(
+                "template",
+                org.hamcrest.Matchers.hasItems("MARKETING_PRODUCT_OFFER", "MARKETING_PRODUCT_OFFER_BANNER"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.channel",
+                org.hamcrest.Matchers.equalTo("PUSH"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.variables",
+                org.hamcrest.Matchers.contains("offerTitle"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_BANNER' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("HOME_BANNER"),
+            )
+        }
+    }
+
     /** A trigger key survives the round trip, so a campaign can declare what wakes it. */
     @Test
     fun `a campaign can declare a trigger and reads it back`() {

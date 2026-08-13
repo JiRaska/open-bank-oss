@@ -83,6 +83,10 @@ object TemplateCatalog {
         InAppSurface.REWARDS_HUB -> "MARKETING_PRODUCT_OFFER_REWARDS_HUB"
     }
 
+    /** The app placement a banner template is approved to render on, or null for dispatched channels. */
+    fun inAppSurfaceFor(template: String): InAppSurface? =
+        InAppSurface.entries.firstOrNull { templateForInAppSurface(it) == template }
+
     fun exists(template: String): Boolean = template in ALL
 
     /**
