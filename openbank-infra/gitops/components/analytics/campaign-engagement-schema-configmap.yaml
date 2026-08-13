@@ -2,7 +2,8 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
 # Live-delivery copy of analytics-sink's V6__campaign_engagement.sql. clickhouse-init only runs
-# when the data directory is empty, so this ConfigMap is applied by the PostSync hook next to it.
+# when the data directory is empty, so the shared ci-gate-runs-schema-apply PostSync hook mounts and
+# applies this ConfigMap over its existing, network-policy-governed ClickHouse connection.
 apiVersion: v1
 kind: ConfigMap
 metadata:
