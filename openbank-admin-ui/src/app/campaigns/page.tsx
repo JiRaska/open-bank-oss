@@ -28,7 +28,20 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Megaphone, Play, PauseCircle, PenLine, ShieldCheck } from 'lucide-react'
+import {
+  Activity,
+  ArrowRight,
+  Clock3,
+  Eye,
+  Gauge,
+  GitBranch,
+  Megaphone,
+  PauseCircle,
+  PenLine,
+  Play,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
@@ -154,6 +167,15 @@ export default function CampaignsPage() {
     )
   }, [summary])
 
+  /** This is a campaign-operation rate, not customer delivery or conversion. Campaign-service
+   * can establish that it handed work to notification-service or protected someone with a
+   * suppression rule; only the channel and a campaign-attributed outcome could establish more. */
+  const handoffRate = useMemo(() => {
+    if (!deliveryPulse) return null
+    const decided = deliveryPulse.sent + deliveryPulse.suppressed
+    return decided > 0 ? Math.round((deliveryPulse.sent / decided) * 100) : null
+  }, [deliveryPulse])
+
   const needle = search.trim().toLowerCase()
   const filtered = items.filter(
     c =>
@@ -207,6 +229,75 @@ export default function CampaignsPage() {
             <StatCard label={t('Pozastavené', 'Paused')} value={counts('PAUSED')}
                       tone={counts('PAUSED') > 0 ? 'warning' : undefined} icon={<PauseCircle size={13} />} />
           </div>
+
+          <section className="campaign-control-room" aria-label={t('Řídicí místnost kampaní', 'Campaign control room')} data-testid="campaign-control-room">
+            <div className="campaign-control-hero">
+              <div className="campaign-control-orbit campaign-control-orbit-one" aria-hidden="true" />
+              <div className="campaign-control-orbit campaign-control-orbit-two" aria-hidden="true" />
+              <div className="campaign-control-kicker"><Sparkles size={13} /> {t('Campaign OS', 'Campaign OS')}</div>
+              <div className="campaign-control-hero-copy">
+                <div>
+                  <h2>{t('Od nápadu k další akci. V jednom tahu.', 'From idea to next action. In one flow.')}</h2>
+                  <p>{t('Pracovní plocha pro rozhodnutí, ne inventář kampaní.', 'A decision workspace, not a campaign inventory.')}</p>
+                </div>
+                <Link href="/campaigns/new" className="campaign-control-create">
+                  <Sparkles size={14} /> {t('Vytvořit cestu', 'Create journey')}
+                </Link>
+              </div>
+              <div className="campaign-control-flow" aria-label={t('Tok práce kampaně', 'Campaign work flow')}>
+                <div className="campaign-flow-node" data-state="brief">
+                  <PenLine size={15} /><span>{t('Zadání', 'Brief')}</span><strong>{counts('DRAFT')}</strong>
+                </div>
+                <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
+                <div className="campaign-flow-node" data-state="review">
+                  <ShieldCheck size={15} /><span>{t('Druhé oči', 'Review')}</span><strong>{counts('PENDING_APPROVAL')}</strong>
+                </div>
+                <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
+                <div className="campaign-flow-node" data-state="live">
+                  <Activity size={15} /><span>{t('Živá cesta', 'Live journey')}</span><strong>{counts('ACTIVE')}</strong>
+                </div>
+                <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
+                <div className="campaign-flow-node" data-state="learn">
+                  <Eye size={15} /><span>{t('Důkaz', 'Evidence')}</span><strong>{deliveryPulse ? t('živě', 'live') : '—'}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="campaign-control-radar">
+              <div className="campaign-radar-heading">
+                <div>
+                  <p>{t('Signály operátora', 'Operator signals')}</p>
+                  <h3>{t('Co vyžaduje pozornost', 'What needs attention')}</h3>
+                </div>
+                <Gauge size={17} aria-hidden="true" />
+              </div>
+              <div className="campaign-radar-cards">
+                <div className="campaign-radar-card" data-tone={counts('PENDING_APPROVAL') > 0 ? 'attention' : 'clear'}>
+                  <div><Clock3 size={15} /><span>{t('Rozhodnutí čekají', 'Decisions waiting')}</span></div>
+                  <strong>{counts('PENDING_APPROVAL')}</strong>
+                  <p>{counts('PENDING_APPROVAL') > 0
+                    ? t('Kampaň potřebuje nezávislé schválení.', 'A campaign needs independent approval.')
+                    : t('Nic nečeká na schválení.', 'Nothing is waiting for approval.')}
+                  </p>
+                </div>
+                <div className="campaign-radar-card" data-tone={counts('PAUSED') > 0 ? 'attention' : 'clear'}>
+                  <div><PauseCircle size={15} /><span>{t('Zastavené cesty', 'Paused journeys')}</span></div>
+                  <strong>{counts('PAUSED')}</strong>
+                  <p>{counts('PAUSED') > 0
+                    ? t('Rozhodněte, zda pokračovat nebo uzavřít.', 'Decide whether to resume or close.')
+                    : t('Žádná cesta není pozastavená.', 'No journey is paused.')}
+                  </p>
+                </div>
+              </div>
+              <div className="campaign-evidence-strip" data-testid="campaign-evidence-strip">
+                <GitBranch size={15} aria-hidden="true" />
+                <div>
+                  <strong>{handoffRate === null ? t('Čeká na provozní data', 'Waiting for operating data') : `${handoffRate} % ${t('předáno do kanálu', 'handed to channel')}`}</strong>
+                  <span>{t('Je to provozní signál, ne potvrzené doručení, engagement ani konverze.', 'This is an operating signal, not confirmed delivery, engagement or conversion.')}</span>
+                </div>
+              </div>
+            </div>
+          </section>
 
           <section className="campaign-decision-desk" aria-label={t('Dnešní priority kampaní', 'Today’s campaign priorities')} data-testid="campaign-decision-desk">
             <div className="campaign-decision-queue">
