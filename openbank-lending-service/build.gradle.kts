@@ -85,6 +85,21 @@ kover {
 
 // Pact: write generated consumer contracts to pacts/ and forward broker config for verification.
 tasks.withType<Test> {
+    // Gradle's default test-JVM heap is 512m, which no module in this fleet overrides. That was
+    // survivable while lending-service had one @QuarkusTestProfile class; it now has two
+    // (CustomerIntakeConfigInjectionTest and CompliancePackReplicaConvergenceIT), and each profile
+    // forces its OWN Quarkus boot in the same forked JVM alongside Testcontainers. CI died with
+    // `java.lang.OutOfMemoryError: Java heap space` inside the OTLP exporter's worker thread,
+    // surfacing as a SocketTimeoutException on the convergence test's polling assertion — the
+    // misleading part, because that test's own logic was correct. Same root cause and same fix as
+    // openbank-account-service's `tasks.withType<Test>` block (see its comment for the account-service
+    // occurrence — this is the second module to hit it, which is the documented signal to raise it
+    // here rather than fleet-wide).
+    //
+    // Deliberately per-module rather than a fleet default: nothing measures test heap anywhere, so
+    // a global bump would be an unmeasured ratchet applied to 50 modules to fix one.
+    maxHeapSize = "2g"
+
     systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
     listOf(
         "pactbroker.url",
