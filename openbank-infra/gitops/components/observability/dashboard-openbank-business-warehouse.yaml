@@ -204,7 +204,7 @@ data:
           "id": 4,
           "type": "stat",
           "title": "Accounts opened (30d)",
-          "description": "Distinct account aggregates with an opened-type event. uniqExact, not count(): bronze is at-least-once, so duplicates are expected and a raw count overstates.",
+          "description": "Distinct account aggregates with an opening-type event (AccountCreated today; matched case-insensitively so a producer switching to ACCOUNT_OPENED does not silently zero this tile). aggregate_type is folded with upper() because bronze holds both ACCOUNT and Account for the same account (#4553). uniqExact, not count(): bronze is at-least-once, so duplicates are expected and a raw count overstates.",
           "gridPos": {
             "x": 10,
             "y": 7,
@@ -224,7 +224,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE aggregate_type = 'Account' AND event_type LIKE '%Opened%' AND occurred_at >= now() - INTERVAL 30 DAY"
+              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE upper(aggregate_type) = 'ACCOUNT' AND (positionCaseInsensitive(event_type, 'opened') > 0 OR positionCaseInsensitive(event_type, 'created') > 0) AND occurred_at >= now() - INTERVAL 30 DAY"
             }
           ],
           "fieldConfig": {
@@ -263,7 +263,7 @@ data:
           "id": 5,
           "type": "stat",
           "title": "Parties onboarded (30d)",
-          "description": null,
+          "description": "Distinct party aggregates with a creation event (PARTY_CREATED). Previously counted ANY party event, so a party whose KYC status merely changed read as onboarded. aggregate_type is folded with upper() — bronze holds PARTY, never Party, so the old literal matched nothing (#4553).",
           "gridPos": {
             "x": 15,
             "y": 7,
@@ -283,7 +283,7 @@ data:
               "refId": "A",
               "editorType": "sql",
               "format": 2,
-              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE aggregate_type = 'Party' AND occurred_at >= now() - INTERVAL 30 DAY"
+              "rawSql": "SELECT uniqExact(aggregate_id) AS value FROM openbank_analytics.bronze_events WHERE upper(aggregate_type) = 'PARTY' AND positionCaseInsensitive(event_type, 'created') > 0 AND occurred_at >= now() - INTERVAL 30 DAY"
             }
           ],
           "fieldConfig": {
