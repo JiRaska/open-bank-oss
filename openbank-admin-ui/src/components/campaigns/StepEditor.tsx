@@ -97,7 +97,7 @@ export function StepEditor({
       <div className="space-y-1.5">
         <span className="text-sm font-medium">{t('Kanál', 'Channel')}</span>
         <div className="flex gap-2">
-          {(['EMAIL', 'PUSH'] as EditorChannel[]).map(c => {
+          {(['EMAIL', 'PUSH', 'BANNER'] as EditorChannel[]).map(c => {
             const first = Object.keys(templates).find(tpl => templateChannel[tpl] === c)
             const active = step.channel === c
             return (
@@ -112,7 +112,7 @@ export function StepEditor({
                   channel: c,
                   template: first,
                   variables: {},
-                  ...(c === 'PUSH'
+                  ...(c === 'PUSH' || c === 'BANNER'
                     ? { fallbackToPush: false, mobileDestination: step.mobileDestination ?? 'HOME' }
                     : { mobileDestination: undefined }),
                   ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
@@ -127,7 +127,11 @@ export function StepEditor({
                     : undefined
                 }
               >
-                {c === 'EMAIL' ? t('E-mail', 'Email') : t('Push do aplikace', 'App push')}
+                {c === 'EMAIL'
+                  ? t('E-mail', 'Email')
+                  : c === 'PUSH'
+                    ? t('Push do aplikace', 'App push')
+                    : t('Banner v aplikaci', 'In-app banner')}
               </button>
             )
           })}
@@ -155,6 +159,33 @@ export function StepEditor({
               </select>
               <span className="block text-xs text-muted-foreground">
                 {t('Jde o pevný deep-link aplikace, ne URL zadanou do kampaně.', 'This is a fixed app deep link, not a campaign-entered URL.')}
+              </span>
+            </label>
+          </>
+        )}
+        {step.channel === 'BANNER' && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Banner se zobrazí na domovské obrazovce přihlášené aplikace. Není to push a neobjeví se na zamčeném telefonu.',
+                'The banner is shown on the signed-in app home screen. It is not a push and never appears on a locked phone.',
+              )}
+            </p>
+            <label className="mt-3 block space-y-1.5 text-sm" data-mobile-destination={index}>
+              <span className="font-medium">{t('Po klepnutí otevřít', 'Open after tap')}</span>
+              <select
+                className={field}
+                value={step.mobileDestination ?? 'HOME'}
+                onChange={e => onChange({ ...step, mobileDestination: e.target.value as EditorStep['mobileDestination'] })}
+              >
+                <option value="HOME">{t('Domovská obrazovka', 'Home')}</option>
+                <option value="SAVINGS">{t('Spoření', 'Savings')}</option>
+                <option value="CARDS">{t('Karty', 'Cards')}</option>
+                <option value="PAYMENTS">{t('Platby', 'Payments')}</option>
+                <option value="PRODUCT_HUB">{t('Produkty', 'Products')}</option>
+              </select>
+              <span className="block text-xs text-muted-foreground">
+                {t('Banner vede jen na pevný deep-link aplikace, nikdy na URL vložené do kampaně.', 'A banner can use only a fixed app deep link, never a campaign-entered URL.')}
               </span>
             </label>
           </>
@@ -207,7 +238,12 @@ export function StepEditor({
                 'Šablona notifikace je pevná. Tady se vyplňuje jen její titulek.',
                 'The notification template is fixed. Only its headline is filled in here.',
               )
-            : t(
+            : step.channel === 'BANNER'
+              ? t(
+                  'Banner používá schválenou kartu aplikace. Tady se vyplňují jen její pojmenované hodnoty.',
+                  'The banner uses an approved in-app card. Only its named values are filled in here.',
+                )
+              : t(
                 'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',
                 'The email copy lives in the template. Only its named values are filled in here.',
               )}

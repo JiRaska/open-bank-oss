@@ -148,18 +148,19 @@ def strip_comments(source: str) -> str:
     return "".join(out)
 
 
-def scan(services: list[str]) -> tuple[list[str], set[str]]:
+def scan(services: list[str], repo: pathlib.Path = None) -> tuple[list[str], set[str]]:
+    repo = repo or REPO
     findings: list[str] = []
     hit_paths: set[str] = set()
     for svc in services:
-        root = REPO / svc / "src" / "main" / "kotlin"
+        root = repo / svc / "src" / "main" / "kotlin"
         if not root.is_dir():
             continue
         for path in sorted(root.rglob("*.kt")):
-            parts = path.relative_to(REPO).parts
+            parts = path.relative_to(repo).parts
             if not any(layer in parts for layer in TARGET_LAYERS):
                 continue
-            rel = str(path.relative_to(REPO))
+            rel = str(path.relative_to(repo))
             code = strip_comments(path.read_text(encoding="utf-8"))
             for lineno, line in enumerate(code.splitlines(), start=1):
                 for pattern, label in BANNED:
@@ -171,10 +172,103 @@ def scan(services: list[str]) -> tuple[list[str], set[str]]:
     return findings, hit_paths
 
 
+def self_test() -> int:
+    """Falsify the banned-construct scanner.
+
+    The accounting day is a BANK calendar fact, not a wall-clock one: a posting made at 23:30
+    Prague on the last business day belongs to that day's books regardless of where the pod
+    runs. `Clock.systemDefaultZone()` or a hand-written `ZoneId.of(...)` in domain or
+    application code silently substitutes the container's zone, and the resulting misdated
+    posting is arithmetically correct — it reconciles, it just lands on the wrong day.
+
+    Nothing downstream catches that: the ledger balances either way.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    def run(files: dict[str, str]) -> tuple[list[str], set[str]]:
+        td = tempfile.mkdtemp()
+        repo = pathlib.Path(td)
+        for rel, body in files.items():
+            f = repo / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body)
+        return scan(["openbank-x"], repo)
+
+    def case(label, findings, want_hit):
+        got = bool(findings)
+        if got != want_hit:
+            fails.append(f"{label}: expected finding={want_hit}, got {findings}")
+
+    K = "openbank-x/src/main/kotlin/com/openbank/x"
+
+    # Every banned construct, because missing ONE leaves that spelling free fleet-wide while
+    # the gate keeps reporting clean about the others.
+    for frag, label in (("Clock.systemDefaultZone()", "systemDefaultZone"),
+                        ("Clock.system(ZoneId.of(\"UTC\"))", "Clock.system"),
+                        ("ZoneId.systemDefault()", "systemDefault"),
+                        ("ZoneId.of(\"Europe/Prague\")", "ZoneId.of")):
+        f, _h = run({f"{K}/domain/A.kt": f"val c = {frag}\n"})
+        case(f"{label} in domain is FLAGGED", f, True)
+
+    # Spacing variants: `Clock . systemDefaultZone (` is the same call, and a pattern without
+    # \s* would miss a reformatted file.
+    f, _h = run({f"{K}/domain/A.kt": "val c = Clock . systemDefaultZone ()\n"})
+    case("spacing around the call still matches", f, True)
+
+    # The SANCTIONED form must be clean, or the gate blocks the fix it demands.
+    f, _h = run({f"{K}/domain/A.kt": "val d = AccountingClock.today()\n"})
+    case("AccountingClock is clean", f, False)
+
+    # SCOPE by layer: infrastructure is where a real zone legitimately enters the system.
+    f, _h = run({f"{K}/infrastructure/A.kt": "val c = Clock.systemDefaultZone()\n"})
+    case("infrastructure is out of scope", f, False)
+
+    # PROSE: the fix comment names the very call it removed.
+    f, _h = run({f"{K}/domain/A.kt": "// never call Clock.systemDefaultZone() here\nval d = AccountingClock.today()\n"})
+    case("the call named in a comment is not a hit", f, False)
+
+    # The allowlist suppresses a FINDING but must still record the path as a hit — otherwise a
+    # stale entry can never be detected, and the list becomes permanent by being invisible.
+    only = sorted(ALLOWLIST)[0] if ALLOWLIST else None
+    if only:
+        svc = only.split("/", 1)[0]
+        td = tempfile.mkdtemp(); repo = pathlib.Path(td)
+        f = repo / only; f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("val c = ZoneId.of(\"Europe/Prague\")\n")
+        findings, hits = scan([svc], repo)
+        if findings:
+            fails.append(f"an allowlisted file produced a finding: {findings}")
+        if only not in hits:
+            fails.append("an allowlisted file was not recorded as a HIT — a stale allowlist "
+                         "entry could then never be detected and the list becomes permanent")
+
+    # A live read: the fixtures cannot tell that the money-path list and the layout still
+    # resolve in this repo.
+    live_services = money_path_services()
+    if not live_services:
+        fails.append("reading the real rules.yaml produced NO money-path services — this gate "
+                     "would report clean about nobody")
+
+    if fails:
+        for f_ in fails:
+            sys.stderr.write(f"::error::self-test: {f_}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: accounting-clock gate is falsifiable "
+          f"(10 cases + a live read of {len(live_services)} money-path services)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--enforce", action="store_true", help="exit 1 on violations")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     services = money_path_services()
     if not services:

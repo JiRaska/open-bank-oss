@@ -79,13 +79,16 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
  */
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
+/** Server-owned campaign context for one opaque app interaction reference. */
+data class CampaignInteractionAttribution(val campaignId: UUID, val stepOrder: Int, val channel: Channel)
+
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
 
     /**
-     * Whether [interactionRef] names a PUSH send made to [partyId]. This is intentionally a
+     * Whether [interactionRef] names an attributable app placement made to [partyId]. This is intentionally a
      * yes/no capability: the customer edge must never learn the campaign, step or another
      * party from a reference supplied by a device.
      *
@@ -93,7 +96,8 @@ interface SendLogRepository {
      * send-log lookup; an adapter that has not implemented attribution cannot accidentally
      * validate a client-controlled reference.
      */
-    suspend fun hasPushInteractionForParty(interactionRef: UUID, partyId: UUID): Boolean = false
+    suspend fun attributionForAppInteraction(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
+        null
 
     /**
      * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1
@@ -216,6 +220,22 @@ data class NotificationSendRequest(
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
     suspend fun requestSend(request: NotificationSendRequest)
+}
+
+/** One approved, customer-specific placement for the authenticated app home surface. */
+data class BannerPlacementRequest(
+    val interactionRef: UUID,
+    val partyId: UUID,
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val template: String,
+    val variables: Map<String, String>,
+    val deepLink: String,
+)
+
+/** Campaign emits placement commands; engagement-service owns rendering and event recording. */
+interface BannerPlacementPort {
+    suspend fun place(request: BannerPlacementRequest)
 }
 
 /** ADR-0200 D2 push: signals a live journey that consent was revoked for its party. */

@@ -99,6 +99,11 @@ mp:
         bootstrap:
           servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     outgoing:
+      campaign-banner-placements-out:
+        connector: smallrye-kafka
+        topic: openbank.campaign.banner.placements
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       notification-requests-out:
         connector: smallrye-kafka
         topic: openbank.notification.requests
