@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.5...audit-service-v0.14.6) (2026-08-13)
+
+
+### Bug Fixes
+
+* **audit:** namespace the shared channel field by source topic ([#4715](https://github.com/JiRaska/open-bank-oss/issues/4715)) ([9bcb31a](https://github.com/JiRaska/open-bank-oss/commit/9bcb31a2f37133683600c7e5c828ea13355b421e))
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.4...audit-service-v0.14.5) (2026-08-13)
 
 

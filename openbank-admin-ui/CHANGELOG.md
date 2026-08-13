@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.121.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.120.0...admin-ui-v0.121.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** clarify campaign customer surfaces ([#4714](https://github.com/JiRaska/open-bank-oss/issues/4714)) ([921810a](https://github.com/JiRaska/open-bank-oss/commit/921810adefde790e06477a9aab794ec1a08b64c2))
+* **campaign:** add explicit decision sources ([#4690](https://github.com/JiRaska/open-bank-oss/issues/4690)) ([3296001](https://github.com/JiRaska/open-bank-oss/commit/3296001b81fda644c6ba8d0b4d7b8703b2f5bc22))
+
 ## [0.120.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.119.0...admin-ui-v0.120.0) (2026-08-13)
 
 
