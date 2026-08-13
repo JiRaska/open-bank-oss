@@ -14,6 +14,7 @@ import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCa
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
+import { CampaignAttentionFunnel, type CampaignAttentionMetric } from '@/components/campaigns/CampaignAttentionFunnel'
 
 interface Campaign {
   id: string
@@ -99,14 +100,6 @@ interface ContentExperiment {
   }
 }
 
-interface CampaignEngagementMetric {
-  stepOrder: number
-  channel: 'PUSH' | 'BANNER'
-  surface: 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
-  type: 'IMPRESSION' | 'CLICK' | 'DISMISS'
-  count: number
-}
-
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -114,7 +107,7 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
-  engagement: CampaignEngagementMetric[]
+  engagement: CampaignAttentionMetric[]
   experiment: Experiment | null
   contentExperiment: ContentExperiment | null
   entryCatalogues?: {
@@ -743,6 +736,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               </SectionBoundary>
             )}
           </section>
+
+          {detail?.sources?.engagement === 'ok' && <CampaignAttentionFunnel metrics={engagement} />}
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
