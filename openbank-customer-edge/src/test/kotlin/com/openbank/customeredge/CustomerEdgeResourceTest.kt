@@ -279,14 +279,19 @@ class CustomerEdgeResourceTest {
     fun `recordSurfaceEvent validates an opaque interaction reference for the caller before forwarding`() {
         val caller = UUID.randomUUID()
         val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
         val upstream = mockk<UpstreamClient>()
+        val forwarded = slot<String>()
         every {
             upstream.get(
                 "http://campaign/api/v1/campaigns/interactions/$interactionRef",
                 caller.toString(),
             )
-        } returns Response.noContent().build()
-        every { upstream.post(any(), caller.toString(), any(), any()) } returns Response.status(202).build()
+        } returns Response.ok(
+            """{"campaignId":"$campaignId","stepOrder":0,"channel":"PUSH"}""",
+        ).build()
+        every { upstream.post(any(), caller.toString(), capture(forwarded), any()) } returns
+            Response.status(202).build()
 
         val response = resourceFor(upstream, caller).recordSurfaceEvent(
             """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
@@ -300,6 +305,27 @@ class CustomerEdgeResourceTest {
             )
         }
         verify(exactly = 1) { upstream.post(any(), caller.toString(), any(), any()) }
+        assertThat(mapper.readTree(forwarded.captured).path("campaignId").asText()).isEqualTo(campaignId.toString())
+        assertThat(mapper.readTree(forwarded.captured).path("stepOrder").asInt()).isEqualTo(0)
+        assertThat(mapper.readTree(forwarded.captured).path("channel").asText()).isEqualTo("PUSH")
+    }
+
+    @Test
+    fun `recordSurfaceEvent strips client supplied campaign attribution without a validated reference`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val forwarded = slot<String>()
+        every { upstream.post(any(), caller.toString(), capture(forwarded), any()) } returns
+            Response.status(202).build()
+
+        resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","campaignId":"${UUID.randomUUID()}","stepOrder":99,"channel":"PUSH"}""",
+        )
+
+        val node = mapper.readTree(forwarded.captured)
+        assertThat(node.has("campaignId")).isFalse()
+        assertThat(node.has("stepOrder")).isFalse()
+        assertThat(node.has("channel")).isFalse()
     }
 
     @Test
@@ -315,6 +341,20 @@ class CustomerEdgeResourceTest {
 
         assertThat(response.status).isEqualTo(400)
         verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `recordSurfaceEvent rejects a client claimed conversion without forwarding`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+
+        val response = resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CONVERSION"}""",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+        verify(exactly = 0) { upstream.get(any(), any()) }
     }
 
     @Test
