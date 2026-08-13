@@ -84,6 +84,10 @@ data class StepRequest(
     val mobileDestination: MobileDestination? = null,
     /** Closed authenticated-app inventory for a BANNER placement; absent preserves HOME_BANNER. */
     val inAppSurface: InAppSurface? = null,
+    /** Optional path-experiment treatment for arm B; all three fields preserve the copy-only default. */
+    val variantBTemplate: String? = null,
+    val variantBChannel: Channel? = null,
+    val variantBDelaySeconds: Long? = null,
 )
 
 /**
@@ -147,6 +151,9 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
                 it.fallbackToPush,
                 it.mobileDestination,
                 it.inAppSurface,
+                it.variantBTemplate,
+                it.variantBChannel,
+                it.variantBDelaySeconds,
             )
         }
         val campaign = service.createDraft(
