@@ -77,6 +77,7 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
                 slot = slot,
                 type = type,
                 occurredAt = Instant.now(),
+                interactionRef = request.interactionRef,
             ),
         )
         return Response.status(Response.Status.ACCEPTED).build()
@@ -96,4 +97,11 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
     )
 }
 
-data class EngagementEventRequest(val partyId: UUID, val contentId: String, val slot: String, val type: String)
+data class EngagementEventRequest(
+    val partyId: UUID,
+    val contentId: String,
+    val slot: String,
+    val type: String,
+    /** Present only after customer-edge verified an opaque PUSH reference for this party. */
+    val interactionRef: UUID? = null,
+)

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.58.0...customer-edge-v0.59.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** validate push engagement attribution ([#4526](https://github.com/JiRaska/open-bank-oss/issues/4526)) ([512c831](https://github.com/JiRaska/open-bank-oss/commit/512c831570cc654246f92e4447d5b868b40957f8))
+
 ## [0.58.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.57.1...customer-edge-v0.58.0) (2026-08-13)
 
 

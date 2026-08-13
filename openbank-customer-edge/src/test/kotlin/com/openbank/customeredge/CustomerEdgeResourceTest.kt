@@ -48,6 +48,7 @@ class CustomerEdgeResourceTest {
         accountServiceUrl = "http://account"
         balanceServiceUrl = "http://balance"
         engagementServiceUrl = "http://engagement"
+        campaignServiceUrl = "http://campaign"
     }
 
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
@@ -272,6 +273,48 @@ class CustomerEdgeResourceTest {
         assertThat(response.status).isEqualTo(Response.Status.ACCEPTED.statusCode)
         assertThat(mapper.readTree(body.captured).path("partyId").asText()).isEqualTo(caller.toString())
         assertThat(mapper.readTree(body.captured).path("contentId").asText()).isEqualTo("SAVINGS_RATE_BANNER")
+    }
+
+    @Test
+    fun `recordSurfaceEvent validates an opaque interaction reference for the caller before forwarding`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every {
+            upstream.get(
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef",
+                caller.toString(),
+            )
+        } returns Response.noContent().build()
+        every { upstream.post(any(), caller.toString(), any(), any()) } returns Response.status(202).build()
+
+        val response = resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
+        )
+
+        assertThat(response.status).isEqualTo(202)
+        verify(exactly = 1) {
+            upstream.get(
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef",
+                caller.toString(),
+            )
+        }
+        verify(exactly = 1) { upstream.post(any(), caller.toString(), any(), any()) }
+    }
+
+    @Test
+    fun `recordSurfaceEvent rejects another party interaction reference without forwarding`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), caller.toString()) } returns Response.status(404).build()
+
+        val response = resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
     }
 
     @Test

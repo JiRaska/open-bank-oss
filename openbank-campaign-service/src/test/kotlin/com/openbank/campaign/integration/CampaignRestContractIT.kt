@@ -127,6 +127,83 @@ class CampaignRestContractIT {
         }
     }
 
+    private fun insertPushSend(campaignId: UUID, partyId: UUID): UUID {
+        val interactionRef = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO send_log (id, campaign_id, party_id, step_order, outcome, occurred_at, delivery_status, channel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, interactionRef)
+                statement.setObject(2, campaignId)
+                statement.setObject(3, partyId)
+                statement.setInt(4, 1)
+                statement.setString(5, "SENT")
+                statement.setObject(6, OffsetDateTime.now())
+                statement.setString(7, "PENDING")
+                statement.setString(8, "PUSH")
+                statement.executeUpdate()
+            }
+        }
+        return interactionRef
+    }
+
+    private fun insertCampaignForSendLog(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaigns (
+                    id, name, goal, segment_name, segment_version, steps_json, holdout_percent,
+                    state, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, campaignId)
+                statement.setString(2, "interaction validation fixture")
+                statement.setString(3, "prove private ownership validation")
+                statement.setString(4, "actives")
+                statement.setInt(5, 1)
+                statement.setString(6, "[]")
+                statement.setInt(7, 0)
+                statement.setString(8, "ACTIVE")
+                statement.setString(9, "fixture")
+                statement.setObject(10, OffsetDateTime.now())
+                statement.setObject(11, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `interaction validation is served only for the owning party and reveals no campaign data`() {
+        // The validation route intentionally needs no campaign lifecycle read. Seed the minimal
+        // durable parent directly, so this test runs entirely under the edge's ROLE_API identity
+        // rather than borrowing an operator token to create a draft.
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        val owner = UUID.randomUUID()
+        val interactionRef = insertPushSend(campaignId, owner)
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef")
+        } Then {
+            statusCode(204)
+        }
+
+        Given {
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef")
+        } Then {
+            statusCode(404)
+        }
+    }
+
     /**
      * The regression this file exists for, and the reason a manual check was not enough.
      *
