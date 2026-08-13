@@ -210,9 +210,9 @@ export default function NewCampaignPage() {
     })
 
   const incomplete = steps.some(s =>
-    (TEMPLATES[s.template] ?? []).some(v =>
-      !(s.variables[v] ?? '').trim() || (contentExperiment && !(s.variantBVariables?.[v] ?? '').trim()),
-    ),
+    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()) ||
+    (contentExperiment && (TEMPLATES[s.variantBTemplate ?? s.template] ?? [])
+      .some(v => !(s.variantBVariables?.[v] ?? '').trim())),
   )
   const entryConfigured =
     entryMode === 'MANUAL' ||
@@ -260,6 +260,9 @@ export default function NewCampaignPage() {
           ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
+          ...(contentExperiment && s.variantBTemplate ? { variantBTemplate: s.variantBTemplate } : {}),
+          ...(contentExperiment && s.variantBChannel ? { variantBChannel: s.variantBChannel } : {}),
+          ...(contentExperiment && s.variantBDelaySeconds !== undefined ? { variantBDelaySeconds: s.variantBDelaySeconds } : {}),
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
           ...(s.inAppSurface ? { inAppSurface: s.inAppSurface } : {}),

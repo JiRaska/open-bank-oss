@@ -588,16 +588,17 @@ class CampaignRestContractIT {
         }
     }
 
-    /** A/B content survives HTTP and has a measured endpoint even before either arm has enrolled. */
+    /** A/B paths survive HTTP and have a measured endpoint even before either arm has enrolled. */
     @Test
-    fun `a content experiment keeps both declared arms and exposes its empty measurement`() {
+    fun `a path experiment keeps both declared arms and exposes its empty measurement`() {
         val body = """
             {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip",
              "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED",
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
-                       "variantBVariables":{"offerTitle":"B","offerText":"B copy","ctaText":"Try"},
-                       "fallbackToPush":true,
+                       "variantBVariables":{"offerTitle":"B"},
+                       "variantBTemplate":"MARKETING_PRODUCT_OFFER_PUSH","variantBChannel":"PUSH",
+                       "variantBDelaySeconds":86400,
                        "delaySeconds":0}]}
         """.trimIndent()
 
@@ -617,7 +618,9 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("steps[0].variantBVariables.offerTitle", org.hamcrest.Matchers.equalTo("B"))
-            body("steps[0].fallbackToPush", org.hamcrest.Matchers.equalTo(true))
+            body("steps[0].variantBTemplate", org.hamcrest.Matchers.equalTo("MARKETING_PRODUCT_OFFER_PUSH"))
+            body("steps[0].variantBChannel", org.hamcrest.Matchers.equalTo("PUSH"))
+            body("steps[0].variantBDelaySeconds", org.hamcrest.Matchers.equalTo(86400))
         }
         When {
             get("/api/v1/campaigns/$id/content-experiment")

@@ -76,9 +76,10 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         ) {
             return TerminationReason.STOPPED_MAX_SENDS
         }
-        if (step.delaySeconds > 0) {
+        val delaySeconds = activities.delayForStep(campaignId, partyId, step)
+        if (delaySeconds > 0) {
             // Pause prevents delivery but does not shift the business deadline.
-            waitThroughDelay(campaignId, partyId, controlVersion, step.delaySeconds)?.let { return it }
+            waitThroughDelay(campaignId, partyId, controlVersion, delaySeconds)?.let { return it }
         }
         // Conditions are evaluated after the delay, when the predecessor's outcome can exist.
         if (step.condition != null &&

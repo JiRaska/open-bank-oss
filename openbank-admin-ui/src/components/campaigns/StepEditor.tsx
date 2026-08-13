@@ -69,6 +69,9 @@ export function StepEditor({
 }) {
   const { t } = useLanguage()
   const declared = templates[step.template] ?? []
+  const variantBTemplate = step.variantBTemplate ?? step.template
+  const variantBChannel = step.variantBChannel ?? step.channel
+  const variantBDeclared = templates[variantBTemplate] ?? []
   const missing = declared.filter(v => !(step.variables[v] ?? '').trim())
   // `.input` is the console's own field style — hover, focus ring, sizing — and I had hand-rolled a
   // worse copy of it. Reinventing a house primitive is the same failure ADR-0208 D2 names for colour.
@@ -308,12 +311,57 @@ export function StepEditor({
             <p className="text-sm font-medium">{t('Varianta B', 'Variant B')}</p>
             <p className="text-xs text-muted-foreground">
               {t(
-                'Každý člověk zůstane po celou cestu ve stejné variantě. Změňte jen hodnoty, které chcete porovnat.',
-                'Each person stays in the same variant throughout the journey. Change only the values you want to compare.',
+                'Každý člověk zůstane po celou cestu ve stejné variantě. B může porovnávat copy, kanál i časování; stejný člověk se mezi nimi nikdy nepřepíná.',
+                'Each person stays in the same variant throughout the journey. B can compare copy, channel and timing; one person is never switched between them.',
               )}
             </p>
           </div>
-          {declared.map(v => (
+          <div className="grid gap-3 sm:grid-cols-3" data-variant-b-path={index}>
+            <label className="space-y-1.5 text-sm">
+              <span className="font-medium">{t('Kanál B', 'B channel')}</span>
+              <select
+                className={field}
+                value={variantBChannel}
+                onChange={e => {
+                  const channel = e.target.value as EditorChannel
+                  const first = Object.keys(templates).find(tpl => templateChannel[tpl] === channel && (
+                    channel !== 'BANNER' || tpl === IN_APP_TEMPLATE.HOME_BANNER
+                  ))
+                  if (!first) return
+                  onChange({ ...step, variantBChannel: channel, variantBTemplate: first, variantBVariables: {} })
+                }}
+              >
+                {(['EMAIL', 'PUSH', 'BANNER'] as EditorChannel[]).map(channel => (
+                  <option key={channel} value={channel} disabled={step.fallbackToPush && channel !== 'EMAIL'}>
+                    {channel === 'EMAIL' ? t('E-mail', 'Email') : channel === 'PUSH' ? t('Push do aplikace', 'App push') : t('Banner v aplikaci', 'In-app banner')}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="space-y-1.5 text-sm">
+              <span className="font-medium">{t('Šablona B', 'B template')}</span>
+              <select
+                className={field}
+                value={variantBTemplate}
+                onChange={e => onChange({ ...step, variantBTemplate: e.target.value, variantBVariables: {} })}
+              >
+                {Object.keys(templates).filter(tpl => templateChannel[tpl] === variantBChannel && (
+                  variantBChannel !== 'BANNER' || tpl === IN_APP_TEMPLATE.HOME_BANNER
+                )).map(tpl => <option key={tpl} value={tpl}>{templateLabels[tpl] ?? tpl}</option>)}
+              </select>
+            </label>
+            <label className="space-y-1.5 text-sm">
+              <span className="font-medium">{t('Čekání B (dny)', 'B wait (days)')}</span>
+              <input
+                type="number"
+                min="0"
+                className={field}
+                value={(step.variantBDelaySeconds ?? step.delaySeconds) / 86400}
+                onChange={e => onChange({ ...step, variantBDelaySeconds: Math.max(0, Number(e.target.value) || 0) * 86400 })}
+              />
+            </label>
+          </div>
+          {variantBDeclared.map(v => (
             <div key={v} className="space-y-1.5">
               <label htmlFor={`var-b-${index}-${v}`} className="text-sm font-medium">
                 {variableLabels[v]?.label ?? v}
