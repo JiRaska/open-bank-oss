@@ -110,6 +110,20 @@ mp:
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # Attributable in-app attention events emitted by engagement-service.  This is aggregate-only
+      # reporting: lag can make a metric temporarily unavailable, but can never affect delivery or
+      # enrolment.  Start at latest so enabling the projection cannot reprocess historic, pre-
+      # attribution app behaviour into a campaign funnel.
+      engagement-events-in:
+        connector: smallrye-kafka
+        topic: openbank.engagement.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-engagement-events
+        auto:
+          offset:
+            reset: latest
       # ADR-0239 D3: delivery outcomes for this service's own send requests, correlated by the
       # send-log row id. Its own consumer group, not the service-wide default one shared with
       # consent-events-in: two channels in one group makes both subscriptions one member set, so a

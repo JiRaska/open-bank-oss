@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.27.0
+  version: 1.28.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -389,6 +389,29 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/StepFunnel'
+
+  /api/v1/campaigns/{id}/engagement:
+    get:
+      tags: [Campaigns]
+      summary: Attributable in-app attention by campaign step and surface
+      description: >-
+        Aggregate event observations from an opaque, server-validated campaign interaction
+        reference. These are not people and are never product conversion: one person can create
+        several impressions, clicks or dismissals. Organic and unknown app content is excluded
+        rather than guessed into this funnel; an empty response therefore means no attributable
+        event has arrived, not that exposure was proven to be zero.
+      operationId: campaignEngagement
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: Aggregate attributable app engagement, ordered by step and surface
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CampaignEngagementMetric'
 
   /api/v1/campaigns/{id}/sends/summary:
     get:
@@ -901,6 +924,25 @@ components:
             rather than sent as zero, so a client cannot render an empty bar segment.
           items:
             $ref: '#/components/schemas/SuppressionCount'
+
+    CampaignEngagementMetric:
+      type: object
+      required: [stepOrder, channel, surface, type, count]
+      description: >-
+        An aggregate count of app observations, never customer identities, unique people or
+        product conversions. It is deduplicated by the source event id against Kafka redelivery.
+      properties:
+        stepOrder: { type: integer, minimum: 0 }
+        channel:
+          type: string
+          enum: [PUSH, BANNER]
+        surface:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [IMPRESSION, CLICK, DISMISS]
+        count: { type: integer, format: int64, minimum: 0 }
 
     SuppressionCount:
       type: object

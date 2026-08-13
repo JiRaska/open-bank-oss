@@ -7,6 +7,10 @@ package com.openbank.campaign.infrastructure.persistence
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
+import com.openbank.campaign.application.port.out.CampaignEngagementEvent
+import com.openbank.campaign.application.port.out.CampaignEngagementEventType
+import com.openbank.campaign.application.port.out.CampaignEngagementMetric
+import com.openbank.campaign.application.port.out.CampaignEngagementRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
@@ -30,6 +34,7 @@ import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
@@ -187,6 +192,37 @@ class SendLogEntity : PanacheEntityBase() {
     /** Actual request medium; nullable so migration leaves historical decision rows intact. */
     @Column(length = 8)
     var channel: String? = null
+}
+
+/**
+ * GDPR-minimised local projection of an attributable app event.  The source event's party id is
+ * intentionally not copied: Campaign Studio needs aggregate attention signals, not a customer
+ * behavioural-history table.  The event id is the idempotency boundary for Kafka redelivery.
+ */
+@Entity
+@Table(name = "campaign_engagement_event")
+class CampaignEngagementEventEntity : PanacheEntityBase() {
+    @Id
+    @Column(nullable = false, updatable = false)
+    lateinit var eventId: UUID
+
+    @Column(nullable = false)
+    lateinit var campaignId: UUID
+
+    @Column(nullable = false)
+    var stepOrder: Int = 0
+
+    @Column(nullable = false, length = 8)
+    lateinit var channel: String
+
+    @Column(nullable = false, length = 32)
+    lateinit var surface: String
+
+    @Column(nullable = false, length = 16)
+    lateinit var type: String
+
+    @Column(nullable = false)
+    lateinit var occurredAt: Instant
 }
 
 @Entity
@@ -385,6 +421,49 @@ class PanacheCampaignContentExperimentRepository : CampaignContentExperimentRepo
                 converted = row[2] as Long,
             )
         }
+}
+
+/** Event-id idempotency is enforced by Postgres, not a racy read-then-write check in a consumer. */
+@ApplicationScoped
+class PanacheCampaignEngagementRepository : CampaignEngagementRepository {
+    override suspend fun record(event: CampaignEngagementEvent): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Any>(
+                "INSERT INTO campaign_engagement_event " +
+                    "(event_id, campaign_id, step_order, channel, surface, type, occurred_at) " +
+                    "VALUES (:eventId, :campaignId, :stepOrder, :channel, :surface, :type, :occurredAt) " +
+                    "ON CONFLICT (event_id) DO NOTHING",
+            )
+                .setParameter("eventId", event.eventId)
+                .setParameter("campaignId", event.campaignId)
+                .setParameter("stepOrder", event.stepOrder)
+                .setParameter("channel", event.channel.name)
+                .setParameter("surface", event.surface.name)
+                .setParameter("type", event.type.name)
+                .setParameter("occurredAt", event.occurredAt)
+                .executeUpdate()
+        }
+    }.awaitSuspending() == 1
+
+    override suspend fun metrics(campaignId: UUID): List<CampaignEngagementMetric> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.stepOrder, e.channel, e.surface, e.type, count(e) " +
+                    "from CampaignEngagementEventEntity e where e.campaignId = :campaignId " +
+                    "group by e.stepOrder, e.channel, e.surface, e.type " +
+                    "order by e.stepOrder, e.channel, e.surface, e.type",
+                Array<Any>::class.java,
+            ).setParameter("campaignId", campaignId).resultList
+        }
+    }.awaitSuspending().map { row ->
+        CampaignEngagementMetric(
+            stepOrder = row[0] as Int,
+            channel = Channel.valueOf(row[1] as String),
+            surface = InAppSurface.valueOf(row[2] as String),
+            type = CampaignEngagementEventType.valueOf(row[3] as String),
+            count = row[4] as Long,
+        )
+    }
 }
 
 @ApplicationScoped
