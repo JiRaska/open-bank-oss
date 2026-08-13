@@ -83,6 +83,8 @@ describe('campaign launch readiness', () => {
           conversionRule={null}
           contentExperiment={false}
           steps={[{ ...push, channel: 'EMAIL', mobileDestination: undefined }]}
+          stopAfter={null}
+          guardrails={{ maxSendsPerParty: 2, sendWindowHours: 168, quietHoursStart: 21, quietHoursEnd: 8, timeZone: 'Europe/Prague' }}
         />
       </LanguageProvider>,
     )
@@ -90,6 +92,7 @@ describe('campaign launch readiness', () => {
     expect(container.querySelector('[data-readiness="audience"][data-state="waiting"]')).toBeTruthy()
     expect(container.querySelector('[data-readiness="content"][data-state="waiting"]')).toBeTruthy()
     expect(container.querySelector('[data-readiness="policy"][data-state="ready"]')).toBeTruthy()
+    expect(screen.getByText(/max 2 contacts per person in 168 h/)).toBeTruthy()
     expect(screen.getByText(/Journey has no in-app step/)).toBeTruthy()
   })
 })

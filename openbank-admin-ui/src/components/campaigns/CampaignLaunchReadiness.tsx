@@ -16,6 +16,15 @@ interface ReadinessItem {
   detail: string
 }
 
+/** Live platform policy from campaign-service, deliberately separate from a campaign's own stop cap. */
+export interface CampaignContactGuardrails {
+  maxSendsPerParty: number
+  sendWindowHours: number
+  quietHoursStart: number
+  quietHoursEnd: number
+  timeZone: string
+}
+
 /**
  * Turns platform constraints into a launch conversation at the point of authoring.
  *
@@ -32,6 +41,8 @@ export function CampaignLaunchReadiness({
   conversionRule,
   contentExperiment,
   steps,
+  stopAfter,
+  guardrails,
 }: {
   audienceChosen: boolean
   audienceSize: number | null
@@ -40,11 +51,14 @@ export function CampaignLaunchReadiness({
   conversionRule: string | null
   contentExperiment: boolean
   steps: EditorStep[]
+  stopAfter: number | null
+  guardrails: CampaignContactGuardrails | null
 }) {
   const { t, language } = useLanguage()
   const n = (value: number) => value.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')
   const appPlacement = steps.find(step => step.channel === 'PUSH' || step.channel === 'BANNER')
   const readyCount = [audienceChosen, entryConfigured, !incomplete, !contentExperiment || conversionRule !== null].filter(Boolean).length
+  const hour = (value: number) => `${String(value).padStart(2, '0')}:00`
 
   const items: ReadinessItem[] = [
     audienceChosen
@@ -70,7 +84,18 @@ export function CampaignLaunchReadiness({
     appPlacement
       ? { id: 'destination', state: 'ready', label: t('Krok v aplikaci má bezpečný cíl', 'In-app step has a safe destination'), detail: t('Jen schválený deep link; žádná URL z kampaně.', 'An approved deep link only; no campaign-entered URL.') }
       : { id: 'destination', state: 'attention', label: t('Cesta zatím nemá krok v aplikaci', 'Journey has no in-app step yet'), detail: t('Přidejte push nebo banner, pokud má kampaň přivést lidi zpět do aplikace.', 'Add a push or banner if the campaign should bring people back into the app.') },
-    { id: 'policy', state: 'ready', label: t('Ochrana kontaktu zůstává zapnutá', 'Contact protection stays on'), detail: t('Souhlas, tiché hodiny a frekvenční limit se ověřují při doručení.', 'Consent, quiet hours and frequency limits are checked at delivery.') },
+    stopAfter !== null
+      ? { id: 'journey-cap', state: 'ready', label: t('Cesta má vlastní limit', 'Journey has its own cap'), detail: t(`Jedna osoba skončí po ${n(stopAfter)} odesláních v této cestě.`, `A person exits this journey after ${n(stopAfter)} sends.`) }
+      : { id: 'journey-cap', state: 'attention', label: t('Cesta nemá vlastní limit', 'Journey has no own cap'), detail: t('Platí stále platformní ochrana níže; vlastní limit je další kontrola, ne její náhrada.', 'The platform protection below still applies; an own cap is an additional control, not a replacement.') },
+    guardrails
+      ? {
+          id: 'policy', state: 'ready', label: t('Ochrana kontaktu je potvrzená', 'Contact protection is confirmed'),
+          detail: t(
+            `E-mail a push: max. ${n(guardrails.maxSendsPerParty)} kontaktů na osobu za ${n(guardrails.sendWindowHours)} h; tiché hodiny ${hour(guardrails.quietHoursStart)}–${hour(guardrails.quietHoursEnd)} (${guardrails.timeZone}). Souhlas se znovu ověřuje před odesláním.`,
+            `Email and push: max ${n(guardrails.maxSendsPerParty)} contacts per person in ${n(guardrails.sendWindowHours)} h; quiet hours ${hour(guardrails.quietHoursStart)}–${hour(guardrails.quietHoursEnd)} (${guardrails.timeZone}). Consent is rechecked before send.`,
+          ),
+        }
+      : { id: 'policy', state: 'attention', label: t('Ochranu kontaktu se nepodařilo ověřit', 'Contact protection could not be confirmed'), detail: t('Návrh můžete připravit, ale před odesláním ověřte aktuální limity. Souhlas se vždy kontroluje živě při doručení.', 'You can prepare the draft, but verify the current limits before sending. Consent is always checked live at delivery.') },
   ]
 
   return (
