@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.114.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.0...admin-ui-v0.114.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** label regulatory preview honestly ([#4610](https://github.com/JiRaska/open-bank-oss/issues/4610)) ([7b9c592](https://github.com/JiRaska/open-bank-oss/commit/7b9c592aed59b6081f607e1257c7418897b11766))
+
 ## [0.114.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.113.0...admin-ui-v0.114.0) (2026-08-13)
 
 
