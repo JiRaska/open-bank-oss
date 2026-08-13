@@ -1587,6 +1587,8 @@ gates:
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/gen-ai-governance-snapshot.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
@@ -2459,6 +2461,8 @@ gates:
     name: "MCP real-port requires caller auth first (BLOCKER #2206, enforced)"
     group: security
     mode: enforced
+    selftest: bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh .
 

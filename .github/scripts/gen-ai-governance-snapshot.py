@@ -325,7 +325,119 @@ def render(snapshot: dict) -> str:
     return json.dumps(snapshot, indent=2, ensure_ascii=False) + "\n"
 
 
+
+def self_test() -> int:
+    """Falsify the curated-input validator.
+
+    This snapshot is what openbank-admin-ui renders as the platform's AI-governance posture —
+    the phase, the D1-D9 decision statuses, the compliance rows. It is READ by people deciding
+    whether a control exists, so a validator that accepts a malformed or partial curated file
+    publishes a governance claim nobody checked.
+
+    Every rule fails in the same direction: accept less structure, and the snapshot renders
+    with a decision silently missing or a status nobody defined. The page still looks
+    complete, because a missing row is not a visible row.
+    """
+    import contextlib
+    import copy
+    import io
+
+    fails: list[str] = []
+
+    good = {
+        "adrRef": "ADR-0031",
+        "adrStatus": "accepted",
+        "phase": {"current": 2, "total": 5, "label": "phase two", "agentsActing": 3},
+        "decisions": [
+            {"id": f"D{i}", "title": f"t{i}", "status": "built", "detail": f"d{i}"}
+            for i in range(1, 10)
+        ],
+        "compliance": [{"control": "c", "status": "ok"}],
+        "auditTrail": {"capture": ["a"], "pipeline": ["b"], "live": ["c"], "planned": ["d"]},
+    }
+
+    def rejects(label: str, mutate) -> None:
+        """A mutated curated doc must be REJECTED (validate_curated raises SystemExit)."""
+        doc = copy.deepcopy(good)
+        mutate(doc)
+        sink = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(sink):
+                validate_curated(doc)
+        except SystemExit:
+            return
+        fails.append(f"{label}: accepted a document it must reject")
+
+    # The valid document must pass — without this a validator that rejects everything looks
+    # identical to a working one.
+    sink = io.StringIO()
+    try:
+        with contextlib.redirect_stderr(sink):
+            validate_curated(copy.deepcopy(good))
+    except SystemExit:
+        fails.append(f"a well-formed curated document was rejected: {sink.getvalue().strip()}")
+
+    # Top-level keys: each one absent means a section of the published page has no source.
+    for key in ("adrRef", "adrStatus", "phase", "decisions", "compliance", "auditTrail"):
+        rejects(f"a missing top-level {key!r}", lambda d, k=key: d.pop(k))
+
+    # The phase block drives the headline number on the page.
+    for key in ("current", "total", "label", "agentsActing"):
+        rejects(f"a missing phase.{key}", lambda d, k=key: d["phase"].pop(k))
+    rejects("a non-mapping phase", lambda d: d.update(phase=["not", "a", "map"]))
+
+    # D1-D9 must appear EXACTLY, in order. A dropped decision is the failure that matters most
+    # here: the page renders eight rows and reads as complete, because a row that is not there
+    # cannot look wrong.
+    rejects("a dropped decision", lambda d: d["decisions"].pop())
+    rejects("decisions out of order", lambda d: d["decisions"].reverse())
+    rejects("a renamed decision id",
+            lambda d: d["decisions"][0].update(id="D0"))
+    rejects("a duplicated decision id",
+            lambda d: d["decisions"].__setitem__(1, dict(d["decisions"][0])))
+    rejects("a non-list decisions", lambda d: d.update(decisions={"id": "D1"}))
+
+    # Per-decision fields, and the closed status vocabulary — an unknown status renders as
+    # something the reader will interpret, having never been defined.
+    for key in ("id", "title", "status", "detail"):
+        rejects(f"a decision missing {key!r}", lambda d, k=key: d["decisions"][3].pop(k))
+    rejects("an invalid decision status",
+            lambda d: d["decisions"][2].update(status="mostly-done"))
+    for ok_status in sorted(ALLOWED_D_STATUSES):
+        doc = copy.deepcopy(good)
+        doc["decisions"][0]["status"] = ok_status
+        sink = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(sink):
+                validate_curated(doc)
+        except SystemExit:
+            fails.append(f"the documented status {ok_status!r} was rejected")
+
+    # An EMPTY compliance list is the pure form of the failure: the section renders with no
+    # rows and reads as "nothing to report" rather than "nobody wrote this".
+    rejects("an empty compliance list", lambda d: d.update(compliance=[]))
+    rejects("a non-list compliance", lambda d: d.update(compliance="none"))
+
+    # The audit trail is the evidence half of the page. An empty list there renders as a
+    # section with no rows, which reads as "no audit gaps" rather than "nobody supplied the
+    # evidence" — the same shape as the compliance case, one level more consequential.
+    for key in ("capture", "pipeline", "live", "planned"):
+        rejects(f"an empty auditTrail.{key}", lambda d, k=key: d["auditTrail"].update({k: []}))
+        rejects(f"a missing auditTrail.{key}", lambda d, k=key: d["auditTrail"].pop(k))
+    rejects("a non-mapping auditTrail", lambda d: d.update(auditTrail=["x"]))
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: ai-governance snapshot validator is falsifiable (33 cases)")
+    return 0
+
 def main() -> None:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     parser = argparse.ArgumentParser(description="Generate the admin-ui AI governance snapshot")
     parser.add_argument("--check", action="store_true", help="verify the committed snapshot is up to date")
     args = parser.parse_args()
@@ -356,4 +468,8 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # `sys.exit(main() or 0)`, not a bare `main()`. main() is declared `-> None` and its other
+    # exits happen via fail() raising SystemExit, so a bare call discards any RETURNED code —
+    # which meant the self-test could print four failures and the process still exited 0.
+    # A harness whose verdict the process throws away is not a harness.
+    sys.exit(main() or 0)

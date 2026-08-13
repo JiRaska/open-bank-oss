@@ -49,6 +49,92 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
+# --- self-test ------------------------------------------------------------------------
+# BLOCKER #2206 and its successor #2401. Two states, and the gate must behave differently in
+# each — which is why both are pinned rather than just the one that is live today.
+#
+# PRE-CUTOVER: McpEndpoint.resolveContext() returns the hardcoded 'agent:mcp-anonymous'
+# placeholder. A stub port is fine; a REAL AccountReadPort/ProposalPort wired behind that
+# placeholder turns get_balance/list_accounts into an unauthenticated read of any account.
+#
+# POST-CUTOVER: every caller presents its own token 'sub'. Reintroducing the shared literal
+# collapses every caller back onto one charter's grant — a new caller silently inherits the
+# previous one's authorization WHILE THE AUDIT TRAIL STILL SHOWS PER-CALLER IDENTITY, which
+# is the part that makes it undetectable after the fact.
+#
+# The comment stripper is load-bearing in both: the KDoc explaining this rule necessarily
+# contains the forbidden literal, and a stripper that also ate STRING literals would hide the
+# real thing.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+
+  mk() { # mk <dir> <endpoint-body> [extra-file-name] [extra-body]
+    local d="$1" ep="$2" extra="${3:-}" body="${4:-}"
+    local base="$d/openbank-mcp-service/src/main/kotlin/com/openbank/mcp/infrastructure/mcp"
+    mkdir -p "$base"
+    printf '%b' "$ep" > "$base/McpEndpoint.kt"
+    [ -n "$extra" ] && printf '%b' "$body" > "$base/$extra"
+    return 0
+  }
+  expect() { # expect <label> <dir> <want-rc> [substring]
+    local label="$1" d="$2" want="$3" sub="${4:-}" out rc
+    out=$(bash "$SELF" "$d" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
+    fi
+  }
+
+  PLACEHOLDER='class McpEndpoint {\n  fun resolveContext() = "agent:mcp-anonymous"\n}\n'
+  CUTOVER='class McpEndpoint(private val r: CallerContextResolver) {\n  fun resolveContext() = r.resolve()\n}\n'
+  REAL_PORT='class LiveAccounts(private val db: Db) : AccountReadPort {\n}\n'
+  STUB_PORT='class StubAccounts {\n  fun balance() = 0L\n}\n'
+  VETOED='@Vetoed\nclass LiveAccounts(private val db: Db) : AccountReadPort {\n}\n'
+
+  # PRE-CUTOVER, only stubs: the sanctioned phase-1 state.
+  a="$td/pre-stub"; mk "$a" "$PLACEHOLDER" Stub.kt "$STUB_PORT"
+  expect "pre-cutover with only a stub port is clean" "$a" 0 "pre-cutover"
+
+  # THE BLOCKER: a real port behind the placeholder identity.
+  b="$td/pre-real"; mk "$b" "$PLACEHOLDER" Live.kt "$REAL_PORT"
+  expect "pre-cutover with a REAL port is blocked" "$b" 1 "UNAUTHENTICATED read"
+
+  # @Vetoed is the declared escape: the class exists but is not reachable.
+  c="$td/pre-vetoed"; mk "$c" "$PLACEHOLDER" Live.kt "$VETOED"
+  expect "a @Vetoed real port is permitted pre-cutover" "$c" 0 "pre-cutover"
+
+  # POST-CUTOVER: real ports are the point, so they must NOT be blocked.
+  d="$td/post-real"; mk "$d" "$CUTOVER" Live.kt "$REAL_PORT"
+  expect "post-cutover a real port is permitted" "$d" 0 "caller auth landed"
+
+  # ...but the shared literal must never come back.
+  e="$td/post-fallback"; mk "$e" "$CUTOVER" Live.kt 'val id = "agent:mcp-anonymous"\n'
+  expect "post-cutover the shared fallback identity is blocked" "$e" 1 "reintroduced"
+
+  # PROSE: the KDoc that explains this very rule contains the literal. If a comment counted,
+  # the gate would block the documentation of itself — and get deleted.
+  f="$td/post-comment"; mk "$f" "$CUTOVER" Doc.kt '// never hardcode "agent:mcp-anonymous" again\nclass X\n'
+  expect "the literal inside a comment is not a hit" "$f" 0 "caller auth landed"
+  g="$td/post-block-comment"; mk "$g" "$CUTOVER" Doc.kt '/* see #2401: "agent:mcp-anonymous" */\nclass X\n'
+  expect "the literal inside a block comment is not a hit" "$g" 0 "caller auth landed"
+
+  # ABSENCE must be explicit in both directions: no service at all is a legitimate skip, but a
+  # MISSING McpEndpoint.kt means the wiring moved and the guard can no longer see its subject
+  # — that is an error, not a pass.
+  h="$td/no-service"; mkdir -p "$h"
+  expect "an absent mcp-service skips explicitly" "$h" 0 "not present"
+  i="$td/no-endpoint"; mkdir -p "$i/openbank-mcp-service/src/main/kotlin"
+  expect "a missing McpEndpoint.kt is an ERROR, not a skip" "$i" 1 "cannot verify"
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: MCP caller-auth guard is falsifiable (9 cases)"
+  exit 0
+fi
+
 ROOT="${1:-.}"
 cd "$ROOT"
 SVC="openbank-mcp-service/src/main/kotlin"
