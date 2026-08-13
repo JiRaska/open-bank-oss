@@ -267,7 +267,7 @@
 .meshNode[data-status="human"] .meshStatus { color: #92400e; }
 .meshFooter {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto auto;
+  grid-template-columns: minmax(280px, 1fr) auto auto auto;
   align-items: center;
   gap: 16px;
   margin-top: 18px;

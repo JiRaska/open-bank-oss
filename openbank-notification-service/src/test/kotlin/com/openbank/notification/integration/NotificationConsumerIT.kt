@@ -8,6 +8,7 @@ import com.openbank.notification.application.NotificationConsumer.Companion.GENE
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.model.NotificationChannel
+import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushResult
@@ -449,6 +450,44 @@ class NotificationConsumerIT {
     }
 
     /**
+     * Issue #4512 — a PUSH for a party with NO device token must still leave a durable row.
+     *
+     * Measured in the sandbox on 2026-08-13: four SCA_APPROVAL pushes were logged on 2026-08-09
+     * (`PUSH: no active devices`, four distinct parties, three hours apart) and the `notifications`
+     * table holds no row for any of them — its newest row is 2026-08-08 11:35. Not erasure (no
+     * `GDPR Art. 17` log line and no `party-events-in` erase in the window), not a restore (the
+     * CNPG cluster has run on its original `initdb` bootstrap since 2026-06-01), and not a
+     * dispatch failure (`Failed to process notification` never logged).
+     *
+     * This pins the code path the issue accuses: `dispatch` persists the row in its own
+     * transaction BEFORE the channel fan-out, and the no-device branch then marks it FAILED with
+     * `no_active_device`. If this passes, the persistence path is sound and the missing rows are
+     * an operational fact about the deployment rather than a defect here — which is worth knowing
+     * before anyone "fixes" the code.
+     */
+    @Test
+    fun `a PUSH to a party with no device still persists a FAILED row and its reason`() {
+        val partyId = UUID.randomUUID()
+        // Deliberately seed nothing: this is the no-device case.
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.SCA_APPROVAL,
+                recipient = "no-device@example.com",
+                variables = mapOf("detail" to "Payment of 10.00 EUR"),
+            ),
+        )
+
+        // The row is the point. A notification that was attempted and left no trace cannot be
+        // counted, alerted on, or reconstructed after the fact.
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("FAILED")
+        assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_NO_DEVICE)
+    }
+
+    /**
      * ADR-0252 phase 0 — a fan-out where every adapter is DISABLED must not read as a delivery.
      *
      * This is the production shape that hid a dead push channel: `ApnsPushSender` is
@@ -523,8 +562,9 @@ class NotificationConsumerIT {
     }
 
     @Test
-    fun `PUSH payload carries only an allow-listed deep link alongside the opaque notification id`() {
+    fun `PUSH payload carries an allow-listed deep link and opaque interaction reference`() {
         val partyId = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
         val token = "apns-campaign-deep-link-token-it"
         OffContextPushSender.SENT.clear()
         seedActiveDevice(partyId, token)
@@ -537,11 +577,13 @@ class NotificationConsumerIT {
                 recipient = "campaign@example.com",
                 variables = mapOf("name" to "Campaign customer"),
                 deepLink = "openbank://savings",
+                interactionRef = interactionRef,
             ),
         )
 
         assertThat(OffContextPushSender.SENT.single { it.token == token }.data)
             .containsEntry("deepLink", "openbank://savings")
+            .containsEntry("interactionRef", interactionRef.toString())
             .containsKey("notificationId")
     }
 

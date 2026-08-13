@@ -16,6 +16,7 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
+import java.sql.Connection
 import java.sql.DriverManager
 import java.sql.Timestamp
 import java.time.Instant
@@ -135,6 +136,25 @@ class SurfaceRestContractIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a validated opaque interaction reference survives the real HTTP to database path`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readInteractionRefFor(party)).isEqualTo(interactionRef)
+    }
+
     // ── AdverseStateResource (issue #4265 item 1) ──────────────────────────────────────────────
     //
     // These live in THIS class rather than a second @QuarkusTest deliberately. A new IT class would
@@ -220,12 +240,7 @@ class SurfaceRestContractIT {
 
     /** The JDBC URL is the one EngagementPostgresTestResource injected — never a second copy. */
     private fun insertAdverseState(partyId: UUID, state: String) {
-        val config = ConfigProvider.getConfig()
-        DriverManager.getConnection(
-            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
-            config.getValue("quarkus.datasource.username", String::class.java),
-            config.getValue("quarkus.datasource.password", String::class.java),
-        ).use { conn ->
+        openTestDatabase().use { conn ->
             conn.prepareStatement(
                 "INSERT INTO party_adverse_state (id, party_id, state, set_at) VALUES (?, ?, ?, ?)",
             ).use { st ->
@@ -236,6 +251,26 @@ class SurfaceRestContractIT {
                 st.executeUpdate()
             }
         }
+    }
+
+    private fun readInteractionRefFor(partyId: UUID): UUID? = openTestDatabase().use { conn ->
+        readInteractionRef(conn, partyId)
+    }
+
+    private fun openTestDatabase(): Connection {
+        val config = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        )
+    }
+
+    private fun readInteractionRef(connection: Connection, partyId: UUID): UUID? = connection.prepareStatement(
+        "SELECT interaction_ref FROM engagement_event WHERE party_id = ? ORDER BY occurred_at DESC LIMIT 1",
+    ).use { statement ->
+        statement.setObject(1, partyId)
+        statement.executeQuery().use { rows -> if (rows.next()) rows.getObject(1, UUID::class.java) else null }
     }
 
     private companion object {

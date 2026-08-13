@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/v0.20.0...v0.21.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** validate push engagement attribution ([#4526](https://github.com/JiRaska/open-bank-oss/issues/4526)) ([512c831](https://github.com/JiRaska/open-bank-oss/commit/512c831570cc654246f92e4447d5b868b40957f8))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/v0.19.0...v0.20.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add push interaction reference ([#4516](https://github.com/JiRaska/open-bank-oss/issues/4516)) ([1bb708b](https://github.com/JiRaska/open-bank-oss/commit/1bb708b5f3d5bd8af2c578f4f530bd665bbe7e3e))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/v0.18.1...v0.19.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/v0.18.0...v0.18.1) (2026-08-08)
 
 

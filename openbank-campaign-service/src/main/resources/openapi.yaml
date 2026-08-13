@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.22.0
+  version: 1.23.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -20,6 +20,35 @@ tags:
   - name: Campaigns
 
 paths:
+  /api/v1/campaigns/interactions/{interactionRef}:
+    get:
+      tags: [Campaigns]
+      summary: Validate an opaque PUSH interaction reference for the caller party
+      description: >-
+        Internal customer-edge capability only. The request carries the authoritative caller party
+        in `X-Customer-Party-Id`; the response intentionally contains no campaign, step or party
+        data. A 404 has one meaning for every unsafe state: unknown reference, wrong party, a
+        non-PUSH handoff, or a send that was never accepted by notification-service.
+      parameters:
+        - name: interactionRef
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "204":
+          description: Reference belongs to the caller and originated from an accepted PUSH handoff
+        "400":
+          description: Missing or malformed caller party header
+        "404":
+          description: Reference is not valid for this caller; deliberately non-specific
+        "401":
+          description: Missing service token
+        "403":
+          description: Caller is not customer-edge
   /api/v1/campaigns:
     get:
       tags: [Campaigns]

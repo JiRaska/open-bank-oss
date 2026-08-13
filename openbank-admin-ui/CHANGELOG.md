@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.111.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.1...admin-ui-v0.111.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** call agent team swarm ([#4517](https://github.com/JiRaska/open-bank-oss/issues/4517)) ([ebfc7bb](https://github.com/JiRaska/open-bank-oss/commit/ebfc7bbd0d477f59cbeb986cffe22e6e3fb310fe))
+
+## [0.111.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.0...admin-ui-v0.111.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** call the agent collaboration a swarm, not a mesh ([#4506](https://github.com/JiRaska/open-bank-oss/issues/4506)) ([d2ad9e0](https://github.com/JiRaska/open-bank-oss/commit/d2ad9e0ba54abf688dcb3eeae815c2122f688885))
+
+## [0.111.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.110.0...admin-ui-v0.111.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** explain AI mesh ([#4496](https://github.com/JiRaska/open-bank-oss/issues/4496)) ([ba3b451](https://github.com/JiRaska/open-bank-oss/commit/ba3b45176eb791a26f20479516de10501292f9ec))
+* **campaign:** add marketer control room ([#4495](https://github.com/JiRaska/open-bank-oss/issues/4495)) ([5dc4141](https://github.com/JiRaska/open-bank-oss/commit/5dc414143c05815d43da3c50a3547db692e65356)), closes [#4476](https://github.com/JiRaska/open-bank-oss/issues/4476)
+
+## [0.110.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.109.0...admin-ui-v0.110.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.109.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.108.0...admin-ui-v0.109.0) (2026-08-13)
 
 

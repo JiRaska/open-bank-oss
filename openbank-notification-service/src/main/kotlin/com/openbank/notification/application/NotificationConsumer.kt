@@ -646,6 +646,7 @@ class NotificationConsumer {
         put("template", req.template.name)
         put("notificationId", entity.notificationId.toString())
         req.deepLink?.let { put("deepLink", it) }
+        req.interactionRef?.let { put("interactionRef", it.toString()) }
     }
 
     /**
