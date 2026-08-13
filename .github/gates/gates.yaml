@@ -1777,6 +1777,8 @@ gates:
     name: "accounting-clock gate — one business-date authority (ADR-0207 D1, enforced)"
     group: kotlin
     mode: enforced
+    selftest: python3 .github/scripts/check-accounting-clock.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-accounting-clock.py --enforce
 
@@ -2415,6 +2417,8 @@ gates:
     name: "psd2 anonymous grant stays behind eIDAS mTLS (issue #2169, enforced)"
     group: security
     mode: enforced
+    selftest: python3 .github/scripts/check-psd2-anonymous-grant-paths.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-psd2-anonymous-grant-paths.py --enforce
 
@@ -2453,6 +2457,8 @@ gates:
     name: "authz-enforce ⇒ PDP sidecar parity (enforced, #1797)"
     group: security
     mode: enforced
+    selftest: python3 .github/scripts/check-authz-pdp-parity.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-authz-pdp-parity.py . --enforce
 
