@@ -2050,6 +2050,23 @@ gates:
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
 
+  # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
+  # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
+  # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
+  # only the resources is invisible — file in git, object present in the sandbox because someone
+  # applied it, CI green — until a warehouse is rebuilt without it. V4__screen_feedback_context.sql
+  # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions.
+  - id: clickhouse-ddl-configmap-parity
+    min_subjects: 15   # 22 objects today (V1-V5 + the ConfigMap's copies, 2026-08-13)
+    name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
