@@ -209,7 +209,95 @@ def compare_avsc(path: str, old_text: str, new_text: str) -> list[str]:
     return findings
 
 
+def self_test() -> int:
+    """Falsify the Kotlin event parser and both compatibility comparators.
+
+    ADR-0006: an event on the wire is a contract with every consumer AND with every message
+    already in the topic. A removed property, a changed type, or a new required field breaks
+    REPLAY — historical payloads stop deserializing — and the failure surfaces at consumer
+    start-up, or worse during a replay months later, never in the PR that caused it.
+
+    Every rule below has a lenient direction that reports clean, which is the one that ships.
+    """
+    fails: list[str] = []
+
+    def case(label, findings, want_hit, want_sub=""):
+        got = bool(findings)
+        if got != want_hit:
+            fails.append(f"{label}: expected finding={want_hit}, got {findings}")
+        elif want_sub and not any(want_sub in f for f in findings):
+            fails.append(f"{label}: flagged for the wrong reason — no {want_sub!r} in {findings}")
+
+    def ev(body: str) -> dict:
+        return parse_events(body)
+
+    base = 'data class Paid(val id: String, val amount: Long) : DomainEvent()\n'
+    old = ev(base)
+    if "Paid" not in old or set(old["Paid"]["props"]) != {"id", "amount"}:
+        fails.append(f"the parser did not read the baseline event: {old}")
+
+    # Identical is compatible — without this case a comparator that flags everything looks
+    # exactly like a working one.
+    case("an unchanged event is compatible", compare_events("p", old, ev(base)), False)
+
+    # THE BREAKING SET. Each is invisible until a consumer or a replay hits it.
+    case("a removed property is breaking",
+         compare_events("p", old, ev('data class Paid(val id: String) : DomainEvent()\n')),
+         True, "removed")
+    case("a changed type is breaking",
+         compare_events("p", old, ev('data class Paid(val id: String, val amount: String) : DomainEvent()\n')),
+         True, "type changed")
+    case("a removed event class is breaking",
+         compare_events("p", old, ev('data class Other(val id: String) : DomainEvent()\n')),
+         True, "removed/renamed")
+
+    # ADDITIVE rules. A new field is only safe if old payloads can still deserialize — which
+    # means nullable, or defaulted. Getting this wrong in the lenient direction ships a
+    # required field into a topic full of messages that lack it.
+    case("a new REQUIRED non-nullable field is breaking",
+         compare_events("p", old, ev('data class Paid(val id: String, val amount: Long, val fee: Long) : DomainEvent()\n')),
+         True)
+    case("a new NULLABLE field is compatible",
+         compare_events("p", old, ev('data class Paid(val id: String, val amount: Long, val fee: Long?) : DomainEvent()\n')),
+         False)
+    case("a new DEFAULTED field is compatible",
+         compare_events("p", old, ev('data class Paid(val id: String, val amount: Long, val fee: Long = 0) : DomainEvent()\n')),
+         False)
+
+    # --- Avro, the other wire format ------------------------------------------------------
+    import json as _json
+    a_old = _json.dumps({"type": "record", "name": "Paid",
+                         "fields": [{"name": "id", "type": "string"}]})
+    case("an unchanged avsc is compatible", compare_avsc("s.avsc", a_old, a_old), False)
+    case("a removed avro field is breaking",
+         compare_avsc("s.avsc", a_old, _json.dumps({"type": "record", "name": "Paid", "fields": []})),
+         True)
+    a_new_req = _json.dumps({"type": "record", "name": "Paid", "fields": [
+        {"name": "id", "type": "string"}, {"name": "fee", "type": "long"}]})
+    case("a new avro field with no default is breaking", compare_avsc("s.avsc", a_old, a_new_req), True)
+    a_new_def = _json.dumps({"type": "record", "name": "Paid", "fields": [
+        {"name": "id", "type": "string"}, {"name": "fee", "type": "long", "default": 0}]})
+    case("a new avro field WITH a default is compatible",
+         compare_avsc("s.avsc", a_old, a_new_def), False)
+
+    # A class that is not a DomainEvent must not be parsed as one — otherwise every ordinary
+    # data class in the diff becomes an event contract and the gate is unusable.
+    if parse_events('data class NotAnEvent(val x: String)\n'):
+        fails.append("a plain data class was parsed as a DomainEvent")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: event schema compatibility is falsifiable (14 cases)")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", required=True)
     ap.add_argument("--enforce", action="store_true")

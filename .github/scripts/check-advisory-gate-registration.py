@@ -155,15 +155,123 @@ def advisory_manifest_gates(root: pathlib.Path, errors):
             yield MANIFEST, gate.get("group", "?"), gate.get("id", "?"), script
 
 
+def self_test() -> int:
+    """Falsify the rules walker and both advisory-gate discoverers.
+
+    ADR-0144: an advisory rule must carry a `target_enforce_date`, or "advisory" becomes
+    permanent by omission — a gate that warns forever is a gate nobody ever has to satisfy.
+    This script is what makes that checkable, so its own failure mode is the meta version of
+    the same thing: discover FEWER advisory gates and the registration requirement quietly
+    applies to fewer of them, with no signal that coverage shrank.
+
+    The walker is the part with real history. A line-wise scan attributed `enforced:` to
+    whichever bare `key:` it saw last, so a rule containing a nested mapping (`finops_tiers`
+    holds a `tiers:` sub-tree) had its metadata read under the wrong name — the gate reported
+    a rule as registered while reading ANOTHER rule's fields. The nested fixture below is
+    that case.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+        (root / RULES).parent.mkdir(parents=True, exist_ok=True)
+        (root / RULES).write_text(
+            "simple_rule:\n"
+            "  enforced: advisory\n"
+            '  target_enforce_date: "2026-12-31"\n'
+            '  ci_producer: ".github/scripts/check-simple.py"\n'
+            "no_date_rule:\n"
+            "  enforced: advisory\n"
+            '  ci_producer: ".github/scripts/check-nodate.py"\n'
+            "nested_rule:\n"
+            "  tiers:\n"
+            "    T3:\n"
+            "      budget: 10\n"
+            "  enforced: advisory\n"
+            '  target_enforce_date: "2026-12-31"\n'
+            '  ci_producer: ".github/scripts/check-nested.py"\n'
+        )
+        errors: list = []
+        got = rules_by_producer(root, errors)
+        if errors:
+            fails.append(f"a well-formed rules.yaml produced errors: {errors}")
+
+        for script, want_name, want_date in (
+            (".github/scripts/check-simple.py", "simple_rule", True),
+            (".github/scripts/check-nodate.py", "no_date_rule", False),
+            # THE HISTORICAL DEFECT: metadata after a nested mapping must still attribute to
+            # the OUTER rule. Read under `T3` it looked registered while describing nothing.
+            (".github/scripts/check-nested.py", "nested_rule", True),
+        ):
+            entry = got.get(script)
+            if entry is None:
+                fails.append(f"{script} was not found in the walk: {sorted(got)}")
+                continue
+            name, _enforced, has_date = entry
+            if name != want_name:
+                fails.append(f"{script} attributed to rule {name!r}, expected {want_name!r} "
+                             f"— metadata was read under the wrong rule")
+            if has_date != want_date:
+                fails.append(f"{script} has_date={has_date}, expected {want_date}")
+
+        # A missing rules.yaml is an ERROR, not an empty map: silently returning {} makes
+        # every advisory gate look unregistered, or (worse, depending on the caller) makes the
+        # check pass having read nothing.
+        errors2: list = []
+        rules_by_producer(root / "nowhere", errors2)
+        if not errors2:
+            fails.append("a missing rules.yaml produced no error")
+
+        # --- the manifest discoverer -------------------------------------------------------
+        gates_dir = root / ".github" / "gates"
+        gates_dir.mkdir(parents=True, exist_ok=True)
+        (gates_dir / "gates.yaml").write_text(
+            "gates:\n"
+            "  - id: adv\n"
+            "    name: an advisory gate\n"
+            "    group: lint\n"
+            "    mode: advisory\n"
+            "    run: |\n"
+            "      python3 .github/scripts/check-adv.py\n"
+            "  - id: enf\n"
+            "    name: an enforced gate\n"
+            "    group: lint\n"
+            "    mode: enforced\n"
+            "    run: |\n"
+            "      python3 .github/scripts/check-enf.py\n"
+        )
+        errs3: list = []
+        found = {script for _src, _grp, _gid, script in advisory_manifest_gates(root, errs3)}
+        if ".github/scripts/check-adv.py" not in found:
+            fails.append(f"the advisory manifest gate was not discovered: {sorted(found)}")
+        if ".github/scripts/check-enf.py" in found:
+            fails.append("an ENFORCED gate was discovered as advisory — it would then be "
+                         "required to carry a target_enforce_date it has no need of")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: advisory-gate registration is falsifiable (9 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
+    ap.add_argument("--self-test", action="store_true")
     ap.add_argument(
         "--expect-manifest",
         action="store_true",
         help="fail if .github/gates/gates.yaml contributes no advisory gate (see header)",
     )
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
     root = pathlib.Path(args.root).resolve()
 
     errors = []
