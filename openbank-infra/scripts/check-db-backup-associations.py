@@ -165,9 +165,97 @@ def applied_associations(cluster_name: str, region: str) -> set[str]:
     return parse_applied_associations(out)
 
 
+def self_test() -> int:
+    """Falsify the three readers this gate correlates.
+
+    A CNPG cluster that declares a barmanObjectStore but whose ServiceAccount has no
+    pod-identity association takes NO BACKUPS — and CNPG reports that as a backup failure in
+    its own status, nowhere a human looks. The database keeps serving, the WAL keeps rotating,
+    and the absence is discovered at restore time, the one moment it cannot be fixed.
+
+    Each of the three inputs can silently come back EMPTY, and an empty input makes the
+    correlation agree — this gate's own failure mode is the shape it exists to catch.
+    """
+    import tempfile
+    import json as _json
+
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # --- what terraform DECLARES ----------------------------------------------------------
+    tf = (
+        'resource "aws_eks_pod_identity_association" "ledger" {\n'
+        '  service_account = "ledger-db"\n'
+        '  namespace       = "openbank"\n'
+        '}\n'
+        'resource "aws_eks_pod_identity_association" "party" {\n'
+        '  service_account = "party-db"\n'
+        '}\n'
+    )
+    case("declared associations are read", sorted(declared_associations(tf)),
+         ["ledger-db", "party-db"])
+    # An empty tf declares nothing — which the caller must never read as "all clusters
+    # covered". Pinned so the emptiness is a known property rather than an accident.
+    case("an empty tf declares nothing", declared_associations(""), set())
+
+    # --- what AWS has APPLIED --------------------------------------------------------------
+    live = _json.dumps({"associations": [
+        {"serviceAccount": "ledger-db", "namespace": "openbank"},
+        {"serviceAccount": "party-db", "namespace": "openbank"},
+    ]})
+    case("applied associations are parsed", sorted(parse_applied_associations(live)),
+         ["ledger-db", "party-db"])
+    # THE HALF THE STATIC CHECK IS BLIND TO: a declaration never applied. An empty list must
+    # parse as empty rather than raise, or the live comparison is skipped and repo-only
+    # agreement is mistaken for coverage.
+    case("no live associations parses as empty",
+         parse_applied_associations('{"associations": []}'), set())
+    case("a response with no associations key parses as empty",
+         parse_applied_associations("{}"), set())
+
+    # --- which clusters actually BACK UP ---------------------------------------------------
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td)
+        (d / "ledger.yaml").write_text(
+            "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\n"
+            "metadata:\n  name: ledger-db\n  namespace: openbank\n"
+            "spec:\n  backup:\n    barmanObjectStore:\n      destinationPath: s3://backups/ledger\n")
+        # No barmanObjectStore ⇒ not backing up ⇒ not this gate's subject. Including it would
+        # demand an association for a database that takes no backups.
+        (d / "nobackup.yaml").write_text(
+            "apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\n"
+            "metadata:\n  name: cache-db\n  namespace: openbank\nspec:\n  instances: 1\n")
+        # STRIMZI also uses `kind: Cluster`. Without the apiVersion filter every Kafka
+        # manifest scores as a database with missing backups — noise that gets a gate switched
+        # off, which is the same outcome as not having one.
+        (d / "kafka.yaml").write_text(
+            "apiVersion: kafka.strimzi.io/v1beta2\nkind: Cluster\n"
+            "metadata:\n  name: events\n  namespace: openbank\n"
+            "spec:\n  backup:\n    barmanObjectStore:\n      destinationPath: s3://x\n")
+        # Malformed YAML must be skipped with a warning, not take the scan down — one bad file
+        # would otherwise hide every cluster after it.
+        (d / "broken.yaml").write_text("kind: Cluster\n  bad: [indent\n")
+
+        found = sorted(name for name, _ns, _src, _dest in backing_up_clusters(d))
+        case("only CNPG clusters WITH a barmanObjectStore are found", found, ["ledger-db"])
+        case("an empty gitops dir finds no clusters", backing_up_clusters(d / "nope"), [])
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: db-backup associations are falsifiable (9 cases)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--enforce", action="store_true", help="exit non-zero on findings")
+    parser.add_argument("--self-test", action="store_true")
     parser.add_argument(
         "--check-applied",
         action="store_true",
@@ -176,6 +264,9 @@ def main() -> int:
     parser.add_argument("--cluster-name", default=DEFAULT_EKS_CLUSTER, help="EKS cluster name")
     parser.add_argument("--region", default=DEFAULT_AWS_REGION, help="AWS region")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     if not TF_FILE.exists():
         print(f"::error::{TF_FILE} not found", file=sys.stderr)

@@ -330,11 +330,9 @@ def main():
 DEBT = {
     "adr-registry-integrity-check": DEBT_MARKER,
     "ai-governance-snapshot-drift": DEBT_MARKER,
-    "db-backup-association-gate": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
     "gen-network-policies-drift-gate": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
-    "openapi-route-conformance": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
 }
 

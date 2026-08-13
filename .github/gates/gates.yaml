@@ -544,6 +544,8 @@ gates:
     name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 openbank-infra/scripts/check-db-backup-associations.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
@@ -2010,6 +2012,8 @@ gates:
     name: "openapi-route-conformance — published contract vs served routes (enforced)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-openapi-route-conformance.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-openapi-route-conformance.py --enforce \
         --baseline .github/openapi-route-conformance-baseline.txt
