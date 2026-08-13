@@ -194,6 +194,14 @@ class CampaignRestContractIT {
         } When {
             get("/api/v1/campaigns/interactions/$interactionRef")
         } Then {
+            statusCode(204)
+        }
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
+        } Then {
             statusCode(200)
             body("campaignId", equalTo(campaignId.toString()))
             body("stepOrder", equalTo(0))
