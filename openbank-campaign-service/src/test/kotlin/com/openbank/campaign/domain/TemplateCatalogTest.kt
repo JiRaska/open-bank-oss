@@ -6,6 +6,8 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -90,6 +92,75 @@ class TemplateCatalogTest {
 class CampaignStepChannelTest {
 
     @Test
+    fun `a B cohort can take a different delivery path without changing its assigned treatment`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            variantBVariables = mapOf("offerTitle" to "Save today"),
+            variantBTemplate = "MARKETING_PRODUCT_OFFER_PUSH",
+            variantBChannel = Channel.PUSH,
+            variantBDelaySeconds = 86_400,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals(Channel.EMAIL, step.primaryDelivery(ContentVariant.A).channel)
+        assertEquals(Channel.PUSH, step.primaryDelivery(ContentVariant.B).channel)
+        assertEquals("Save today", step.primaryDelivery(ContentVariant.B).variables["offerTitle"])
+        assertEquals(86_400, step.delayFor(ContentVariant.B))
+    }
+
+    @Test
+    fun `a path experiment rejects an incomplete B treatment`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER",
+                channel = Channel.EMAIL,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                variantBTemplate = "MARKETING_PRODUCT_OFFER_PUSH",
+            )
+        }
+    }
+
+    @Test
+    fun `a B home-banner path never inherits A's different app surface`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            channel = Channel.BANNER,
+            variables = emptyMap(),
+            delaySeconds = 0,
+            inAppSurface = InAppSurface.HOME_CAROUSEL,
+            variantBVariables = emptyMap(),
+            variantBTemplate = "MARKETING_PRODUCT_OFFER_BANNER",
+            variantBChannel = Channel.BANNER,
+            mobileDestination = MobileDestination.HOME,
+        )
+
+        assertEquals(InAppSurface.HOME_BANNER, step.primaryDelivery(ContentVariant.B).inAppSurface)
+    }
+
+    @Test
+    fun `a B banner path requires its app destination before workflow handoff`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER",
+                channel = Channel.EMAIL,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                variantBVariables = emptyMap(),
+                variantBTemplate = "MARKETING_PRODUCT_OFFER_BANNER",
+                variantBChannel = Channel.BANNER,
+            )
+        }
+    }
+
+    @Test
     fun `a banner step carries its approved values to an app destination`() {
         val step = CampaignStep(
             order = 1,
@@ -101,7 +172,45 @@ class CampaignStepChannelTest {
         )
 
         assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
-        assertEquals(setOf("MARKETING_PRODUCT_OFFER_BANNER"), TemplateCatalog.forChannel(Channel.BANNER))
+        assertEquals(
+            setOf(
+                "MARKETING_PRODUCT_OFFER_BANNER",
+                "MARKETING_PRODUCT_OFFER_CAROUSEL",
+                "MARKETING_PRODUCT_OFFER_PRODUCT_FEED",
+                "MARKETING_PRODUCT_OFFER_REWARDS_HUB",
+            ),
+            TemplateCatalog.forChannel(Channel.BANNER),
+        )
+    }
+
+    @Test
+    fun `a carousel placement carries its selected surface through delivery`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+            inAppSurface = InAppSurface.HOME_CAROUSEL,
+        )
+
+        assertEquals(InAppSurface.HOME_CAROUSEL, step.primaryDelivery(null).inAppSurface)
+    }
+
+    @Test
+    fun `a banner template cannot be posted to a different app surface`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_BANNER",
+                channel = Channel.BANNER,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                mobileDestination = MobileDestination.HOME,
+                inAppSurface = InAppSurface.PRODUCT_FEED,
+            )
+        }
     }
 
     @Test

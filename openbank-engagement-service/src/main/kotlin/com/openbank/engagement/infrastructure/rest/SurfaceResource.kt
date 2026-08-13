@@ -90,7 +90,7 @@ class SurfaceResource(
             null
         }
         if (campaignAttribution?.channel == "BANNER" && !content.isCampaignPlacement) {
-            return badRequest("campaign banner attribution must name its assigned banner")
+            return badRequest("campaign banner attribution must name its assigned app placement")
         }
         record.record(
             EngagementEvent(
@@ -111,11 +111,10 @@ class SurfaceResource(
         val catalogue = SurfaceCatalog.ALL[request.contentId]
         if (catalogue != null) return catalogue.takeIf { it.slot == slot }?.let { ValidatedContent(false) }
 
-        val isCampaignPlacement = request.contentId == CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID &&
+        val isCampaignPlacement = CampaignBannerPlacement.isCampaignContentId(request.contentId) &&
             request.interactionRef != null &&
-            banners.belongsToParty(request.interactionRef, request.partyId)
-        val isInteractiveCampaignPlacement =
-            isCampaignPlacement && slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES
+            banners.belongsToPartyAtSlot(request.interactionRef, request.partyId, slot)
+        val isInteractiveCampaignPlacement = isCampaignPlacement && request.type in INTERACTION_EVENT_TYPES
         return if (isInteractiveCampaignPlacement) {
             ValidatedContent(true)
         } else {

@@ -185,6 +185,36 @@ class SurfaceRestContractIT {
 
     @Test
     @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a campaign carousel is attributed only in its assigned app surface`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(
+            interactionRef,
+            party,
+            campaignId,
+            slot = "HOME_CAROUSEL",
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+        )
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"CAMPAIGN_HOME_CAROUSEL","slot":"HOME_CAROUSEL","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "BANNER"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `a banner interaction cannot be attached to a catalogue card`() {
         val party = UUID.randomUUID()
         val interactionRef = UUID.randomUUID()
@@ -316,23 +346,30 @@ class SurfaceRestContractIT {
         }
     }
 
-    private fun insertCampaignBanner(interactionRef: UUID, partyId: UUID, campaignId: UUID) {
+    private fun insertCampaignBanner(
+        interactionRef: UUID,
+        partyId: UUID,
+        campaignId: UUID,
+        slot: String = "HOME_BANNER",
+        template: String = "MARKETING_PRODUCT_OFFER_BANNER",
+    ) {
         openTestDatabase().use { conn ->
             conn.prepareStatement(
                 """
                 INSERT INTO campaign_banner_placement
-                    (interaction_ref, party_id, campaign_id, step_order, template, values_json, deep_link, placed_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (interaction_ref, party_id, campaign_id, step_order, template, values_json, deep_link, placed_at, slot)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """.trimIndent(),
             ).use { st ->
                 st.setObject(1, interactionRef)
                 st.setObject(2, partyId)
                 st.setObject(3, campaignId)
                 st.setInt(4, 0)
-                st.setString(5, "MARKETING_PRODUCT_OFFER_BANNER")
+                st.setString(5, template)
                 st.setString(6, """{"offerTitle":"Savings","offerText":"Four percent","ctaText":"Explore"}""")
                 st.setString(7, "openbank://savings")
                 st.setTimestamp(8, Timestamp.from(Instant.now()))
+                st.setString(9, slot)
                 st.executeUpdate()
             }
         }

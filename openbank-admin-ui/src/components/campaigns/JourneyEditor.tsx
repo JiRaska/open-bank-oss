@@ -31,6 +31,8 @@ export type EditorChannel = 'EMAIL' | 'PUSH' | 'BANNER'
 
 export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
 
+export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
+
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 
 export interface EditorStep {
@@ -42,10 +44,16 @@ export interface EditorStep {
   condition?: EditorCondition
   /** Alternative B-arm values in a campaign-wide content experiment. */
   variantBVariables?: { [key: string]: string }
+  /** Optional journey-path treatment for B; absent retains the historical copy-only experiment. */
+  variantBTemplate?: string
+  variantBChannel?: EditorChannel
+  variantBDelaySeconds?: number
   /** Try the catalogue's safe app-push counterpart only when email consent is absent. */
   fallbackToPush?: boolean
   /** Closed app context reached after a push tap; never an arbitrary URL. */
   mobileDestination?: EditorMobileDestination
+  /** Closed in-app inventory for a BANNER step; absent remains the backwards-compatible home banner. */
+  inAppSurface?: EditorInAppSurface
 }
 
 export const MAX_STEPS = 5
@@ -302,7 +310,7 @@ export function JourneyEditor({
                   {t('KROK', 'STEP')} {i + 1} · {step.channel === 'PUSH'
                     ? t('PUSH', 'PUSH')
                     : step.channel === 'BANNER'
-                      ? t('BANNER V APLIKACI', 'IN-APP BANNER')
+                      ? t('PLOCHA V APLIKACI', 'IN-APP SURFACE')
                       : t('E-MAIL', 'EMAIL')}
                 </text>
                 <text x={x + 14 + ICON + 12} y={ROW_Y + 8} fontSize="13.5" fontWeight="600"

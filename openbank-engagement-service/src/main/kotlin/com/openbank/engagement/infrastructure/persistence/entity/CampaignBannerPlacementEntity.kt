@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.persistence.entity
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.engagement.domain.model.CampaignBannerPlacement
+import com.openbank.engagement.domain.model.SurfaceSlot
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -39,6 +40,9 @@ class CampaignBannerPlacementEntity : PanacheEntityBase() {
     lateinit var deepLink: String
 
     @Column(nullable = false)
+    lateinit var slot: String
+
+    @Column(nullable = false)
     lateinit var placedAt: Instant
 
     fun toDomain(mapper: ObjectMapper) = CampaignBannerPlacement(
@@ -50,6 +54,7 @@ class CampaignBannerPlacementEntity : PanacheEntityBase() {
         mapper.readValue(valuesJson),
         deepLink,
         placedAt,
+        SurfaceSlot.valueOf(slot),
     )
 
     companion object {
@@ -62,6 +67,7 @@ class CampaignBannerPlacementEntity : PanacheEntityBase() {
             valuesJson = mapper.writeValueAsString(placement.values)
             deepLink = placement.deepLink
             placedAt = placement.placedAt
+            slot = placement.slot.name
         }
     }
 }

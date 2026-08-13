@@ -37,9 +37,9 @@ interface AdverseStateRepository {
     suspend fun activeStates(partyId: UUID): Set<AdverseState>
 }
 
-/** Latest campaign banner wins for the fixed HOME_BANNER slot; no hidden ranking system exists. */
+/** Latest placement wins within each closed app surface; there is no hidden cross-surface ranking. */
 interface CampaignBannerPlacementRepository {
     suspend fun save(placement: CampaignBannerPlacement)
-    suspend fun latestForParty(partyId: UUID): CampaignBannerPlacement?
-    suspend fun belongsToParty(interactionRef: UUID, partyId: UUID): Boolean
+    suspend fun latestForPartyAndSlot(partyId: UUID, slot: SurfaceSlot): CampaignBannerPlacement?
+    suspend fun belongsToPartyAtSlot(interactionRef: UUID, partyId: UUID, slot: SurfaceSlot): Boolean
 }

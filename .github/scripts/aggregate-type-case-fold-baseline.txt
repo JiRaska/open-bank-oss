@@ -1,0 +1,14 @@
+# Known-debt BASELINE for check-aggregate-type-case-fold.py — SHRINK-ONLY (issue #4604).
+#
+# Every entry here is DEAD, not overlooked: each names a view that V7__fold_aggregate_type_case.sql
+# redefines with CREATE OR REPLACE, which fully supersedes the view's prior body on both a fresh
+# cluster (files apply in numeric order) and an existing one (CREATE OR REPLACE always executes,
+# unlike the CREATE VIEW IF NOT EXISTS several of these files use — V4's own header documents why
+# editing one of those old bodies in place would be a silent no-op). The unfolded text below is kept
+# as the historical DDL record; do not "fix" it by editing these files in place.
+#
+# format: <path>:<line>  # <view it defines, and what supersedes it>
+openbank-analytics-sink/src/main/resources/clickhouse/V2__onboarding_funnel.sql:30  # gold_onboarding_funnel_events, superseded by V7
+openbank-analytics-sink/src/main/resources/clickhouse/V3__screen_feedback.sql:41  # gold_screen_feedback, superseded by V4 then V7
+openbank-analytics-sink/src/main/resources/clickhouse/V4__screen_feedback_context.sql:41  # gold_screen_feedback, superseded by V7
+openbank-analytics-sink/src/main/resources/clickhouse/V6__campaign_engagement.sql:27  # gold_campaign_engagement, superseded by V7

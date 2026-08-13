@@ -10,6 +10,7 @@ import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -58,6 +59,54 @@ data class ContentVariantMetrics(val variant: ContentVariant, val assigned: Long
 
 interface CampaignContentExperimentRepository {
     suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics>
+}
+
+/**
+ * One in-app observation that customer-edge has already bound to an opaque campaign interaction.
+ *
+ * This deliberately contains no party identifier.  The reporting read model is an operator-facing
+ * aggregate, and retaining a party merely to answer an aggregate count would turn a marketer view
+ * into a second customer-tracking store.  [eventId] is the producer's immutable idempotency key:
+ * engagement delivery is at-least-once, so a redelivery must not inflate a funnel.
+ */
+data class CampaignEngagementEvent(
+    val eventId: UUID,
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val channel: Channel,
+    val surface: InAppSurface,
+    val type: CampaignEngagementEventType,
+    val occurredAt: Instant,
+) {
+    init {
+        require(stepOrder >= 0) { "campaign step order must be non-negative" }
+        require(channel == Channel.PUSH || channel == Channel.BANNER) {
+            "only mobile campaign interactions are attributable"
+        }
+    }
+}
+
+/** App attention signals.  Product conversion stays in [SendOutcome.CONVERTED], never here. */
+enum class CampaignEngagementEventType { IMPRESSION, CLICK, DISMISS }
+
+/** Aggregate event counts, not people: one person may legitimately create several observations. */
+data class CampaignEngagementMetric(
+    val stepOrder: Int,
+    val channel: Channel,
+    val surface: InAppSurface,
+    val type: CampaignEngagementEventType,
+    val count: Long,
+)
+
+/**
+ * Privacy-minimising, append-only read model for Campaign Studio's in-app engagement funnel.
+ * Its table has one row per source event but never a party id; SQL aggregation therefore remains
+ * bounded and does not expose a customer drill-down endpoint by accident.
+ */
+interface CampaignEngagementRepository {
+    /** Returns false for an already recorded event id (Kafka redelivery). */
+    suspend fun record(event: CampaignEngagementEvent): Boolean
+    suspend fun metrics(campaignId: UUID): List<CampaignEngagementMetric>
 }
 
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
@@ -222,7 +271,7 @@ interface NotificationSendPort {
     suspend fun requestSend(request: NotificationSendRequest)
 }
 
-/** One approved, customer-specific placement for the authenticated app home surface. */
+/** One approved, customer-specific placement for a closed authenticated-app surface. */
 data class BannerPlacementRequest(
     val interactionRef: UUID,
     val partyId: UUID,
@@ -231,6 +280,7 @@ data class BannerPlacementRequest(
     val template: String,
     val variables: Map<String, String>,
     val deepLink: String,
+    val inAppSurface: InAppSurface,
 )
 
 /** Campaign emits placement commands; engagement-service owns rendering and event recording. */

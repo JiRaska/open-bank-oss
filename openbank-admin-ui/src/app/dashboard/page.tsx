@@ -4,12 +4,16 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { CreditCard, ArrowLeftRight, Users, Activity, TrendingUp, TrendingDown,
-  ShieldCheck, AlertTriangle, RefreshCw, Zap,
-  DollarSign, Globe, BarChart3, Clock, Server, HardDrive } from 'lucide-react'
+import { CreditCard, ArrowLeftRight, Users, Activity, ShieldCheck, RefreshCw,
+  DollarSign, Globe, BarChart3, Server } from 'lucide-react'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
+import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { hasPermission, type Permission } from '@/lib/auth/roles'
+import { fleetHealthState, summarizeFleetHealth } from '@/lib/dashboard/fleetHealth'
+import styles from './Dashboard.module.css'
 
 // Tri-state per fleet member. `deployed=false` is NEUTRAL (planned, not an outage) —
 // it must never be counted as an error, or the 23 not-yet-deployed services in the
@@ -33,12 +37,13 @@ function titleCase(name: string): string {
 }
 
 const GROUP_COLORS: Record<string, string> = {
-  core: '#6366f1', payments: '#10b981', compliance: '#f59e0b',
-  identity: '#3b82f6', 'open-banking': '#8b5cf6', platform: '#64748b'
+  core: 'var(--accent)', payments: 'var(--success)', compliance: 'var(--warning)',
+  identity: 'var(--info)', 'open-banking': 'var(--accent)', platform: 'var(--text-tertiary)'
 }
 
 export default function DashboardPage() {
   const { t } = useLanguage()
+  const { data: session } = useSession()
   const [statuses, setStatuses] = useState<SvcStatus[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -114,31 +119,23 @@ export default function DashboardPage() {
   // Health metrics are computed over DEPLOYED services only. Not-deployed roster
   // members are planned capacity, not failures — folding them into the denominator
   // would report a false outage (the old "0/27 → 100% error rate" bug).
-  const fleetTotal = statuses.length
-  const deployed = statuses.filter(s => s.deployed)
-  const deployedCount = deployed.length
-  const upCount = deployed.filter(s => s.up).length
-  const healthPct = deployedCount > 0 ? Math.round((upCount / deployedCount) * 100) : 0
-  const avgLatency = deployed.filter(s => s.latencyMs !== null).reduce((a, b) => a + (b.latencyMs ?? 0), 0) /
-    Math.max(1, deployed.filter(s => s.latencyMs !== null).length)
+  const health = summarizeFleetHealth(statuses)
+  const healthState = fleetHealthState(health)
+  const healthTone: Tone = healthState === 'healthy' ? 'success' : healthState === 'degraded' ? 'warning' : 'neutral'
+  const roles = session?.user?.roles ?? []
 
   const groups = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      {/* Page header */}
-      <div style={{ marginBottom: '28px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-            {t('Přehled platformy', 'Platform Overview')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {t('Platforma mikroslužeb OpenBank — zdraví a observabilita v reálném čase', 'OpenBank microservices platform — real-time health & observability')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+    <main className={styles.dashboard}>
+      <PageHeader
+        title={t('Přehled platformy', 'Platform overview')}
+        subtitle={t('Aktuální stav health-checků nasazené části platformy.', 'Current health-check state of the deployed platform.')}
+        icon={<Activity className={styles.headerIcon} size={20} aria-hidden="true" />}
+        actions={
+          <div className={styles.headerActions}>
           {lastRefresh && (
-            <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+            <span className={styles.lastRefresh}>
               {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
             </span>
           )}
@@ -146,74 +143,56 @@ export default function DashboardPage() {
             <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
-      {/* KPI row */}
-      <div className="grid-4" style={{ marginBottom: '28px' }}>
-        <KpiCard icon={<Server size={18} />} label={t('Služby online', 'Services Online')} value={`${upCount}/${deployedCount}`}
-          sub={`${deployedCount}/${fleetTotal} ${t('nasazeno', 'deployed')} · ${healthPct}% ${t('v pořádku', 'healthy')}`}
-          color={healthPct >= 90 ? 'var(--success)' : healthPct >= 70 ? 'var(--warning)' : 'var(--danger)'}
-          trend={healthPct >= 90 ? 'up' : 'down'} />
-        <KpiCard icon={<Zap size={18} />} label={t('Prům. latence', 'Avg Latency')} value={`${Math.round(avgLatency)}ms`}
-          sub={t('kontrola p50', 'health check p50')} color="var(--accent)"
-          trend={avgLatency < 100 ? 'up' : 'down'} />
-        <KpiCard icon={<ShieldCheck size={18} />} label={t('Bezpečnost', 'Security Grade')}
-          value={deployedCount > 0 && upCount >= deployedCount * 0.9 ? 'A' : 'B'}
-          sub="OWASP + EBA ICT" color="var(--info)" trend="up" />
-        <KpiCard icon={<Globe size={18} />} label={t('Shoda', 'Compliance')}
-          value="PSD2 ✓" sub="EBA · CNB · GDPR" color="var(--success)" trend="up" />
-      </div>
+      {/* These are intentionally current health facts, not estimated operational or compliance metrics. */}
+      <section className={styles.metrics} aria-label={t('Klíčové metriky platformy', 'Platform key metrics')}>
+        <StatCard className={styles.metric} icon={<Server size={15} />} label={t('Zdravé služby', 'Healthy services')} value={`${health.healthy}/${health.deployed}`} tone={healthTone}
+          hint={t('aktuální health-check nasazených služeb', 'current health check of deployed services')} />
+        <StatCard className={styles.metric} icon={<Activity size={15} />} label={t('Průměrná latence kontroly', 'Average check latency')}
+          value={health.averageHealthCheckLatencyMs === null ? '—' : `${health.averageHealthCheckLatencyMs} ms`}
+          hint={t('měření endpointu health-checku, ne p99', 'health-check endpoint measurement, not p99')} />
+        <StatCard className={styles.metric} icon={<Server size={15} />} label={t('Nasazeno', 'Deployed')} value={`${health.deployed}/${health.total}`}
+          hint={t('služby objevené v tomto prostředí', 'services discovered in this environment')} />
+        <StatCard className={styles.metric} icon={<ShieldCheck size={15} />} label={t('Nenasaženo', 'Not deployed')} value={health.notDeployed} tone="neutral"
+          hint={t('plánované služby; není to incident', 'planned services; not an incident')} />
+      </section>
 
-      {/* Observability KPIs */}
-      <div className="grid-4" style={{ marginBottom: '28px' }}>
-        <KpiCard icon={<AlertTriangle size={18} />} label={t('Chybovost', 'Error Rate')} value={`${100 - healthPct}%`}
-          sub={t('odvozeno ze zdraví', 'derived from health')} color={100 - healthPct > 5 ? 'var(--danger)' : 'var(--success)'}
-          trend={100 - healthPct > 5 ? 'up' : 'down'} />
-        <KpiCard icon={<Clock size={18} />} label={t('p99 Latence (odh.)', 'p99 Latency (est.)')} value={`${Math.round(avgLatency * 2.5)}ms`}
-          sub={t('odhad z latencí', 'approx from latencies')} color="var(--accent)"
-          trend={avgLatency * 2.5 < 200 ? 'up' : 'down'} />
-        <KpiCard icon={<Activity size={18} />} label={t('Propustnost', 'Throughput')} value={`${upCount * 125} req/s`}
-          sub={t('proxy z health-checku', 'health-check proxy')} color="var(--info)"
-          trend="up" />
-        <KpiCard icon={<TrendingUp size={18} />} label={t('Zátěž systému', 'System Load')} value={`${Math.round((upCount / Math.max(1, deployedCount)) * 42)}%`}
-          sub={t('odhad průměrné zátěže CPU', 'average cpu proxy')} color="var(--warning)" trend="up" />
-      </div>
-
-      {/* Uptime by group */}
-      <div className="card" style={{ padding: '20px', marginBottom: '28px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase',
-          letterSpacing: '0.06em', marginBottom: '14px' }}>{t('Dostupnost dle skupiny', 'Uptime Ratio By Group')}</div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+      {/* A current per-group health distribution, not an uptime/SLO measurement. */}
+      <section className={`card ${styles.healthOverview}`} aria-labelledby="health-by-group-heading">
+        <h2 id="health-by-group-heading" className={styles.sectionLabel}>{t('Aktuální zdraví dle skupiny', 'Current health by group')}</h2>
+        <div className={styles.healthGroups}>
           {groups.map(group => {
             const groupSvcs = statuses.filter(s => s.group === group)
             if (groupSvcs.length === 0) return null
             const deployedInGroup = groupSvcs.filter(s => s.deployed)
             const upInGroup = deployedInGroup.filter(s => s.up).length
-            // Uptime is over deployed members of the group; a group with nothing
+            // The bar is the current healthy share of deployed members; a group with nothing
             // deployed yet shows a neutral "not deployed" rather than a red 0%.
             const hasDeployed = deployedInGroup.length > 0
             const pct = hasDeployed ? Math.round((upInGroup / deployedInGroup.length) * 100) : 0
-            const color = GROUP_COLORS[group] ?? '#64748b'
+            const color = GROUP_COLORS[group] ?? 'var(--text-tertiary)'
             return (
-              <div key={`uptime-${group}`}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '6px' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--text-primary)', textTransform: 'capitalize' }}>{group.replace('-', ' ')}</span>
-                  <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
-                    {hasDeployed ? `${pct}%` : t('nenasazeno', 'not deployed')}
+              <div key={`health-${group}`} className={styles.healthGroup}>
+                <div className={styles.healthGroupHeader}>
+                  <span className={styles.groupName}>{group.replace('-', ' ')}</span>
+                  <span className={styles.groupSummary}>
+                    {hasDeployed ? `${upInGroup}/${deployedInGroup.length} ${t('zdravé', 'healthy')}` : t('nenasazeno', 'not deployed')}
                   </span>
                 </div>
-                <div style={{ height: '6px', background: 'var(--border)', borderRadius: '3px', overflow: 'hidden' }}>
-                  <div style={{ height: '100%', width: hasDeployed ? `${pct}%` : '0%', background: pct === 100 ? color : 'var(--danger)', transition: 'width 0.3s ease' }} />
+                <div className={styles.healthBar}>
+                  <div className={styles.healthBarFill} style={{ width: hasDeployed ? `${pct}%` : '0%', background: pct === 100 ? color : 'var(--danger)' }} />
                 </div>
               </div>
             )
           })}
         </div>
-      </div>
+      </section>
 
       {/* Service groups */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '28px' }}>
+      <section className={styles.serviceGroups} aria-label={t('Služby podle skupiny', 'Services by group')}>
         {groups.map(group => {
           const groupSvcs = statuses.filter(s => s.group === group)
           if (groupSvcs.length === 0) return null
@@ -221,110 +200,69 @@ export default function DashboardPage() {
           const upInGroup = deployedInGroup.filter(s => s.up).length
           const plannedInGroup = groupSvcs.length - deployedInGroup.length
           const allHealthy = deployedInGroup.length > 0 && upInGroup === deployedInGroup.length
-          const color = GROUP_COLORS[group] ?? '#64748b'
+          const color = GROUP_COLORS[group] ?? 'var(--text-tertiary)'
+          const deploymentSummary = `${upInGroup}/${deployedInGroup.length} ${t('nasazeno', 'up')}${plannedInGroup > 0 ? ` · ${plannedInGroup} ${t('plán', 'planned')}` : ''}`
           // Sort deployed members first so the live ones lead each group card.
           const ordered = [...groupSvcs].sort((a, b) => Number(b.deployed) - Number(a.deployed))
           return (
-            <div key={group} className="card" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />
-                  <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+            <article key={group} className={`card ${styles.serviceGroup}`}>
+              <div className={styles.serviceGroupHeader}>
+                <div className={styles.serviceGroupTitle}>
+                  <span className={styles.groupDot} style={{ background: color }} aria-hidden="true" />
+                  <h2 className={styles.sectionLabel}>
                     {group.replace('-', ' ')}
-                  </span>
+                  </h2>
                 </div>
-                <span style={{ fontSize: '11px', color: allHealthy ? 'var(--success-text)' : deployedInGroup.length === 0 ? 'var(--text-tertiary)' : 'var(--warning-text)',
-                  background: allHealthy ? 'var(--success-bg)' : deployedInGroup.length === 0 ? 'var(--surface-2)' : 'var(--warning-bg)',
-                  padding: '2px 8px', borderRadius: '10px', fontWeight: 600 }}>
-                  {upInGroup}/{deployedInGroup.length} {t('nasazeno', 'up')}{plannedInGroup > 0 ? ` · ${plannedInGroup} ${t('plán', 'planned')}` : ''}
-                </span>
+                <StatusBadge
+                  status={allHealthy ? 'HEALTHY' : deployedInGroup.length === 0 ? 'NOT_DEPLOYED' : 'DEGRADED'}
+                  label={deploymentSummary}
+                  tone={allHealthy ? 'success' : deployedInGroup.length === 0 ? 'neutral' : 'warning'}
+                  className={styles.groupStatus}
+                />
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+              <div className={styles.serviceChips}>
                 {ordered.map(s => {
                   // Tri-state chip: live-up (green), deployed-down (red, a real outage),
                   // not-deployed (muted/neutral — planned, never an alarm).
-                  const bg = !s.deployed ? 'var(--surface-2)' : s.up ? 'var(--success-bg)' : 'var(--danger-bg)'
-                  const bd = !s.deployed ? 'var(--border)' : s.up ? 'var(--success-border)' : 'var(--danger-border)'
-                  const fg = !s.deployed ? 'var(--text-tertiary)' : s.up ? 'var(--success-text)' : 'var(--danger-text)'
-                  const dot = !s.deployed ? 'var(--text-tertiary)' : s.up ? 'var(--success)' : 'var(--danger)'
+                  const state = !s.deployed ? 'planned' : s.up ? 'healthy' : 'unhealthy'
                   return (
-                    <div key={s.name} title={!s.deployed ? t('Nenasazeno v tomto prostředí', 'Not deployed in this environment') : s.up ? t('BĚŽÍ', 'UP') : t('NEBĚŽÍ', 'DOWN')} style={{
-                      display: 'flex', alignItems: 'center', gap: '5px',
-                      padding: '4px 10px', borderRadius: '6px',
-                      background: bg, border: `1px solid ${bd}`,
-                      fontSize: '11px', fontWeight: 500, color: fg,
-                      opacity: s.deployed ? 1 : 0.7,
-                    }}>
-                      <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: dot, flexShrink: 0 }} />
+                    <div key={s.name} title={!s.deployed ? t('Nenasazeno v tomto prostředí', 'Not deployed in this environment') : s.up ? t('BĚŽÍ', 'UP') : t('NEBĚŽÍ', 'DOWN')} className={`${styles.serviceChip} ${styles[`serviceChip${state.charAt(0).toUpperCase()}${state.slice(1)}`]}`}>
+                      <span className={styles.serviceDot} aria-hidden="true" />
                       {s.label}
-                      {s.deployed && s.latencyMs ? <span style={{ opacity: 0.7 }}>{s.latencyMs}ms</span> : null}
+                      {s.deployed && s.latencyMs ? <span className={styles.serviceLatency}>{s.latencyMs}ms</span> : null}
                     </div>
                   )
                 })}
               </div>
-            </div>
+            </article>
           )
         })}
-      </div>
+      </section>
 
-      {/* Quick links */}
-      <div className="card" style={{ padding: '20px' }}>
-        <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase',
-          letterSpacing: '0.06em', marginBottom: '14px' }}>{t('Rychlý přístup', 'Quick Access')}</div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+      {/* Only show destinations the operator can already access; dashboard shortcuts must not create 403 traps. */}
+      <section className={`card ${styles.quickAccess}`} aria-labelledby="quick-access-heading">
+        <h2 id="quick-access-heading" className={styles.sectionLabel}>{t('Rychlý přístup', 'Quick Access')}</h2>
+        <div className={styles.quickLinks}>
           {[
-            { href: '/accounts',          label: t('Účty', 'Accounts'),         icon: CreditCard,    color: '#6366f1' },
-            { href: '/transactions',      label: t('Transakce', 'Transactions'),     icon: ArrowLeftRight, color: '#10b981' },
-            { href: '/infrastructure',    label: t('Infra', 'Infrastructure'),  icon: Server,         color: '#f43f5e' },
-            { href: '/parties',           label: t('Strany', 'Parties'),          icon: Users,          color: '#3b82f6' },
-            { href: '/payments',          label: t('Platby', 'Payments'),         icon: DollarSign,     color: '#f59e0b' },
-            { href: '/audit',             label: t('Audit záznam', 'Audit Log'),        icon: Activity,       color: '#8b5cf6' },
-            { href: '/regulatory',        label: t('Regulace', 'Regulatory'),       icon: BarChart3,      color: '#ef4444' },
-            { href: '/docs/api',          label: t('API Katalog', 'API Catalog'),      icon: Globe,          color: '#0891b2' },
-            { href: '/docs/compliance',   label: t('Shoda', 'Compliance'),       icon: ShieldCheck,    color: '#059669' },
-            { href: '/infrastructure',    label: t('Infrastruktura', 'Infrastructure'),icon: HardDrive,    color: '#64748b' },
-          ].map(({ href, label, icon: Icon, color }) => (
-            <Link key={href} href={href} style={{ textDecoration: 'none' }}>
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '7px',
-                padding: '8px 14px', borderRadius: '8px',
-                border: '1px solid var(--border)', background: 'var(--surface)',
-                fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)',
-                transition: 'all 0.15s', cursor: 'pointer',
-              }}
-                onMouseEnter={e => { e.currentTarget.style.borderColor = color; e.currentTarget.style.background = 'var(--surface-2)' }}
-                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.background = 'var(--surface)' }}
-              >
+            { href: '/accounts', label: t('Účty', 'Accounts'), icon: CreditCard, color: 'var(--accent)', permission: 'accounts:view' },
+            { href: '/transactions', label: t('Transakce', 'Transactions'), icon: ArrowLeftRight, color: 'var(--success)', permission: 'transactions:view' },
+            { href: '/infrastructure', label: t('Infrastruktura', 'Infrastructure'), icon: Server, color: 'var(--danger)', permission: 'system:view' },
+            { href: '/parties', label: t('Strany', 'Parties'), icon: Users, color: 'var(--info)', permission: 'parties:view' },
+            { href: '/payments', label: t('Platby', 'Payments'), icon: DollarSign, color: 'var(--warning)', permission: 'payments:view' },
+            { href: '/audit', label: t('Auditní záznam', 'Audit log'), icon: Activity, color: 'var(--accent)', permission: 'audit:view' },
+            { href: '/regulatory', label: t('Regulace', 'Regulatory'), icon: BarChart3, color: 'var(--danger)', permission: 'regulatory:view' },
+            { href: '/docs/api', label: t('API katalog', 'API catalog'), icon: Globe, color: 'var(--info)', permission: 'docs:view' },
+            { href: '/docs/compliance', label: t('Shoda', 'Compliance'), icon: ShieldCheck, color: 'var(--success)', permission: 'compliance:view' },
+          ].filter(link => hasPermission(roles, link.permission as Permission)).map(({ href, label, icon: Icon, color }) => (
+            <Link key={href} href={href} className={styles.quickLink} style={{ '--quick-link-accent': color } as CSSProperties}>
+              <span className={styles.quickLinkContent}>
                 <Icon size={14} style={{ color }} />
                 {label}
-              </div>
+              </span>
             </Link>
           ))}
         </div>
-      </div>
-    </div>
-  )
-}
-
-function KpiCard({ icon, label, value, sub, color, trend }: {
-  icon: React.ReactNode; label: string; value: string; sub: string; color: string; trend: 'up' | 'down'
-}) {
-  return (
-    <div className="stat-card">
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '12px' }}>
-        <div style={{ width: '36px', height: '36px', borderRadius: '10px',
-          background: `${color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color }}>
-          {icon}
-        </div>
-        {trend === 'up'
-          ? <TrendingUp size={14} style={{ color: 'var(--success)' }} />
-          : <TrendingDown size={14} style={{ color: 'var(--danger)' }} />}
-      </div>
-      <div style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '2px' }}>
-        {value}
-      </div>
-      <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '2px' }}>{label}</div>
-      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{sub}</div>
-    </div>
+      </section>
+    </main>
   )
 }

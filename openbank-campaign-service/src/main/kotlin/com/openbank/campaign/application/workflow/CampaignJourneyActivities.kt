@@ -17,6 +17,9 @@ interface CampaignJourneyActivities {
     fun controlState(campaignId: UUID, partyId: UUID): JourneyControlState
     fun sendsSoFar(campaignId: UUID, partyId: UUID): Int
 
+    /** The cohort-specific delay for a step; assignment is durable before this workflow starts. */
+    fun delayForStep(campaignId: UUID, partyId: UUID, step: CampaignStep): Long
+
     /**
      * The delivery status of the newest send before [stepOrder], for an ADR-0200 D1 branch
      * condition (#3585). Null when this party has no earlier send in this campaign.

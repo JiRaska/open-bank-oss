@@ -182,10 +182,18 @@ channels:
 
   sanctions-events:
     address: openbank.sanctions.screening.event
-    description: Sanctions screening result events (clear, hit, pending-review)
+    description: |
+      Sanctions check lifecycle events. TWO distinct event types share this channel and
+      `eventType` is the discriminator — a consumer must switch on it, not on payload shape:
+        - `SanctionChecked`  — an automated screening produced a status from list matching.
+        - `SanctionReviewed` — a human analyst manually dispositioned an existing check.
+      Until #1035 both paths emitted `SanctionChecked`, so the two facts were indistinguishable
+      from the envelope and no consumer could route them apart.
     messages:
       SanctionsScreeningEvent:
         $ref: '#/components/messages/SanctionsScreeningEvent'
+      SanctionsReviewEvent:
+        $ref: '#/components/messages/SanctionsReviewEvent'
 
 operations:
   publishAccountCreated:
@@ -258,7 +266,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/sanctions-events'
-    summary: sanctions-service publishes SanctionsScreeningEvent
+    summary: sanctions-service publishes SanctionsScreeningEvent and SanctionsReviewEvent
 
 components:
   messages:
@@ -404,6 +412,19 @@ components:
     SanctionsScreeningEvent:
       name: SanctionsScreeningEvent
       title: Sanctions Screening Event
+      description: 'eventType: SanctionChecked — emitted by SanctionsService.screen'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SanctionsScreeningEventPayload'
+
+    SanctionsReviewEvent:
+      name: SanctionsReviewEvent
+      title: Sanctions Review Outcome Event
+      description: >-
+        eventType: SanctionReviewed — emitted by SanctionsService.review when an analyst
+        dispositions a check. Same payload shape as the screening event (the payload is the
+        serialised aggregate), but `reviewedBy` / `reviewNote` / `reviewedAt` are populated and
+        `occurredAt` is the review instant rather than the screening instant.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SanctionsScreeningEventPayload'

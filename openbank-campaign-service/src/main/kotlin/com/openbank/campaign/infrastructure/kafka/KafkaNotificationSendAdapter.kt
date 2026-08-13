@@ -79,6 +79,7 @@ class KafkaBannerPlacementAdapter(
                 "template" to request.template,
                 "variables" to request.variables,
                 "deepLink" to request.deepLink,
+                "inAppSurface" to request.inAppSurface.name,
             ),
         )
         // The compacted placement topic retains the current assignment for this send interaction.

@@ -56,6 +56,11 @@ dependencies {
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // Provider-side Pact verification (ADR-0063)
     testImplementation(libs.pact.provider)
+    // Consumer-driven contract for the fx-service CNB fixing lookup the daily revaluation makes
+    // (#3921): ledger is the CONSUMER of GET /api/v1/fx/rates/{base}/{quote}?source=CNB&asOf=,
+    // so this module also generates a pact. Only the provider replay can catch a wrong request
+    // shape, and `?asOf=` is exactly that (#2269/#2290).
+    testImplementation(libs.pact.consumer)
     // CI infra sweep (#578): isolated PostgreSQL (+ Redpanda for non-in-memory ITs) per JVM.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
@@ -98,6 +103,13 @@ System.setProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 // provider test is @EnabledIfSystemProperty-skipped and git-pact above stays the fallback;
 // publishResults + provider.version/branch tag the verification result for can-i-deploy.
 tasks.withType<Test> {
+    // Forwarded into the FORKED test JVM, which the config-time System.setProperty above does not
+    // reach — that one only ever set it on the Gradle daemon. Without it a consumer pact is written
+    // to `build/pacts` instead of the shared `pacts/` dir, where nothing commits it and
+    // `derive-pact-drift-scope.sh` reports it as an uncommitted pact (#3921). The provider
+    // verification is unaffected either way: it resolves `@PactFolder("../pacts")` relative to the
+    // module, not through this property.
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
     listOf(
         "pactbroker.url",
         "pactbroker.auth.username",

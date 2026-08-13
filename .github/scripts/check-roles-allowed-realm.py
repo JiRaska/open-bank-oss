@@ -159,6 +159,12 @@ def self_test() -> int:
         (kt / "Roles.kt").write_text('object Roles {\n  const val OPERATOR: String = "ROLE_OPERATOR"\n'
                                      '  const val GHOST: String = "ROLE_NEVER_DEFINED"\n}\n')
 
+        catalog_roles = root / CATALOG_ROLES_KT
+        catalog_roles.parent.mkdir(parents=True)
+        catalog_roles.write_text(
+            'object CatalogRoles {\n  const val AUTHOR: String = "ROLE_CATALOG_AUTHOR"\n}\n'
+        )
+
         svc = root / "openbank-x/src/main/kotlin/com/openbank/x"
         svc.mkdir(parents=True)
         (svc / "R.kt").write_text(
@@ -167,6 +173,7 @@ def self_test() -> int:
             '@RolesAllowed(Roles.OPERATOR)\nfun c() {}\n\n'                        # constant, known
             '@RolesAllowed(Roles.GHOST)\nfun d() {}\n\n'                           # constant, unknown
             '@RolesAllowed("ROLE_OPERATOR", "ROLE_TYPO2")\nfun e() {}\n\n'         # partial
+            '@RolesAllowed(CatalogRoles.AUTHOR)\nfun g() {}\n\n'                  # catalog constant
             '// @RolesAllowed("ROLE_IN_A_COMMENT")\nfun f() {}\n'                   # prose
         )
 
@@ -175,7 +182,12 @@ def self_test() -> int:
         if known != {"ROLE_OPERATOR", "ROLE_API"}:
             fails.append(f"realm roles wrong: {sorted(known)}")
         consts = role_constants(root)
-        if consts.get("OPERATOR") != "ROLE_OPERATOR" or consts.get("GHOST") != "ROLE_NEVER_DEFINED":
+        expected_consts = {
+            "Roles.OPERATOR": "ROLE_OPERATOR",
+            "Roles.GHOST": "ROLE_NEVER_DEFINED",
+            "CatalogRoles.AUTHOR": "ROLE_CATALOG_AUTHOR",
+        }
+        if consts != expected_consts:
             fails.append(f"role constants wrong: {consts}")
 
         found = {str(rel) + ":" + str(line): (names, dead) for rel, line, names, dead in scan(root, known, consts)}
@@ -183,7 +195,7 @@ def self_test() -> int:
         alldead = sorted({d for _, dead in found.values() for d in dead})
 
         # THE DEFECT and its constant-valued twin must both be dead.
-        for want in ("ROLE_TYPO", "ROLE_NEVER_DEFINED", "ROLE_TYPO2"):
+        for want in ("ROLE_TYPO", "ROLE_NEVER_DEFINED", "ROLE_TYPO2", "ROLE_CATALOG_AUTHOR"):
             if want not in alldead:
                 fails.append(f"{want} should be reported as not in the realm; dead={alldead}")
         # Known roles must NOT be — a gate that flags valid roles is one nobody keeps.
@@ -195,7 +207,7 @@ def self_test() -> int:
         # resolver that had stopped working entirely.
         if "ROLE_NEVER_DEFINED" not in allnames:
             fails.append("Roles.GHOST was not resolved to its literal value")
-        if any(n.startswith("Roles.") for n in allnames):
+        if any(n.startswith(("Roles.", "CatalogRoles.")) for n in allnames):
             fails.append(f"a constant was left unresolved: {allnames}")
         # Prose must not be read as code.
         if "ROLE_IN_A_COMMENT" in allnames:

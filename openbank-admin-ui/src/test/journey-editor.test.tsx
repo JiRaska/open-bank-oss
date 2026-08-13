@@ -13,11 +13,17 @@ const TEMPLATES = {
   MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
   MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
 }
 const TPL_CHANNEL = {
   MARKETING_PRODUCT_OFFER: 'EMAIL' as const,
   MARKETING_PRODUCT_OFFER_PUSH: 'PUSH' as const,
   MARKETING_PRODUCT_OFFER_BANNER: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER' as const,
 }
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
@@ -182,6 +188,41 @@ describe('step editor', () => {
     fireEvent.click(document.querySelector('[data-channel-pick="BANNER"]')!)
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_BANNER', mobileDestination: 'HOME',
+    }))
+  })
+
+  it('switches a campaign placement to its matching carousel template', () => {
+    const onChange = vi.fn()
+    const banner: EditorStep = {
+      channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_BANNER', variables: {}, delaySeconds: 0,
+      mobileDestination: 'HOME', inAppSurface: 'HOME_BANNER',
+    }
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.change(document.querySelector('[data-in-app-surface="0"] select')!, { target: { value: 'HOME_CAROUSEL' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      inAppSurface: 'HOME_CAROUSEL', template: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+    }))
+  })
+
+  it('lets a journey experiment compare a B path, not just alternative copy', () => {
+    const onChange = vi.fn()
+    const experimentStep: EditorStep = { ...step(), variantBVariables: {} }
+    const { container } = render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          contentExperiment: true, onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.change(container.querySelector('[data-variant-b-path="0"] select')!, { target: { value: 'PUSH' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      variantBChannel: 'PUSH', variantBTemplate: 'MARKETING_PRODUCT_OFFER_PUSH', variantBVariables: {},
     }))
   })
 })

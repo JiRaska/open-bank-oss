@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/v0.24.0...v0.25.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add journey path experiments ([#4588](https://github.com/JiRaska/open-bank-oss/issues/4588)) ([3077571](https://github.com/JiRaska/open-bank-oss/commit/307757110c42470d51d9fdfbdf869fb133fcf447))
+
+
+### Bug Fixes
+
+* **analytics:** sweep remaining aggregate_type case comparisons, add a gate ([#4618](https://github.com/JiRaska/open-bank-oss/issues/4618)) ([d0c01b7](https://github.com/JiRaska/open-bank-oss/commit/d0c01b7cb5e2b538e3798bdc76935170418b2cf7))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/v0.23.0...v0.24.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/v0.22.0...v0.23.0) (2026-08-13)
 
 

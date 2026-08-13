@@ -24,20 +24,23 @@ channels:
   campaignBannerPlacements:
     address: openbank.campaign.banner.placements
     description: |
-      First-party HOME_BANNER placement command emitted by KafkaBannerPlacementAdapter and consumed
+      First-party app-surface placement command emitted by KafkaBannerPlacementAdapter and consumed
       by engagement-service. The compacted record key is the opaque interactionRef, so retries
       remain idempotent and do not create a second customer surface.
 components:
   schemas:
     campaignBannerPlacement:
       type: object
-      required: [interactionRef, partyId, campaignId, stepOrder, template, variables, deepLink]
+      required: [interactionRef, partyId, campaignId, stepOrder, template, variables, deepLink, inAppSurface]
       properties:
         interactionRef: { type: string, format: uuid, description: Campaign send-log id and opaque app interaction reference. }
         partyId: { type: string, format: uuid }
         campaignId: { type: string, format: uuid }
         stepOrder: { type: integer, minimum: 0 }
-        template: { type: string, enum: [MARKETING_PRODUCT_OFFER_BANNER] }
+        template:
+          type: string
+          enum: [MARKETING_PRODUCT_OFFER_BANNER, MARKETING_PRODUCT_OFFER_CAROUSEL, MARKETING_PRODUCT_OFFER_PRODUCT_FEED, MARKETING_PRODUCT_OFFER_REWARDS_HUB]
+        inAppSurface: { type: string, enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB] }
         variables:
           type: object
           additionalProperties: { type: string }
