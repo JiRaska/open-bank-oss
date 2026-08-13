@@ -94,6 +94,16 @@ describe('campaign studio', () => {
     expect(screen.getByText(/a pull request, not a UI action/)).toBeTruthy()
   }, 15000)
 
+  it('starts a new journey in the app, with a closed deep link, not as an email sequence', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="PUSH"]')).toBeTruthy(), { timeout: 8000 })
+    expect(document.querySelector('[data-channel-pick="PUSH"]')?.getAttribute('data-selected')).toBe('true')
+    expect(document.querySelector('[data-mobile-destination="0"]')).toBeTruthy()
+    expect(screen.getByText(/fixed app deep link/i)).toBeTruthy()
+  }, 15000)
+
   /**
    * ADR-0176 D4 / ADR-0221 D1 step 3: a campaign supplies values, never body text. The fields
    * offered are exactly the template's declared variables — a free-form body field here would be a
@@ -103,6 +113,9 @@ describe('campaign studio', () => {
     vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
+    // Mobile is the studio's starting surface. E-mail remains available when a campaign genuinely
+    // needs its richer template, and that switch—not the initial screen—owns these three fields.
+    fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     // The labels are the marketer's words, but the FIELD SET is still exactly the template's
     // declared variables — asserted by id, which carries the variable name the service knows.
     await waitFor(() => expect(document.getElementById('var-0-offerTitle')).toBeTruthy(), {
@@ -135,6 +148,7 @@ describe('campaign studio', () => {
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Recurring welcome' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Keep new customers engaged' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Welcome' } })
     fireEvent.change(document.getElementById('var-0-offerText')!, { target: { value: 'Thanks for joining.' } })
     fireEvent.change(document.getElementById('var-0-ctaText')!, { target: { value: 'Explore' } })
@@ -166,6 +180,7 @@ describe('campaign studio', () => {
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Two headlines' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'A headline' } })
     fireEvent.change(document.getElementById('var-0-offerText')!, { target: { value: 'A copy' } })
     fireEvent.change(document.getElementById('var-0-ctaText')!, { target: { value: 'Open' } })
@@ -211,6 +226,7 @@ describe('campaign studio', () => {
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Fallback offer' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
+    fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
     fireEvent.change(document.getElementById('var-0-offerTitle')!, { target: { value: 'Headline' } })
     fireEvent.change(document.getElementById('var-0-offerText')!, { target: { value: 'Copy' } })
     fireEvent.change(document.getElementById('var-0-ctaText')!, { target: { value: 'Open' } })

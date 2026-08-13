@@ -6,6 +6,7 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -81,13 +82,66 @@ class TemplateCatalogTest {
 }
 
 /**
- * The channel/template agreement (ADR-0200 D7 as it now stands: EMAIL + PUSH).
+ * The channel/template agreement: EMAIL, PUSH and the authenticated-app BANNER.
  *
  * Both directions matter and both fail silently in production. An EMAIL step naming a push template
  * renders a one-line title as an entire email; a PUSH step naming an email template puts offer body
  * copy into an APNs payload, which is the leak #1182 closed by making push bodies generic.
  */
 class CampaignStepChannelTest {
+
+    @Test
+    fun `a banner step carries its approved values to an app destination`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_BANNER",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
+        assertEquals(
+            setOf(
+                "MARKETING_PRODUCT_OFFER_BANNER",
+                "MARKETING_PRODUCT_OFFER_CAROUSEL",
+                "MARKETING_PRODUCT_OFFER_PRODUCT_FEED",
+                "MARKETING_PRODUCT_OFFER_REWARDS_HUB",
+            ),
+            TemplateCatalog.forChannel(Channel.BANNER),
+        )
+    }
+
+    @Test
+    fun `a carousel placement carries its selected surface through delivery`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+            inAppSurface = InAppSurface.HOME_CAROUSEL,
+        )
+
+        assertEquals(InAppSurface.HOME_CAROUSEL, step.primaryDelivery(null).inAppSurface)
+    }
+
+    @Test
+    fun `a banner template cannot be posted to a different app surface`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_BANNER",
+                channel = Channel.BANNER,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                mobileDestination = MobileDestination.HOME,
+                inAppSurface = InAppSurface.PRODUCT_FEED,
+            )
+        }
+    }
 
     @Test
     fun `a push step may use a push template`() {
