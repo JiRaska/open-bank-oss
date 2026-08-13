@@ -125,10 +125,111 @@ def scan(root: pathlib.Path, known, consts):
             yield f.relative_to(root), line, names, dead
 
 
+def self_test() -> int:
+    """Falsify the annotation reader, the constant resolver and the comment stripper.
+
+    What this prevents: an endpoint annotated with a role the realm has never defined. Nobody
+    can hold a role that does not exist, so the endpoint is unreachable by everyone — a 403
+    for every caller, which reads as an authorization problem rather than a typo, and cannot
+    fail at compile time because the role is a STRING.
+
+    Three ways it goes quiet, all covered below: an annotation form the reader does not
+    recognise (silently zero findings for that form), a `Roles.X` constant it cannot resolve
+    (compared as the literal "Roles.X", which is in no realm — a false positive that gets the
+    gate switched off), and prose in a comment being read as code.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+
+        realm = root / "openbank-infra/gitops/components/keycloak"
+        realm.mkdir(parents=True)
+        (realm / "realm-template.json").write_text(json.dumps(
+            {"roles": {"realm": [{"name": "ROLE_OPERATOR"}, {"name": "ROLE_API"}]}}))
+
+        kt = root / "openbank-libs-domain/src/main/kotlin/com/openbank/libs/security"
+        kt.mkdir(parents=True)
+        (kt / "Roles.kt").write_text('object Roles {\n  const val OPERATOR: String = "ROLE_OPERATOR"\n'
+                                     '  const val GHOST: String = "ROLE_NEVER_DEFINED"\n}\n')
+
+        svc = root / "openbank-x/src/main/kotlin/com/openbank/x"
+        svc.mkdir(parents=True)
+        (svc / "R.kt").write_text(
+            '@RolesAllowed("ROLE_OPERATOR")\nfun a() {}\n\n'                       # known literal
+            '@RolesAllowed("ROLE_TYPO")\nfun b() {}\n\n'                           # THE DEFECT
+            '@RolesAllowed(Roles.OPERATOR)\nfun c() {}\n\n'                        # constant, known
+            '@RolesAllowed(Roles.GHOST)\nfun d() {}\n\n'                           # constant, unknown
+            '@RolesAllowed("ROLE_OPERATOR", "ROLE_TYPO2")\nfun e() {}\n\n'         # partial
+            '// @RolesAllowed("ROLE_IN_A_COMMENT")\nfun f() {}\n'                   # prose
+        )
+
+        errors: list = []
+        known, files = realm_roles(root, errors)
+        if known != {"ROLE_OPERATOR", "ROLE_API"}:
+            fails.append(f"realm roles wrong: {sorted(known)}")
+        consts = role_constants(root)
+        if consts.get("OPERATOR") != "ROLE_OPERATOR" or consts.get("GHOST") != "ROLE_NEVER_DEFINED":
+            fails.append(f"role constants wrong: {consts}")
+
+        found = {str(rel) + ":" + str(line): (names, dead) for rel, line, names, dead in scan(root, known, consts)}
+        allnames = [n for names, _ in found.values() for n in names]
+        alldead = sorted({d for _, dead in found.values() for d in dead})
+
+        # THE DEFECT and its constant-valued twin must both be dead.
+        for want in ("ROLE_TYPO", "ROLE_NEVER_DEFINED", "ROLE_TYPO2"):
+            if want not in alldead:
+                fails.append(f"{want} should be reported as not in the realm; dead={alldead}")
+        # Known roles must NOT be — a gate that flags valid roles is one nobody keeps.
+        for notdead in ("ROLE_OPERATOR",):
+            if notdead in alldead:
+                fails.append(f"{notdead} is a real realm role and must not be reported dead")
+        # The CONSTANT must be resolved to its value. Unresolved it compares as "Roles.GHOST",
+        # which is in no realm either — right verdict, wrong reason, and it would mask a
+        # resolver that had stopped working entirely.
+        if "ROLE_NEVER_DEFINED" not in allnames:
+            fails.append("Roles.GHOST was not resolved to its literal value")
+        if any(n.startswith("Roles.") for n in allnames):
+            fails.append(f"a constant was left unresolved: {allnames}")
+        # Prose must not be read as code.
+        if "ROLE_IN_A_COMMENT" in allnames:
+            fails.append("an annotation inside a // comment was read as code")
+
+    # --- the comment stripper, which is where nesting bites (Kotlin block comments NEST) ---
+    if "X" in strip_comments("/* a /* b */ X */"):
+        fails.append("nested block comments closed early — text after the inner */ was kept")
+    if "KEEP" not in strip_comments("/* gone */ KEEP"):
+        fails.append("code after a closed block comment was dropped")
+    if strip_comments("a\n// c\nb").count("\n") != 2:
+        fails.append("line numbering was not preserved by the stripper")
+    # A `*/` at depth ZERO — inside a string literal, say — must be left alone. Without the
+    # `depth and` guard it drives the counter NEGATIVE, and since a negative depth is truthy
+    # every following character is blanked: the rest of the file silently disappears and the
+    # gate reports no annotations at all. The nesting fixture above cannot reach this branch,
+    # because there the depth is always positive when a `*/` arrives.
+    if "KEEPME" not in strip_comments('val s = "a */ KEEPME"'):
+        fails.append("an unbalanced */ at depth 0 blanked the rest of the source — "
+                     "the gate would silently see no annotations")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: @RolesAllowed realm parity is falsifiable (13 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
+    ap.add_argument("--self-test", action="store_true")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
     root = pathlib.Path(args.root).resolve()
 
     errors = []
