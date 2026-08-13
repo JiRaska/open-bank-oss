@@ -35,12 +35,29 @@
 # the same source, not about a different commit. Recording is the symmetric case. This script is
 # the recording half of that decision; the two halves disagreeing is the state #3223 describes.
 #
-# WHY VIA THE GITHUB API AND NOT git
-# resolve-can-i-deploy-selector.sh compares git tree objects, which needs a checkout with full
-# history. The `record-deployment` job has NO `actions/checkout` at all — one step, api-only, by
-# design (see GH_REPO in that workflow). Adding a full-history checkout to every gitops merge to
-# answer "did anything under <svc>/ change" is a large cost for a question the compare API answers
-# directly. So the proof is the same; the evidence source differs.
+# WHY TREE OBJECTS AND NOT THE COMPARE API (#4673)
+# This used to ask `compare/<published>...<deployed>` for the changed-file list. That endpoint caps
+# its `files` array at 300 entries, does not paginate past it (page=2 returns an empty array,
+# measured), and returns `changed_files: null` on a large comparison — so the cap is silent in both
+# changed", which is a claim about the PROBE, not about the source.
+#
+# Measured on the real case that exposed it: document-service between ee974ea3 and 77ebab08 has
+# 16 changed build inputs (Dockerfile, build.gradle.kts, 8 under src/main). git reports 1519 changed
+# files across the comparison; the API returned 300, and ZERO of them were document-service files.
+# So the script declared equivalence, record-deployment wrote the stale version, and every consumer
+# stayed phantom-blocked. It also cannot self-heal: the staler the record, the wider the comparison,
+# the more certain the truncation.
+#
+# Tree objects answer the real question directly and are not subject to any of that. A commit's
+# top-level tree lists `<svc>` with its own subtree sha; equal subtree shas mean the directory is
+# byte-identical, which is a STRONGER proof than "no changed file was named". This still needs no
+# checkout — `git/trees` is an API call — so the constraint that motivated the compare API is
+# respected. resolve-can-i-deploy-selector.sh compares tree objects too; the two halves now agree
+# on both the question and the evidence.
+#
+# Cost: 2 calls when the subtrees match, 4 when they differ and exclude-paths have to be considered.
+# Every tree response carries a `truncated` flag, and this script treats a truncated tree as `none`
+# rather than as evidence of anything.
 #
 # WHAT COUNTS AS A BUILD INPUT
 # Everything under `<svc>/` except that package's release-please `exclude-paths` — `<svc>/src/test`
@@ -81,16 +98,38 @@ EOF
   return 0
 }
 
-# True when NONE of the changed paths is a build input of <svc>.
-trees_equivalent() {
-  local svc="$1" excludes="$2" p
-  while IFS= read -r p; do
-    [ -n "$p" ] || continue
-    if path_is_build_input "$svc" "$p" "$excludes"; then
-      return 1
+# Compare two `<path>TAB<blobsha>` listings of the SAME service subtree and decide whether they
+# agree on every BUILD INPUT. Paths arrive relative to the subtree, so they are prefixed with
+# `<svc>/` before path_is_build_input sees them — that function's contract is repo-relative paths.
+#
+# Full listings, not a changed-file list. That is the structural fix for #4673: with a changed-file
+# list, "the probe could not show me the change" and "there was no change" are the same empty
+# input. With listings, a missing entry is a difference.
+build_inputs_agree() {
+  local svc="$1" excludes="$2" a_file="$3" b_file="$4"
+  local filtered_a filtered_b
+  # Fail CLOSED on a broken environment. Without this the function compares two empty strings when
+  # the filter cannot run and reports agreement — the same shape as the defect this file exists to
+  # remove, one layer down. Found while testing this very change: `sort` was unavailable, both
+  # sides filtered to nothing, and a 16-file difference read as "equivalent".
+  command -v sort >/dev/null 2>&1 || return 1
+  [ -r "$a_file" ] && [ -r "$b_file" ] || return 1
+
+  filtered_a="$(_filter_build_inputs "$svc" "$excludes" <"$a_file")" || return 1
+  filtered_b="$(_filter_build_inputs "$svc" "$excludes" <"$b_file")" || return 1
+  [ "$filtered_a" = "$filtered_b" ]
+}
+
+# Keep only the `<path>TAB<blobsha>` lines that are build inputs, sorted for a stable comparison.
+_filter_build_inputs() {
+  local svc="$1" excludes="$2" line path
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    path="${line%%$'\t'*}"
+    if path_is_build_input "$svc" "${svc}/${path}" "$excludes"; then
+      printf '%s\n' "$line"
     fi
-  done
-  return 0
+  done | LC_ALL=C sort
 }
 
 # Read a package's exclude-paths out of release-please-config.json, one per line.
@@ -131,13 +170,66 @@ self_test() {
   # PREFIX TRAP: a sibling whose name starts with ours must not match.
   path_is_build_input openbank-ledger openbank-ledger-service/src/main/kotlin/A.kt "$EX"; check "prefix sibling does not match" 1 $?
 
-  printf 'openbank-ledger-service/src/test/kotlin/T.kt\ndocs/adr/0001.md\n' \
-    | trees_equivalent openbank-ledger-service "$EX"; check "test-only + docs change IS equivalent" 0 $?
-  printf 'openbank-ledger-service/src/test/kotlin/T.kt\nopenbank-ledger-service/src/main/kotlin/A.kt\n' \
-    | trees_equivalent openbank-ledger-service "$EX"; check "one main change is NOT equivalent" 1 $?
-  printf '' | trees_equivalent openbank-ledger-service "$EX"; check "empty diff IS equivalent" 0 $?
+
+  # ── #4673: the entry-map comparison the tree path uses ────────────────────────────────
+  # These are what the old compare-API shape could not express. Its input was a list of CHANGED
+  # filenames, so "the probe did not show me the change" and "there was no change" were the same
+  # empty list. These compare full listings, where a missing entry is a difference.
+  local A B
+  A="$(mktemp)"; B="$(mktemp)"
+
+  printf 'src/main/kotlin/A.kt\taaa\nsrc/test/kotlin/T.kt\tttt\n' >"$A"
+  printf 'src/main/kotlin/A.kt\taaa\nsrc/test/kotlin/T.kt\tZZZ\n' >"$B"
+  build_inputs_agree openbank-ledger-service "$EX" "$A" "$B"; check "differing src/test only IS equivalent" 0 $?
+
+  printf 'src/main/kotlin/A.kt\taaa\n' >"$A"
+  printf 'src/main/kotlin/A.kt\tbbb\n' >"$B"
+  build_inputs_agree openbank-ledger-service "$EX" "$A" "$B"; check "a changed src/main blob is NOT equivalent" 1 $?
+
+  printf 'src/main/kotlin/A.kt\taaa\n' >"$A"
+  printf 'src/main/kotlin/A.kt\taaa\nsrc/main/kotlin/B.kt\tbbb\n' >"$B"
+  build_inputs_agree openbank-ledger-service "$EX" "$A" "$B"; check "an ADDED build input is NOT equivalent" 1 $?
+
+  printf 'src/main/kotlin/A.kt\taaa\nDockerfile\tddd\n' >"$A"
+  printf 'Dockerfile\tddd\nsrc/main/kotlin/A.kt\taaa\n' >"$B"
+  build_inputs_agree openbank-ledger-service "$EX" "$A" "$B"; check "listing order does not matter" 0 $?
+
+  # THE #4673 CASE: a truncated listing must never read as agreement. Here the deployed side is
+  # missing an entry it really has, exactly as the 300-cap compare response was — and the answer
+  # must be "differs", never "equivalent".
+  printf 'src/main/kotlin/A.kt\taaa\nDockerfile\tddd\n' >"$A"
+  printf 'src/main/kotlin/A.kt\taaa\n' >"$B"
+  build_inputs_agree openbank-ledger-service "$EX" "$A" "$B"; check "a listing missing a build input is NOT equivalent" 1 $?
+
+  printf '' >"$A"; printf '' >"$B"
+  build_inputs_agree openbank-ledger-service "$EX" "$A" "$B"; check "two empty listings agree" 0 $?
+
+  # Fail-closed: an unreadable listing is not agreement. Same rule as a truncated tree — the
+  # absence of evidence must never be read as evidence of sameness.
+  build_inputs_agree openbank-ledger-service "$EX" "$A" /nonexistent-listing; check "an unreadable listing is NOT agreement" 1 $?
+
+  # ── truncation guards (#4673) — the branch the compare-API shape could not have ────────
+  # These exist because the ORIGINAL defect was a silently truncated response read as "unchanged".
+  # A guard in the network path is unreachable by a test, so the JSON handling is split out and
+  # driven here directly.
+  local TREE_OK='{"truncated":false,"tree":[{"path":"openbank-ledger-service","type":"tree","sha":"abc123"}]}'
+  local TREE_TRUNC='{"truncated":true,"tree":[{"path":"openbank-ledger-service","type":"tree","sha":"abc123"}]}'
+
+  printf '%s' "$TREE_OK" | tree_pick_subtree openbank-ledger-service >/dev/null; check "a complete tree yields the subtree sha" 0 $?
+  printf '%s' "$TREE_TRUNC" | tree_pick_subtree openbank-ledger-service >/dev/null; check "a TRUNCATED tree is refused, not read" 1 $?
+  printf '%s' "$TREE_OK" | tree_pick_subtree openbank-absent-service >/dev/null; check "an absent service is refused" 1 $?
+  printf 'not json' | tree_pick_subtree openbank-ledger-service >/dev/null; check "unparseable JSON is refused" 1 $?
+
+  local BLOBS_OK='{"truncated":false,"tree":[{"path":"src/main/A.kt","type":"blob","sha":"aaa"},{"path":"src","type":"tree","sha":"ttt"}]}'
+  local BLOBS_TRUNC='{"truncated":true,"tree":[{"path":"src/main/A.kt","type":"blob","sha":"aaa"}]}'
+
+  local got
+  got="$(printf '%s' "$BLOBS_OK" | tree_blobs)"; check "blobs are listed, trees skipped" 0 $?
+  [ "$got" = "$(printf 'src/main/A.kt\taaa')" ]; check "the blob listing is path TAB sha" 0 $?
+  printf '%s' "$BLOBS_TRUNC" | tree_blobs >/dev/null; check "a TRUNCATED blob listing is refused" 1 $?
+
+  rm -f "$A" "$B"
   # A service with no exclude-paths declared: src/test then counts, which is the safe direction.
-  printf 'openbank-x/src/test/T.kt\n' | trees_equivalent openbank-x ""; check "no excludes => src/test counts" 1 $?
 
   [ "$fails" -eq 0 ] && { echo "resolve-record-deployment-version: self-test PASS"; return 0; }
   echo "resolve-record-deployment-version: self-test FAIL"; return 1
@@ -171,16 +263,96 @@ except Exception: print("")' 2>/dev/null)"
   esac
   [ "$published" != "$deployed" ] || { echo "none"; return 0; }
 
-  local files excludes
-  files="$(gh api "repos/${GH_REPO}/compare/${published}...${deployed}" \
-    --jq '.files[].filename' 2>/dev/null)" || { echo "none"; return 0; }
-  excludes="$(excludes_for "$svc")"
+  # Tree objects, not the compare API (#4673): equal subtree shas prove the directory is
+  # byte-identical, and nothing here is subject to a 300-entry cap.
+  local tree_pub tree_dep
+  tree_pub="$(subtree_sha "$published" "$svc")" || { echo "none"; return 0; }
+  tree_dep="$(subtree_sha "$deployed" "$svc")" || { echo "none"; return 0; }
+  [ -n "$tree_pub" ] && [ -n "$tree_dep" ] || { echo "none"; return 0; }
 
-  if printf '%s\n' "$files" | trees_equivalent "$svc" "$excludes"; then
+  if [ "$tree_pub" = "$tree_dep" ]; then
     echo "equivalent:${published}"
-  else
-    echo "none"
+    return 0
   fi
+
+  # The directories differ. That is still equivalence if every difference sits inside an
+  # exclude-path, so list both subtrees and compare the build inputs entry by entry.
+  local excludes list_pub list_dep rc
+  excludes="$(excludes_for "$svc")"
+  list_pub="$(mktemp)" || { echo "none"; return 0; }
+  list_dep="$(mktemp)" || { rm -f "$list_pub"; echo "none"; return 0; }
+
+  if ! subtree_entries "$tree_pub" >"$list_pub" || ! subtree_entries "$tree_dep" >"$list_dep"; then
+    rm -f "$list_pub" "$list_dep"
+    echo "none"
+    return 0
+  fi
+
+  if build_inputs_agree "$svc" "$excludes" "$list_pub" "$list_dep"; then
+    rc="equivalent:${published}"
+  else
+    rc="none"
+  fi
+  rm -f "$list_pub" "$list_dep"
+  echo "$rc"
+}
+
+# The subtree sha of `<svc>` at <commit>, read from the commit's top-level tree. Fails (rc 1) when
+# the call fails, the tree is TRUNCATED, or the service is absent — each of which means "cannot
+# establish equivalence", never "equivalent". Truncation matters most: entries would be missing, so
+# an absent <svc> could not be told apart from a service that genuinely is not there.
+subtree_sha() {
+  local commit="$1" svc="$2" json
+  json="$(gh api "repos/${GH_REPO}/git/trees/${commit}" 2>/dev/null)" || return 1
+  printf '%s' "$json" | tree_pick_subtree "$svc"
+}
+
+# PURE half of subtree_sha: reads a git-trees JSON on stdin, prints the subtree sha of <svc>.
+# Fails (rc 1) on unparseable JSON, a TRUNCATED tree, or an absent service. Split out from the
+# network call precisely so the self-test can drive the truncation branch — the guard that stops
+# #4673 recurring is otherwise unreachable by any test.
+tree_pick_subtree() {
+  SVC="$1" python3 -c '
+import json, os, sys
+svc = os.environ["SVC"]
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if d.get("truncated"):
+    sys.exit(1)
+for e in d.get("tree", []):
+    if e.get("path") == svc and e.get("type") == "tree":
+        print(e.get("sha", ""))
+        sys.exit(0)
+sys.exit(1)
+'
+}
+
+subtree_entries() {
+  local tree="$1" json
+  json="$(gh api "repos/${GH_REPO}/git/trees/${tree}?recursive=1" 2>/dev/null)" || return 1
+  printf '%s' "$json" | tree_blobs
+}
+
+# PURE half of subtree_entries: `<path>TAB<blobsha>` per blob, from a git-trees JSON on stdin.
+# Fails (rc 1) on unparseable JSON or a TRUNCATED tree. A service tree is a few hundred entries so
+# truncation should never fire; if it ever does, the honest answer is that we could not look — not
+# that nothing changed. That distinction is the whole of #4673.
+tree_blobs() {
+  python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+if d.get("truncated"):
+    sys.exit(1)
+for e in d.get("tree", []):
+    if e.get("type") == "blob":
+        sys.stdout.write(e.get("path", "") + "\t" + e.get("sha", "") + "\n")
+sys.exit(0)
+'
 }
 
 case "${1:-}" in
