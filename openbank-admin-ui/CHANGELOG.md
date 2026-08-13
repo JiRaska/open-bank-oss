@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.113.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.112.0...admin-ui-v0.113.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app banner channel ([#4577](https://github.com/JiRaska/open-bank-oss/issues/4577)) ([d95c85c](https://github.com/JiRaska/open-bank-oss/commit/d95c85cf3fbe0428e4cc5e44bcca27d05bc574ab))
+
 ## [0.112.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.3...admin-ui-v0.112.0) (2026-08-13)
 
 
