@@ -2371,6 +2371,8 @@ gates:
     name: "helm valuesObject keys have effect (rules.yaml: alerting, enforced)"
     group: gitops
     mode: enforced
+    rationale: "Helm discards an unknown top-level values key silently — no error and no ArgoCD diff — so a mis-nested key reads as applied while doing nothing; three such keys in argo-rollouts.yaml left all 21 Rollouts with zero Prometheus series and three alerts structurally unable to fire."
+    review_after: "2027-02-13"
     selftest: python3 .github/scripts/check-helm-values-keys.py --self-test
     selftest_expect: pass
     min_subjects: 15   # 20 Helm sources with a valuesObject today (2026-08-13)
