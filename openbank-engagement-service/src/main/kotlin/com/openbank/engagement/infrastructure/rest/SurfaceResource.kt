@@ -72,8 +72,7 @@ class SurfaceResource(
         val slot = parseSlot(request.slot) ?: return badRequest("unknown slot '${request.slot}'")
         val type = EngagementEventType.entries.find { it.name == request.type }
             ?: return badRequest("unknown event type '${request.type}'")
-        val content = validateContent(request, slot)
-            ?: return badRequest("unknown or incompatible content '${request.contentId}'")
+        val content = validateContent(request, slot) ?: return badRequest("unknown or incompatible content '${request.contentId}'")
         val campaignFields = listOf(request.campaignId, request.stepOrder, request.channel)
         val campaignAttribution = if (campaignFields.any { it != null }) {
             if (request.interactionRef == null || campaignFields.any { it == null }) {
@@ -114,13 +113,9 @@ class SurfaceResource(
         val isCampaignPlacement = request.contentId == CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID &&
             request.interactionRef != null &&
             banners.belongsToParty(request.interactionRef, request.partyId)
-        val isInteractiveCampaignPlacement =
-            isCampaignPlacement && slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES
-        return if (isInteractiveCampaignPlacement) {
-            ValidatedContent(true)
-        } else {
-            null
-        }
+        return isCampaignPlacement
+            .takeIf { slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES }
+            ?.let { ValidatedContent(true) }
     }
 
     private fun parseSlot(name: String): SurfaceSlot? = SurfaceSlot.entries.find { it.name == name }
