@@ -136,6 +136,7 @@ openbank:
     keycloak-admin-client-id: ${KEYCLOAK_ADMIN_CLIENT_ID:customer-edge-admin}
     notification-service-url: ${NOTIFICATION_SERVICE_URL:http://notification-service.notifications.svc:8112}
     engagement-service-url: ${ENGAGEMENT_SERVICE_URL:http://engagement-service.engagement.svc:8153}
+    campaign-service-url: ${CAMPAIGN_SERVICE_URL:https://campaign-service.campaign.svc:8443}
     statement-service-url: ${STATEMENT_SERVICE_URL:http://statement-service.statements.svc:8136}
     standing-order-service-url: ${STANDING_ORDER_SERVICE_URL:http://standing-order-service.payments.svc:8121}
     fx-service-url:      ${FX_SERVICE_URL:http://fx-service.fx.svc:8119}
@@ -147,6 +148,9 @@ openbank:
   upstream:
     connect-timeout-ms: 5000
     request-timeout-ms: 10000
+    # The campaign interaction validator uses the private platform CA. Blank keeps local HTTP
+    # fixtures on the normal JVM trust store while the remaining east-west fleet migrates.
+    tls-trust-certificate-file: ${OPENBANK_UPSTREAM_TLS_TRUST_CERTIFICATE_FILE:}
     # M2M (client_credentials) creds for the operator realm. token-url and client-id
     # have sensible defaults in UpstreamClient; the SECRET is supplied at runtime via the
     # env var OPENBANK_UPSTREAM_CLIENT_SECRET, which Quarkus maps to the dotted property

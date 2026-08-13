@@ -529,6 +529,25 @@ class PanacheSendLogRepository :
     }.awaitSuspending().toInt()
 
     /**
+     * A push interaction reference is the immutable send-log id. Check ownership, medium and
+     * handoff outcome in one SQL predicate so neither the caller nor the edge can turn this into
+     * a campaign/party discovery oracle. A persisted `SENT` is the point at which the request was
+     * accepted by notification-service; suppressed and email rows are not attributable. Delivery
+     * status is deliberately not a precondition: a PUSH gateway acknowledgement is a later, weaker
+     * signal and must not erase an app interaction the bank actually observed.
+     */
+    override suspend fun hasPushInteractionForParty(interactionRef: UUID, partyId: UUID): Boolean =
+        Panache.withSession {
+            count(
+                "id = ?1 and partyId = ?2 and channel = ?3 and outcome = ?4",
+                interactionRef,
+                partyId,
+                Channel.PUSH.name,
+                SendOutcome.SENT.name,
+            ).map { it > 0 }
+        }.awaitSuspending()
+
+    /**
      * The predecessor send's delivery status (#3585 branch conditions).
      *
      * Ordered by step DESC then time DESC, and limited to one row: a retried step can leave more
