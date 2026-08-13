@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.21.0...notification-service-v0.22.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add push interaction reference ([#4516](https://github.com/JiRaska/open-bank-oss/issues/4516)) ([1bb708b](https://github.com/JiRaska/open-bank-oss/commit/1bb708b5f3d5bd8af2c578f4f530bd665bbe7e3e))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.20.0...notification-service-v0.21.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.1...notification-service-v0.20.0) (2026-08-09)
 
 

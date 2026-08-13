@@ -72,4 +72,34 @@ describe('campaign detail bundle', () => {
     expect(d.sources.journey).toBe('not_deployed')
     expect(Array.isArray(d.journey)).toBe(true)
   })
+
+  it('reads A/B measurement only for a campaign that configured variant B', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      const u = String(url)
+      if (u.endsWith('/content-experiment')) {
+        return { ok: true, status: 200, json: async () => ({ from: 'content-experiment' }), headers: new Headers() }
+      }
+      if (u.endsWith('/abc')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ steps: [{ variantBVariables: { offerTitle: 'B' } }] }),
+          headers: new Headers(),
+        }
+      }
+      return { ok: true, status: 200, json: async () => [], headers: new Headers() }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { GET } = await import('@/app/api/campaigns/[id]/route')
+    const res = await GET(new Request('http://x/api/campaigns/abc'), { params: Promise.resolve({ id: 'abc' }) })
+    const d = await res.json()
+
+    expect(d.contentExperiment).toEqual({ from: 'content-experiment' })
+    expect(d.sources.contentExperiment).toBe('ok')
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/campaigns/abc/content-experiment'),
+      expect.anything(),
+    )
+  })
 })
