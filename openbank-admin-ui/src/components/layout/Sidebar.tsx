@@ -23,6 +23,7 @@ import {
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import styles from './Sidebar.module.css'
 
 // `external: true` marks a destination that is NOT a Next.js route — today the
 // internal tool UIs served as sub-paths of this same host by their own Ingress
@@ -200,34 +201,24 @@ export function Sidebar() {
   }, [])
 
   return (
-    <aside style={{
-      width: '240px', flexShrink: 0,
-      background: 'var(--sidebar-bg)',
-      borderRight: '1px solid var(--sidebar-border)',
-      display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden',
-      boxShadow: '1px 0 10px rgba(0,0,0,0.1)'
-    }}>
+    <aside className={styles.sidebar}>
       {/* Brand */}
-      <div style={{ padding: '24px 20px 20px', borderBottom: '1px solid var(--sidebar-border)', flexShrink: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{
-            width: '32px', height: '32px', background: 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-            borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            boxShadow: '0 2px 4px rgba(99,102,241,0.3)'
-          }}>
+      <div className={styles.brand}>
+        <div className={styles.brandLockup}>
+          <div className={styles.brandMark}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/>
             </svg>
           </div>
-          <div>
-            <div style={{ fontSize: '15px', fontWeight: 800, color: '#ffffff', letterSpacing: '-0.02em' }}>OpenBank</div>
-            <div style={{ fontSize: '11px', color: 'var(--sidebar-text)', marginTop: '2px', fontWeight: 500 }}>{t('Administrace', 'Admin Portal')}</div>
+          <div className={styles.brandText}>
+            <div className={styles.brandName}>OpenBank</div>
+            <div className={styles.brandSubtitle}>{t('Administrace', 'Admin Portal')}</div>
           </div>
         </div>
       </div>
 
       {/* Nav — the only scrollable region; brand + footer stay pinned. */}
-      <nav ref={navRef} className="ob-sidebar-nav" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '16px 12px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+      <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
         <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
         <NavSection items={filter(workspace)} pathname={pathname} />
         <NavSection items={filter(coreNav)} pathname={pathname} />
@@ -252,9 +243,9 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div style={{ padding: '16px 20px', borderTop: '1px solid var(--sidebar-border)', flexShrink: 0, background: 'rgba(0,0,0,0.1)' }}>
-        <div style={{ fontSize: '11px', color: 'var(--sidebar-text)', fontWeight: 600 }}>OpenBank v2.0</div>
-        <div style={{ fontSize: '10px', color: 'var(--sidebar-text-muted)', marginTop: '4px', letterSpacing: '0.02em' }}>EBA · PSD2 · CNB · GDPR</div>
+      <div className={styles.footer}>
+        <div className={styles.footerVersion}>OpenBank v2.0</div>
+        <div className={styles.footerScope}>EBA · PSD2 · CNB · GDPR</div>
       </div>
     </aside>
   )
@@ -262,8 +253,7 @@ export function Sidebar() {
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ fontSize: '10px', fontWeight: 700, letterSpacing: '0.1em', color: 'var(--sidebar-text-muted)',
-      padding: '16px 8px 6px', textTransform: 'uppercase' }}>
+    <div className={styles.sectionLabel}>
       {children}
     </div>
   )
@@ -283,47 +273,20 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
 
         if (locked) {
           return (
-            <div key={item.href} title={language === 'cs' ? 'Přístup není povolen pro demo účet' : 'Not available for demo account'} style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '8px 12px', borderRadius: '8px',
-              color: 'var(--sidebar-text-muted)',
-              fontSize: '13px', fontWeight: 500,
-              opacity: 0.45,
-              cursor: 'not-allowed',
-              userSelect: 'none',
-            }}>
-              <Icon size={16} style={{ flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{displayName}</span>
-              <Lock size={11} style={{ flexShrink: 0, opacity: 0.7 }} />
+            <div key={item.href} title={language === 'cs' ? 'Přístup není povolen pro demo účet' : 'Not available for demo account'} className={`${styles.navItem} ${styles.locked}`}>
+              <Icon size={16} className={styles.navIcon} />
+              <span className={styles.navLabel}>{displayName}</span>
+              <Lock size={11} className={styles.lockIcon} />
             </div>
           )
         }
 
         const row = (
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '10px',
-              padding: '8px 12px', borderRadius: '8px', cursor: 'pointer',
-              background: active ? 'var(--sidebar-active-bg)' : 'transparent',
-              color: active ? 'var(--sidebar-active-text)' : 'var(--sidebar-text)',
-              fontSize: '13px', fontWeight: active ? 600 : 500,
-              transition: 'all 0.15s ease',
-              position: 'relative'
-            }}
-              onMouseEnter={e => { if (!active) { e.currentTarget.style.background = 'var(--sidebar-hover-bg)'; e.currentTarget.style.color = '#fff'; } }}
-              onMouseLeave={e => { if (!active) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--sidebar-text)'; } }}
-            >
-              {active && (
-                <div style={{
-                  position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
-                  width: '3px', height: '16px', background: 'var(--sidebar-accent)',
-                  borderRadius: '0 4px 4px 0'
-                }} />
-              )}
-              <Icon size={16} style={{ flexShrink: 0, opacity: active ? 1 : 0.7 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{displayName}</span>
+            <div className={`${styles.navItem} ${active ? styles.active : ''}`}>
+              <Icon size={16} className={styles.navIcon} />
+              <span className={styles.navLabel}>{displayName}</span>
               {item.badge && (
-                <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '10px',
-                  background: 'var(--sidebar-accent)', color: '#fff' }}>{item.badge}</span>
+                <span className={styles.navBadge}>{item.badge}</span>
               )}
             </div>
         )
