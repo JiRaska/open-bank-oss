@@ -36,7 +36,7 @@ class CatalogReviewServiceTest {
 
     @Suppress("LongMethod")
     @Test
-    fun `review grounds an exact draft with no tools and persists structured provenance`() = runBlocking {
+    fun `review grounds an exact draft with no tools and persists structured provenance`(): Unit = runBlocking {
         val reader = mockk<CatalogRevisionReadPort> {
             every { get(snapshot.offeringId, snapshot.revisionId) } returns
                 snapshot
@@ -102,7 +102,7 @@ class CatalogReviewServiceTest {
     }
 
     @Test
-    fun `published revision never reaches model or proposal queue`() = runBlocking {
+    fun `published revision never reaches model or proposal queue`(): Unit = runBlocking {
         val published = snapshot.copy(state = "PUBLISHED")
         val reader = mockk<CatalogRevisionReadPort> { every { get(any(), any()) } returns published }
         val chat = mockk<AgentChatService>()
@@ -117,7 +117,7 @@ class CatalogReviewServiceTest {
     }
 
     @Test
-    fun `unknown output fields are rejected without a proposal`() = runBlocking {
+    fun `unknown output fields are rejected without a proposal`(): Unit = runBlocking {
         val reader = mockk<CatalogRevisionReadPort> { every { get(any(), any()) } returns snapshot }
         val chat = mockk<AgentChatService>()
         coEvery { chat.run(any(), any(), any(), any(), any(), any(), any(), any()) } returns
@@ -144,7 +144,7 @@ class CatalogReviewServiceTest {
     }
 
     @Test
-    fun `unavailable model creates no proposal`() = runBlocking {
+    fun `unavailable model creates no proposal`(): Unit = runBlocking {
         val reader = mockk<CatalogRevisionReadPort> { every { get(any(), any()) } returns snapshot }
         val chat = mockk<AgentChatService>()
         coEvery { chat.run(any(), any(), any(), any(), any(), any(), any(), any()) } returns

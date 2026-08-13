@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogForbiddenException
 import com.openbank.productcatalog.application.CatalogPreconditionFailedException
@@ -274,7 +275,7 @@ class PostgresGenericCatalogRepository(
     private fun persistRevisionChildren(session: Mutiny.Session, revision: ProductRevision): Uni<Void> {
         val prices = revision.content.prices.map { price ->
             CatalogPriceEntity().apply {
-                id = UUID.randomUUID()
+                id = Ids.newId()
                 revisionId = revision.id
                 code = price.code
                 kind = price.kind.name
@@ -289,7 +290,7 @@ class PostgresGenericCatalogRepository(
         }
         val relationships = revision.content.relationships.map { relationship ->
             CatalogRelationshipEntity().apply {
-                id = UUID.randomUUID()
+                id = Ids.newId()
                 revisionId = revision.id
                 targetOfferingId = relationship.targetOfferingId
                 kind = relationship.kind.name
@@ -319,7 +320,7 @@ class PostgresGenericCatalogRepository(
     ): Uni<Void> {
         val at = Instant.now(clock)
         val event = CatalogChangeEvent(
-            eventId = UUID.randomUUID(),
+            eventId = Ids.newId(),
             aggregateType = aggregateType,
             aggregateId = aggregateId,
             eventType = "com.openbank.catalog.${action.lowercase()}",
@@ -329,7 +330,7 @@ class PostgresGenericCatalogRepository(
         )
         val details = JsonObject(mapper.writeValueAsString(mapOf("action" to action)))
         val audit = CatalogAuditEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             this.aggregateType = aggregateType
             this.aggregateId = aggregateId
             this.action = action
@@ -379,7 +380,7 @@ class PostgresGenericCatalogRepository(
         reason: String,
         at: Instant,
     ): CatalogApprovalEntity = CatalogApprovalEntity().apply {
-        id = UUID.randomUUID()
+        id = Ids.newId()
         revisionId = revision.id
         makerId = revision.makerId
         this.checkerId = checkerId

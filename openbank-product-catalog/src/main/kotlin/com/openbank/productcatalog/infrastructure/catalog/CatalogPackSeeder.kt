@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.catalog
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.runtime.StartupEvent
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
@@ -81,7 +82,7 @@ class CatalogPackSeeder(
     private fun recordRegistration(connection: java.sql.Connection, pack: PackSchema) {
         val at = Instant.now(clock)
         val aggregateId = UUID.nameUUIDFromBytes("${pack.id}:${pack.version}".toByteArray(StandardCharsets.UTF_8))
-        val eventId = UUID.randomUUID()
+        val eventId = Ids.newId()
         val eventType = "com.openbank.catalog.schema_registered"
         val payload = mapper.writeValueAsString(
             mapOf(
@@ -100,7 +101,7 @@ class CatalogPackSeeder(
                 """VALUES (?, 'SCHEMA', ?, 'SCHEMA_REGISTERED', 'system:trusted-pack-seeder', ?, CAST(? AS jsonb))""",
         ).use { statement ->
             statement.bind(
-                UUID.randomUUID(),
+                Ids.newId(),
                 aggregateId,
                 java.time.OffsetDateTime.ofInstant(at, java.time.ZoneOffset.UTC),
                 """{"schemaId":"${pack.id}","version":${pack.version}}""",

@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.infrastructure.persistence
 
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.domain.Product
 import com.openbank.productcatalog.domain.ProductStatus
@@ -434,7 +435,7 @@ class BankV1CompatibilityProjector(
     ).setParameter("offeringId", offeringId).singleResult.map { it + 1 }
 
     private fun bootstrapApproval(revision: ProductRevision, at: Instant) = CatalogApprovalEntity().apply {
-        id = UUID.randomUUID()
+        id = Ids.newId()
         revisionId = revision.id
         makerId = revision.makerId
         checkerId = BOOTSTRAP_CHECKER

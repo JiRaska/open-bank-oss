@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
 import io.smallrye.mutiny.Uni
 import io.vertx.core.json.JsonObject
@@ -26,7 +27,7 @@ class CatalogCompatibilityEvidenceWriter(private val mapper: ObjectMapper, priva
     ): Uni<Void> {
         val at = Instant.now(clock)
         val event = CatalogChangeEvent(
-            eventId = UUID.randomUUID(),
+            eventId = Ids.newId(),
             aggregateType = aggregateType,
             aggregateId = aggregateId,
             eventType = "com.openbank.catalog.${action.lowercase()}",
@@ -35,7 +36,7 @@ class CatalogCompatibilityEvidenceWriter(private val mapper: ObjectMapper, priva
             actorId = actorId,
         )
         val audit = CatalogAuditEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             this.aggregateType = aggregateType
             this.aggregateId = aggregateId
             this.action = action

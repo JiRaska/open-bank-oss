@@ -2,6 +2,7 @@
 date: 2026-08-13
 decision-status: accepted
 delivery-status: partial
+followup: "#4505 — P6b bundle intelligence and P6c offer explanations remain proposal-only"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []

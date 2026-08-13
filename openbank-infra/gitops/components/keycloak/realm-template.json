@@ -35,6 +35,18 @@
         "description": "Bank operator"
       },
       {
+        "name": "CATALOG_SCOPE_READ",
+        "description": "Catalog read permission derived from the catalog:read OAuth scope"
+      },
+      {
+        "name": "CATALOG_SCOPE_AUTHOR",
+        "description": "Catalog author permission derived from the catalog:author OAuth scope"
+      },
+      {
+        "name": "CATALOG_SCOPE_PUBLISH",
+        "description": "Catalog publication permission derived from the catalog:publish OAuth scope"
+      },
+      {
         "name": "ROLE_VIEWER",
         "description": "Read-only access"
       },

@@ -4,6 +4,7 @@
 
 package com.openbank.productcatalog.domain.catalog
 
+import com.openbank.libs.domain.identifiers.Ids
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.Locale
@@ -49,7 +50,7 @@ enum class EligibilityOperator { EQUALS, NOT_EQUALS, IN, GREATER_THAN, GREATER_O
 enum class RelationshipKind { BUNDLE, ADD_ON, REPLACEMENT, DEPENDENCY, COMPATIBLE_WITH }
 
 data class ProductSpecification(
-    val id: UUID = UUID.randomUUID(),
+    val id: UUID = Ids.newId(),
     val code: String,
     val schemaRef: SchemaRef,
     val createdAt: Instant,
@@ -146,7 +147,7 @@ data class RevisionContent(
 }
 
 data class ProductOffering(
-    val id: UUID = UUID.randomUUID(),
+    val id: UUID = Ids.newId(),
     val specificationId: UUID,
     val code: String,
     val market: MarketContext = MarketContext(),
@@ -159,7 +160,7 @@ data class ProductOffering(
 }
 
 data class ProductRevision(
-    val id: UUID = UUID.randomUUID(),
+    val id: UUID = Ids.newId(),
     val offeringId: UUID,
     val number: Long,
     val schemaRef: SchemaRef,

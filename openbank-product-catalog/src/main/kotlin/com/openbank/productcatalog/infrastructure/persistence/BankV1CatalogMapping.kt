@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.productcatalog.domain.Fee
 import com.openbank.productcatalog.domain.Product
 import com.openbank.productcatalog.domain.ProductStatus
@@ -25,7 +26,6 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.HexFormat
-import java.util.UUID
 
 /** The only place where the legacy banking document is translated to the generic catalog model. */
 @ApplicationScoped
@@ -93,7 +93,7 @@ class BankV1CatalogMapping(private val mapper: ObjectMapper, private val catalog
 
     fun priceEntities(revision: ProductRevision): List<CatalogPriceEntity> = revision.content.prices.map { price ->
         CatalogPriceEntity().apply {
-            id = UUID.randomUUID()
+            id = Ids.newId()
             revisionId = revision.id
             code = price.code
             kind = price.kind.name

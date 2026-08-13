@@ -13,7 +13,10 @@ whether anything reads the artifact before assuming a green covers it.
 
 WHAT IT CHECKS: for every `openbank-*/src/main/resources/openapi.yaml`, the set of
 (HTTP method, absolute path) pairs declared under `paths:` — resolved against `servers[0].url`
-— against the same set read off the JAX-RS annotations of that service's resource classes.
+— against the same set read off the JAX-RS annotations of that service's resource classes. A
+resource that implements an OpenAPI-generated server interface is also an authoritative served
+route declaration: compilation proves it implements the generated methods and the generator owns
+the JAX-RS annotations, so no handwritten annotation copy is needed.
 Drift is reported in both directions:
 
     served-not-published   a route the code answers and the contract omits
@@ -95,6 +98,7 @@ BASELINE_HEADER = """\
 
 # A JAX-RS *client* stub carries the CALLEE's routes, not this service's served contract.
 CLIENT_HINT = re.compile(r"@RegisterRestClient")
+GENERATED_API_IMPORT = re.compile(r"import\s+[\w.]+\.generated\.api\.([A-Za-z][A-Za-z0-9_]*Api)\b")
 
 
 def normalize(path: str) -> str:
@@ -138,6 +142,34 @@ def spec_routes(spec_text: str) -> set[str]:
         method = re.match(r"^    ([a-z]+):\s*$", line)
         if method and current and method.group(1) in SPEC_METHODS:
             routes.add(f"{method.group(1).upper()} {normalize(current)}")
+    return routes
+
+
+def generated_api_routes(spec_text: str) -> dict[str, set[str]]:
+    """Routes owned by each OpenAPI tag's generated `<Tag>Api` server interface."""
+    prefix = server_prefix(spec_text)
+    routes: dict[str, set[str]] = {}
+    current: str | None = None
+    method: str | None = None
+    for line in spec_text.splitlines():
+        path_key = re.match(r"^  ([\"']?)(/\S*?)\1:\s*$", line)
+        if path_key:
+            current = prefix + path_key.group(2)
+            method = None
+            continue
+        operation = re.match(r"^    ([a-z]+):\s*$", line)
+        if operation:
+            method = operation.group(1).upper() if operation.group(1) in SPEC_METHODS else None
+            continue
+        tags = re.match(r"^      tags:\s*\[([^]]+)]\s*$", line)
+        if not (tags and current and method):
+            continue
+        for raw_tag in tags.group(1).split(","):
+            words = re.findall(r"[A-Za-z0-9]+", raw_tag)
+            if not words:
+                continue
+            api = "".join(word[:1].upper() + word[1:] for word in words) + "Api"
+            routes.setdefault(api, set()).add(f"{method} {normalize(current)}")
     return routes
 
 
@@ -216,6 +248,24 @@ def code_routes(service_dir: Path) -> set[str]:
     return routes
 
 
+def generated_server_routes(service_dir: Path, spec_text: str) -> set[str]:
+    """Routes declared by generated server interfaces implemented in this service."""
+    src = service_dir / "src/main/kotlin"
+    if not src.is_dir():
+        return set()
+    implemented: set[str] = set()
+    for kt in sorted(src.rglob("*.kt")):
+        try:
+            text = kt.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for api in set(GENERATED_API_IMPORT.findall(text)):
+            if re.search(rf":\s*{re.escape(api)}\b", text):
+                implemented.add(api)
+    by_api = generated_api_routes(spec_text)
+    return set().union(*(by_api.get(api, set()) for api in implemented)) if implemented else set()
+
+
 SHARED_RUNTIME = Path("openbank-libs-runtime")
 
 # Quarkus serves its management surface (health, metrics, the generated spec) from extensions,
@@ -276,8 +326,9 @@ def main() -> int:
     for spec_path in specs:
         service_dir = Path(spec_path.parts[0])
         service = service_dir.name
-        declared = spec_routes(spec_path.read_text(encoding="utf-8", errors="replace"))
-        served = code_routes(service_dir)
+        spec_text = spec_path.read_text(encoding="utf-8", errors="replace")
+        declared = spec_routes(spec_text)
+        served = code_routes(service_dir) | generated_server_routes(service_dir, spec_text)
 
         # A service with no annotated resource class at all is not evidence of drift — it is a
         # service this heuristic cannot see (generated resources, a non-JAX-RS surface). Report
