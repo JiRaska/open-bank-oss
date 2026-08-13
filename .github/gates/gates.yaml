@@ -1996,6 +1996,8 @@ gates:
     name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-openapi-server-port.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-openapi-server-port.py --enforce
 
@@ -2101,6 +2103,8 @@ gates:
     group: data
     mode: advisory
     verified: "2026-08-09 — fleet still not clean per #686; no target date set for --enforce yet"
+    selftest: bash .github/scripts/check-dotted-mp-messaging-keys.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
@@ -2344,6 +2348,8 @@ gates:
     name: "no dead-code SERVICE-principal rego rule (enforced)"
     group: security
     mode: enforced
+    selftest: bash .github/scripts/check-no-service-principal-type.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-no-service-principal-type.sh .
 
