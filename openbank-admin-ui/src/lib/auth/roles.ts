@@ -18,6 +18,9 @@ export const ROLES = {
   KYC_OPENER: "ROLE_KYC_OPENER",
   KYC_REVIEWER: "ROLE_KYC_REVIEWER",
   DEMO:       "ROLE_DEMO",
+  CATALOG_READ: "CATALOG_SCOPE_READ",
+  CATALOG_AUTHOR: "CATALOG_SCOPE_AUTHOR",
+  CATALOG_PUBLISH: "CATALOG_SCOPE_PUBLISH",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -42,6 +45,11 @@ export const PERMISSIONS = {
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Generic Product Studio. Scope-derived roles make the same UI usable with a provider-neutral
+  // standalone OIDC issuer; OpenBank OPERATOR/ADMIN remain compatible personas.
+  "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
+  "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
+  "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
   // Parties / KYC / Onboarding — KYC_OPENER may NOT approve (four-eyes, ADR-0116);
   // KYC_REVIEWER may NOT open. The UI mirrors the backend @RolesAllowed split so a
   // holder of only one KYC role gets exactly their half of the workflow.

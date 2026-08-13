@@ -60,6 +60,7 @@ const customerNav: NavItem[] = [
 
 const paymentsNav: NavItem[] = [
   { nameCs: 'Katalog produktů',  nameEn: 'Product Catalog',  href: '/product-catalog',   icon: Package,   permission: 'payments:view' },
+  { nameCs: 'Produktové studio', nameEn: 'Product Studio',   href: '/product-studio',    icon: Boxes,     permission: 'catalog:read' },
   { nameCs: 'Platby',            nameEn: 'Payments',         href: '/payments',          icon: Banknote,  permission: 'payments:view' },
   { nameCs: 'Trvalé příkazy',    nameEn: 'Standing Orders',  href: '/standing-orders',   icon: Repeat,    permission: 'payments:view' },
   { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payments:view' },

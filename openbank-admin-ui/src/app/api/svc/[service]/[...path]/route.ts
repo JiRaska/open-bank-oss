@@ -86,6 +86,9 @@ async function resolveInCluster(svcKey: string): Promise<ResolvedService | null>
 }
 
 async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
+  if (svcKey === 'product-catalog' && process.env.CATALOG_STANDALONE_SIDECAR === 'true') {
+    return { url: 'http://127.0.0.1:8104', scaledToZero: false }
+  }
   if (inCluster()) {
     // Only proxy to services the cluster actually exposes; an undeployed service
     // resolves to null → 404 rather than a misleading hang.

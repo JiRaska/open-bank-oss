@@ -5,6 +5,8 @@
 import { customFetch, type NextAuthConfig } from "next-auth"
 import KeycloakProvider from "next-auth/providers/keycloak"
 import type { JWT } from "next-auth/jwt"
+import { extractCatalogScopeRoles } from '@/lib/auth/catalogScopes'
+import { requireSecurePublicUrl } from '@/lib/auth/publicUrl'
 
 // Public URL is what the browser and OIDC issuer metadata should see.
 // Internal URL is what the NextAuth server uses for discovery/token refresh inside Docker.
@@ -36,7 +38,15 @@ function requiredSecret(name: string, devFallback: string): string {
   return devFallback
 }
 
-const KEYCLOAK_PUBLIC_URL   = process.env.KEYCLOAK_PUBLIC_URL || "http://localhost:8080"
+const publicUrlPolicy = {
+  production: process.env.NODE_ENV === 'production',
+  buildPhase: process.env.NEXT_PHASE === 'phase-production-build',
+  allowInsecureLoopback: process.env.ALLOW_INSECURE_STUDIO_URLS === 'true',
+}
+
+const KEYCLOAK_PUBLIC_URL = requireSecurePublicUrl(
+  'KEYCLOAK_PUBLIC_URL', process.env.KEYCLOAK_PUBLIC_URL || "http://localhost:8080", publicUrlPolicy,
+)
 const KEYCLOAK_INTERNAL_URL = process.env.KEYCLOAK_URL || "http://keycloak:8080"
 const KEYCLOAK_REALM = process.env.KEYCLOAK_REALM || "openbank"
 const CLIENT_ID      = process.env.KEYCLOAK_CLIENT_ID     || "openbank-admin-ui"
@@ -45,7 +55,8 @@ const CLIENT_SECRET  = requiredSecret("KEYCLOAK_CLIENT_SECRET", "openbank-admin-
 const KEYCLOAK_ISSUER = `${KEYCLOAK_PUBLIC_URL}/realms/${KEYCLOAK_REALM}`
 // Secure cookies whenever the portal is served over https (prod). Drives the cookie name
 // prefix + the Secure flag (ADR-0080 P1 / F-AUTH-07).
-const USE_SECURE_COOKIES = (process.env.NEXTAUTH_URL ?? "").startsWith("https://")
+const NEXTAUTH_URL = requireSecurePublicUrl('NEXTAUTH_URL', process.env.NEXTAUTH_URL ?? '', publicUrlPolicy)
+const USE_SECURE_COOKIES = NEXTAUTH_URL.startsWith("https://")
 
 // Split front/back-channel OIDC. Auth.js v5 (@auth/core) runs *server-side* OIDC
 // discovery, token, userinfo and JWKS fetches against `provider.issuer` — the
@@ -85,11 +96,13 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
   }
 }
 
-/** Extract ROLE_* roles from any Keycloak JWT */
+/** Extract OpenBank realm roles plus provider-neutral catalog scopes from an OIDC JWT. */
 function extractRoles(jwt: string): string[] {
   const payload = decodeJwtPayload(jwt)
   const realmAccess = payload["realm_access"] as { roles?: string[] } | undefined
-  return realmAccess?.roles?.filter(r => r.startsWith("ROLE_")) ?? []
+  const roles = realmAccess?.roles?.filter(r => r.startsWith("ROLE_")) ?? []
+  roles.push(...extractCatalogScopeRoles(payload))
+  return [...new Set(roles)]
 }
 
 /**
