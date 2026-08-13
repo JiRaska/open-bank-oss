@@ -18,7 +18,7 @@ class CampaignInteractionQueryTest {
     private val query = CampaignInteractionQuery(sendLog)
 
     @Test
-    fun `delegates the opaque reference and authoritative party to the send log`() = runBlocking {
+    fun `delegates the opaque reference and authoritative party to the send log`(): Unit = runBlocking {
         val interactionRef = UUID.randomUUID()
         val partyId = UUID.randomUUID()
         coEvery { sendLog.hasPushInteractionForParty(interactionRef, partyId) } returns true
