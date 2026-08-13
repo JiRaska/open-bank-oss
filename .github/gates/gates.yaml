@@ -693,9 +693,19 @@ gates:
   # nothing; there is no build failure because there is no build. Six instances by
   # 2026-07-16 (the 6 control agents, document-service, clearing-simulator, finrep,
   # vop), each fixed by hand and documented in an auto-deploy.yml comment. The comments
-  # did not stop the seventh. ENFORCED, with a shrink-only baseline for the known debt.
+  # did not stop the seventh: analytics-sink was undeployed from 2026-07-26 to 2026-08-13
+  # (#4553 / #4576) and this gate reported PASS every run, because its subject set was
+  # release-please's RELEASED components — analytics-sink owns no OLTP database and cuts
+  # no release (ADR-0022), so it has no version.txt and was structurally invisible to a
+  # gate whose whole job is catching exactly this. Widened 2026-08-13: the subject is now
+  # released components PLUS anything wearing a `sandbox-<sha>` tag, since that tag shape
+  # IS auto-deploy's own output and needs no second registry to define it. The widening
+  # immediately found two more (developer-portal, document-renderer) — non-Quarkus builds
+  # that need real build-path work, so they are baselined rather than force-fit into the
+  # Gradle fast-jar step. ENFORCED, with a shrink-only baseline for the known debt.
   - id: deploy-coverage-guard
-    name: "deploy-coverage guard (released + gitops => in ALL_SERVICES, enforced)"
+    min_subjects: 45   # 60 deployable workloads today (2026-08-13)
+    name: "deploy-coverage guard (released + sandbox-tagged => in ALL_SERVICES, enforced)"
     group: supplychain
     mode: enforced
     selftest: bash .github/scripts/check-deploy-coverage.sh --self-test
