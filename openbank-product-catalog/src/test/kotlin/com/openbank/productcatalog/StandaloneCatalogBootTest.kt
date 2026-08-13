@@ -17,6 +17,7 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.Test
 import javax.sql.DataSource
@@ -78,8 +79,10 @@ class InsuranceStandaloneCatalogBootTest : StandaloneCatalogBootContract() {
     fun `insurance-only standalone deployment starts without bank data`() {
         given().get("/api/v2/product-types").then()
             .statusCode(200)
-            .body("size()", equalTo(1))
-            .body("[0].id", equalTo("org.openbank.insurance.term-life"))
+            .body("size()", equalTo(2))
+            .body("id", everyItem(equalTo("org.openbank.insurance.term-life")))
+            .body("version", hasItem(1))
+            .body("version", hasItem(2))
         assertNoBankCompatibilityData()
     }
 }

@@ -28,7 +28,7 @@ class CatalogBoundaryValidationTest {
         val specificationId = given().contentType("application/json")
             .body(
                 """{"code":"PRICE_BOUNDARY_$suffix","schemaRef":{"id":""" +
-                    """"org.openbank.insurance.term-life","version":1}}""",
+                    """"org.openbank.insurance.term-life","version":2}}""",
             )
             .post("/api/v2/specifications").then().statusCode(201).extract().path<String>("id")
         val offeringId = given().contentType("application/json")
@@ -38,9 +38,8 @@ class CatalogBoundaryValidationTest {
 
         given().contentType("application/json")
             .body(
-                """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":1},""" +
-                    """"name":{"en":"Boundary"},"attributes":{"coverage":{"amount":"1","currency":"EUR"},""" +
-                    """"termYears":1,"premiumModel":"VARIABLE"},"prices":[{"code":"$tooLong","kind":"RATE",""" +
+                    """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":2},""" +
+                    """"name":{"en":"Boundary"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{"code":"$tooLong","kind":"RATE",""" +
                     """"value":"1","unit":"annual","cadence":"ANNUALLY"}]}""",
             )
             .post("/api/v2/offerings/$offeringId/revisions").then()
@@ -54,7 +53,7 @@ class CatalogBoundaryValidationTest {
         val specificationId = given().contentType("application/json")
             .body(
                 """{"code":"DECIMAL_WIRE_$suffix","schemaRef":{"id":""" +
-                    """"org.openbank.insurance.term-life","version":1}}""",
+                    """"org.openbank.insurance.term-life","version":2}}""",
             )
             .post("/api/v2/specifications").then().statusCode(201).extract().path<String>("id")
         val offeringId = given().contentType("application/json")
@@ -64,9 +63,8 @@ class CatalogBoundaryValidationTest {
         listOf("1e3", "01").forEach { invalidValue ->
             given().contentType("application/json")
                 .body(
-                    """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":1},""" +
-                        """"name":{"en":"Boundary"},"attributes":{"coverage":{"amount":"1","currency":"EUR"},""" +
-                        """"termYears":1,"premiumModel":"VARIABLE"},"prices":[{"code":"PREMIUM","kind":"RATE",""" +
+                        """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":2},""" +
+                        """"name":{"en":"Boundary"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{"code":"PREMIUM","kind":"RATE",""" +
                         """"value":"$invalidValue","unit":"annual","cadence":"ANNUALLY"}]}""",
                 )
                 .post("/api/v2/offerings/$offeringId/revisions").then()
@@ -77,5 +75,10 @@ class CatalogBoundaryValidationTest {
         given().get("/api/v2/offerings/$offeringId/revisions").then()
             .statusCode(200)
             .body("$", hasSize<Any>(0))
+    }
+
+    private companion object {
+        const val INSURANCE_ATTRIBUTES =
+            """{"coverage":{"amount":"1","currency":"EUR"},"termYears":1,"premiumModel":"CALCULATED","perils":[{"code":"DEATH","description":"Death"}],"exclusions":[],"limits":[{"kind":"PER_EVENT","amount":"1","currency":"EUR"}],"deductibles":[],"underwritingQuestions":[]}"""
     }
 }

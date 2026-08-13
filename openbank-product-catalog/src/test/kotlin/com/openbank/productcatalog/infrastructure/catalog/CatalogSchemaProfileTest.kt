@@ -69,6 +69,16 @@ class CatalogSchemaProfileTest {
             .hasMessageContaining("additionalProperties")
     }
 
+    @Test
+    fun `allows a property whose business name equals a schema keyword`() {
+        val schema =
+            """{"${'$'}schema":"${CatalogSchemaProfile.DIALECT}","type":"object","additionalProperties":false,""" +
+                """"properties":{"question":{"type":"object","additionalProperties":false,""" +
+                """"required":["required"],"properties":{"required":{"type":"boolean"}}}}}"""
+
+        profile.requireValid(mapper.readTree(schema))
+    }
+
     private fun schema(property: String): String =
         """{"${'$'}schema":"${CatalogSchemaProfile.DIALECT}","type":"object","additionalProperties":false,""" +
             """"properties":{"name":{$property}}}"""

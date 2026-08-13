@@ -164,6 +164,12 @@ class CatalogPackSeeder(
                 1,
                 "/catalog-packs/insurance/term-life-v1.schema.json",
             ),
+            PackSchema(
+                "insurance",
+                "org.openbank.insurance.term-life",
+                2,
+                "/catalog-packs/insurance/term-life-v2.schema.json",
+            ),
         )
     }
 }

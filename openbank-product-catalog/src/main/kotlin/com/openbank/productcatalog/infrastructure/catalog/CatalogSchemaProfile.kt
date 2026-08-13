@@ -55,7 +55,17 @@ class CatalogSchemaProfile {
                     // Conditional roots are partial schemas over their enclosing closed object.
                     // Descendants introduced beneath them are ordinary schemas and must close
                     // every object they define.
-                    visit(child, depth + 1, keyword in CONDITIONAL_KEYWORDS)
+                    if (keyword in SCHEMA_MAP_KEYWORDS && child.isObject) {
+                        // `properties` and `$defs` are dictionaries whose *values* are schemas.
+                        // A valid product attribute may itself be named `required`, `properties`,
+                        // etc.; treating the dictionary as a schema makes such an attribute
+                        // spuriously fail the closed-object profile.
+                        child.fields().forEachRemaining { (_, schema) ->
+                            visit(schema, depth + 1, conditionalFragment = false)
+                        }
+                    } else {
+                        visit(child, depth + 1, keyword in CONDITIONAL_KEYWORDS)
+                    }
                 }
             }
             node.isArray -> node.elements().forEachRemaining { visit(it, depth + 1, conditionalFragment) }
@@ -85,5 +95,6 @@ class CatalogSchemaProfile {
             "unevaluatedProperties",
         )
         private val CONDITIONAL_KEYWORDS = setOf("if", "then", "else")
+        private val SCHEMA_MAP_KEYWORDS = setOf("properties", "patternProperties", "dependentSchemas", "\$defs")
     }
 }

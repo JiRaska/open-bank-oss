@@ -58,14 +58,15 @@ class CatalogPlatformResourceTest {
         } Then {
             statusCode(200)
             header("X-API-Version", equalTo("v2"))
-            body("size()", greaterThanOrEqualTo(2))
+            body("size()", greaterThanOrEqualTo(3))
         }
 
-        validateInsurance(INSURANCE_ATTRIBUTES, expectedValid = true)
-        validateInsurance(INSURANCE_ATTRIBUTES.dropLast(1) + ",\"cardConfig\":{}}", expectedValid = false)
+        validateInsurance(INSURANCE_ATTRIBUTES, expectedValid = true, schemaVersion = 2)
+        validateInsurance(INSURANCE_ATTRIBUTES.dropLast(1) + ",\"cardConfig\":{}}", expectedValid = false, schemaVersion = 2)
         validateInsurance(
-            """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"FIXED"}""",
+            """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"FIXED","perils":[],"exclusions":[],"limits":[],"deductibles":[],"underwritingQuestions":[]}""",
             expectedValid = false,
+            schemaVersion = 2,
         )
     }
 
@@ -143,9 +144,9 @@ class CatalogPlatformResourceTest {
     @Test
     fun advancesSchemaVersionOnlyOnANewPinnedRevision() {
         installInsuranceSchemaVersion(2)
-        val specificationId = createSpecification("INS_TERM_LIFE_SCHEMA_ADVANCE")
+        val specificationId = createSpecification("INS_TERM_LIFE_SCHEMA_ADVANCE", schemaVersion = 1)
         val offeringId = createOffering(specificationId, "INS_TERM_LIFE_SCHEMA_ADVANCE_CZ")
-        val first = createRevision(offeringId, "Schema version one")
+        val first = createRevision(offeringId, "Schema version one", schemaVersion = 1)
         val second = createRevision(offeringId, "Schema version two", schemaVersion = 2)
 
         val mismatchedUpdate = mapper.readTree(revisionPayload("Wrong in-place schema", schemaVersion = 2))
@@ -402,23 +403,23 @@ class CatalogPlatformResourceTest {
         }
     }
 
-    private fun validateInsurance(attributes: String, expectedValid: Boolean) {
+    private fun validateInsurance(attributes: String, expectedValid: Boolean, schemaVersion: Int) {
         Given {
             contentType("application/json")
             body("""{"attributes":$attributes}""")
         } When {
-            post("/api/v2/product-types/org.openbank.insurance.term-life/versions/1/validate")
+            post("/api/v2/product-types/org.openbank.insurance.term-life/versions/$schemaVersion/validate")
         } Then {
             statusCode(200)
             body("valid", equalTo(expectedValid))
         }
     }
 
-    private fun createSpecification(code: String): UUID = UUID.fromString(
+    private fun createSpecification(code: String, schemaVersion: Int = 2): UUID = UUID.fromString(
         (
             Given {
                 contentType("application/json")
-                body("""{"code":"$code","schemaRef":{"id":"org.openbank.insurance.term-life","version":1}}""")
+                body("""{"code":"$code","schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion}}""")
             } When {
                 post("/api/v2/specifications")
             } Then {
@@ -445,7 +446,7 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun createRevision(offeringId: UUID, name: String, schemaVersion: Int = 1): UUID = UUID.fromString(
+    private fun createRevision(offeringId: UUID, name: String, schemaVersion: Int = 2): UUID = UUID.fromString(
         (
             Given {
                 contentType("application/json")
@@ -460,11 +461,14 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun revisionPayload(name: String, schemaVersion: Int = 1): String =
+    private fun revisionPayload(name: String, schemaVersion: Int = 2): String =
         """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion},""" +
-            """"name":{"en":"$name"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{""" +
+            """"name":{"en":"$name"},"attributes":${attributesFor(schemaVersion)},"prices":[{""" +
             """"code":"PREMIUM","kind":"AMOUNT","value":"$EXACT_PRICE","currency":"EUR","unit":"policy",""" +
             """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}]}"""
+
+    private fun attributesFor(schemaVersion: Int): String =
+        if (schemaVersion == 1) LEGACY_INSURANCE_ATTRIBUTES else INSURANCE_ATTRIBUTES
 
     private fun setMaker(revisionId: UUID, maker: String) {
         dataSource.connection.use { connection ->
@@ -739,7 +743,9 @@ class CatalogPlatformResourceTest {
 
     private companion object {
         const val EXACT_PRICE = "10000000000000000000.10"
+        const val LEGACY_INSURANCE_ATTRIBUTES =
+            """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"CALCULATED"}"""
         const val INSURANCE_ATTRIBUTES =
-            """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"smokerAccepted":true,"premiumModel":"FIXED","premium":{"amount":"12.3400","currency":"EUR","cadence":"MONTHLY"}}"""
+            """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"smokerAccepted":true,"premiumModel":"FIXED","premium":{"amount":"12.3400","currency":"EUR","cadence":"MONTHLY"},"perils":[{"code":"DEATH","description":"Death during the insured term"}],"exclusions":[{"code":"FRAUD","description":"Fraud or deliberate misrepresentation"}],"limits":[{"kind":"PER_EVENT","amount":"100000.00","currency":"EUR"}],"deductibles":[{"kind":"PER_CLAIM","amount":"0","currency":"EUR"}],"underwritingQuestions":[{"id":"smoker","question":"Do you use tobacco?","answerType":"BOOLEAN","required":true}]}"""
     }
 }
