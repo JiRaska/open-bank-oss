@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.0...admin-ui-v0.111.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** call the agent collaboration a swarm, not a mesh ([#4506](https://github.com/JiRaska/open-bank-oss/issues/4506)) ([d2ad9e0](https://github.com/JiRaska/open-bank-oss/commit/d2ad9e0ba54abf688dcb3eeae815c2122f688885))
+
 ## [0.111.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.110.0...admin-ui-v0.111.0) (2026-08-13)
 
 
