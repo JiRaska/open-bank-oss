@@ -558,6 +558,25 @@ data:
     FROM openbank_analytics.bronze_events
     WHERE upper(aggregate_type) = 'ACCOUNT'
       AND JSONExtractString(payload, 'partyId') != '';
+  06-campaign-engagement.sql: |
+    -- Privacy-safe campaign engagement mart (issue #4535). Server-resolved attribution only;
+    -- never project partyId or the opaque interaction reference into this aggregate.
+    CREATE OR REPLACE VIEW openbank_analytics.gold_campaign_engagement AS
+    SELECT
+        JSONExtractString(payload, 'campaignId') AS campaign_id,
+        JSONExtractUInt(payload, 'stepOrder')     AS step_order,
+        JSONExtractString(payload, 'channel')    AS channel,
+        uniqExactIf(event_id, event_type = 'EngagementEvent.IMPRESSION') AS impressions,
+        uniqExactIf(event_id, event_type = 'EngagementEvent.CLICK')      AS clicks,
+        uniqExactIf(event_id, event_type = 'EngagementEvent.DISMISS')    AS dismissals,
+        min(occurred_at) AS first_observed_at,
+        max(occurred_at) AS last_observed_at
+    FROM openbank_analytics.bronze_events
+    WHERE aggregate_type = 'ENGAGEMENT'
+      AND JSONExtractString(payload, 'campaignId') != ''
+      AND JSONHas(payload, 'stepOrder')
+      AND JSONExtractString(payload, 'channel') = 'PUSH'
+    GROUP BY campaign_id, step_order, channel;
 kind: ConfigMap
 metadata:
   name: clickhouse-init

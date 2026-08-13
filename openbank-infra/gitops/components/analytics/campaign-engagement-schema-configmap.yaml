@@ -1,0 +1,31 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Live-delivery copy of analytics-sink's V6__campaign_engagement.sql. clickhouse-init only runs
+# when the data directory is empty, so this ConfigMap is applied by the PostSync hook next to it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: campaign-engagement-schema
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: campaign-observability
+data:
+  campaign-engagement.sql: |
+    CREATE OR REPLACE VIEW openbank_analytics.gold_campaign_engagement AS
+    SELECT
+        JSONExtractString(payload, 'campaignId') AS campaign_id,
+        JSONExtractUInt(payload, 'stepOrder')     AS step_order,
+        JSONExtractString(payload, 'channel')    AS channel,
+        uniqExactIf(event_id, event_type = 'EngagementEvent.IMPRESSION') AS impressions,
+        uniqExactIf(event_id, event_type = 'EngagementEvent.CLICK')      AS clicks,
+        uniqExactIf(event_id, event_type = 'EngagementEvent.DISMISS')    AS dismissals,
+        min(occurred_at) AS first_observed_at,
+        max(occurred_at) AS last_observed_at
+    FROM openbank_analytics.bronze_events
+    WHERE aggregate_type = 'ENGAGEMENT'
+      AND JSONExtractString(payload, 'campaignId') != ''
+      AND JSONHas(payload, 'stepOrder')
+      AND JSONExtractString(payload, 'channel') = 'PUSH'
+    GROUP BY campaign_id, step_order, channel;
