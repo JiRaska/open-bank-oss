@@ -102,4 +102,34 @@ describe('campaign detail bundle', () => {
       expect.anything(),
     )
   })
+
+  it('relays a draft revision with the caller token but never a maker identity from the browser', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ id: 'abc', state: 'DRAFT', name: 'Updated draft' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { PUT } = await import('@/app/api/campaigns/[id]/route')
+    const res = await PUT(
+      new Request('http://x/api/campaigns/abc', {
+        method: 'PUT',
+        body: JSON.stringify({ name: 'Updated draft', createdBy: 'forged@openbank.test' }),
+      }),
+      { params: Promise.resolve({ id: 'abc' }) },
+    )
+
+    expect(await res.json()).toMatchObject({ state: 'ok', campaign: { name: 'Updated draft' } })
+    expect(fetchMock).toHaveBeenCalledWith(
+      // The BFF resolves its service host from the deployment environment.  The contract we own
+      // here is the protected campaign resource and the payload it receives, not a test-only host.
+      expect.stringContaining('/api/v1/campaigns/abc'),
+      expect.objectContaining({
+        method: 'PUT',
+        headers: expect.objectContaining({ authorization: 'Bearer tok' }),
+        body: expect.not.stringContaining('createdBy'),
+      }),
+    )
+  })
 })

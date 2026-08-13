@@ -101,6 +101,7 @@ export default function NewCampaignPage() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const requestedAudience = searchParams.get('audience')
+  const draftId = searchParams.get('draft')
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
@@ -164,6 +165,67 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }, [])
 
+  // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
+  // A number computed here from a different query would agree with the send only by luck.
+  function previewReach(ref: string) {
+    setReach(null)
+    const [segName, segVersion] = ref.split('@')
+    if (!segName) return
+    fetch(`/api/segments/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
+      .then(r => r.json())
+      .then((d: { size?: number; state: string }) => {
+        if (d.state === 'ok') setReach(d.size ?? 0)
+      })
+      .catch(() => undefined)
+  }
+
+  // A campaign is editable only before submit.  Load the real stored definition rather than
+  // reconstructing it from the canvas, otherwise an omitted later field could silently disappear
+  // when a maker saves an unrelated change.
+  useEffect(() => {
+    if (!draftId) return
+    fetch(`/api/campaigns/${encodeURIComponent(draftId)}`)
+      .then(r => r.json())
+      .then((d: { campaign?: {
+        state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
+        steps?: EditorStep[]; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
+        holdoutPercent?: number; schedule?: { cadence: string } | null; trigger?: string | null
+      }; sources?: { campaign?: string } }) => {
+        const campaign = d.campaign
+        if (d.sources?.campaign !== 'ok' || !campaign || campaign.state !== 'DRAFT') {
+          setError(t('Tento koncept už nelze upravit.', 'This campaign draft can no longer be edited.'))
+          return
+        }
+        setName(campaign.name ?? '')
+        setGoal(campaign.goal ?? '')
+        if (campaign.segmentRef) {
+          const ref = `${campaign.segmentRef.name}@${campaign.segmentRef.version}`
+          setSegment(ref)
+          previewReach(ref)
+        }
+        if (campaign.steps?.length) {
+          setSteps(campaign.steps)
+          setSelected(0)
+        }
+        setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
+        setConversionRule(campaign.conversionRule ?? null)
+        setHoldoutPercent(campaign.holdoutPercent ?? 0)
+        setContentExperiment(campaign.steps?.some(step => step.variantBVariables !== undefined) ?? false)
+        if (campaign.schedule) {
+          setEntryMode('SCHEDULE')
+          setCadence(campaign.schedule.cadence)
+        } else if (campaign.trigger) {
+          setEntryMode('TRIGGER')
+          setTrigger(campaign.trigger)
+        }
+        setJourneyRecipe(null)
+      })
+      .catch(() => setError(t('Koncept se nepodařilo načíst.', 'The campaign draft could not be loaded.')))
+  // previewReach is deliberately called from this initial hydration only; it has no unstable
+  // dependencies and is declared in the component closure.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId])
+
   // The Audience Library hands the exact, versioned identifier to Studio. The service still
   // evaluates this audience on create; the query parameter only saves the marketer from selecting
   // the same reviewed item twice and never carries an audience definition itself.
@@ -197,20 +259,6 @@ export default function NewCampaignPage() {
       })
       .catch(() => setEntryUnavailable(true))
   }, [])
-
-  // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
-  // A number computed here from a different query would agree with the send only by luck.
-  const previewReach = (ref: string) => {
-    setReach(null)
-    const [segName, segVersion] = ref.split('@')
-    if (!segName) return
-    fetch(`/api/segments/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
-      .then(r => r.json())
-      .then((d: { size?: number; state: string }) => {
-        if (d.state === 'ok') setReach(d.size ?? 0)
-      })
-      .catch(() => undefined)
-  }
 
   const updateStep = (i: number, next: EditorStep) =>
     setSteps(prev => prev.map((s, k) => (k === i ? next : s)))
@@ -275,8 +323,8 @@ export default function NewCampaignPage() {
     setSaving(true)
     setError(null)
     const [segName, segVersion] = segment.split('@')
-    fetch('/api/campaigns', {
-      method: 'POST',
+    fetch(draftId ? `/api/campaigns/${encodeURIComponent(draftId)}` : '/api/campaigns', {
+      method: draftId ? 'PUT' : 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: name.trim(),
@@ -317,7 +365,7 @@ export default function NewCampaignPage() {
           d.message ??
             d.error ??
             (d.state === 'forbidden'
-              ? t('Nemáte oprávnění zakládat kampaně.', 'You are not permitted to create campaigns.')
+              ? t('Nemáte oprávnění tento koncept upravit.', 'You are not permitted to revise this draft.')
               : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
         )
       })
@@ -335,7 +383,7 @@ export default function NewCampaignPage() {
           <div>
             <p className="campaign-composer-eyebrow"><Sparkles className="h-3.5 w-3.5" /> {t('Campaign studio', 'Campaign studio')}</p>
             <PageHeader
-              title={t('Nová kampaň', 'New campaign')}
+              title={draftId ? t('Upravit koncept', 'Edit draft') : t('Nová kampaň', 'New campaign')}
               subtitle={t(
                 'Navrhněte zážitek v aplikaci, zprávu a okamžik, kdy má přijít. Aktivaci pak vždy potvrdí druhý člověk.',
                 'Design the in-app moment, the message and when it appears. A second person always confirms activation.',
@@ -740,7 +788,7 @@ export default function NewCampaignPage() {
 
       <footer className="campaign-composer-footer">
         <div>
-          <p>{t('Koncept se zatím nikomu neposílá.', 'A draft does not send anything yet.')}</p>
+          <p>{draftId ? t('Upravujete koncept; zatím nikomu nic neposílá.', 'You are revising a draft; it still sends nothing.') : t('Koncept se zatím nikomu neposílá.', 'A draft does not send anything yet.')}</p>
           <span>{t('Po kontrole jej aktivuje jiný oprávněný člověk.', 'A different authorised person activates it after review.')}</span>
         </div>
         <div className="campaign-composer-footer-actions">
@@ -749,7 +797,9 @@ export default function NewCampaignPage() {
           disabled={!ready || saving}
           className="btn btn-primary disabled:opacity-40"
         >
-          {saving ? t('Zakládám…', 'Creating…') : t('Založit koncept', 'Create draft')}
+          {saving
+            ? (draftId ? t('Ukládám…', 'Saving…') : t('Zakládám…', 'Creating…'))
+            : (draftId ? t('Uložit koncept', 'Save draft') : t('Založit koncept', 'Create draft'))}
         </button>
         {!ready && (
           <span className="text-xs text-muted-foreground">

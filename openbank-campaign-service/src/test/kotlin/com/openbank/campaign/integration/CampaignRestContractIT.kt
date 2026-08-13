@@ -85,6 +85,30 @@ class CampaignRestContractIT {
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
 
+    @Test
+    fun `maker can revise an unsubmitted draft through the HTTP contract`() {
+        val id = createDraft()
+        val revisedName = "revised-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody(revisedName))
+        } When {
+            put("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+            body("state", equalTo("DRAFT"))
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+        }
+    }
+
     private fun insertEnrolment(
         campaignId: UUID,
         state: String,

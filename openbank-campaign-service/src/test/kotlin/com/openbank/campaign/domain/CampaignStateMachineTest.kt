@@ -36,6 +36,29 @@ class CampaignStateMachineTest {
     }
 
     @Test
+    fun `only a draft can be revised`() {
+        val revised = draft().revise(
+            name = "Jarní vklady",
+            goal = "Zvýšit spoření",
+            segmentRef = SegmentRef("saver-high-balance", 1),
+            steps = listOf(CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, mapOf("offerTitle" to "4 %"), 0)),
+            stopCondition = null,
+            conversionRule = null,
+            holdoutPercent = 0,
+            schedule = null,
+            trigger = null,
+        )
+
+        assertEquals("Jarní vklady", revised.name)
+        assertEquals("maker", revised.createdBy)
+        assertThrows<IllegalArgumentException> {
+            draft().submit().revise(
+                "Nesmí projít", "", SegmentRef("saver-high-balance", 1), emptyList(), null, null, 0, null, null,
+            )
+        }
+    }
+
+    @Test
     fun `only pending approval can activate`() {
         assertThrows<IllegalArgumentException> { draft().activate("checker") }
     }

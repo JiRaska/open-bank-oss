@@ -85,6 +85,37 @@ data class Campaign(
         return copy(state = CampaignState.PENDING_APPROVAL, updatedAt = Instant.now())
     }
 
+    /**
+     * A maker may revise the definition while it is still a draft.  Once it enters approval, the
+     * exact reviewed definition is immutable: changing it afterwards would make the checker
+     * approve one journey while a different one is actually run.
+     */
+    fun revise(
+        name: String,
+        goal: String,
+        segmentRef: SegmentRef,
+        steps: List<CampaignStep>,
+        stopCondition: StopCondition?,
+        conversionRule: String?,
+        holdoutPercent: Int,
+        schedule: CampaignSchedule?,
+        trigger: String?,
+    ): Campaign {
+        require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be revised" }
+        return copy(
+            name = name,
+            goal = goal,
+            segmentRef = segmentRef,
+            steps = steps.sortedBy { it.order },
+            stopCondition = stopCondition,
+            conversionRule = conversionRule,
+            holdoutPercent = holdoutPercent,
+            schedule = schedule,
+            trigger = trigger,
+            updatedAt = Instant.now(),
+        )
+    }
+
     fun activate(approver: String): Campaign {
         require(state == CampaignState.PENDING_APPROVAL) { "only a PENDING_APPROVAL campaign can activate" }
         require(approver != createdBy) { "maker/checker: the approver must differ from the creator (ADR-0200 D5)" }

@@ -67,24 +67,12 @@ class CampaignService(
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
     ): Campaign {
-        val segment = segments.load(segmentRef.name, segmentRef.version)
-            ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
-        // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
-        // be approved, run, and report nothing, and the first person to notice would be whoever
-        // asked why it converted zero people (ADR-0245 D1).
-        require(conversionRule == null || ConversionCatalog.exists(conversionRule)) {
-            "unknown conversion rule '$conversionRule' — must be one of ${ConversionCatalog.ALL.keys.sorted()}"
-        }
-        // Same reasoning as the conversion rule: a key nobody watches would be approved, run, and
-        // never enrol anyone, and the first person to notice would ask why the campaign was empty.
-        require(trigger == null || TriggerCatalog.exists(trigger)) {
-            "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
-        }
+        val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
             goal = goal,
-            segmentRef = SegmentRef(segment.name, segment.version),
+            segmentRef = resolvedSegment,
             steps = steps.sortedBy { it.order },
             stopCondition = stopCondition,
             conversionRule = conversionRule,
@@ -101,6 +89,60 @@ class CampaignService(
             updatedAt = Instant.now(),
         )
         return campaigns.save(campaign)
+    }
+
+    /** A draft belongs to its maker until submitted; the request never supplies that identity. */
+    suspend fun reviseDraft(
+        id: UUID,
+        name: String,
+        goal: String,
+        segmentRef: SegmentRef,
+        steps: List<CampaignStep>,
+        revisedBy: String,
+        stopCondition: StopCondition? = null,
+        conversionRule: String? = null,
+        holdoutPercent: Int = 0,
+        schedule: CampaignSchedule? = null,
+        trigger: String? = null,
+    ): Campaign {
+        val existing = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
+        require(existing.createdBy == revisedBy) { "only the campaign maker can revise this draft" }
+        val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        return campaigns.save(
+            existing.revise(
+                name = name,
+                goal = goal,
+                segmentRef = resolvedSegment,
+                steps = steps,
+                stopCondition = stopCondition,
+                conversionRule = conversionRule,
+                holdoutPercent = holdoutPercent,
+                schedule = schedule,
+                trigger = trigger,
+            ),
+        )
+    }
+
+    /** Keeps create and draft revision tied to the same reviewed catalogue boundary. */
+    private suspend fun validateDraftReferences(
+        segmentRef: SegmentRef,
+        conversionRule: String?,
+        trigger: String?,
+    ): SegmentRef {
+        val segment = segments.load(segmentRef.name, segmentRef.version)
+            ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
+        // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
+        // be approved, run, and report nothing, and the first person to notice would be whoever
+        // asked why it converted zero people (ADR-0245 D1).
+        require(conversionRule == null || ConversionCatalog.exists(conversionRule)) {
+            "unknown conversion rule '$conversionRule' — must be one of ${ConversionCatalog.ALL.keys.sorted()}"
+        }
+        // Same reasoning as the conversion rule: a key nobody watches would be approved, run, and
+        // never enrol anyone, and the first person to notice would ask why the campaign was empty.
+        require(trigger == null || TriggerCatalog.exists(trigger)) {
+            "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
+        }
+        return SegmentRef(segment.name, segment.version)
     }
 
     suspend fun get(id: UUID): Campaign? = campaigns.findById(id)

@@ -482,6 +482,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           which is how a real refusal stops being read. */}
       {!loading && !unavailable && c && actionsFor(c.state).length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
+          {c.state === 'DRAFT' && (
+            <Link href={`/campaigns/new?draft=${encodeURIComponent(c.id)}`} className="rounded-md border px-3 py-1.5 text-sm">
+              {t('Upravit koncept', 'Edit draft')}
+            </Link>
+          )}
           {actionsFor(c.state).map(a => (
             <button
               key={a}

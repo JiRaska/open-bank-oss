@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.28.0
+  version: 1.29.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -202,6 +202,30 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         '404':
           description: Not found
+    put:
+      tags: [Campaigns]
+      summary: Revise the authenticated maker's unsubmitted campaign draft
+      description: >-
+        A DRAFT may be revised only by its recorded maker. Once submitted, the approved definition
+        is immutable through this endpoint so the checker always approves the journey that runs.
+      operationId: reviseCampaignDraft
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+      responses:
+        '200':
+          description: Draft revised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '409':
+          description: Campaign is not a draft, caller is not its maker, or the definition is invalid
   /api/v1/campaigns/{id}/submit:
     post:
       tags: [Campaigns]

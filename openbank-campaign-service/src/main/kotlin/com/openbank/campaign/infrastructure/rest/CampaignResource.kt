@@ -17,6 +17,7 @@ import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.core.Response
@@ -116,6 +117,24 @@ data class ApprovalRequest(val approver: String? = null)
  */
 private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
 
+private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
+    CampaignStep(
+        it.order,
+        it.template,
+        it.channel,
+        it.variables,
+        it.delaySeconds,
+        it.condition,
+        it.variantBVariables,
+        it.fallbackToPush,
+        it.mobileDestination,
+        it.inAppSurface,
+        it.variantBTemplate,
+        it.variantBChannel,
+        it.variantBDelaySeconds,
+    )
+}
+
 /**
  * Operator API for the campaign first slice (ADR-0200). Activation is four-eyes gated by the
  * `campaign.activate` action (rules.yaml four_eyes.actions) and re-asserted by the domain
@@ -139,28 +158,11 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @Authorize(action = "campaign.create", resource = "#request.name")
     suspend fun create(request: CreateCampaignRequest): Response {
         val createdBy = jwt.principalName()
-        val steps = request.steps.map {
-            CampaignStep(
-                it.order,
-                it.template,
-                it.channel,
-                it.variables,
-                it.delaySeconds,
-                it.condition,
-                it.variantBVariables,
-                it.fallbackToPush,
-                it.mobileDestination,
-                it.inAppSurface,
-                it.variantBTemplate,
-                it.variantBChannel,
-                it.variantBDelaySeconds,
-            )
-        }
         val campaign = service.createDraft(
             request.name,
             request.goal,
             SegmentRef(request.segmentName, request.segmentVersion),
-            steps,
+            request.toSteps(),
             createdBy,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
@@ -170,6 +172,28 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }
+
+    /** The authenticated maker may revise only the unsubmitted definition. */
+    @PUT
+    @Path("/{id}")
+    @Authorize(action = "campaign.create", resource = "#id")
+    suspend fun revise(@PathParam("id") id: UUID, request: CreateCampaignRequest): Response = runCatching {
+        Response.ok(
+            service.reviseDraft(
+                id = id,
+                name = request.name,
+                goal = request.goal,
+                segmentRef = SegmentRef(request.segmentName, request.segmentVersion),
+                steps = request.toSteps(),
+                revisedBy = jwt.principalName(),
+                stopCondition = request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
+                conversionRule = request.conversionRule,
+                holdoutPercent = request.holdoutPercent,
+                schedule = request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+                trigger = request.trigger,
+            ),
+        ).build()
+    }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     @POST
     @Path("/{id}/submit")
