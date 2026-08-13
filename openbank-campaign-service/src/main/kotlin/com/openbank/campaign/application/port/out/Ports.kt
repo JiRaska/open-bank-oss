@@ -190,6 +190,15 @@ data class NotificationSendRequest(
     val correlationId: UUID,
     /** Closed mobile-app route, present only on a PUSH delivery. */
     val deepLink: String? = null,
+    /**
+     * Opaque, producer-owned reference carried only in a PUSH routing envelope. It is deliberately
+     * not a campaign id, party id, content id or URL: the app may return it later as evidence of
+     * an interaction, but it cannot use it to discover or select another campaign.
+     *
+     * Today it equals this request's send-log id. The later customer-edge/engagement join must
+     * validate ownership against that row before it attributes anything (issue #4480).
+     */
+    val interactionRef: UUID? = null,
 )
 
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */

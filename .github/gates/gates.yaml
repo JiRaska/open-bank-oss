@@ -643,6 +643,8 @@ gates:
     name: "release-registration consistency (rule 3, ADR-0029)"
     group: supplychain
     mode: enforced
+    selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-release-registration.py
 
@@ -1665,6 +1667,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 16   # 33 dispatch-gated services today (2026-08-09)
+    selftest: bash .github/scripts/check-outbox-dispatch-enabled.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-outbox-dispatch-enabled.sh .
 
@@ -2073,6 +2077,8 @@ gates:
     name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
     group: data
     mode: enforced
+    selftest: bash .github/scripts/check-duplicate-yaml-keys.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
 
