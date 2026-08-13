@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.58.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.57.1...customer-edge-v0.58.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.57.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.57.0...customer-edge-v0.57.1) (2026-08-09)
 
 

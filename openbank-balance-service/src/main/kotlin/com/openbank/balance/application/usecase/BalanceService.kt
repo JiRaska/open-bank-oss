@@ -8,6 +8,7 @@ import com.openbank.balance.application.port.`in`.*
 import com.openbank.balance.application.port.out.*
 import com.openbank.balance.domain.model.*
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.event.EventActor
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -128,6 +129,8 @@ class BalanceService(
                 availableAmount = updated.availableAmount,
                 reservedAmount = updated.reservedAmount,
                 occurredAt = OffsetDateTime.now(clock),
+                actorId = BalanceEventActors.API,
+                actorType = EventActor.TYPE_SYSTEM,
             ),
         )
 
@@ -158,6 +161,8 @@ class BalanceService(
                 availableAmount = updated.availableAmount,
                 reservedAmount = updated.reservedAmount,
                 occurredAt = OffsetDateTime.now(clock),
+                actorId = BalanceEventActors.API,
+                actorType = EventActor.TYPE_SYSTEM,
             ),
         )
 
@@ -182,6 +187,8 @@ class BalanceService(
                     availableAmount = outcome.balance.availableAmount,
                     reservedAmount = outcome.balance.reservedAmount,
                     occurredAt = OffsetDateTime.now(clock),
+                    actorId = BalanceEventActors.API,
+                    actorType = EventActor.TYPE_SYSTEM,
                 ),
             )
         }
@@ -210,6 +217,8 @@ class BalanceService(
                     availableAmount = outcome.balance.availableAmount,
                     reservedAmount = outcome.balance.reservedAmount,
                     occurredAt = OffsetDateTime.now(clock),
+                    actorId = BalanceEventActors.API,
+                    actorType = EventActor.TYPE_SYSTEM,
                 ),
             )
         }

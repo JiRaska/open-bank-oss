@@ -17,7 +17,10 @@ interface SettlementPort {
     suspend fun settle(payment: DomesticPayment): SettlementOutcome
 }
 
-/** The result of a settlement attempt. [settled] is true on first-book and 409-idempotent. */
+/**
+ * The result of a settlement attempt. [settled] is true on a first book and on a replay of the same
+ * idempotency key — transaction-service returns the existing transaction as 201 rather than 409.
+ */
 data class SettlementOutcome(val settled: Boolean, val transactionId: UUID?)
 
 /**

@@ -17,6 +17,8 @@ import {
   type EditorStep,
 } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
+import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
+import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
 
 /**
  * Campaign Studio — authoring on a canvas (ADR-0221 D1).
@@ -43,6 +45,19 @@ interface Segment {
   version: number
   rules: string[]
 }
+
+interface Cadence {
+  cadence: string
+  humanForm: string
+  zone: string
+}
+
+interface CampaignTrigger {
+  trigger: string
+  humanForm: string
+}
+
+type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
 
 /** Mirrors the service's catalogue; the service rejects anything not in its own copy. */
 const TEMPLATES: Record<string, string[]> = {
@@ -73,6 +88,12 @@ export default function NewCampaignPage() {
   const [goal, setGoal] = useState('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+  const [cadences, setCadences] = useState<Cadence[]>([])
+  const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
+  const [entryMode, setEntryMode] = useState<EntryMode>('MANUAL')
+  const [cadence, setCadence] = useState('')
+  const [trigger, setTrigger] = useState('')
+  const [entryUnavailable, setEntryUnavailable] = useState(false)
   const [steps, setSteps] = useState<EditorStep[]>([newStep()])
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
@@ -80,6 +101,12 @@ export default function NewCampaignPage() {
   const [stopAfter, setStopAfter] = useState<number | null>(null)
   // Null = measure nothing, which is the service's default and an honest state rather than a gap.
   const [conversionRule, setConversionRule] = useState<string | null>(null)
+  // A bounded, explicit control group is the only way to compare outcome rates with no-contact
+  // peers; zero preserves the existing all-treatment behaviour.
+  const [holdoutPercent, setHoldoutPercent] = useState(0)
+  // A/B compares two contacted content arms. It needs the same observed conversion fact as a
+  // holdout, but it never withholds a message and never chooses a winner automatically.
+  const [contentExperiment, setContentExperiment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -114,6 +141,25 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }, [])
 
+  // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
+  // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
+  // cron field that looks valid while doing something different in Temporal.
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/campaigns/cadences').then(r => r.json()),
+      fetch('/api/campaigns/triggers').then(r => r.json()),
+    ])
+      .then(([cadenceResponse, triggerResponse]: [
+        { items?: Cadence[]; state?: string },
+        { items?: CampaignTrigger[]; state?: string },
+      ]) => {
+        if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
+        if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
+        if (cadenceResponse.state !== 'ok' || triggerResponse.state !== 'ok') setEntryUnavailable(true)
+      })
+      .catch(() => setEntryUnavailable(true))
+  }, [])
+
   // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
   // A number computed here from a different query would agree with the send only by luck.
   const previewReach = (ref: string) => {
@@ -135,7 +181,10 @@ export default function NewCampaignPage() {
     setSteps(prev => {
       if (prev.length >= MAX_STEPS) return prev
       setSelected(prev.length)
-      return [...prev, newStep()]
+      return [...prev, {
+        ...newStep(),
+        ...(contentExperiment ? { variantBVariables: {} } : {}),
+      }]
     })
 
   const removeStep = (i: number) =>
@@ -146,9 +195,31 @@ export default function NewCampaignPage() {
     })
 
   const incomplete = steps.some(s =>
-    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()),
+    (TEMPLATES[s.template] ?? []).some(v =>
+      !(s.variables[v] ?? '').trim() || (contentExperiment && !(s.variantBVariables?.[v] ?? '').trim()),
+    ),
   )
-  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 && !incomplete
+  const entryConfigured =
+    entryMode === 'MANUAL' ||
+    (entryMode === 'SCHEDULE' && cadence !== '') ||
+    (entryMode === 'TRIGGER' && trigger !== '')
+  const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
+    !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+
+  const setContentExperimentEnabled = (enabled: boolean) => {
+    setContentExperiment(enabled)
+    if (enabled) {
+      // Copy A once when the test is enabled. Later edits intentionally diverge, otherwise both
+      // arms would change together and the test would be a convincing-looking no-op.
+      setSteps(prev => prev.map(s => ({ ...s, variantBVariables: { ...s.variables } })))
+    }
+  }
+
+  const chooseEntryMode = (next: EntryMode) => {
+    setEntryMode(next)
+    if (next === 'SCHEDULE' && cadence === '' && cadences[0]) setCadence(cadences[0].cadence)
+    if (next === 'TRIGGER' && trigger === '' && triggers[0]) setTrigger(triggers[0].trigger)
+  }
 
   const submit = () => {
     setSaving(true)
@@ -164,12 +235,18 @@ export default function NewCampaignPage() {
         segmentVersion: Number(segVersion),
         ...(stopAfter !== null ? { stopCondition: { maxSendsPerParty: stopAfter } } : {}),
         ...(conversionRule ? { conversionRule } : {}),
+        ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
+        ...(entryMode === 'SCHEDULE' && cadence ? { schedule: { cadence } } : {}),
+        ...(entryMode === 'TRIGGER' && trigger ? { trigger } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
           channel: s.channel,
           ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
+          ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
+          ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
+          ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -286,6 +363,95 @@ export default function NewCampaignPage() {
             )}
           </p>
         </div>
+
+        <div className="space-y-3" data-entry-mode={entryMode}>
+          <div>
+            <h2 className="text-sm font-semibold">{t('Kdy cesta začne', 'When the journey starts')}</h2>
+            <p className="text-xs text-muted-foreground" style={{ marginTop: '0.25rem' }}>
+              {t(
+                'Vyberte jeden přezkoumatelný zdroj vstupu. Publikum stále určuje segment výše.',
+                'Choose one reviewable entry source. The segment above still decides who may enter.',
+              )}
+            </p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-3">
+            <button
+              type="button"
+              data-entry-pick="MANUAL"
+              data-selected={entryMode === 'MANUAL' ? 'true' : 'false'}
+              onClick={() => chooseEntryMode('MANUAL')}
+              className="rounded-lg border p-3 text-left text-sm"
+              style={entryMode === 'MANUAL' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
+            >
+              <span className="font-medium">{t('Jednorázově', 'One time')}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t('Po spuštění ručně zařadíte aktuální publikum.', 'After activation, enrol the current audience manually.')}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-entry-pick="SCHEDULE"
+              data-selected={entryMode === 'SCHEDULE' ? 'true' : 'false'}
+              onClick={() => chooseEntryMode('SCHEDULE')}
+              disabled={cadences.length === 0}
+              className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
+              style={entryMode === 'SCHEDULE' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
+            >
+              <span className="font-medium">{t('Opakovaně', 'Recurring')}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t('Pravidelně zkontroluje, kdo do segmentu nově patří.', 'Rechecks who newly belongs to the segment on a schedule.')}
+              </span>
+            </button>
+            <button
+              type="button"
+              data-entry-pick="TRIGGER"
+              data-selected={entryMode === 'TRIGGER' ? 'true' : 'false'}
+              onClick={() => chooseEntryMode('TRIGGER')}
+              disabled={triggers.length === 0}
+              className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
+              style={entryMode === 'TRIGGER' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
+            >
+              <span className="font-medium">{t('Při události', 'On an event')}</span>
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t('Zařadí člověka hned po sledované bankovní události.', 'Enrols a person as soon as the observed banking event happens.')}
+              </span>
+            </button>
+          </div>
+          {entryMode === 'SCHEDULE' && (
+            <label className="block max-w-xl text-sm">
+              <span className="font-medium">{t('Rytmus', 'Cadence')}</span>
+              <select
+                className="input mt-1 block w-full"
+                value={cadence}
+                onChange={e => setCadence(e.target.value)}
+                data-cadence
+              >
+                {cadences.map(c => <option key={c.cadence} value={c.cadence}>{c.humanForm} ({c.zone})</option>)}
+              </select>
+            </label>
+          )}
+          {entryMode === 'TRIGGER' && (
+            <label className="block max-w-xl text-sm">
+              <span className="font-medium">{t('Událost', 'Event')}</span>
+              <select
+                className="input mt-1 block w-full"
+                value={trigger}
+                onChange={e => setTrigger(e.target.value)}
+                data-trigger
+              >
+                {triggers.map(x => <option key={x.trigger} value={x.trigger}>{x.humanForm}</option>)}
+              </select>
+            </label>
+          )}
+          {entryUnavailable && (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Některý katalog vstupů teď není dostupný; nenabízíme jeho neověřené volby.',
+                'One entry catalogue is unavailable; its unverified choices are not offered.',
+              )}
+            </p>
+          )}
+        </div>
       </section>
 
       <section className="space-y-3">
@@ -318,11 +484,25 @@ export default function NewCampaignPage() {
             templateChannel={TEMPLATE_CHANNEL}
             templateLabels={templateLabels}
             variableLabels={variableLabels}
+            contentExperiment={contentExperiment}
             onChange={next => updateStep(selected, next)}
             onClose={() => setSelected(null)}
           />
         )}
 
+        </div>
+
+        <div className="campaign-studio-companion-grid">
+          <CampaignExperiencePreview step={selected === null ? undefined : steps[selected]} campaignName={name} />
+          <CampaignLaunchReadiness
+            audienceChosen={segment !== ''}
+            audienceSize={reach}
+            entryConfigured={entryConfigured}
+            incomplete={incomplete}
+            conversionRule={conversionRule}
+            contentExperiment={contentExperiment}
+            steps={steps}
+          />
         </div>
 
         {/* What "it worked" means, asked at authoring time because it cannot be answered later:
@@ -338,7 +518,13 @@ export default function NewCampaignPage() {
                 type="button"
                 data-conversion-pick={r ?? 'NONE'}
                 data-selected={conversionRule === r ? 'true' : 'false'}
-                onClick={() => setConversionRule(r)}
+                onClick={() => {
+                  setConversionRule(r)
+                  if (r === null) {
+                    setHoldoutPercent(0)
+                    setContentExperiment(false)
+                  }
+                }}
                 className="btn"
                 style={
                   conversionRule === r
@@ -359,6 +545,63 @@ export default function NewCampaignPage() {
               'Počítá se skutečná událost v bance, ne otevření e-mailu ani proklik — ty se nesledují.',
               'Counted from a real banking event, never an email open or a click — those are not tracked.',
             )}
+          </p>
+        </div>
+
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2" data-content-experiment={contentExperiment ? 'true' : 'false'}>
+          <label className="flex items-center gap-2 text-sm font-medium" htmlFor="c-content-experiment">
+            <input
+              id="c-content-experiment"
+              type="checkbox"
+              checked={contentExperiment}
+              disabled={!conversionRule}
+              onChange={e => setContentExperimentEnabled(e.target.checked)}
+            />
+            {t('Porovnat variantu A a B', 'Compare variant A and B')}
+          </label>
+          <p className="text-xs text-muted-foreground">
+            {conversionRule
+              ? t(
+                  'Každý člověk dostane stabilně A nebo B; u každého kroku pak upravíte hodnoty varianty B. Výsledek vychází jen ze skutečné bankovní konverze.',
+                  'Each person consistently receives A or B; edit B values in every step. The result comes only from a real banking conversion.',
+                )
+              : t(
+                  'Nejdřív vyberte měřitelný cíl. Bez něj by dvě verze obsahu neměly důvěryhodný výsledek.',
+                  'Choose a measurable success event first. Without it, two content versions have no credible outcome.',
+                )}
+          </p>
+        </div>
+
+        <div className="max-w-2xl rounded-lg border p-3 space-y-2">
+          <label className="flex items-center gap-2 text-sm font-medium" htmlFor="c-holdout">
+            {t('Kontrolní skupina', 'Control group')}
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              id="c-holdout"
+              data-holdout-percent
+              type="number"
+              min="0"
+              max="50"
+              step="5"
+              className="input"
+              style={{ width: '5.5rem' }}
+              value={holdoutPercent}
+              disabled={!conversionRule}
+              onChange={e => setHoldoutPercent(Math.min(50, Math.max(0, Number(e.target.value) || 0)))}
+            />
+            <span className="text-sm text-muted-foreground">%</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {conversionRule
+              ? t(
+                  'Tito lidé dostanou trvale stejné zařazení, ale žádnou zprávu. Porovnáme jejich skutečnou konverzi s osloveným publikem.',
+                  'These people keep a stable assignment but receive no message. Their real conversion rate is compared with the contacted audience.',
+                )
+              : t(
+                  'Nejdřív vyberte měřitelný cíl. Bez něj by kontrolní skupina jen zadržela komunikaci bez možnosti zjistit výsledek.',
+                  'Choose a measurable success event first. Without it, a control group would withhold communication without any way to learn from it.',
+                )}
           </p>
         </div>
 

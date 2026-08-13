@@ -7,11 +7,55 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, governance, observability]
-summary: "Gate-run outcomes, collected like DORA (ADR-0061): a CI-time collector bakes a read-only snapshot, no live token in the pod. A ClickHouse/Grafana trend is coded but not cluster-verified yet."
-followup: "#4339 — Tier 2 (ClickHouse table, in-cluster puller CronJob, Grafana dashboard) needs ArgoCD sync and a human confirming the dashboard renders against real cluster state; this session has no kubectl/cluster access to verify it."
+summary: "Gate-run outcomes, collected like DORA (ADR-0061): a CI-time collector bakes a read-only snapshot, no live token in the pod. Tier 2 (ClickHouse + Grafana) is committed and verified against a real ClickHouse engine; the live cluster is not."
+followup: "#4439 — verify ArgoCD sync, the PostSync schema hook, the CronJob's egress, and the Grafana dashboard render against the real cluster (this session has no kubectl/cluster access)"
 ---
 
 # ADR-0255 — CI/QG observability: a read-only health snapshot, an admin-ui panel, and a ClickHouse/Grafana historical trend
+
+**Delivery note (2026-08-10):** this ADR's own text described Tier 2 (the ClickHouse table, the
+puller CronJob, the Grafana dashboard) as "delivered as code in this change" — it was not.
+Re-auditing the tree on 2026-08-10 found none of the three files it names anywhere in the repo.
+That gap is closed by this note's commit: all three exist now, plus a schema-apply Job and an
+ExternalSecret the original text implied but did not enumerate as separate files. Two real bugs
+were found and fixed by actually running the DDL and an INSERT against a real
+`clickhouse/clickhouse-server:24.8` container (Docker, not assumed from reading ClickHouse docs):
+
+1. The HTTP interface rejects a multi-statement script by default
+   (`Multi-statements are not allowed`) — the schema-apply Job now POSTs the `CREATE DATABASE`
+   and `CREATE TABLE` statements as two separate requests, not one script body.
+2. `DateTime64` via `JSONEachRow` rejects GitHub's `...Z`-suffixed ISO 8601 timestamps outright
+   (`CANNOT_PARSE_INPUT_ASSERTION_FAILED`) and wants a space, not `T`, between date and time —
+   the puller now converts before inserting (`clickhouse_datetime()` in `pull.py`).
+
+Every dashboard panel's `rawSql` was run against that same container, seeded with 161 real gate
+rows pulled from a live `ci.yml` run via `gh api` (not synthetic fixtures) — including a
+falsification of the "gates currently red" panel: empty against all-passing real data, and
+correctly populated after inserting one synthetic `status: failed` row. One panel's ClickHouse
+query had a self-shadowing column alias (`argMax(budget_seconds, ...) AS budget_seconds`) that
+produced `ILLEGAL_AGGREGATION` — caught by the same real-engine run, fixed by renaming the alias.
+
+**What is still honestly unverified**, unchanged from the original text below: ArgoCD actually
+syncing these manifests, the PostSync hook firing (it will, on this same PR's diff to the schema
+ConfigMap — the shape that DOES trigger a sync, per the `temporal-namespace-registration.yaml`
+precedent this Job's hook annotations copy), the CronJob's egress reaching `api.github.com`
+under the real VPC CNI enforcement, and the dashboard rendering in the live Grafana. Real
+ClickHouse behaviour is now proven; real cluster behaviour is not, and this note does not
+pretend otherwise.
+
+One design point worth surfacing to a reviewer explicitly, not buried in a file comment: the
+puller's NetworkPolicy is the **second** direct-internet-egress hole in the entire fleet. Today
+there is exactly one (`ai-platform/networkpolicy-litellm-egress.yaml`), and `agent-service`'s own
+egress policy states outright that every other workload is expected to route through it rather
+than get its own hole. The GitHub REST API cannot route through an LLM gateway, and Kubernetes
+NetworkPolicy has no FQDN selector (only CIDR/IP), so the alternatives were: pin GitHub's
+published IP ranges (rejected — they rotate, and this fleet has no automation to keep a pinned
+list current, which trades a security question for a silent-outage one), or accept a
+`0.0.0.0/0:443` rule scoped by pod selector to only this CronJob's pods. Chose the latter.
+See `networkpolicy-gate-health-puller-egress.yaml`'s own header for the full reasoning — this is
+flagged here because it is the one part of Tier 2 that changes the fleet's security posture
+rather than adding a self-contained new pipeline, and a decision like that should be visible in
+the document a reviewer reads first, not only in the file it lives in.
 
 ## Context
 

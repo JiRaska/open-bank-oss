@@ -120,6 +120,21 @@ class SurfaceRestContractIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `an event for content not in the rendered catalogue is rejected rather than polluting metrics`() {
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"${UUID.randomUUID()}","contentId":"NOT_A_CATALOGUE_ITEM","slot":"HOME_BANNER","type":"CLICK"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
+    }
+
     // ── AdverseStateResource (issue #4265 item 1) ──────────────────────────────────────────────
     //
     // These live in THIS class rather than a second @QuarkusTest deliberately. A new IT class would

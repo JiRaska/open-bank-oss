@@ -1,0 +1,171 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0. */
+
+.portrait {
+  --agent-accent: #6366f1;
+  --agent-glow: #c7d2fe;
+  --agent-shell: #eef2ff;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 104px;
+  min-width: 104px;
+  height: 112px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--agent-accent) 24%, var(--border));
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at 50% 34%, color-mix(in srgb, var(--agent-glow) 52%, transparent), transparent 42%),
+    linear-gradient(150deg, var(--surface) 0%, var(--agent-shell) 100%);
+}
+
+.portrait::after {
+  position: absolute;
+  right: 13px;
+  bottom: 10px;
+  left: 13px;
+  height: 9px;
+  content: '';
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--agent-accent) 16%, transparent);
+  filter: blur(5px);
+}
+
+.robot {
+  position: relative;
+  z-index: 1;
+  width: 70px;
+  height: 88px;
+  transform: translateY(3px);
+}
+
+.antenna {
+  position: absolute;
+  top: 1px;
+  left: 50%;
+  width: 3px;
+  height: 15px;
+  border-radius: 4px;
+  background: #64748b;
+  transform: translateX(-50%) rotate(var(--antenna-angle, 0deg));
+  transform-origin: bottom;
+}
+
+.antenna::before {
+  position: absolute;
+  top: -3px;
+  left: -3px;
+  width: 9px;
+  height: 9px;
+  content: '';
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--agent-accent);
+  box-shadow: 0 0 10px var(--agent-glow);
+}
+
+.head {
+  position: absolute;
+  top: 15px;
+  left: 8px;
+  width: 54px;
+  height: 37px;
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 30%, #94a3b8);
+  border-radius: var(--head-radius, 16px 16px 13px 13px);
+  background: linear-gradient(155deg, #ffffff, var(--agent-shell));
+  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.12);
+}
+
+.visor {
+  position: absolute;
+  inset: 8px 7px 7px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border-radius: 9px;
+  background: #172033;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4);
+}
+
+.eye {
+  width: var(--eye-width, 6px);
+  height: 8px;
+  border-radius: 50%;
+  background: var(--agent-glow);
+  box-shadow: 0 0 7px var(--agent-accent);
+}
+
+.body {
+  position: absolute;
+  top: 48px;
+  left: 13px;
+  width: 44px;
+  height: 36px;
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 25%, #94a3b8);
+  border-radius: var(--body-radius, 10px 10px 16px 16px);
+  background: linear-gradient(145deg, #ffffff, var(--agent-shell));
+  box-shadow: 0 6px 12px rgba(15, 23, 42, 0.11);
+}
+
+.chest {
+  position: absolute;
+  top: 8px;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 21px;
+  border-radius: 7px;
+  color: white;
+  background: var(--agent-accent);
+  transform: translateX(-50%);
+  box-shadow: 0 4px 10px color-mix(in srgb, var(--agent-accent) 40%, transparent);
+}
+
+.arm {
+  position: absolute;
+  top: 53px;
+  width: 9px;
+  height: 25px;
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 22%, #94a3b8);
+  border-radius: 8px;
+  background: var(--agent-shell);
+}
+
+.armLeft { left: 3px; transform: rotate(9deg); }
+.armRight { right: 3px; transform: rotate(-9deg); }
+
+.base {
+  position: absolute;
+  bottom: 0;
+  left: 18px;
+  width: 34px;
+  height: 11px;
+  border: 2px solid color-mix(in srgb, var(--agent-accent) 26%, #64748b);
+  border-radius: 5px 5px 10px 10px;
+  background: #dbe3ee;
+}
+
+.variantLens { --eye-width: 12px; --head-radius: 50% 50% 13px 13px; --antenna-angle: 12deg; }
+.variantGuard { --body-radius: 5px 5px 18px 18px; --head-radius: 12px 12px 7px 7px; }
+.variantRunner { --body-radius: 16px 16px 9px 9px; --antenna-angle: -13deg; }
+.variantGuide { --head-radius: 21px 21px 12px 12px; --eye-width: 7px; }
+
+.compact {
+  width: 76px;
+  min-width: 76px;
+  height: 82px;
+  border-radius: 19px;
+}
+
+.compact .robot { transform: translateY(5px) scale(.72); }
+
+@media (max-width: 680px) {
+  .portrait {
+    width: 86px;
+    min-width: 86px;
+    height: 96px;
+  }
+  .robot { transform: translateY(5px) scale(.82); }
+}

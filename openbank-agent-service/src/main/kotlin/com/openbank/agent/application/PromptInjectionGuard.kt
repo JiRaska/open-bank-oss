@@ -127,6 +127,8 @@ class PromptInjectionGuard {
                     "source" to source,
                     "action" to if (blocked) "blocked" else "flagged",
                     "mode" to mode,
+                    // AI attribution (ADR-0031 D5, #3667): which model was being guarded.
+                    "model_id" to identity.modelId,
                 ),
             ),
         )

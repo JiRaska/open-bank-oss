@@ -104,6 +104,13 @@ open class SepaPaymentActivitiesImpl(
         decision
     }
 
+    // #3914: every payload below carries `occurredAt` = the transitioned aggregate's `updatedAt`,
+    // which `SepaPayment.transitionTo` stamps with `Instant.now(clock)` AT the state change. That
+    // is the business event time; `SepaPaymentOutboxMessage.createdAt` next to it is the outbox
+    // ROW's time and is not the same fact. Without the key, AuditConsumer.eventTime() returns null
+    // and audit_entries.occurred_at records the consumer's INGEST time as business time — under
+    // consumer lag or a replay, arbitrarily wrong. `Instant.toString()` is ISO-8601 with `Z`, which
+    // `Instant.parse` accepts. The non-Temporal path (SepaPaymentEvents.kt) was already correct.
     override fun validatePayment(paymentId: UUID): Unit = runOnVertxContext {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during validate activity")
@@ -113,7 +120,7 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"VALIDATED"}""",
+                payload = """{"paymentId":"$paymentId","status":"VALIDATED","occurredAt":"${updated.updatedAt}"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -129,7 +136,8 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"REJECTED","reason":"SANCTIONS_HIT"}""",
+                payload = """{"paymentId":"$paymentId","status":"REJECTED","reason":"SANCTIONS_HIT",""" +
+                    """"occurredAt":"${updated.updatedAt}"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -188,7 +196,7 @@ open class SepaPaymentActivitiesImpl(
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = rejected.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","status":"REJECTED"}""",
+                    payload = """{"paymentId":"$paymentId","status":"REJECTED","occurredAt":"${rejected.updatedAt}"}""",
                     createdAt = Instant.now(clock),
                 ),
             )
@@ -207,7 +215,7 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"PROCESSING"}""",
+                payload = """{"paymentId":"$paymentId","status":"PROCESSING","occurredAt":"${processing.updatedAt}"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -224,7 +232,8 @@ open class SepaPaymentActivitiesImpl(
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = completed.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","status":"COMPLETED"}""",
+                    payload = """{"paymentId":"$paymentId","status":"COMPLETED",""" +
+                        """"occurredAt":"${completed.updatedAt}"}""",
                     createdAt = Instant.now(clock),
                 ),
             )

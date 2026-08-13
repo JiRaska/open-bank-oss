@@ -38,7 +38,16 @@ class TppRegistryResource(
     @GET
     @Path("/check")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
-    suspend fun checkAuthorization(@QueryParam("tppId") tppId: String, @QueryParam("role") role: String): Response {
+    suspend fun checkAuthorization(
+        // Nullable by necessity: JAX-RS injects null for an absent query parameter and a suspend
+        // fun emits no null-check intrinsic, so a non-nullable declaration let the null reach
+        // `role.uppercase()` and answered 500. libs-runtime maps IllegalArgumentException to 400
+        // — never add a service-local exception mapper (#526, #3624).
+        @QueryParam("tppId") tppId: String?,
+        @QueryParam("role") role: String?,
+    ): Response {
+        requireNotNull(tppId) { "query parameter 'tppId' is required" }
+        requireNotNull(role) { "query parameter 'role' is required" }
         val result = svc.checkAuthorization(
             CheckTppAuthorizationQuery(tppId, TppRole.valueOf(role.uppercase())),
         )

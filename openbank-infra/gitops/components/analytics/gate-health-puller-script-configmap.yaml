@@ -1,0 +1,231 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# The gate-health puller's script, in its own ConfigMap for the same reason
+# temporal-namespace-registration.yaml keeps its script out of the Job/CronJob spec:
+# editing a large inline `command:` block is painful to review as a diff, and a script this
+# size belongs in a file with its own syntax highlighting, not a YAML block scalar buried in
+# a workload spec.
+#
+# Stdlib only (urllib, json, zipfile) — no new pip dependency, matching
+# collect-gate-health.mjs's own "no new dependency" convention (that file uses
+# execFileSync + fs only; this is the same discipline in Python for the in-cluster side).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gate-health-puller-script
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+data:
+  pull.py: |
+    #!/usr/bin/env python3
+    # SPDX-License-Identifier: Apache-2.0
+    # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+    """Pull recent ci.yml gate-run artifacts and insert them into ClickHouse (ADR-0255 Tier 2).
+
+    Reads the SAME `run-gates.py --json` record shape the admin-ui's build-time collector
+    (collect-gate-health.mjs) already parses — deliberately: one schema, two consumers, no
+    translation layer to drift. See ci-gate-runs-schema-configmap.yaml for the table this
+    writes into and why it is a ReplacingMergeTree (safe to re-insert the same run twice).
+
+    Idempotency is NOT tracked client-side (no "have I seen this run" state file) — this job
+    always re-pulls the last RUNS completed ci.yml runs and re-inserts everything in that
+    window. ReplacingMergeTree(inserted_at) means a duplicate insert is not a correctness bug,
+    only slightly wasted bandwidth on a small, infrequent job — the same trade
+    collect-gate-health.mjs already makes for the same reason (simplicity over a cache that
+    could itself go stale).
+
+    Honest by construction: outside a token, or on any API failure, this exits non-zero after
+    logging what failed — it never inserts a partial or fabricated row.
+    """
+    import base64
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    import zipfile
+    from io import BytesIO
+
+    REPO = os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss")
+    TOKEN = os.environ.get("GITHUB_TOKEN", "")
+    RUNS = int(os.environ.get("PULLER_RUNS", "20"))
+    CLICKHOUSE_URL = os.environ["CLICKHOUSE_URL"]
+    CLICKHOUSE_USER = os.environ["CLICKHOUSE_USER"]
+    CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
+    API = "https://api.github.com"
+
+
+    def gh(path):
+        req = urllib.request.Request(
+            f"{API}{path}",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read())
+
+
+    class _NoAutoRedirect(urllib.request.HTTPRedirectHandler):
+        """Stop urllib from auto-following the artifact-download redirect.
+
+        An earlier version of this function asserted "urllib's default redirect handling
+        already drops custom headers on cross-host redirects" and relied on that being
+        true. It is not: measured against a real GitHub artifact, urllib carries the
+        Authorization header straight through to the blob-storage host, which then
+        rejects the request outright — `InvalidAuthenticationInfo: Server failed to
+        authenticate the request`, HTTP 401, on every single artifact, always. That
+        shipped to the live cluster before anyone (including the person who wrote the
+        confident comment) had run it against a real artifact. It is being run now:
+        returning None here makes urlopen surface the 302 as an HTTPError instead of
+        transparently following it, so gh_bytes can fetch the Location URL itself, with
+        no headers of its own — the blob URL's own query-string signature is the only
+        auth it wants or will accept.
+        """
+
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    _no_redirect_opener = urllib.request.build_opener(_NoAutoRedirect)
+
+    def gh_bytes(path):
+        req = urllib.request.Request(
+            f"{API}{path}",
+            headers={
+                "Authorization": f"Bearer {TOKEN}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+        )
+        try:
+            with _no_redirect_opener.open(req, timeout=30) as resp:
+                # No redirect happened (unexpected, but handle it rather than assume) —
+                # the artifact endpoint answered directly.
+                return resp.read()
+        except urllib.error.HTTPError as exc:
+            if exc.code not in (301, 302, 303, 307, 308):
+                raise
+            location = exc.headers.get("Location")
+            if not location:
+                raise urllib.error.URLError(f"redirect with no Location header: {exc.code}")
+            # Deliberately a bare urlopen with NO custom headers — this is the fix.
+            with urllib.request.urlopen(location, timeout=60) as resp:
+                return resp.read()
+
+
+    def gate_records_for_run(run):
+        """[] on any per-run failure — one bad artifact must not abort the whole pull."""
+        try:
+            artifacts = gh(f"/repos/{REPO}/actions/runs/{run['id']}/artifacts?per_page=100")
+        except urllib.error.URLError as exc:
+            print(f"[gate-health-puller] run {run['id']}: artifact list failed: {exc}", file=sys.stderr)
+            return []
+        out = []
+        for art in artifacts.get("artifacts", []):
+            if not art["name"].startswith("gate-results-"):
+                continue
+            try:
+                blob = gh_bytes(f"/repos/{REPO}/actions/artifacts/{art['id']}/zip")
+                with zipfile.ZipFile(BytesIO(blob)) as zf:
+                    # ci.yml names the artifact gate-results-<group> and the file inside it
+                    # gate-results-<group>.json (run-gates.py's --json target) — take
+                    # whatever single .json is in the zip rather than hardcoding the name,
+                    # so a rename on either side degrades to "skip this artifact", not a
+                    # silent empty read of the wrong file.
+                    names = [n for n in zf.namelist() if n.endswith(".json")]
+                    if not names:
+                        continue
+                    records = json.loads(zf.read(names[0]))
+            except (urllib.error.URLError, zipfile.BadZipFile, json.JSONDecodeError, KeyError) as exc:
+                print(f"[gate-health-puller] run {run['id']} artifact {art['name']}: {exc}", file=sys.stderr)
+                continue
+            out.extend(records)
+        return out
+
+
+    def clickhouse_datetime(iso_z: str) -> str:
+        """'2026-08-10T05:39:26Z' -> '2026-08-10 05:39:26'.
+
+        Measured against a real clickhouse/clickhouse-server:24.8 (not assumed): the
+        JSONEachRow DateTime64 parser rejects the trailing 'Z' outright
+        (CANNOT_PARSE_INPUT_ASSERTION_FAILED, "expected '\"' before: 'Z...'") and wants a
+        space, not 'T', between date and time. GitHub's REST API always returns UTC
+        (documented, and this column IS UTC per the schema), so dropping 'Z' loses no
+        information — it is a format change, not a timezone conversion.
+        """
+        return iso_z.rstrip("Z").replace("T", " ")
+
+
+    def to_row(run, rec):
+        prs = run.get("pull_requests") or []
+        return {
+            "run_id": run["id"],
+            "sha": run["head_sha"],
+            "event": run["event"],
+            "pr_number": prs[0]["number"] if prs else None,
+            "run_created_at": clickhouse_datetime(run["created_at"]),
+            "shard": rec.get("group"),
+            "gate_id": rec["id"],
+            "mode": rec.get("mode", "enforced"),
+            "status": rec["status"],
+            "seconds": rec["seconds"],
+            "subjects": rec.get("subjects"),
+            "selftest_declared": bool(rec.get("selftest_declared")),
+            "selftest_passed": rec.get("selftest_passed"),
+            "budget_seconds": rec.get("budget_seconds"),
+            "min_subjects": rec.get("min_subjects"),
+        }
+
+
+    def insert_rows(rows):
+        if not rows:
+            print("[gate-health-puller] 0 row(s) to insert — nothing to do")
+            return
+        body = "\n".join(json.dumps(r) for r in rows).encode("utf-8")
+        url = (
+            f"{CLICKHOUSE_URL}/?query="
+            + urllib.parse.quote(
+                "INSERT INTO openbank_analytics.ci_gate_runs FORMAT JSONEachRow"
+            )
+        )
+        req = urllib.request.Request(url, data=body, method="POST")
+        auth = f"{CLICKHOUSE_USER}:{CLICKHOUSE_PASSWORD}".encode("ascii")
+        req.add_header("Authorization", "Basic " + base64.b64encode(auth).decode("ascii"))
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                resp.read()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+            raise SystemExit(f"ClickHouse insert failed (HTTP {exc.code}): {detail}")
+        print(f"[gate-health-puller] inserted {len(rows)} row(s)")
+
+
+    def main():
+        if not TOKEN:
+            raise SystemExit("GITHUB_TOKEN not set — refusing to report a silent no-op as success")
+        runs = gh(
+            f"/repos/{REPO}/actions/workflows/ci.yml/runs?status=completed&per_page={RUNS}"
+        ).get("workflow_runs", [])
+        print(f"[gate-health-puller] {len(runs)} completed ci.yml run(s) in window")
+        rows = []
+        runs_with_detail = 0
+        for run in runs:
+            recs = gate_records_for_run(run)
+            if recs:
+                runs_with_detail += 1
+            rows.extend(to_row(run, r) for r in recs)
+        print(
+            f"[gate-health-puller] {runs_with_detail}/{len(runs)} run(s) had gate-result "
+            f"artifacts, {len(rows)} gate-row(s) total"
+        )
+        insert_rows(rows)
+
+
+    if __name__ == "__main__":
+        main()

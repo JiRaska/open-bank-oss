@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.3...domestic-payment-v0.13.4) (2026-08-10)
+
+
+### Bug Fixes
+
+* **domestic-payment:** fail settlePayment on a settlement outage instead of completing the workflow on SENT_TO_CLEARING ([#4300](https://github.com/JiRaska/open-bank-oss/issues/4300)) ([ece5819](https://github.com/JiRaska/open-bank-oss/commit/ece581989b85ee4d62931897f73439e8c892de92))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.2...domestic-payment-v0.13.3) (2026-08-09)
 
 

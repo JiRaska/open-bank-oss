@@ -83,3 +83,35 @@ allowed_reasons contains "edge-service-sdd" if {
 # queue only. The same shape as interest-service's accrueAll at its own bootstrap. When the
 # clearing-side caller is built, it gets its own identity-scoped rule naming that caller — not a
 # family widening here, and not a role-only grant that the shared backend client would inherit.
+
+# Read-only oversight personas, added as the precondition of the AUTHZ_ENFORCE flip (#3679).
+#
+# WHY THIS IS NOT AN OVER-GRANT, AND WHY THE FLIP NEEDED IT. Both read resources declare
+# @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_PAYMENTS", "ROLE_API"), so a
+# ROLE_VIEWER holder can reach GET /api/v1/sdd/mandates, /mandates/{id} and
+# /mandates/{id}/refund-assessment today. Base rest.rego grants that persona nothing:
+# operator-read-any needs ROLE_OPERATOR, and compliance-read-any matches only actions ending in
+# ".read", so a ROLE_COMPLIANCE analyst is granted sdd.read but NOT sdd.list. Measured with
+# `opa eval` against the DEPLOYED sdd-opa-bundle ConfigMap before this rule existed:
+#
+#   sdd.list  ROLE_VIEWER      -> false      sdd.read  ROLE_VIEWER      -> false
+#   sdd.list  ROLE_COMPLIANCE  -> false      sdd.read  ROLE_COMPLIANCE  -> compliance-read-any
+#
+# The deployed realm (gitops/components/keycloak/realm-template.json) seeds demo@openbank.local
+# with ROLE_VIEWER and nothing else, and compliance@/compliance2@ with ROLE_COMPLIANCE+ROLE_VIEWER;
+# admin-ui's /sdd page is not role-gated, so it is reachable by all three. Flipping AUTHZ_ENFORCE
+# without this rule would 403 every one of them on a read they are entitled to — a regression
+# introduced by the security change itself.
+#
+# READ-ONLY BY CONSTRUCTION, which is what makes a role-only grant acceptable here where the write
+# rule above had to exclude service accounts: the action set is a closed literal of the two read
+# actions, so no widening of sdd.* can leak through it, and neither role appears on any sdd write
+# path. It also grants the shared backend client nothing new — service-account-openbank-services
+# holds ROLE_API in the deployed realm (and ROLE_OPERATOR in the docker/CI realms, where base
+# operator-read-any already covers both actions), so this rule changes no M2M exposure.
+allowed_reasons contains "sdd-oversight-read" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_VIEWER", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action in {"sdd.read", "sdd.list"}
+}
