@@ -63,10 +63,11 @@ class ApiVersionResponseFilter(
                 val nextMajor = currentMajor.toIntOrNull()?.plus(1)?.toString() ?: currentMajor
                 putSingleHeader("Deprecation", "true")
                 sunsetDate.ifPresent { putSingleHeader("Sunset", it) }
+                val successor = successorFor(req.uriInfo.path)
+                    ?: replacePathMajor(req.uriInfo.path, currentMajor, nextMajor)
                 putSingleHeader(
                     "Link",
-                    "<${successorFor(req.uriInfo.path) ?: replacePathMajor(req.uriInfo.path, currentMajor, nextMajor)}>" +
-                        "; rel=\"successor-version\"",
+                    "<$successor>; rel=\"successor-version\"",
                 )
             }
         }
