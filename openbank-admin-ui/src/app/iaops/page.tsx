@@ -5,7 +5,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import Image from 'next/image'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
@@ -143,7 +143,6 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
-  const router = useRouter()
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
@@ -430,13 +429,10 @@ function IAOpsContent() {
                   const isExceeded = costEntry?.burnRate === 'exceeded'
                   const isFinopsAgent = a.id === 'finops-agent'
                   return (
-                    <div key={a.id} role="link" tabIndex={0}
-                      onClick={() => router.push(`/iaops/agents/${encodeURIComponent(a.id)}`)}
-                      onKeyDown={e => { if (e.key === 'Enter') router.push(`/iaops/agents/${encodeURIComponent(a.id)}`) }}
-                      aria-label={t(`Otevřít profil agenta ${persona.name}, ${persona.role}`, `Open ${persona.name}'s agent profile, ${persona.role}`)}
+                    <article key={a.id}
                       style={{ position: 'relative', overflow: 'hidden', padding: '18px', borderRadius: '16px',
                         border: `1px solid ${isExceeded ? '#fca5a5' : `${persona.accent}30`}`,
-                        background: `linear-gradient(145deg, var(--surface) 0%, ${persona.shell} 145%)`, cursor: 'pointer',
+                        background: `linear-gradient(145deg, var(--surface) 0%, ${persona.shell} 145%)`,
                         boxShadow: '0 6px 18px rgba(15,23,42,0.05)', transition: 'transform .15s ease, box-shadow .15s ease' }}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '14px' }}>
                         <AgentPortrait agentId={a.id} />
@@ -444,7 +440,12 @@ function IAOpsContent() {
                           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
                             <div>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
-                                <span style={{ fontSize: '18px', fontWeight: 850, color: 'var(--text-primary)', letterSpacing: '-0.025em' }}>{persona.name}</span>
+                                <Link href={`/iaops/agents/${encodeURIComponent(a.id)}`}
+                                  aria-label={t(`Otevřít profil agenta ${persona.name}, ${persona.role}`, `Open ${persona.name}'s agent profile, ${persona.role}`)}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-primary)', textDecoration: 'none' }}>
+                                  <span style={{ fontSize: '18px', fontWeight: 850, letterSpacing: '-0.025em' }}>{persona.name}</span>
+                                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                                </Link>
                                 {isExceeded && (
                                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: 700,
                                     padding: '2px 6px', borderRadius: '8px', background: '#fee2e2', color: '#dc2626' }}>
@@ -453,17 +454,16 @@ function IAOpsContent() {
                                   </span>
                                 )}
                               </div>
-                              <div style={{ fontSize: '12px', fontWeight: 750, color: persona.accent, marginTop: '1px' }}>{persona.role}</div>
+                              <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)', marginTop: '1px' }}>{persona.role}</div>
                               <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '4px' }}>{a.id}</div>
                             </div>
-                            <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0, marginTop: '4px' }} />
                           </div>
                           <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '9px 0 0', lineHeight: 1.55 }}>{persona.purpose}</p>
                         </div>
                       </div>
 
                       <div style={{ padding: '10px 12px', borderRadius: '10px', background: `${persona.accent}0d`, borderLeft: `3px solid ${persona.accent}`, marginBottom: '12px' }}>
-                        <div style={{ fontSize: '9px', color: persona.accent, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '3px' }}>
+                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '3px' }}>
                           {t('Proč je tu', 'Why this colleague matters')}
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{persona.value}</div>
@@ -569,7 +569,7 @@ function IAOpsContent() {
                         </div>
                         </div>
                       </details>
-                    </div>
+                    </article>
                   )
                 })}
               </div>
