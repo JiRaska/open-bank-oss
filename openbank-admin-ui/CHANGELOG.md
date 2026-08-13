@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.122.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.121.0...admin-ui-v0.122.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** show campaign attention funnel ([#4731](https://github.com/JiRaska/open-bank-oss/issues/4731)) ([b3e5c83](https://github.com/JiRaska/open-bank-oss/commit/b3e5c839a005521c7b28c4fdbf54d01a8a622c8f))
+
 ## [0.121.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.120.0...admin-ui-v0.121.0) (2026-08-13)
 
 
