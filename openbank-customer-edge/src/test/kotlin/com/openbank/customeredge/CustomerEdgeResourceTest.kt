@@ -284,7 +284,7 @@ class CustomerEdgeResourceTest {
         val forwarded = slot<String>()
         every {
             upstream.get(
-                "http://campaign/api/v1/campaigns/interactions/$interactionRef",
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef/attribution",
                 caller.toString(),
             )
         } returns Response.ok(
@@ -300,7 +300,7 @@ class CustomerEdgeResourceTest {
         assertThat(response.status).isEqualTo(202)
         verify(exactly = 1) {
             upstream.get(
-                "http://campaign/api/v1/campaigns/interactions/$interactionRef",
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef/attribution",
                 caller.toString(),
             )
         }

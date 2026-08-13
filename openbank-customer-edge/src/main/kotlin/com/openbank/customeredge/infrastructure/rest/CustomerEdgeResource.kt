@@ -2663,7 +2663,7 @@ class CustomerEdgeResource(
             val interactionRef = runCatching { UUID.fromString(interactionRefNode.asText()) }.getOrNull()
                 ?: return badRequest("Invalid interaction reference")
             val validation = upstream.get(
-                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef",
+                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef/attribution",
                 customer.partyId.toString(),
             )
             if (validation.status != Response.Status.OK.statusCode) {
