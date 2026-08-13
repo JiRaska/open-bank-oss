@@ -368,7 +368,100 @@ def all_services() -> list[str]:
     return sorted(out)
 
 
+
+def self_test() -> int:
+    """Falsify the DR-text classifier.
+
+    These runbooks are read by an on-call engineer at 3am, so a wrong branch here is not a
+    documentation defect — it is an instruction. The incident this function's docstring
+    records is exactly that: a runbook told the engineer to "restore from the datastore's
+    managed backup" for a service that has no database and no such backup.
+
+    Two distinctions carry the whole thing, and they are NOT the same question:
+      * is_stateless(datastore) — declares no primary datastore at all
+      * ownsNoDatabase — owns no DATABASE, but may still hold real state (copilot and
+        customer-edge both declare Redis + ownsNoDatabase, and customer-edge's Redis holds
+        durable TTL-less passkey credentials)
+    Conflating them produces confident, wrong instructions in both directions: "you have
+    nothing to lose" for a service holding credentials, or a backup-restore procedure for a
+    service with no backup.
+    """
+    fails: list[str] = []
+
+    def says(text: str, *needles: str) -> bool:
+        return all(n in text for n in needles)
+
+    def case(label: str, ok: bool) -> None:
+        if not ok:
+            fails.append(label)
+
+    # STATELESS: no datastore at all. Recovery is a redeploy, and the text must say so without
+    # ever mentioning a backup.
+    t = dr_for("none", has_backup=False)
+    case("a stateless service is told to redeploy, not restore",
+         says(t, "no primary datastore", "redeploy"))
+    case("a stateless service is NOT offered a backup restore", "managed backup" not in t)
+
+    # OWNS NO DATABASE but holds state — the incident case. It must NOT claim zero impact, and
+    # must point at the TTL question rather than a restore procedure.
+    t = dr_for("Redis", has_backup=False, owns_no_db=True)
+    case("a no-database service with state is told there is no backup to restore",
+         says(t, "owns no database", "no managed backup"))
+    case("...and is told to check for durable, TTL-less keys",
+         says(t, "TTL"))
+    case("...and is NOT told it holds nothing to lose",
+         "holds no state to lose" not in t)
+
+    # POSTGRES WITH a backup: PITR is real and the procedure applies.
+    t = dr_for("PostgreSQL", has_backup=True)
+    case("a backed-up postgres gets the PITR mechanism", says(t, "WAL archiving", "PITR"))
+    case("...and carries no unmet-prerequisite warning", "NOT met" not in t)
+
+    # POSTGRES WITHOUT a backup: the sharpest case. The procedure must be prefixed by the fact
+    # that DR IS NOT ACHIEVABLE — printing the same steps without that line is the failure
+    # that reads as a working runbook at the exact moment it is being followed.
+    t = dr_for("PostgreSQL", has_backup=False)
+    case("an unbacked-up postgres says DR is not achievable today",
+         says(t, "no backup configured", "not achievable"))
+    case("...and still shows the procedure for after enablement", "bootstrap.recovery" in t)
+
+    # The has_backup flag must actually change the answer — if the two postgres texts were
+    # identical, the flag would be decorative and the warning could never appear.
+    case("has_backup changes the postgres text",
+         dr_for("PostgreSQL", has_backup=True) != dr_for("PostgreSQL", has_backup=False))
+
+    # owns_no_db must override the datastore-based inference. Defaulting it to the inference
+    # is what conflates the two questions the docstring warns about.
+    case("owns_no_db=True changes the answer for a service WITH a datastore",
+         dr_for("Redis", has_backup=False, owns_no_db=True)
+         != dr_for("Redis", has_backup=False, owns_no_db=False))
+
+    # --- the ownsNoDatabase assertion itself ------------------------------------------------
+    case("an explicit ownsNoDatabase: true is honoured",
+         owns_no_database({"ownsNoDatabase": "true", "primaryDatastore": "Redis"}) is True)
+    case("a service with a real database is not 'owns no database'",
+         owns_no_database({"ownsNoDatabase": "false", "primaryDatastore": "PostgreSQL"}) is False)
+    # The legacy fallback: no assertion at all, infer from the datastore.
+    case("with no assertion, a stateless datastore infers owns-no-database",
+         owns_no_database({"primaryDatastore": "none"}) is True)
+    case("with no assertion, a real datastore infers a database",
+         owns_no_database({"primaryDatastore": "PostgreSQL"}) is False)
+    # Whitespace and case must not decide a DR instruction.
+    case("the assertion is read case- and whitespace-insensitively",
+         owns_no_database({"ownsNoDatabase": " TRUE ", "primaryDatastore": "PostgreSQL"}) is True)
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: runbook DR classifier is falsifiable (17 cases)")
+    return 0
+
 def main():
+    if "--self-test" in sys.argv:
+        sys.exit(self_test())
+
     ap = argparse.ArgumentParser()
     ap.add_argument("services", nargs="*")
     ap.add_argument("--force", action="store_true", help="overwrite existing runbooks")
