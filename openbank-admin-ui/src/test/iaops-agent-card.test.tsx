@@ -34,12 +34,33 @@ function response(body: unknown) {
   return { ok: true, json: async () => body }
 }
 
+const originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+
 afterEach(() => {
+  if (originalScrollIntoView) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView)
+  else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+  window.history.replaceState({}, '', '/')
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
 
 describe('AIOps agent card interactions', () => {
+  it.each(['ai-swarm', 'ai-mesh'])('scrolls to the %s swarm fragment after governance data loads', async fragment => {
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {
+      callback(0)
+      return 1
+    })
+    window.history.replaceState({}, '', `/#${fragment}`)
+    vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
+
+    render(<IAOpsPage />)
+
+    await screen.findByRole('heading', { name: 'What is the AI swarm?' })
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }))
+  })
+
   it('keeps profile navigation separate from nested keyboard controls', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
@@ -55,8 +76,13 @@ describe('AIOps agent card interactions', () => {
 
     render(<IAOpsPage />)
 
-    expect(screen.getByRole('heading', { name: 'What is the AI mesh?' })).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'What is the AI swarm?' })
+    expect(document.getElementById('ai-swarm')).toBeInTheDocument()
     expect(document.getElementById('ai-mesh')).toBeInTheDocument()
+
+    const crewHeading = screen.getByRole('heading', { name: 'Meet the colleagues who never decide for you.' })
+    const swarmHeading = screen.getByRole('heading', { name: 'What is the AI swarm?' })
+    expect(document.body.innerHTML.indexOf(crewHeading.outerHTML)).toBeLessThan(document.body.innerHTML.indexOf(swarmHeading.outerHTML))
 
     const profileLink = await screen.findByRole('link', { name: /Open Fina's agent profile/i })
     expect(profileLink).toHaveAttribute('href', '/iaops/agents/finops-agent')
