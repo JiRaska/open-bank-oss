@@ -198,10 +198,34 @@ class AnalyticsConsumer {
             ?: address.key
             ?: UNKNOWN_SERVICE
 
-    private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = node["aggregateType"]?.asText()
-        ?: inferAggregateType(node).takeIf { it != UNKNOWN }
-        ?: TopicAttribution.aggregateType(address.topic)
-        ?: UNKNOWN
+    /**
+     * The aggregate type, UPPERCASED (issue #4553).
+     *
+     * The producer's spelling used to survive verbatim while both fallbacks below emit uppercase, so
+     * the value recorded WHICH PATH attributed the event rather than what the aggregate is. Bronze
+     * ended up holding `ACCOUNT` (294 rows) and `Account` (17) for the same domain — five account ids
+     * under both — and `silver_current_state`, which groups by `(aggregate_type, aggregate_id)`, then
+     * emitted TWO current-state rows for one account. Last-writer-wins cannot fire across a group
+     * boundary, so a reader filtering one spelling got a stale row presented as current.
+     *
+     * `Transaction` and `Consent` existed ONLY in mixed case, which is why every consumer comparing
+     * against `'TRANSACTION'` matched nothing at all, and a Grafana tile asking for `'Party'` read 0
+     * against a true 4 for its whole life (fixed in #4556).
+     *
+     * Uppercasing also repairs [idForType], whose `when (type)` matches uppercase literals only: a
+     * mixed-case type fell through to the `accountId`/`partyId` fallback — the exact pairing of a
+     * TRANSACTION type with an ACCOUNT id that [resolveAggregateId]'s KDoc exists to prevent.
+     *
+     * Rows already in bronze keep their original spelling; this stops the split growing, it does not
+     * heal it. The backfill is tracked separately on #4553 — bronze is a `ReplacingMergeTree`, so
+     * re-keying is an explicit CORRECTION ingest, not an in-place update.
+     */
+    private fun resolveAggregateType(node: JsonNode, address: EventAddress): String = (
+        node["aggregateType"]?.asText()
+            ?: inferAggregateType(node).takeIf { it != UNKNOWN }
+            ?: TopicAttribution.aggregateType(address.topic)
+            ?: UNKNOWN
+        ).uppercase()
 
     private fun resolveAggregateVersion(node: JsonNode): Long = node["aggregateVersion"]?.asLong()
         ?: node["version"]?.asLong()
