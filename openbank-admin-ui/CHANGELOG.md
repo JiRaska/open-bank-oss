@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.111.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.2...admin-ui-v0.111.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* **analytics-sink:** materialise the ADR-0210 D2 party key as a ClickHouse view ([#4520](https://github.com/JiRaska/open-bank-oss/issues/4520)) ([3aa3598](https://github.com/JiRaska/open-bank-oss/commit/3aa359899951d96fe6c5914cce44dcecd6436a11))
+
 ## [0.111.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.1...admin-ui-v0.111.2) (2026-08-13)
 
 
