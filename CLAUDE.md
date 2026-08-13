@@ -628,14 +628,22 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   leaf — check `gh pr list --base <branch>` first (#3055 closed #3063, reopened as #3111).
 
 ### API contract (ADR-0048)
-- **Two racing spec PRs can both claim the same `info.version` — and both pass the gate.** The
-  api-contract gate classifies against the PR's *creation-time* base
-  (`github.event.pull_request.base.sha`), so a competing bump that merges first is invisible to
-  the second PR: it lands with new endpoints under an unchanged version (#481 vs #524 on the
-  ledger spec, corrected by #534). After any competing `openapi.yaml` change merges — including
-  when you resolve a merge conflict against `main` — re-check `info.version` against the *current*
-  `main` and re-bump; whoever lands second takes the next version. A matching version line merging
-  "cleanly" is the trap: git sees identical text, not a taken version.
+- **Two racing spec PRs can both claim the same `info.version`.** After any competing
+  `openapi.yaml` change merges — including when you resolve a merge conflict against `main` —
+  re-check `info.version` against the *current* `main` and re-bump; whoever lands second takes
+  the next version. A matching version line merging "cleanly" is the trap: git sees identical
+  text, not a taken version.
+  **Guard against the right mechanism — this bullet named a stale one until 2026-08-13.** The
+  original cause was the gate classifying against the PR's *creation-time* base
+  (`github.event.pull_request.base.sha`), which froze at PR creation and could not see a
+  competing bump (#481 vs #524 on the ledger spec). That was **fixed by #534**: `ci.yml`'s
+  `resolve PR diff base` step now resolves the merge-base as it is right now, and says so in
+  its own comment. What remains is a *different* and narrower race — a PR whose last CI run
+  predates a competing spec merge, and which then merges with no later run, is invisible to any
+  run-time base, because the classification is only as fresh as the run. No base resolution can
+  close that; only a merge queue or up-to-date-branch enforcement would, and the repo has
+  deliberately chosen detection over prevention. So the re-check above is still required — but
+  a branch that has been sitting is the risk, not a branch that was created early.
 - **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
   Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
   scans *open* PRs — but the number is just as easily consumed by something that landed while your
