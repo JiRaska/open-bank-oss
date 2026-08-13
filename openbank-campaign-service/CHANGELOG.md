@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/v0.18.1...v0.19.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/v0.18.0...v0.18.1) (2026-08-08)
 
 
