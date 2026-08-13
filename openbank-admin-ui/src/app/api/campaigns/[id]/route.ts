@@ -124,7 +124,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
   const { id } = await ctx.params
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
 
-  const [campaign, enrolments, sends, sendSummary, journey, experiment] = await Promise.all([
+  const [campaign, enrolments, sends, sendSummary, journey, engagement, experiment] = await Promise.all([
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}`, null),
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/enrolments`, []),
     // First page only. Paging and filtering go through /api/campaigns/[id]/sends so turning a
@@ -143,6 +143,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     // and the screen died on `.map` with the 404 on /journey never surfacing, because its state had
     // landed under `sendSummary`.
     read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/journey`, []),
+    // App attention is a separate, privacy-minimised projection.  It is never inferred from a
+    // banner handoff, so a missing/lagging source remains visible as unavailable in Campaign Studio.
+    read(headers, `/api/v1/campaigns/${encodeURIComponent(id)}/engagement`, []),
     readExperiment(headers, id),
   ])
 
@@ -180,6 +183,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     sends: sends.data,
     sendSummary: sendSummary.data,
     journey: journey.data,
+    engagement: engagement.data,
     experiment: experiment.data,
     contentExperiment: contentExperiment.data,
     entryCatalogues: { cadences: cadences.data, triggers: triggers.data },
@@ -192,6 +196,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       sends: sends.state,
       sendSummary: sendSummary.state,
       journey: journey.state,
+      engagement: engagement.state,
       experiment: experiment.state,
       contentExperiment: contentExperiment.state,
       cadences: cadences.state,

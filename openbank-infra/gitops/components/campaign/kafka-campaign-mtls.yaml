@@ -50,6 +50,14 @@ spec:
           name: openbank.notification.outcomes.v1
           patternType: literal
         operations: [Read, Describe]
+      # Aggregate-only campaign attention reporting.  The source payload carries an opaque
+      # interaction reference and campaign tuple; campaign-service persists neither party id nor
+      # contact data in its derived projection (#4480).
+      - resource:
+          type: topic
+          name: openbank.engagement.events
+          patternType: literal
+        operations: [Read, Describe]
       # Consume the product events that count as a conversion (ADR-0245 D2). Read-only, and the
       # service only ever appends an outcome row from them — it cannot cause, suppress or alter a
       # send, so the blast radius of this grant is a reporting number.
@@ -99,5 +107,10 @@ spec:
       - resource:
           type: group
           name: openbank-campaign-service-notification-outcomes
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-campaign-service-engagement-events
           patternType: literal
         operations: [Read, Describe]
