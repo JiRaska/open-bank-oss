@@ -1200,6 +1200,8 @@ gates:
     name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-ai-act-high-risk-inventory.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
@@ -2205,6 +2207,8 @@ gates:
     verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
     when: pull_request
     needs_base: required
+    selftest: python3 openbank-infra/scripts/check-db-migration.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
 
