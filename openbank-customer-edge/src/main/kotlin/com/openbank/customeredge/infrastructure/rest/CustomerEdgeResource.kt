@@ -201,6 +201,10 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.engagement-service-url")
     lateinit var engagementServiceUrl: String
 
+    /** Campaign validates opaque PUSH interaction references before engagement data is appended. */
+    @ConfigProperty(name = "openbank.edge.campaign-service-url")
+    lateinit var campaignServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.statement-service-url")
     lateinit var statementServiceUrl: String
 
@@ -2630,6 +2634,11 @@ class CustomerEdgeResource(
      * any supplied partyId with the JWT party id before forwarding, which makes the feedback loop
      * meaningful without turning it into an IDOR write primitive. Content/slot/type validation is
      * owned by engagement-service, alongside the catalogue it validates against.
+     *
+     * When the app includes an interactionRef from a PUSH payload, it is validated against the
+     * campaign send log for this JWT party before it can become an attribution datum. A reference
+     * for another party, a non-PUSH send, or an unknown id all receive the same public error — the
+     * endpoint must never disclose which of those cases happened.
      */
     @POST
     @Path("/surfaces/events")
@@ -2637,8 +2646,29 @@ class CustomerEdgeResource(
     @Blocking
     fun recordSurfaceEvent(body: String): Response {
         val customer = customer()
+        val event = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
+            ?: return badRequest("Malformed engagement event")
+        val interactionRefNode = event.get("interactionRef")
+        if (interactionRefNode != null) {
+            if (!interactionRefNode.isTextual) return badRequest("Invalid interaction reference")
+            val interactionRef = runCatching { UUID.fromString(interactionRefNode.asText()) }.getOrNull()
+                ?: return badRequest("Invalid interaction reference")
+            val validation = upstream.get(
+                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef",
+                customer.partyId.toString(),
+            )
+            if (validation.status != Response.Status.NO_CONTENT.statusCode) {
+                // 400/403/404 are deliberately indistinguishable to the mobile client. Upstream
+                // failure stays a 502 so the client can safely retry instead of discarding an event.
+                return if (validation.status >= UPSTREAM_SERVER_ERROR_MIN) {
+                    Response.status(Response.Status.BAD_GATEWAY).build()
+                } else {
+                    badRequest("Invalid interaction reference")
+                }
+            }
+        }
         val enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
-            ?: return Response.status(Response.Status.BAD_REQUEST).build()
+            ?: return badRequest("Malformed engagement event")
         return upstream.post(
             "$engagementServiceUrl/api/v1/surfaces/events",
             customer.partyId.toString(),
@@ -4020,6 +4050,9 @@ class CustomerEdgeResource(
 
         /** Upper bound for upstream error text carried into an audit detail field. */
         private const val AUDIT_DETAIL_MAX_CHARS = 300
+
+        /** HTTP status classes start at this value; named to keep upstream-retry policy legible. */
+        private const val UPSTREAM_SERVER_ERROR_MIN = 500
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
         internal const val SCA_EXEMPTION_OWN_ACCOUNT = "PSD2_RTS_ART15_OWN_ACCOUNT"

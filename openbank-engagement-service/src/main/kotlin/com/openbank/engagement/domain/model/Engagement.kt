@@ -23,6 +23,8 @@ data class EngagementEvent(
     val slot: SurfaceSlot,
     val type: EngagementEventType,
     val occurredAt: Instant,
+    /** Opaque campaign PUSH handoff reference, validated by customer-edge before this service sees it. */
+    val interactionRef: UUID? = null,
 )
 
 /**

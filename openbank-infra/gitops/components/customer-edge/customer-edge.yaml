@@ -228,6 +228,11 @@ spec:
             # so declare the real cross-namespace URL here to allow edge → engagement.
             - name: ENGAGEMENT_SERVICE_URL
               value: http://engagement-service.engagement.svc:8153
+            # Campaign's ownership-only endpoint validates an optional opaque PUSH interaction
+            # reference before engagement-service appends it. Declare it here (not only in the
+            # in-image default) so the generated NetworkPolicy permits customer-edge → campaign.
+            - name: CAMPAIGN_SERVICE_URL
+              value: http://campaign-service.campaign.svc:8128
             - name: STATEMENT_SERVICE_URL
               value: http://statement-service.statements.svc:8136
             - name: STANDING_ORDER_SERVICE_URL

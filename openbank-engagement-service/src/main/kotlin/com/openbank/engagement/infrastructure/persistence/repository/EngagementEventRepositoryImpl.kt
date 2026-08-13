@@ -34,14 +34,15 @@ class EngagementEventRepositoryImpl(
         Panache.withTransaction {
             persist(EngagementEventEntity.from(event, eventId)).chain { _ ->
                 val payload = mapper.writeValueAsString(
-                    mapOf(
-                        "eventId" to eventId.toString(),
-                        "partyId" to event.partyId.toString(),
-                        "contentId" to event.contentId,
-                        "slot" to event.slot.name,
-                        "type" to event.type.name,
-                        "occurredAt" to event.occurredAt.toString(),
-                    ),
+                    buildMap {
+                        put("eventId", eventId.toString())
+                        put("partyId", event.partyId.toString())
+                        put("contentId", event.contentId)
+                        put("slot", event.slot.name)
+                        put("type", event.type.name)
+                        put("occurredAt", event.occurredAt.toString())
+                        event.interactionRef?.let { put("interactionRef", it.toString()) }
+                    },
                 )
                 outbox.persistInTransaction(
                     OutboxMessage(
