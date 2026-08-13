@@ -185,6 +185,17 @@ function IAOpsContent() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    if (!data || typeof window === 'undefined') return
+    const fragment = window.location.hash.slice(1)
+    if (fragment !== 'ai-swarm' && fragment !== 'ai-mesh') return
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(fragment)?.scrollIntoView?.({ block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [data])
+
   const submitRca = useCallback(async () => {
     if (!rcaAsk.trim()) return
     setRcaLoading(true)
@@ -253,8 +264,6 @@ function IAOpsContent() {
         </div>
       </div>
 
-      <AgentMeshExplainer language={language} />
-
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
           <RefreshCw size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
@@ -305,6 +314,8 @@ function IAOpsContent() {
               </span>
             </div>
           </div>
+
+          <AgentMeshExplainer language={language} />
 
           {/* ── A. Governance posture (hero) ── */}
           <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(8,145,178,0.04))',

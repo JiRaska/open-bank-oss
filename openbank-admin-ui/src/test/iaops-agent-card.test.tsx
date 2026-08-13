@@ -55,9 +55,13 @@ describe('AIOps agent card interactions', () => {
 
     render(<IAOpsPage />)
 
-    expect(screen.getByRole('heading', { name: 'What is the AI swarm?' })).toBeInTheDocument()
+    await screen.findByRole('heading', { name: 'What is the AI swarm?' })
     expect(document.getElementById('ai-swarm')).toBeInTheDocument()
     expect(document.getElementById('ai-mesh')).toBeInTheDocument()
+
+    const crewHeading = screen.getByRole('heading', { name: 'Meet the colleagues who never decide for you.' })
+    const swarmHeading = screen.getByRole('heading', { name: 'What is the AI swarm?' })
+    expect(document.body.innerHTML.indexOf(crewHeading.outerHTML)).toBeLessThan(document.body.innerHTML.indexOf(swarmHeading.outerHTML))
 
     const profileLink = await screen.findByRole('link', { name: /Open Fina's agent profile/i })
     expect(profileLink).toHaveAttribute('href', '/iaops/agents/finops-agent')
