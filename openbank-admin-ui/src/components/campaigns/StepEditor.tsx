@@ -427,6 +427,14 @@ export function StepEditor({
             )}
           </p>
         )}
+        {step.conditionSourceOrder !== undefined && step.condition && (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              `Tato větev vždy čte výsledek kroku ${step.conditionSourceOrder + 1}.`,
+              `This path always reads the result of step ${step.conditionSourceOrder + 1}.`,
+            )}
+          </p>
+        )}
         {step.condition === 'IF_PREVIOUS_NOT_CONFIRMED' && (
           <p className="text-xs text-muted-foreground">
             {t(

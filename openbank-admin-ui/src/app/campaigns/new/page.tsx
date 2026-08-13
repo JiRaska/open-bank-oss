@@ -297,9 +297,8 @@ export default function NewCampaignPage() {
 
   /**
    * A binary decision is an authoring shortcut over the service's two complementary, observable
-   * delivery conditions. Keeping both steps adjacent makes their shared predecessor unambiguous:
-   * when the first path is skipped, the second still evaluates that predecessor; when it sends,
-   * the second condition is false. The workflow has covered this replay-safe semantics since #3585.
+   * delivery conditions. Both generated paths explicitly point at the same source step: a skipped
+   * first path can therefore never become the second path's input.
    */
   const addDeliveryDecision = () =>
     setSteps(prev => {
@@ -309,6 +308,7 @@ export default function NewCampaignPage() {
       const decisionStep = (condition: EditorStep['condition']): EditorStep => ({
         ...newStep(first),
         condition,
+        conditionSourceOrder: prev.length - 1,
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       })
       setSelected(prev.length)
@@ -395,6 +395,7 @@ export default function NewCampaignPage() {
           template: s.template,
           channel: s.channel,
           ...(s.condition ? { condition: s.condition } : {}),
+          ...(s.conditionSourceOrder !== undefined ? { conditionSourceOrder: s.conditionSourceOrder + 1 } : {}),
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
           ...(contentExperiment && s.variantBTemplate ? { variantBTemplate: s.variantBTemplate } : {}),

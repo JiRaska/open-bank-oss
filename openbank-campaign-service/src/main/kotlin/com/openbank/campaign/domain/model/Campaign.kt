@@ -74,6 +74,14 @@ data class Campaign(
         require(name.isNotBlank()) { "campaign name must not be blank" }
         require(steps.isNotEmpty()) { "campaign must have at least one step" }
         require(steps.size <= MAX_STEPS) { "journeys are capped at $MAX_STEPS steps in the first slice" }
+        require(steps.map { it.order }.distinct().size == steps.size) { "campaign step orders must be unique" }
+        steps.forEach { step ->
+            step.conditionSourceOrder?.let { sourceOrder ->
+                require(step.condition != null) { "a condition source requires a branch condition" }
+                require(sourceOrder < step.order) { "a condition source must be an earlier step" }
+                require(steps.any { it.order == sourceOrder }) { "a condition source must name a campaign step" }
+            }
+        }
         require(holdoutPercent in 0..MAX_HOLDOUT_PERCENT) {
             "holdoutPercent must be between 0 and $MAX_HOLDOUT_PERCENT"
         }
@@ -231,6 +239,12 @@ data class CampaignStep(
      * it took before. See [StepCondition].
      */
     val condition: StepCondition? = null,
+    /**
+     * Optional explicit source for [condition].  Absent preserves the original "latest earlier
+     * delivery" semantics.  When present, both arms of a decision can name the same source step,
+     * so a skipped arm can never accidentally become the other's predecessor.
+     */
+    val conditionSourceOrder: Int? = null,
     /**
      * Alternative declared values for the B arm of a campaign-wide A/B content experiment.
      * Null preserves the historical single-content step; when present every step must provide it

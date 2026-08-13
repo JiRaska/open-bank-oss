@@ -26,6 +26,9 @@ interface CampaignJourneyActivities {
      */
     fun previousDeliveryStatus(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
 
+    /** Delivery state for an explicit source step in a multi-path decision. */
+    fun deliveryStatusForStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
+
     /**
      * Record that [stepOrder] was skipped because its branch condition did not hold, and move the
      * enrolment past it. One activity, not a record + an advance: a skip that logged and then
