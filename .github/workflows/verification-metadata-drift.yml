@@ -17,7 +17,7 @@
 #
 # Sharded on purpose: one fleet-wide regeneration needs ~12g of heap (measured;
 # 6g died with `Java heap space` after 3h40m on the quarkusBuild variant), which is
-# more than a 16 GB runner can safely hand a single JVM. TWELVE shards of ~5 modules
+# more than a 16 GB runner can safely hand a single JVM. EIGHTEEN shards of ~3-4 modules
 # each keep every job well inside that budget and run concurrently.
 #
 # Was eight. Raised after three of eight shards died of `Java heap space` on
@@ -47,13 +47,13 @@ concurrency:
 
 jobs:
   sweep:
-    name: sweep ${{ matrix.shard }}/12
+    name: sweep ${{ matrix.shard }}/18
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
       fail-fast: false # one shard's gap must not hide another's
       matrix:
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
     steps:
       - uses: actions/checkout@v7
 
@@ -75,28 +75,39 @@ jobs:
       # the metadata. Record which it was as an ARTIFACT rather than leaving raise-issue to
       # grep a log: a job log contains the step's own `run:` script, so a grep matches
       # strings that never executed.
+      #
+      # The verdict is written INSIDE the workspace, and that is not cosmetic. It used to go
+      # to /tmp, and `hashFiles()` is resolved relative to GITHUB_WORKSPACE and cannot see a
+      # path outside it — so the guard on the upload step evaluated to '' on every shard, the
+      # upload was SKIPPED every time, and raise-issue downloaded nothing. Measured on run
+      # 31356989272: shard 10 died of Java heap space, its upload step reads `skipped`, the
+      # run produced 0 artifacts, and the issue it filed said "0 shard(s) exited 2, 0 reported
+      # a gap". Both numbers were structural zeros. A REAL metadata gap would have been
+      # reported the same way, which is the dangerous direction. `if-no-files-found: error`
+      # is there so this cannot regress quietly a second time.
       - name: Sweep shard for unpinned artifacts
         id: sweep
         run: |
           set +e
           python3 .github/scripts/check-verification-metadata-complete.py \
-            --modules all --shard "${{ matrix.shard }}/12" --enforce
+            --modules all --shard "${{ matrix.shard }}/18" --enforce
           rc=$?
           set -e
-          mkdir -p /tmp/sweep-verdict
+          mkdir -p ${{ github.workspace }}/sweep-verdict
           case "$rc" in
             0) exit 0 ;;
-            2) echo "could-not-run" > "/tmp/sweep-verdict/shard-${{ matrix.shard }}" ;;
-            *) echo "gap" > "/tmp/sweep-verdict/shard-${{ matrix.shard }}" ;;
+            2) echo "could-not-run" > "${{ github.workspace }}/sweep-verdict/shard-${{ matrix.shard }}" ;;
+            *) echo "gap" > "${{ github.workspace }}/sweep-verdict/shard-${{ matrix.shard }}" ;;
           esac
           exit "$rc"
 
       - name: Upload this shard's verdict
-        if: ${{ always() && hashFiles('/tmp/sweep-verdict/**') != '' }}
+        if: ${{ always() && hashFiles('sweep-verdict/**') != '' }}
         uses: actions/upload-artifact@v7
         with:
           name: sweep-verdict-${{ matrix.shard }}
-          path: /tmp/sweep-verdict/
+          path: ${{ github.workspace }}/sweep-verdict/
+          if-no-files-found: error
           retention-days: 7
 
   # A red schedule is addressed to nobody. Turn a real gap into an owned ticket —

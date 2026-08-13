@@ -64,8 +64,12 @@ channels:
       (`OutboxKafkaHeaders.partitionKey` reads `entry.aggregateId`). All proposals for one case
       land on one partition and are ordered with respect to each other.
     messages:
-      CaseProposal:
-        $ref: '#/components/messages/CaseProposal'
+      case-timeout:
+        $ref: '#/components/messages/case-timeout'
+      case-contested:
+        $ref: '#/components/messages/case-contested'
+      case-synthesis:
+        $ref: '#/components/messages/case-synthesis'
 
 operations:
   publishCaseProposal:
@@ -80,12 +84,28 @@ operations:
       The write goes through plain JDBC rather than the `OutboxMessage` domain type on purpose: a
       Temporal activity thread carries no Vert.x context, so reactive Panache throws `HR000068`
       there — the same reason agent-service keeps `JdbcAgentProposalRepository`.
+    messages:
+      - $ref: '#/channels/proposalEvents/messages/case-timeout'
+      - $ref: '#/channels/proposalEvents/messages/case-contested'
+      - $ref: '#/channels/proposalEvents/messages/case-synthesis'
 
 components:
   messages:
-    CaseProposal:
-      name: CaseProposal
-      title: Case convergence proposal
+    case-timeout:
+      name: case-timeout
+      title: Case convergence proposal — deadline reached with no synthesis requested
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CaseProposalPayload'
+    case-contested:
+      name: case-contested
+      title: Case convergence proposal — a participant flagged the case contested
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CaseProposalPayload'
+    case-synthesis:
+      name: case-synthesis
+      title: Case convergence proposal — the LLM synthesised a verdict from contributions
       contentType: application/json
       payload:
         $ref: '#/components/schemas/CaseProposalPayload'
@@ -95,8 +115,10 @@ components:
       description: |
         Serialised by `objectMapper.writeValueAsString` from a literal map in `emitProposal`, so
         this is the exact field set — no envelope, no `eventType` inside the body. The outbox
-        row's `event_type` column carries `proposalType` and reaches Kafka as a header, not as a
-        payload field.
+        row's `event_type` column carries `proposalType`, which is one of this contract's three
+        message names (`case-timeout`/`case-contested`/`case-synthesis`, the three literals
+        `CaseWorkflowImpl.emitTerminalProposal`'s callers pass), and reaches Kafka as a header, not
+        as a payload field.
       additionalProperties: false
       required: [caseId, proposalType, summary, contested, occurredAt]
       properties:
@@ -105,10 +127,12 @@ components:
           description: The case this proposal concludes. Also the row's `aggregate_id` (as a UUID).
         proposalType:
           type: string
+          enum: [case-timeout, case-contested, case-synthesis]
           description: |
-            The kind of verdict. Also written to the row's `event_type` column, which is what the
-            dispatcher puts on the Kafka header — so this value is the routing key a consumer
-            filters on.
+            The kind of verdict — one of this file's three message names. Also written to the
+            row's `event_type` column, which is what the dispatcher puts on the Kafka header, so
+            this value is the routing key a consumer filters on, and it is redundant with which of
+            the three messages a consumer received.
         summary:
           type: string
           description: |

@@ -1,0 +1,16 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/security-scanner",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "affected",
+      "action_statement": "Resolved org.hibernate.reactive:hibernate-reactive-core is 3.4.2.Final (bundled by the Quarkus platform BOM io.quarkus.platform:quarkus-bom:3.38.0; measured with `./gradlew :openbank-security-scanner:dependencies --configuration runtimeClasspath`). The advisory's affected range is [0, 4.2.1), so this version is in range. The vulnerable path is REACHABLE here, so no not_affected justification is defensible: com.openbank.security.infrastructure.persistence.repository.SecurityOutboxRepositoryImpl extends io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository over the reactive PostgreSQL pool, and it is driven from HTTP request handling (the scan/report REST path that writes the security outbox), which is exactly the advisory's precondition (an HTTP endpoint performing database operations, where a remote client closing the connection prematurely can leak a pooled connection). Remediation is a Quarkus platform bump, not an independent force: forcing hibernate-reactive-core:4.2.1.Final resolves and augments cleanly (quarkusBuild succeeds) but fails every @QuarkusTest at boot with NoSuchMethodError org.hibernate.loader.ast.internal.LoaderSelectBuilder.createSelect(...) \u2014 4.2.x needs a newer Hibernate ORM than Quarkus 3.38.0 ships (measured on branch security/vex-cve-2025-14969 and reverted; the baseline suite is green). Tracked in issue #4533. Note the tracker cited by the other 44 component VEX docs for this CVE, issue #1446, is CLOSED \u2014 it landed the 3.37.2 -> 3.38.0 bump, which moved this artifact 3.4.1.Final -> 3.4.2.Final and did not cross the fix boundary. Compensating controls: this service depends on project(\":openbank-libs\"), so it inherits the fleet reactive-pool eviction defaults quarkus.datasource.reactive.idle-timeout=5M and max-lifetime=30M (openbank-libs META-INF/microprofile-config.properties, issue #1682), which bound how long a pooled connection can survive so a leak condition ages out rather than persisting until a pod restart. Every REST endpoint requires an authenticated caller (quarkus-oidc; quarkus.oidc configured with the openbank realm; the service is internal, not customer-facing), matching the advisory's PR:L. Residual risk: availability only \u2014 GHSA-frpp-8pwq-hjrx is rated MODERATE (CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L, 4.3); no confidentiality or integrity impact, and the finding is below the CRITICAL/HIGH threshold the weekly Image rescan gate (#4422) acts on.",
+      "timestamp": "2026-08-13T00:00:00Z"
+    }
+  ]
+}
