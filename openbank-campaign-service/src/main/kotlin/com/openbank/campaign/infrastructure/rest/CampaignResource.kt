@@ -8,6 +8,7 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition
@@ -76,6 +77,10 @@ data class StepRequest(
     val condition: StepCondition? = null,
     /** The B-arm values for a campaign-wide content experiment; absent keeps one shared message. */
     val variantBVariables: Map<String, String>? = null,
+    /** Use the catalogue's safe PUSH counterpart only when this EMAIL step lacks email consent. */
+    val fallbackToPush: Boolean = false,
+    /** Closed in-app destination opened when the customer taps the resulting PUSH notification. */
+    val mobileDestination: MobileDestination? = null,
 )
 
 /**
@@ -136,6 +141,8 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
                 it.delaySeconds,
                 it.condition,
                 it.variantBVariables,
+                it.fallbackToPush,
+                it.mobileDestination,
             )
         }
         val campaign = service.createDraft(

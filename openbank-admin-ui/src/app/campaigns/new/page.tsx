@@ -17,6 +17,8 @@ import {
   type EditorStep,
 } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
+import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
+import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
 
 /**
  * Campaign Studio — authoring on a canvas (ADR-0221 D1).
@@ -243,6 +245,8 @@ export default function NewCampaignPage() {
           ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
+          ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
+          ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -486,6 +490,19 @@ export default function NewCampaignPage() {
           />
         )}
 
+        </div>
+
+        <div className="campaign-studio-companion-grid">
+          <CampaignExperiencePreview step={selected === null ? undefined : steps[selected]} campaignName={name} />
+          <CampaignLaunchReadiness
+            audienceChosen={segment !== ''}
+            audienceSize={reach}
+            entryConfigured={entryConfigured}
+            incomplete={incomplete}
+            conversionRule={conversionRule}
+            contentExperiment={contentExperiment}
+            steps={steps}
+          />
         </div>
 
         {/* What "it worked" means, asked at authoring time because it cannot be answered later:

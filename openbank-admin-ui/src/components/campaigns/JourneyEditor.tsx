@@ -29,6 +29,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export type EditorChannel = 'EMAIL' | 'PUSH'
 
+export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
+
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 
 export interface EditorStep {
@@ -40,6 +42,10 @@ export interface EditorStep {
   condition?: EditorCondition
   /** Alternative B-arm values in a campaign-wide content experiment. */
   variantBVariables?: { [key: string]: string }
+  /** Try the catalogue's safe app-push counterpart only when email consent is absent. */
+  fallbackToPush?: boolean
+  /** Closed app context reached after a push tap; never an arbitrary URL. */
+  mobileDestination?: EditorMobileDestination
 }
 
 export const MAX_STEPS = 5
@@ -294,6 +300,11 @@ export function JourneyEditor({
                   fill="var(--text-primary)">
                   {templateLabels[step.template] ?? step.template}
                 </text>
+                {step.fallbackToPush && (
+                  <text x={x + 14 + ICON + 12} y={ROW_Y + 26} fontSize="10.5" fill="var(--text-secondary)">
+                    {t('bez e-mail souhlasu → push', 'no email consent → push')}
+                  </text>
+                )}
               </g>
 
               {/* Remove sits on the node rather than in a toolbar: the thing it acts on is the thing

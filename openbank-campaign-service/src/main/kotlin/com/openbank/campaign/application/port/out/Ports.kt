@@ -179,23 +179,22 @@ interface ConsentCheckPort {
     suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean
 }
 
+/** One immutable request from campaign orchestration to notification-service. */
+data class NotificationSendRequest(
+    val partyId: UUID,
+    val channel: Channel,
+    val template: String,
+    val recipient: String,
+    val variables: Map<String, String>,
+    /** Send-log row id; campaign needs this mandatory to join a delivery outcome back. */
+    val correlationId: UUID,
+    /** Closed mobile-app route, present only on a PUSH delivery. */
+    val deepLink: String? = null,
+)
+
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
-    /**
-     * [correlationId] is the send-log row id this request belongs to (ADR-0239 D1).
-     *
-     * Required, not optional: the whole reason the campaign publishes here is to hear back what
-     * became of the message, and a nullable parameter is one a caller forgets. The receiving
-     * contract keeps it optional for producers that genuinely do not care — this one does.
-     */
-    suspend fun requestSend(
-        partyId: UUID,
-        channel: Channel,
-        template: String,
-        recipient: String,
-        variables: Map<String, String>,
-        correlationId: UUID,
-    )
+    suspend fun requestSend(request: NotificationSendRequest)
 }
 
 /** ADR-0200 D2 push: signals a live journey that consent was revoked for its party. */

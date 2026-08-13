@@ -84,6 +84,8 @@ data class SendRecord(
     val deliveryReason: String? = null,
     /** When [deliveryStatus] last moved. Null while it has never moved off `PENDING`. */
     val deliveryUpdatedAt: Instant? = null,
+    /** The actual medium passed to notification-service; null for historical and non-send rows. */
+    val channel: Channel? = null,
 )
 
 /**

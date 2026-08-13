@@ -13,6 +13,7 @@ import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
+import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
 
 interface Campaign {
   id: string
@@ -22,7 +23,14 @@ interface Campaign {
   state: string
   createdBy: string
   approvedBy: string | null
-  steps: { order: number; template: string; delaySeconds: number; variantBVariables?: Record<string, string> | null }[]
+  steps: {
+    order: number
+    template: string
+    delaySeconds: number
+    variantBVariables?: Record<string, string> | null
+    fallbackToPush?: boolean
+    mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null
+  }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
   /** Percentage deliberately kept in the no-contact control cohort. */
@@ -51,6 +59,8 @@ interface Send {
    */
   deliveryStatus?: string
   deliveryReason?: string | null
+  /** Actual request medium, including a consent-authorized EMAIL → PUSH fallback. */
+  channel?: 'EMAIL' | 'PUSH' | null
 }
 
 interface SendPage {
@@ -410,6 +420,35 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     Object.entries(summary).filter(([outcome, count]) => outcome.startsWith('SUPPRESSED') && count > 0),
   )
 
+  const campaignNextAction = () => {
+    if (!c) return { title: '', detail: '' }
+    if (c.state === 'DRAFT') return {
+      title: t('Dokončete zadání', 'Finish the brief'),
+      detail: t('Pak ho předejte k nezávislému schválení.', 'Then submit it for independent approval.'),
+    }
+    if (c.state === 'PENDING_APPROVAL') return {
+      title: t('Vyžádejte druhé oči', 'Ask for a second pair of eyes'),
+      detail: t('Autor ji nemůže sám aktivovat.', 'The author cannot activate it alone.'),
+    }
+    if (c.state === 'PAUSED') return {
+      title: t('Rozhodněte o pokračování', 'Decide whether to resume'),
+      detail: t('Zkontrolujte cestu a teprve pak změňte stav.', 'Review the journey before changing its state.'),
+    }
+    if ((summary.FAILED ?? 0) > 0) return {
+      title: t('Prověřte neúspěšná předání', 'Review failed handoffs'),
+      detail: t('Použijte detailní log níže; potlačení pravidlem není chyba.', 'Use the detailed log below; policy suppression is not an error.'),
+    }
+    if (!c.conversionRule) return {
+      title: t('Zvažte měřitelný cíl', 'Consider a measurable outcome'),
+      detail: t('Bez něj uvidíte průchod, ale ne skutečný obchodní výsledek.', 'Without one you see flow, but not the real business outcome.'),
+    }
+    return {
+      title: t('Sledujte průchod a výsledek', 'Follow the journey and outcome'),
+      detail: t('Doručení, potlačení a konverze jsou níže oddělené, aby se nezaměnily.', 'Delivery, suppression and conversion remain separate below so they cannot be confused.'),
+    }
+  }
+  const nextAction = campaignNextAction()
+
   return (
     <div className="space-y-6">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
@@ -459,14 +498,16 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
       {!loading && !unavailable && c && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label={t('Stav', 'State')} value={c.state} />
-            <StatCard label={t('Segment', 'Segment')} value={`${c.segmentRef?.name}@${c.segmentRef?.version}`} />
-            <StatCard label={t('Zařazeno', 'Enrolled')} value={String(detail?.enrolments.length ?? 0)} />
-            {/* Surfaced as a headline number on purpose: "how many were deliberately not
-                contacted" is the question the send log exists to answer (#2895). */}
-            <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
-          </div>
+          <CampaignOutcomeBrief
+            state={c.state}
+            audience={detail?.enrolments.length ?? 0}
+            handedOff={summary.SENT ?? 0}
+            suppressed={suppressed}
+            conversion={c.conversionRule ? (summary.CONVERTED ?? 0) : null}
+            conversionLabel={c.conversionRule ? conversionLabel(c.conversionRule) : t('Cíl není měřen', 'Outcome is not measured')}
+            nextAction={nextAction.title}
+            nextActionDetail={nextAction.detail}
+          />
 
           <section className="rounded-lg border p-3 text-sm" data-campaign-entry>
             <h2 className="font-semibold">{t('Vstup do cesty', 'Journey entry')}</h2>
@@ -632,6 +673,18 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             </section>
           )}
 
+          {c.steps.some(step => step.fallbackToPush) && (
+            <section className="space-y-1 rounded-lg border p-3" data-channel-fallback>
+              <h2 className="text-sm font-semibold">{t('Záložní kanál', 'Fallback channel')}</h2>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'U vybraných e-mailových kroků se při chybějícím e-mailovém souhlasu zkusí push. I ten projde vlastním souhlasem, frekvenčním limitem, quiet hours a suppression listem; po nedoručení e-mailu se druhá zpráva neposílá.',
+                  'Selected email steps may try push when email consent is absent. Push still passes its own consent, frequency cap, quiet hours and suppression list; an email delivery failure never triggers a second message.',
+                )}
+              </p>
+            </section>
+          )}
+
           {Object.keys(byReason).length > 0 && (
             <p className="text-xs text-muted-foreground">
               {t('Potlačeno: ', 'Suppressed: ')}
@@ -784,6 +837,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                         'Co se se zprávou skutečně stalo, podle notification-service.',
                         'What actually became of the message, as reported by notification-service.',
                       )}>{t('Doručení', 'Delivery')}</th>
+                      <th title={t(
+                        'Kanál, který campaign-service skutečně předal notification-service.',
+                        'The channel campaign-service actually handed to notification-service.',
+                      )}>{t('Kanál', 'Channel')}</th>
                       <th>{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
@@ -813,6 +870,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
+                        </td>
+                        <td>
+                          {s.channel === 'EMAIL'
+                            ? t('E-mail', 'Email')
+                            : s.channel === 'PUSH'
+                              ? t('Push', 'Push')
+                              : <span className="text-xs text-muted-foreground">—</span>}
                         </td>
                         <td className="text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>

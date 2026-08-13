@@ -506,6 +506,7 @@ class CampaignRestContractIT {
              "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                        "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
                        "variantBVariables":{"offerTitle":"B","offerText":"B copy","ctaText":"Try"},
+                       "fallbackToPush":true,
                        "delaySeconds":0}]}
         """.trimIndent()
 
@@ -525,6 +526,7 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("steps[0].variantBVariables.offerTitle", org.hamcrest.Matchers.equalTo("B"))
+            body("steps[0].fallbackToPush", org.hamcrest.Matchers.equalTo(true))
         }
         When {
             get("/api/v1/campaigns/$id/content-experiment")
@@ -533,6 +535,35 @@ class CampaignRestContractIT {
             body("a.assigned", org.hamcrest.Matchers.equalTo(0))
             body("b.assigned", org.hamcrest.Matchers.equalTo(0))
             body("decision.state", org.hamcrest.Matchers.equalTo("COLLECTING_DATA"))
+        }
+    }
+
+    @Test
+    fun `a mobile-first push step keeps its closed app destination over the HTTP contract`() {
+        val body = """
+            {"name":"push-${UUID.randomUUID()}","goal":"savings activation",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
+                       "variables":{"offerTitle":"Savings"},"mobileDestination":"SAVINGS","delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+            body("steps[0].mobileDestination", org.hamcrest.Matchers.equalTo("SAVINGS"))
         }
     }
 

@@ -519,6 +519,30 @@ class NotificationConsumerIT {
         // The amount and account never appear anywhere in the transported payload.
         assertThat(msg.title).doesNotContain(amount).doesNotContain(account)
         assertThat(msg.body).doesNotContain(amount).doesNotContain(account)
+        assertThat(msg.data).containsKeys("template", "notificationId")
+    }
+
+    @Test
+    fun `PUSH payload carries only an allow-listed deep link alongside the opaque notification id`() {
+        val partyId = UUID.randomUUID()
+        val token = "apns-campaign-deep-link-token-it"
+        OffContextPushSender.SENT.clear()
+        seedActiveDevice(partyId, token)
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.WELCOME,
+                recipient = "campaign@example.com",
+                variables = mapOf("name" to "Campaign customer"),
+                deepLink = "openbank://savings",
+            ),
+        )
+
+        assertThat(OffContextPushSender.SENT.single { it.token == token }.data)
+            .containsEntry("deepLink", "openbank://savings")
+            .containsKey("notificationId")
     }
 
     @Test
