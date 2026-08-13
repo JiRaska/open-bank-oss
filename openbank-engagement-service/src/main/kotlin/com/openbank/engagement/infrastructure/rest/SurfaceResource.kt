@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.rest
 
 import com.openbank.engagement.application.usecase.RecordEngagementEventUseCase
 import com.openbank.engagement.application.usecase.ResolveSurfaceUseCase
+import com.openbank.engagement.domain.model.CampaignAttribution
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
 import com.openbank.engagement.domain.model.SurfaceCatalog
@@ -70,6 +71,21 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
         if (content.slot != slot) {
             return badRequest("content '${request.contentId}' is not renderable in slot '${request.slot}'")
         }
+        val campaignFields = listOf(request.campaignId, request.stepOrder, request.channel)
+        val campaignAttribution = if (campaignFields.any { it != null }) {
+            if (request.interactionRef == null || campaignFields.any { it == null }) {
+                return badRequest("campaign attribution requires an interaction reference and all server fields")
+            }
+            runCatching {
+                CampaignAttribution(
+                    campaignId = requireNotNull(request.campaignId),
+                    stepOrder = requireNotNull(request.stepOrder),
+                    channel = requireNotNull(request.channel),
+                )
+            }.getOrElse { return badRequest(it.message ?: "invalid campaign attribution") }
+        } else {
+            null
+        }
         record.record(
             EngagementEvent(
                 partyId = request.partyId,
@@ -78,6 +94,7 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
                 type = type,
                 occurredAt = Instant.now(),
                 interactionRef = request.interactionRef,
+                campaignAttribution = campaignAttribution,
             ),
         )
         return Response.status(Response.Status.ACCEPTED).build()
@@ -104,4 +121,8 @@ data class EngagementEventRequest(
     val type: String,
     /** Present only after customer-edge verified an opaque PUSH reference for this party. */
     val interactionRef: UUID? = null,
+    /** Server-owned fields: customer-edge strips client values and resolves these from campaign-service. */
+    val campaignId: UUID? = null,
+    val stepOrder: Int? = null,
+    val channel: String? = null,
 )

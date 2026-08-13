@@ -10,6 +10,18 @@ import java.util.UUID
 /** ADR-0220 D2: the four events the app posts back. */
 enum class EngagementEventType { IMPRESSION, CLICK, DISMISS, CONVERSION }
 
+/** Server-owned campaign context resolved from an opaque PUSH interaction reference. */
+data class CampaignAttribution(val campaignId: UUID, val stepOrder: Int, val channel: String) {
+    init {
+        require(stepOrder >= 0) { "campaign step order must be non-negative" }
+        require(channel == PUSH_CHANNEL) { "only PUSH interaction references are attributable" }
+    }
+
+    companion object {
+        const val PUSH_CHANNEL = "PUSH"
+    }
+}
+
 /**
  * One posted engagement event (ADR-0220 D2). `conversion` here is deliberately the SAME concept
  * as ADR-0245's — a real observed product event, never a click proxy — so an `EngagementEventType`
@@ -25,6 +37,8 @@ data class EngagementEvent(
     val occurredAt: Instant,
     /** Opaque campaign PUSH handoff reference, validated by customer-edge before this service sees it. */
     val interactionRef: UUID? = null,
+    /** Absent for organic in-app content; never accepted from the public mobile API on its own. */
+    val campaignAttribution: CampaignAttribution? = null,
 )
 
 /**
