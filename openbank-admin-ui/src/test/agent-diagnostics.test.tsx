@@ -90,7 +90,7 @@ describe('agent operating diagnostics', () => {
     })
   })
 
-  it('renders accessible operating meters and names the current mesh limitation', () => {
+  it('renders accessible operating meters and names the current swarm limitation', () => {
     const selected = charter('finops-agent', { dataRead: ['costs'], toolsAllow: ['read.costs'] })
     const coordinator = charter('case-coordinator', {
       caseCapabilities: ['case.open', 'case.coordinate', 'case.synthesize'],
@@ -110,7 +110,7 @@ describe('agent operating diagnostics', () => {
     expect(screen.getAllByRole('progressbar')).toHaveLength(6)
     expect(screen.getByText('Not an intelligence or quality score')).toBeInTheDocument()
     expect(screen.getByText(/0 of 2: capability not granted yet/)).toBeInTheDocument()
-    expect(screen.getByText(/multi-agent mesh activates only after specialists receive/)).toBeInTheDocument()
+    expect(screen.getByText(/multi-agent swarm activates only after specialists receive/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Open live case threads/ })).toHaveAttribute('href', '/iaops/cases')
     expect(screen.getByRole('list', { name: /Flow from signal through coordinator/ })).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(5)

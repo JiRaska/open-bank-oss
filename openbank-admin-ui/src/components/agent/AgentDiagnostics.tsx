@@ -167,7 +167,7 @@ export function AgentMeshMap({ agentId, mesh, language }: {
       <div className={styles.sectionHeading}>
         <div>
           <span className={styles.eyebrow}><Network size={13} /> {t('Spolupráce agentů', 'Agent collaboration')}</span>
-          <h2 id="agent-mesh-title">{t('AI mesh — jak má tým spolupracovat', 'AI mesh — how the team is designed to collaborate')}</h2>
+          <h2 id="agent-mesh-title">{t('AI swarm — jak má tým spolupracovat', 'AI swarm — how the team is designed to collaborate')}</h2>
           <p>{t(
             'Jeden dlouho běžící Temporal case drží kontext, rozpočet i stop podmínku. Diagram ukazuje charterovaný design, ne živou runtime topologii.',
             'One durable Temporal case holds context, budget and stop conditions. This diagram shows chartered design, not live runtime topology.',
@@ -179,7 +179,7 @@ export function AgentMeshMap({ agentId, mesh, language }: {
                 participants === 1 ? '1 specialista v charteru' : `${participants} specialistů v charteru`,
                 participants === 1 ? '1 chartered specialist' : `${participants} chartered specialists`,
               )
-            : t('Dnes: základ mesh', 'Today: mesh foundation')}
+            : t('Dnes: základ swarmu', 'Today: swarm foundation')}
         </span>
       </div>
 
@@ -202,7 +202,7 @@ export function AgentMeshMap({ agentId, mesh, language }: {
           detail={t('Citace důkazů, dissent zůstává viditelný', 'Evidence is cited and dissent stays visible')}
           status={mesh.synthesisEnabled ? 'governed' : 'planned'} language={language} />
         <MeshNode icon={Hand} title={t('Člověk rozhodne', 'Human decides')}
-          detail={t('Mesh nikdy nezapisuje přímo do business služby', 'The mesh never writes directly to a business service')}
+          detail={t('Swarm nikdy nezapisuje přímo do business služby', 'The swarm never writes directly to a business service')}
           status={mesh.humanGateEnabled ? 'human' : 'planned'} language={language} />
       </ol>
 
@@ -211,8 +211,8 @@ export function AgentMeshMap({ agentId, mesh, language }: {
           <ShieldCheck size={16} />
           <span>{participants === 0
             ? t(
-                'Pravdivý stav: koordinace a syntéza jsou charterované, ale multi-agentní mesh se aktivuje až po přidání case.join / case.contribute konkrétním specialistům.',
-                'Honest status: coordination and synthesis are chartered, but the multi-agent mesh activates only after specialists receive case.join / case.contribute.',
+                'Pravdivý stav: koordinace a syntéza jsou charterované, ale multi-agentní swarm se aktivuje až po přidání case.join / case.contribute konkrétním specialistům.',
+                'Honest status: coordination and synthesis are chartered, but the multi-agent swarm activates only after specialists receive case.join / case.contribute.',
               )
             : t(
                 'Charterovaný stav: specialisté deklarují case.join / case.contribute. Skutečné runtime přijetí řídí samostatný allowlist case-coordinatoru a tato stránka ho netvrdí.',
