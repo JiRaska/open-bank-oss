@@ -148,6 +148,10 @@ describe('campaigns console', () => {
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
     await waitFor(() => expect(screen.getByTestId('campaign-decision-desk')).toBeTruthy())
+    // The control room gives the operator the complete lifecycle before they drill into the
+    // decision queue. It names operating evidence, but explicitly refuses to call it engagement.
+    expect(screen.getByTestId('campaign-control-room').textContent).toMatch(/Brief.*Review.*Live journey.*Evidence/)
+    expect(screen.getByTestId('campaign-evidence-strip').textContent).toMatch(/operating signal, not confirmed delivery, engagement or conversion/)
     const decisions = Array.from(document.querySelectorAll('[data-decision-campaign]'))
       .map(node => node.getAttribute('data-decision-campaign'))
     // Approval is a more urgent human decision than an unfinished draft or a live campaign.
