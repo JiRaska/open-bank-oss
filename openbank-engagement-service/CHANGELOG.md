@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.9.0...engagement-service-v0.10.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
+
+### Bug Fixes
+
+* **engagement:** preserve legacy banner placements ([#4609](https://github.com/JiRaska/open-bank-oss/issues/4609)) ([e198644](https://github.com/JiRaska/open-bank-oss/commit/e19864494ddac96d83637ba070d8649921b544f3))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.8.0...engagement-service-v0.9.0) (2026-08-13)
 
 

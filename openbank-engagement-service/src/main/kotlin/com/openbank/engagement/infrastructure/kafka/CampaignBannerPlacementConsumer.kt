@@ -35,8 +35,13 @@ class CampaignBannerPlacementConsumer(
                 values = mapper.convertValue(node.required("variables"), MAP_TYPE),
                 deepLink = node.requiredText("deepLink"),
                 placedAt = Instant.now(),
-                slot = SurfaceSlot.entries.find { it.name == node.requiredText("inAppSurface") }
-                    ?: error("unknown inAppSurface"),
+                // `inAppSurface` was added after HOME_BANNER shipped. Older campaign producers
+                // legitimately omit it during a rolling deployment, so absence retains the
+                // original slot; a present invalid value remains a malformed command.
+                slot = node["inAppSurface"]?.let { slotNode ->
+                    SurfaceSlot.entries.find { it.name == slotNode.asText().takeIf(String::isNotBlank) }
+                        ?: error("unknown inAppSurface")
+                } ?: SurfaceSlot.HOME_BANNER,
             )
             placements.save(placement)
         } catch (e: Exception) {
