@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.114.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.113.0...admin-ui-v0.114.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** strengthen operator dashboard ([#4598](https://github.com/JiRaska/open-bank-oss/issues/4598)) ([914ab71](https://github.com/JiRaska/open-bank-oss/commit/914ab71e1d9542f74ebe2e06c0c27f6ff3de07c1))
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
+
+### Bug Fixes
+
+* **admin-ui:** load regulatory templates ([#4602](https://github.com/JiRaska/open-bank-oss/issues/4602)) ([9629531](https://github.com/JiRaska/open-bank-oss/commit/96295319c727c43407ac87628b596e27d26153bb))
+
 ## [0.113.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.112.0...admin-ui-v0.113.0) (2026-08-13)
 
 
