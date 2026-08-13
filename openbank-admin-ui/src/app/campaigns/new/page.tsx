@@ -14,6 +14,7 @@ import {
   JourneyEditor,
   MAX_STEPS,
   type EditorChannel,
+  type EditorInAppSurface,
   type EditorStep,
 } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
@@ -62,38 +63,25 @@ interface CampaignTrigger {
   humanForm: string
 }
 
+/** The reviewed content choice served by campaign-service, rather than a second client-side copy. */
+interface CampaignTemplate {
+  template: string
+  channel: EditorChannel
+  variables: string[]
+  inAppSurface?: EditorInAppSurface | null
+}
+
 type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
 
-/** Mirrors the service's catalogue; the service rejects anything not in its own copy. */
-const TEMPLATES: Record<string, string[]> = {
-  MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
-  // One variable, and that is the channel's rule rather than a simplification: a push renders its
-  // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
-  MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
-  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
-  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
-  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
-  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
-}
-
-/** Which channel each template renders on. The service refuses a step whose two disagree. */
-const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
-  MARKETING_PRODUCT_OFFER: 'EMAIL',
-  MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
-  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER',
-  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER',
-  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER',
-  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER',
-}
-
-const newStep = (): EditorStep => ({
+const newStep = (choice: CampaignTemplate): EditorStep => ({
   // The studio starts with the primary owned surface: the bank app. E-mail remains a supported
   // channel, but leading an app-first campaign with it made the canvas teach the wrong product.
-  template: 'MARKETING_PRODUCT_OFFER_PUSH',
-  channel: 'PUSH',
+  template: choice.template,
+  channel: choice.channel,
   variables: {},
   delaySeconds: 0,
-  mobileDestination: 'HOME',
+  ...(choice.channel === 'PUSH' || choice.channel === 'BANNER' ? { mobileDestination: 'HOME' as const } : {}),
+  ...(choice.inAppSurface ? { inAppSurface: choice.inAppSurface } : {}),
 })
 
 export default function NewCampaignPage() {
@@ -109,11 +97,13 @@ export default function NewCampaignPage() {
   const [segments, setSegments] = useState<Segment[]>([])
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
+  const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
+  const [contentCatalogueState, setContentCatalogueState] = useState<'loading' | 'ok' | 'unavailable'>('loading')
   const [entryMode, setEntryMode] = useState<EntryMode>('MANUAL')
   const [cadence, setCadence] = useState('')
   const [trigger, setTrigger] = useState('')
   const [entryUnavailable, setEntryUnavailable] = useState(false)
-  const [steps, setSteps] = useState<EditorStep[]>([newStep()])
+  const [steps, setSteps] = useState<EditorStep[]>([])
   const [journeyRecipe, setJourneyRecipe] = useState<JourneyRecipeId | null>('RETURN_TO_APP')
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
@@ -129,6 +119,13 @@ export default function NewCampaignPage() {
   const [contentExperiment, setContentExperiment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const templates = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.variables])) as Record<string, string[]>
+  const templateChannel = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.channel])) as Record<string, EditorChannel>
+  const templateSurface = Object.fromEntries(
+    contentCatalogue.flatMap(entry => entry.inAppSurface ? [[entry.inAppSurface, entry.template] as const] : []),
+  ) as Partial<Record<EditorInAppSurface, string>>
+  const defaultStep = () => contentCatalogue.find(entry => entry.channel === 'PUSH') ?? contentCatalogue[0]
 
   const templateLabels: Record<string, string> = {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
@@ -248,17 +245,40 @@ export default function NewCampaignPage() {
     Promise.all([
       fetch('/api/campaigns/cadences').then(r => r.json()),
       fetch('/api/campaigns/triggers').then(r => r.json()),
+      fetch('/api/campaigns/templates').then(r => r.json()),
     ])
-      .then(([cadenceResponse, triggerResponse]: [
+      .then(([cadenceResponse, triggerResponse, templateResponse]: [
         { items?: Cadence[]; state?: string },
         { items?: CampaignTrigger[]; state?: string },
+        { items?: CampaignTemplate[]; state?: string },
       ]) => {
         if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
         if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
         if (cadenceResponse.state !== 'ok' || triggerResponse.state !== 'ok') setEntryUnavailable(true)
+        if (templateResponse.state === 'ok' && (templateResponse.items?.length ?? 0) > 0) {
+          setContentCatalogue(templateResponse.items ?? [])
+          setContentCatalogueState('ok')
+        } else {
+          setContentCatalogueState('unavailable')
+        }
       })
-      .catch(() => setEntryUnavailable(true))
+      .catch(() => {
+        setEntryUnavailable(true)
+        setContentCatalogueState('unavailable')
+      })
   }, [])
+
+  // A new journey gets a server-approved app-first step only after the catalogue arrives. There is
+  // intentionally no browser fallback: a stale template fails after a marketer has authored it.
+  useEffect(() => {
+    if (draftId || contentCatalogueState !== 'ok') return
+    const first = defaultStep()
+    if (!first) return
+    setSteps(previous => previous.length === 0 ? [newStep(first)] : previous)
+    setSelected(previous => previous ?? 0)
+  // The catalogue state changes only when its authoritative response arrives.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentCatalogueState, draftId])
 
   const updateStep = (i: number, next: EditorStep) =>
     setSteps(prev => prev.map((s, k) => (k === i ? next : s)))
@@ -266,14 +286,23 @@ export default function NewCampaignPage() {
   const addStep = () =>
     setSteps(prev => {
       if (prev.length >= MAX_STEPS) return prev
+      const first = defaultStep()
+      if (!first) return prev
       setSelected(prev.length)
       return [...prev, {
-        ...newStep(),
+        ...newStep(first),
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       }]
     })
 
   const applyRecipe = (recipe: JourneyRecipe) => {
+    const verified = recipe.steps.every(step =>
+      templates[step.template] !== undefined && templateChannel[step.template] === step.channel,
+    )
+    if (!verified) {
+      setError(t('Tento recept používá obsah, který už není v ověřeném katalogu.', 'This recipe uses content no longer in the verified catalogue.'))
+      return
+    }
     // A recipe is only an authoring shortcut. Clone every map so opening one step can never alter
     // another step's values through a shared object reference.
     setSteps(recipe.steps.map(step => ({
@@ -293,8 +322,9 @@ export default function NewCampaignPage() {
     })
 
   const incomplete = steps.some(s =>
-    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()) ||
-    (contentExperiment && (TEMPLATES[s.variantBTemplate ?? s.template] ?? [])
+    templates[s.template] === undefined ||
+    templates[s.template].some(v => !(s.variables[v] ?? '').trim()) ||
+    (contentExperiment && (templates[s.variantBTemplate ?? s.template] ?? [])
       .some(v => !(s.variantBVariables?.[v] ?? '').trim())),
   )
   const entryConfigured =
@@ -302,7 +332,7 @@ export default function NewCampaignPage() {
     (entryMode === 'SCHEDULE' && cadence !== '') ||
     (entryMode === 'TRIGGER' && trigger !== '')
   const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
-    !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+    contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
 
   const setContentExperimentEnabled = (enabled: boolean) => {
     setContentExperiment(enabled)
@@ -573,7 +603,7 @@ export default function NewCampaignPage() {
         </div>
       </section>
 
-      <JourneyRecipePicker selected={journeyRecipe} onApply={applyRecipe} />
+      {contentCatalogueState === 'ok' && <JourneyRecipePicker selected={journeyRecipe} onApply={applyRecipe} />}
 
       <section className="campaign-journey-workbench">
         <div className="campaign-workbench-heading">
@@ -584,6 +614,13 @@ export default function NewCampaignPage() {
           </div>
           <span className="campaign-workbench-status"><span /> {steps.length}/{MAX_STEPS} {t('kroků', 'steps')}</span>
         </div>
+        {contentCatalogueState !== 'ok' && (
+          <p className="text-xs text-muted-foreground" data-content-catalogue-state={contentCatalogueState}>
+            {contentCatalogueState === 'loading'
+              ? t('Načítáme ověřený katalog obsahu…', 'Loading the reviewed content catalogue…')
+              : t('Katalog obsahu teď není dostupný; nové kroky ani recepty nenabízíme.', 'The content catalogue is unavailable; new steps and recipes are not offered.')}
+          </p>
+        )}
         {/* space-y-0 around the canvas+panel pair: any gap between them undoes the join. */}
         <div className="space-y-0">
         <JourneyEditor
@@ -596,6 +633,7 @@ export default function NewCampaignPage() {
           selected={selected}
           onSelect={setSelected}
           onAdd={addStep}
+          contentCatalogueReady={contentCatalogueState === 'ok'}
           onRemove={removeStep}
           templateLabels={templateLabels}
           stopAfter={stopAfter}
@@ -608,8 +646,9 @@ export default function NewCampaignPage() {
             attached
             index={selected}
             step={steps[selected]}
-            templates={TEMPLATES}
-            templateChannel={TEMPLATE_CHANNEL}
+            templates={templates}
+            templateChannel={templateChannel}
+            templateSurface={templateSurface}
             templateLabels={templateLabels}
             variableLabels={variableLabels}
             contentExperiment={contentExperiment}
