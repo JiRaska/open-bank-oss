@@ -10,6 +10,9 @@ info:
     same committed envelope may later be delivered by Kafka, cursor API or webhook without
     changing the source transaction (ADR-0257). Consumers must be idempotent on `eventId`.
 defaultContentType: application/json
+# This is a durable source contract for the transactional outbox. A Kafka dispatcher is not
+# enabled yet; the same envelope is currently consumed through the authenticated cursor API.
+x-openbank-transport: transactional-outbox
 channels:
   catalogChanges:
     address: openbank.catalog.changes
@@ -22,6 +25,8 @@ channels:
     messages:
       CatalogChangeEvent:
         $ref: '#/components/messages/CatalogChangeEvent'
+      SchemaRegistered:
+        $ref: '#/components/messages/SchemaRegistered'
 operations:
   publishCatalogChange:
     action: send
@@ -32,6 +37,7 @@ components:
   messages:
     CatalogChangeEvent:
       name: CatalogChangeEvent
+      x-openbank-envelope-class: CatalogChangeEvent
       contentType: application/json
       headers:
         type: object
@@ -42,6 +48,21 @@ components:
           ce_id: { type: string, format: uuid }
           ce_source: { const: openbank-product-catalog }
           ce_type: { type: string, pattern: '^com\.openbank\.catalog\.[a-z0-9_]+$' }
+          content-type: { const: application/json }
+      payload:
+        $ref: '#/components/schemas/CatalogChangeEventPayload'
+    SchemaRegistered:
+      name: com.openbank.catalog.schema_registered
+      contentType: application/json
+      headers:
+        type: object
+        additionalProperties: false
+        required: [ce_specversion, ce_id, ce_source, ce_type, content-type]
+        properties:
+          ce_specversion: { const: '1.0' }
+          ce_id: { type: string, format: uuid }
+          ce_source: { const: openbank-product-catalog }
+          ce_type: { const: com.openbank.catalog.schema_registered }
           content-type: { const: application/json }
       payload:
         $ref: '#/components/schemas/CatalogChangeEventPayload'

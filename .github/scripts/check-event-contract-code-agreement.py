@@ -298,6 +298,40 @@ def parse_event_classes(service_dir: pathlib.Path) -> dict[str, dict]:
     return by_event_type
 
 
+def parse_named_data_class(service_dir: pathlib.Path, class_name: str) -> dict | None:
+    """Return constructor evidence for an explicit transport-neutral envelope class.
+
+    A transactional outbox is an internal, durable transport: it has no
+    ``mp.messaging.outgoing`` Kafka producer for the channel agreement rule to inspect. Its
+    AsyncAPI contract can nevertheless name the exact envelope persisted in the outbox. Such a
+    message declares ``x-openbank-envelope-class`` rather than pretending its dynamic
+    ``eventType`` is one static event literal.
+    """
+    src_root = service_dir / "src" / "main" / "kotlin"
+    if not src_root.is_dir():
+        return None
+    for kt in sorted(src_root.rglob("*.kt")):
+        src = strip_kotlin_comments(kt.read_text(encoding="utf-8", errors="replace"))
+        for match in DATA_CLASS_RE.finditer(src):
+            if match.group(1) != class_name:
+                continue
+            span = balanced_span(src, match.end() - 1)
+            if span is None:
+                continue
+            ctor_start, ctor_end = span
+            return {
+                "class": class_name,
+                "props": {
+                    pm.group(1)
+                    for part in split_top_level(src[ctor_start:ctor_end])
+                    if (pm := PARAM_NAME_RE.search(part))
+                },
+                "domain_event": False,
+                "path": str(kt.relative_to(REPO)),
+            }
+    return None
+
+
 def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
     """The hand-built-outbox idiom's event-type literals — see the regexes' own docstrings.
 
@@ -430,22 +464,35 @@ def check_contract(path: pathlib.Path) -> list[str]:
         ]
 
     # ---- A. channels vs produced topics -------------------------------------------------
+    # A transactional outbox can publish through a cursor API before any Kafka dispatcher exists.
+    # Do not manufacture an mp.messaging producer merely to satisfy this static check: doing so
+    # would promise delivery that the service does not perform. The marker is deliberately exact
+    # and cannot exempt a service which also declares Kafka output topics.
+    transport_neutral = doc.get("x-openbank-transport") == "transactional-outbox"
     channels = doc.get("channels") or {}
     addresses = {
         c["address"] for c in channels.values() if isinstance(c, dict) and isinstance(c.get("address"), str)
     }
     topics = produced_topics(service_dir)
-    for extra in sorted(addresses - topics):
-        errors.append(
-            f"{rel}: channel address `{extra}` is not a topic {service} produces. Its "
-            f"application.yaml declares: {sorted(topics) or 'none'}"
-        )
-    for missing in sorted(topics - addresses):
-        errors.append(
-            f"{rel}: {service} produces `{missing}` but no channel declares that address. A "
-            f"contracted service adding a topic must document it — the coverage ratchet only "
-            f"checks that this FILE exists, so it cannot see this."
-        )
+    if transport_neutral:
+        if topics:
+            errors.append(
+                f"{rel}: declares x-openbank-transport=transactional-outbox but {service} also "
+                f"declares Kafka output topic(s) {sorted(topics)}. Model dispatched topics as normal "
+                "AsyncAPI channels instead of suppressing their agreement check."
+            )
+    else:
+        for extra in sorted(addresses - topics):
+            errors.append(
+                f"{rel}: channel address `{extra}` is not a topic {service} produces. Its "
+                f"application.yaml declares: {sorted(topics) or 'none'}"
+            )
+        for missing in sorted(topics - addresses):
+            errors.append(
+                f"{rel}: {service} produces `{missing}` but no channel declares that address. A "
+                f"contracted service adding a topic must document it — the coverage ratchet only "
+                f"checks that this FILE exists, so it cannot see this."
+            )
 
     # ---- B. message names vs event-type literals ----------------------------------------
     messages = ((doc.get("components") or {}).get("messages")) or {}
@@ -453,18 +500,37 @@ def check_contract(path: pathlib.Path) -> list[str]:
     for literal, info in parse_outbox_literals(service_dir).items():
         declared.setdefault(literal, info)
     doc_names: set[str] = set()
+    envelope_messages: dict[str, dict] = {}
     for key, msg in messages.items():
         if not isinstance(msg, dict):
             continue
-        doc_names.add(msg.get("name") or key)
-    for name in sorted(doc_names - set(declared)):
+        name = msg.get("name") or key
+        doc_names.add(name)
+        envelope_class = msg.get("x-openbank-envelope-class")
+        if envelope_class is not None:
+            if not transport_neutral or not isinstance(envelope_class, str):
+                errors.append(
+                    f"{rel}: message `{name}` uses x-openbank-envelope-class but is not a valid "
+                    "transactional-outbox envelope."
+                )
+                continue
+            info = parse_named_data_class(service_dir, envelope_class)
+            if info is None:
+                errors.append(
+                    f"{rel}: envelope message `{name}` names `{envelope_class}`, but no matching "
+                    f"data class exists in {service}/src/main."
+                )
+                continue
+            envelope_messages[name] = info
+    ordinary_doc_names = doc_names - set(envelope_messages)
+    for name in sorted(ordinary_doc_names - set(declared)):
         errors.append(
             f"{rel}: message `{name}` is declared in the contract but no class in {service}/src/main "
             f"declares that event type (`override val eventType = \"{name}\"` or "
             f'`const val EVENT_TYPE = "{name}"`). Either the producer was renamed and the contract '
             f"was not, or this message describes an event that is never emitted."
         )
-    for name in sorted(set(declared) - doc_names):
+    for name in sorted(set(declared) - ordinary_doc_names):
         info = declared[name]
         errors.append(
             f"{rel}: {info['path']} declares event type `{name}` ({info['class'] or 'hand-built outbox'}) "
@@ -476,7 +542,7 @@ def check_contract(path: pathlib.Path) -> list[str]:
         if not isinstance(msg, dict):
             continue
         name = msg.get("name") or key
-        info = declared.get(name)
+        info = envelope_messages.get(name) or declared.get(name)
         if info is None:
             continue  # already reported by B; do not double-report
         if info["props"] is None:
@@ -653,6 +719,29 @@ def self_test() -> int:
             "    val reason: String,\n    val suppressedBy: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
         ),
         "does not document it",
+    )
+    # Transactional-outbox contracts name a durable envelope before a Kafka dispatcher exists.
+    # The escape from the Kafka-topic rule is deliberately narrow; it must still verify the
+    # envelope against its Kotlin constructor and must stop applying once the exact marker changes.
+    case(
+        "outbox envelope property absent from the class",
+        "openbank-product-catalog",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-product-catalog" / "asyncapi.yaml",
+            "        actorId: { type: string, minLength: 1 }",
+            "        authorId: { type: string, minLength: 1 }",
+        ),
+        "does not carry",
+    )
+    case(
+        "outbox transport marker must be exact",
+        "openbank-product-catalog",
+        lambda t: edit(
+            t / CONTRACTS_DIRNAME / "openbank-product-catalog" / "asyncapi.yaml",
+            "x-openbank-transport: transactional-outbox",
+            "x-openbank-transport: planned-kafka",
+        ),
+        "is not a topic",
     )
 
     failures = 0
