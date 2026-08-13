@@ -460,9 +460,13 @@ class PanacheCampaignEngagementRepository : CampaignEngagementRepository {
             stepOrder = row[0] as Int,
             channel = Channel.valueOf(row[1] as String),
             surface = InAppSurface.valueOf(row[2] as String),
-            type = CampaignEngagementEventType.valueOf(row[3] as String),
+            type = CampaignEngagementEventType.valueOf(row[EVENT_TYPE_INDEX] as String),
             count = row[4] as Long,
         )
+    }
+
+    private companion object {
+        const val EVENT_TYPE_INDEX = 3
     }
 }
 
