@@ -16,6 +16,7 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -54,6 +55,13 @@ class CampaignEngagementConsumerTest {
         consumer().onEvent("not json")
 
         coVerify(exactly = 0) { repository.record(any()) }
+    }
+
+    @Test
+    fun `projection storage failure is retried by the Kafka connector`(): Unit = runBlocking {
+        coEvery { repository.record(any()) } throws IllegalStateException("database unavailable")
+
+        assertThrows<IllegalStateException> { consumer().onEvent(attributedEvent()) }
     }
 
     private fun consumer() = CampaignEngagementConsumer(ObjectMapper(), repository)

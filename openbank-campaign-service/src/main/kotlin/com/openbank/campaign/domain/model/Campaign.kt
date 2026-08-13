@@ -272,6 +272,9 @@ data class CampaignStep(
         require(inAppSurface == null || channel == Channel.BANNER) {
             "an in-app surface requires a BANNER step"
         }
+        require(channel != Channel.BANNER || mobileDestination != null) {
+            "a BANNER step requires a mobile destination"
+        }
         if (channel == Channel.BANNER) {
             require(template == TemplateCatalog.templateForInAppSurface(inAppSurface ?: InAppSurface.HOME_BANNER)) {
                 "template '$template' does not render on ${inAppSurface ?: InAppSurface.HOME_BANNER}"
@@ -282,6 +285,9 @@ data class CampaignStep(
         }
         require(variantBTemplate == null || variantBVariables != null) {
             "a variant B path needs variant B values so the campaign records an experiment"
+        }
+        require(variantBChannel != Channel.BANNER || mobileDestination != null) {
+            "a BANNER variant B path requires a mobile destination"
         }
         require(variantBDelaySeconds == null || variantBDelaySeconds >= 0) {
             "variant B step delay must be >= 0"

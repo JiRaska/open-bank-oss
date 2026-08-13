@@ -32,8 +32,7 @@ class CampaignEngagementConsumer(
 ) {
     private val log = Logger.getLogger(CampaignEngagementConsumer::class.java)
 
-    /** Reporting must never block a Kafka partition on an unrelated malformed app event. */
-    @Suppress("TooGenericExceptionCaught")
+    /** Malformed or unattributed app events are terminal; projection storage failures must retry. */
     @Incoming("engagement-events-in")
     suspend fun onEvent(payload: String) {
         val event = runCatching { mapper.readTree(payload) }.getOrElse {
@@ -41,14 +40,7 @@ class CampaignEngagementConsumer(
             return
         }
         val attributable = event.toCampaignEngagementEvent() ?: return
-        try {
-            engagement.record(attributable)
-        } catch (e: Exception) {
-            // This is a read model, never a delivery decision.  Dropping a poisoned record keeps
-            // campaign orchestration independent; monitoring sees the error and the UI must treat
-            // an absent metric as unavailable, not as a zero.
-            log.errorf(e, "Could not project engagement event %s", attributable.eventId)
-        }
+        engagement.record(attributable)
     }
 
     private fun JsonNode.toCampaignEngagementEvent(): CampaignEngagementEvent? {

@@ -138,9 +138,26 @@ class CampaignStepChannelTest {
             variantBVariables = emptyMap(),
             variantBTemplate = "MARKETING_PRODUCT_OFFER_BANNER",
             variantBChannel = Channel.BANNER,
+            mobileDestination = MobileDestination.HOME,
         )
 
         assertEquals(InAppSurface.HOME_BANNER, step.primaryDelivery(ContentVariant.B).inAppSurface)
+    }
+
+    @Test
+    fun `a B banner path requires its app destination before workflow handoff`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER",
+                channel = Channel.EMAIL,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                variantBVariables = emptyMap(),
+                variantBTemplate = "MARKETING_PRODUCT_OFFER_BANNER",
+                variantBChannel = Channel.BANNER,
+            )
+        }
     }
 
     @Test

@@ -76,7 +76,19 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         ) {
             return TerminationReason.STOPPED_MAX_SENDS
         }
-        val delaySeconds = activities.delayForStep(campaignId, partyId, step)
+        // Existing histories scheduled their delay from the definition directly. Adding an activity
+        // command to those histories would make Temporal replay nondeterministic, so only workflows
+        // started after this release resolve the selected path's delay through the activity.
+        val delayVersion = Workflow.getVersion(
+            PATH_EXPERIMENT_DELAY_CHANGE_ID,
+            Workflow.DEFAULT_VERSION,
+            PATH_EXPERIMENT_DELAY_V1,
+        )
+        val delaySeconds = if (delayVersion < PATH_EXPERIMENT_DELAY_V1) {
+            step.delaySeconds
+        } else {
+            activities.delayForStep(campaignId, partyId, step)
+        }
         if (delaySeconds > 0) {
             // Pause prevents delivery but does not shift the business deadline.
             waitThroughDelay(campaignId, partyId, controlVersion, delaySeconds)?.let { return it }
@@ -185,6 +197,8 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         private const val SCHEDULE_TO_CLOSE_MINUTES = 5L
         private const val CONTROL_STATE_CHANGE_ID = "campaign-control-state-v1"
         private const val CONTROL_STATE_V1 = 1
+        private const val PATH_EXPERIMENT_DELAY_CHANGE_ID = "campaign-path-experiment-delay-v1"
+        private const val PATH_EXPERIMENT_DELAY_V1 = 1
         private val CONTROL_RECHECK_INTERVAL: Duration = Duration.ofMinutes(1)
     }
 }
