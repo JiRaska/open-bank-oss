@@ -78,6 +78,9 @@ class CampaignJourneyActivitiesTest {
         /** App destinations handed to notification-service for the current delivery. */
         val deepLinks = mutableListOf<String?>()
 
+        /** Opaque PUSH-only references handed to notification-service (issue #4480). */
+        val interactionRefs = mutableListOf<UUID?>()
+
         val campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = if (id == campaignId) {
                 campaign.copy(
@@ -141,6 +144,7 @@ class CampaignJourneyActivitiesTest {
                 sendsRequested += 1
                 correlationIds += request.correlationId
                 deepLinks += request.deepLink
+                interactionRefs += request.interactionRef
             }
         }
 
@@ -206,6 +210,19 @@ class CampaignJourneyActivitiesTest {
         assertThat(h.correlationIds).hasSize(1)
         assertThat(h.recorded).hasSize(1)
         assertThat(h.correlationIds.single()).isEqualTo(h.recorded.single().id)
+    }
+
+    @Test
+    fun `a PUSH handoff carries its opaque send reference but email does not`() {
+        val push = Harness().apply { channel = Channel.PUSH }
+        runBlocking { push.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(push.interactionRefs).containsExactly(push.recorded.single().id)
+
+        val email = Harness()
+        runBlocking { email.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(email.interactionRefs).containsExactly(null)
     }
 
     /**

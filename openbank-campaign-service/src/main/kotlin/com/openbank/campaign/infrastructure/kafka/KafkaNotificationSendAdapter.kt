@@ -14,7 +14,7 @@ import org.eclipse.microprofile.reactive.messaging.Emitter
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors
  * notification-service's `NotificationRequest` (partyId, channel, template, recipient, variables,
- * correlationId); the template name resolves against the notification-service catalogue there, so an
+ * correlationId, interactionRef); the template name resolves against the notification-service catalogue there, so an
  * unknown template fails closed at the choke point, not here.
  *
  * The payload is hand-built as a map rather than shared as a type — the two services do not share a
@@ -46,6 +46,9 @@ class KafkaNotificationSendAdapter(
         // This is transport metadata, never a template variable. The notification renderer's
         // closed variable schema therefore cannot accidentally interpolate a navigation route.
         request.deepLink?.let { fields["deepLink"] = it }
+        // An opaque per-send reference for an eventual app interaction. It deliberately travels
+        // beside the deep link rather than inside the template variables or customer content.
+        request.interactionRef?.let { fields["interactionRef"] = it.toString() }
         val payload = mapper.writeValueAsString(fields)
         emitter.send(payload).toCompletableFuture().join()
     }

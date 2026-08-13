@@ -337,6 +337,9 @@ private suspend fun NotificationSendPort.requestDelivery(partyId: UUID, delivery
             variables = delivery.variables,
             correlationId = sendId,
             deepLink = delivery.deepLink,
+            // A send-log id is opaque to the device but is the one durable campaign-owned row
+            // that a future attribution boundary can validate against. EMAIL never exposes it.
+            interactionRef = sendId.takeIf { delivery.channel == Channel.PUSH },
         ),
     )
 }
