@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.109.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.108.0...admin-ui-v0.109.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** visualize agent diagnostics ([#4489](https://github.com/JiRaska/open-bank-oss/issues/4489)) ([df9a38c](https://github.com/JiRaska/open-bank-oss/commit/df9a38c0faf044d1718590fa75567bffaa339228))
+
+## [0.108.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.107.0...admin-ui-v0.108.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** humanize AIOps agent roster ([66ca219](https://github.com/JiRaska/open-bank-oss/commit/66ca219ba9e16dd511977f26be73798c1762721e)), closes [#4482](https://github.com/JiRaska/open-bank-oss/issues/4482)
+
 ## [0.107.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.106.0...admin-ui-v0.107.0) (2026-08-09)
 
 

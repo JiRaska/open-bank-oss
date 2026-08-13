@@ -222,6 +222,12 @@ spec:
               value: "true"
             - name: NOTIFICATION_SERVICE_URL
               value: http://notification-service.notifications.svc:8112
+            # In-app campaign surfaces (#4475): the customer app fetches its eligible
+            # placements and records impressions/clicks through engagement-service.
+            # The application default alone is invisible to gen-network-policies.py,
+            # so declare the real cross-namespace URL here to allow edge → engagement.
+            - name: ENGAGEMENT_SERVICE_URL
+              value: http://engagement-service.engagement.svc:8153
             - name: STATEMENT_SERVICE_URL
               value: http://statement-service.statements.svc:8136
             - name: STANDING_ORDER_SERVICE_URL
