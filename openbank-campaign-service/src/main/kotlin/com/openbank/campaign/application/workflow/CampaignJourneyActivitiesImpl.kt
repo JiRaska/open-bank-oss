@@ -81,6 +81,16 @@ open class CampaignJourneyActivitiesImpl(
         sendLog.countSendsForPartyInCampaign(campaignId, partyId)
     }
 
+    override fun delayForStep(campaignId: UUID, partyId: UUID, step: CampaignStep): Long = runBlockingOnWorker {
+        val campaign = campaigns.findById(campaignId)
+        val variant = if (campaign?.hasContentExperiment == true) {
+            enrolments.findByCampaignAndParty(campaignId, partyId)?.contentVariant
+        } else {
+            null
+        }
+        campaign?.steps?.firstOrNull { it.order == step.order }?.delayFor(variant) ?: step.delayFor(variant)
+    }
+
     override fun previousDeliveryStatus(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? =
         runBlockingOnWorker {
             sendLog.latestDeliveryStatusBeforeStep(campaignId, partyId, stepOrder)

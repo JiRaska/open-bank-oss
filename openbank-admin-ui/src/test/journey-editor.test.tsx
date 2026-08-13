@@ -209,4 +209,20 @@ describe('step editor', () => {
       inAppSurface: 'HOME_CAROUSEL', template: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
     }))
   })
+
+  it('lets a journey experiment compare a B path, not just alternative copy', () => {
+    const onChange = vi.fn()
+    const experimentStep: EditorStep = { ...step(), variantBVariables: {} }
+    const { container } = render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          contentExperiment: true, onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.change(container.querySelector('[data-variant-b-path="0"] select')!, { target: { value: 'PUSH' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      variantBChannel: 'PUSH', variantBTemplate: 'MARKETING_PRODUCT_OFFER_PUSH', variantBVariables: {},
+    }))
+  })
 })

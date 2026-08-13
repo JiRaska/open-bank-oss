@@ -96,6 +96,14 @@ interface ContentExperiment {
   }
 }
 
+interface CampaignEngagementMetric {
+  stepOrder: number
+  channel: 'PUSH' | 'BANNER'
+  surface: 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
+  type: 'IMPRESSION' | 'CLICK' | 'DISMISS'
+  count: number
+}
+
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -103,6 +111,7 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
+  engagement: CampaignEngagementMetric[]
   experiment: Experiment | null
   contentExperiment: ContentExperiment | null
   entryCatalogues?: {
@@ -270,6 +279,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     loadSends(0, outcome)
   }
   const summary = detail?.sendSummary ?? {}
+  const engagement = Array.isArray(detail?.engagement) ? detail.engagement : []
   const experiment = detail?.experiment
   const contentExperiment = detail?.contentExperiment
   const cadence = c?.schedule
@@ -284,6 +294,12 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const suppressed = Object.entries(summary)
     .filter(([outcome]) => outcome.startsWith('SUPPRESSED'))
     .reduce((n, [, count]) => n + count, 0)
+  const impressions = engagement
+    .filter(metric => metric.type === 'IMPRESSION')
+    .reduce((n, metric) => n + metric.count, 0)
+  const interactions = engagement
+    .filter(metric => metric.type === 'CLICK' || metric.type === 'DISMISS')
+    .reduce((n, metric) => n + metric.count, 0)
 
   const fmtDateTime = (iso: string | null | undefined) =>
     iso
@@ -505,6 +521,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             suppressed={suppressed}
             conversion={c.conversionRule ? (summary.CONVERTED ?? 0) : null}
             conversionLabel={c.conversionRule ? conversionLabel(c.conversionRule) : t('Cíl není měřen', 'Outcome is not measured')}
+            inAppImpressions={detail?.sources?.engagement === 'ok' ? impressions : null}
+            inAppInteractions={detail?.sources?.engagement === 'ok' ? interactions : null}
             nextAction={nextAction.title}
             nextActionDetail={nextAction.detail}
           />

@@ -44,6 +44,10 @@ export interface EditorStep {
   condition?: EditorCondition
   /** Alternative B-arm values in a campaign-wide content experiment. */
   variantBVariables?: { [key: string]: string }
+  /** Optional journey-path treatment for B; absent retains the historical copy-only experiment. */
+  variantBTemplate?: string
+  variantBChannel?: EditorChannel
+  variantBDelaySeconds?: number
   /** Try the catalogue's safe app-push counterpart only when email consent is absent. */
   fallbackToPush?: boolean
   /** Closed app context reached after a push tap; never an arbitrary URL. */
