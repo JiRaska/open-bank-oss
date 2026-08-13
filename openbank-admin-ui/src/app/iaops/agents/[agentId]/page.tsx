@@ -7,12 +7,14 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, Bot, Lock, Users, FileText, Clock, Sparkles, Hand } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Lock, Users, FileText, Clock, Sparkles, Hand } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
+import { AgentBodyAnalysis, AgentMeshMap } from '@/components/agent/AgentDiagnostics'
+import type { AgentDiagnostic, AgentMeshSummary } from '@/lib/governance/agentDiagnostics'
 
 // ── Types (mirror /api/iaops/agents/[agentId]) ─────────────────────────────
 interface Schedule { daily: string | null; reactive: string | null }
@@ -20,6 +22,7 @@ interface Charter {
   id: string; plane: string; charter: string; owns: string[]; skills: string[]
   dataRead: string[]; pii: string; toolsAllow: string[]; toolsDeny: string[]
   requiresHuman: string[]; tokensPerRun: number | null; runsPerDay: number | null
+  caseCapabilities: string[]
   schedule: Schedule | null
 }
 interface Narrative { title: string; adr: string; plane: string; body: string }
@@ -28,6 +31,8 @@ interface AgentDetail {
   id: string
   charter: Charter | null
   narrative: Narrative | null
+  diagnostics: AgentDiagnostic[]
+  mesh: AgentMeshSummary | null
   proposals: { available: boolean; items: ProposalSummary[]; pendingCount: number }
 }
 
@@ -257,22 +262,12 @@ function AgentDetailContent() {
             </div>
           </Card>
 
-          {agentId === 'case-coordinator' && (
-            <Card>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-                <Bot size={14} style={{ color: '#6366f1' }} />
-                <span style={{ fontSize: '13px', fontWeight: 700 }}>{t('Swarm case', 'Swarm cases')}</span>
-              </div>
-              <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '0 0 10px' }}>
-                {t(
-                  'Koordinační případy, ve kterých agenti přispívají do sdíleného vlákna (Temporal CaseWorkflow, ADR-0244/0246).',
-                  'Coordination cases agents contribute to in a shared thread (Temporal CaseWorkflow, ADR-0244/0246).',
-                )}
-              </p>
-              <Link href="/iaops/cases" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
-                {t('Otevřít vlákna case', 'Open case threads')}
-              </Link>
-            </Card>
+          {data.charter && data.diagnostics.length > 0 && (
+            <AgentBodyAnalysis agentId={agentId} diagnostics={data.diagnostics} language={language} />
+          )}
+
+          {data.mesh && (
+            <AgentMeshMap agentId={agentId} mesh={data.mesh} language={language} />
           )}
 
           {/* Tools + operating profile (agents.yaml — enforced fields) */}
