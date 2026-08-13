@@ -15,6 +15,8 @@ metadata:
 data:
   override.properties: |
     config_ordinal=500
+    mp.messaging.incoming.campaign-banner-placements-in.group.id=openbank-engagement-service
+    mp.messaging.incoming.campaign-banner-placements-in.auto.offset.reset=earliest
     mp.messaging.incoming.lending-events-in.group.id=openbank-engagement-service
     mp.messaging.incoming.lending-events-in.auto.offset.reset=earliest
     mp.messaging.incoming.party-events-in.group.id=openbank-engagement-service
