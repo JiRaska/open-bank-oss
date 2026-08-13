@@ -85,7 +85,16 @@ spec:
               # file currently has none, but the RS approach costs nothing extra and does
               # not depend on that staying true.
               echo "Splitting and applying ci-gate-runs.sql to ${CLICKHOUSE_URL}"
-              awk 'BEGIN{RS=";\n"} NF{fn="/tmp/stmt" NR ".sql"; print $0";" > fn}' /sql/ci-gate-runs.sql
+              # Whole-line comments (`^\s*--`) are stripped BEFORE the statement split, not
+              # after — found live 2026-08-10: a prose comment containing an ordinary English
+              # semicolon ("... underfoot; this is 0.0 ...") split one CREATE TABLE into two
+              # broken fragments, because RS=";\n" cannot distinguish a real statement
+              # terminator from a semicolon inside a comment. Stripping comment lines first
+              # removes the false terminators along with the prose that carried them; it
+              # would also hide a terminator hidden INSIDE a comment on purpose, which is not
+              # a shape this file has any reason to contain.
+              grep -v '^[[:space:]]*--' /sql/ci-gate-runs.sql \
+                | awk 'BEGIN{RS=";\n"} NF{fn="/tmp/stmt" NR ".sql"; print $0";" > fn}'
               n=0
               for f in /tmp/stmt*.sql; do
                 [ -e "$f" ] || continue
