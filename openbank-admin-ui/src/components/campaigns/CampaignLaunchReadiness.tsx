@@ -43,7 +43,7 @@ export function CampaignLaunchReadiness({
 }) {
   const { t, language } = useLanguage()
   const n = (value: number) => value.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')
-  const push = steps.find(step => step.channel === 'PUSH')
+  const appPlacement = steps.find(step => step.channel === 'PUSH' || step.channel === 'BANNER')
   const readyCount = [audienceChosen, entryConfigured, !incomplete, !contentExperiment || conversionRule !== null].filter(Boolean).length
 
   const items: ReadinessItem[] = [
@@ -67,9 +67,9 @@ export function CampaignLaunchReadiness({
       : conversionRule
         ? { id: 'measurement', state: 'ready', label: t('Výsledek je měřitelný', 'Outcome is measurable'), detail: t('Měříme bankovní událost, ne domnělý proklik.', 'This measures a banking event, not an assumed click.') }
         : { id: 'measurement', state: 'attention', label: t('Kampaň neměří výsledek', 'Campaign does not measure an outcome'), detail: t('Můžete pokračovat, ale po spuštění nepůjde porovnat skutečný dopad.', 'You can continue, but the actual outcome cannot be compared after launch.') },
-    push
-      ? { id: 'destination', state: 'ready', label: t('Push má bezpečný cíl v aplikaci', 'Push has a safe in-app destination'), detail: t('Jen schválený deep link; žádná URL z kampaně.', 'An approved deep link only; no campaign-entered URL.') }
-      : { id: 'destination', state: 'attention', label: t('Cesta zatím nemá push krok', 'Journey has no push step yet'), detail: t('Přidejte ho, pokud má kampaň přivést lidi zpět do aplikace.', 'Add one if the campaign should bring people back into the app.') },
+    appPlacement
+      ? { id: 'destination', state: 'ready', label: t('Krok v aplikaci má bezpečný cíl', 'In-app step has a safe destination'), detail: t('Jen schválený deep link; žádná URL z kampaně.', 'An approved deep link only; no campaign-entered URL.') }
+      : { id: 'destination', state: 'attention', label: t('Cesta zatím nemá krok v aplikaci', 'Journey has no in-app step yet'), detail: t('Přidejte push nebo banner, pokud má kampaň přivést lidi zpět do aplikace.', 'Add a push or banner if the campaign should bring people back into the app.') },
     { id: 'policy', state: 'ready', label: t('Ochrana kontaktu zůstává zapnutá', 'Contact protection stays on'), detail: t('Souhlas, tiché hodiny a frekvenční limit se ověřují při doručení.', 'Consent, quiet hours and frequency limits are checked at delivery.') },
   ]
 

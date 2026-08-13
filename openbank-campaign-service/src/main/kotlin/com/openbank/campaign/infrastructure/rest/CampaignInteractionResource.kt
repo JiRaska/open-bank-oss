@@ -34,12 +34,39 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
         @PathParam("interactionRef") interactionRef: UUID,
         @HeaderParam("X-Customer-Party-Id") partyId: String?,
     ): Response {
-        val customerPartyId = partyId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
-            ?: return Response.status(Response.Status.BAD_REQUEST).build()
-        return if (query.isValidForParty(interactionRef, customerPartyId)) {
-            Response.noContent().build()
-        } else {
-            Response.status(Response.Status.NOT_FOUND).build()
-        }
+        resolve(interactionRef, partyId) ?: return invalidInteractionResponse(partyId)
+        return Response.noContent().build()
     }
+
+    @GET
+    @Path("/{interactionRef}/attribution")
+    @RolesAllowed("ROLE_API")
+    @Authorize(action = "campaign.interaction.validate", resource = "#partyId")
+    suspend fun attribution(
+        @PathParam("interactionRef") interactionRef: UUID,
+        @HeaderParam("X-Customer-Party-Id") partyId: String?,
+    ): Response {
+        val attribution = resolve(interactionRef, partyId)
+            ?: return invalidInteractionResponse(partyId)
+        return Response.ok(
+            CampaignInteractionAttributionResponse(
+                campaignId = attribution.campaignId,
+                stepOrder = attribution.stepOrder,
+                channel = attribution.channel.name,
+            ),
+        ).build()
+    }
+
+    private suspend fun resolve(interactionRef: UUID, partyId: String?) = partyId
+        ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        ?.let { query.resolve(interactionRef, it) }
+
+    private fun invalidInteractionResponse(partyId: String?): Response =
+        if (partyId?.let { runCatching { UUID.fromString(it) }.isSuccess } == true) {
+            Response.status(Response.Status.NOT_FOUND).build()
+        } else {
+            Response.status(Response.Status.BAD_REQUEST).build()
+        }
 }
+
+data class CampaignInteractionAttributionResponse(val campaignId: UUID, val stepOrder: Int, val channel: String)

@@ -367,12 +367,18 @@ spec:
           secret:
             secretName: document-service-signing-keystore
             optional: true
+        # No `items:` — project the whole ConfigMap, exactly as account-service and every other
+        # msg-override consumer does. An `items:` block naming `keystore.p12` stood here, evidently
+        # copy-pasted from the signing-keystore volume directly above: this ConfigMap holds ONE key,
+        # `override.properties`, and never held a keystore. Kubernetes treats a named key that does
+        # not exist as a hard mount failure, so the pod sat in ContainerCreating with
+        # `MountVolume.SetUp failed for volume "msg-override": configmap references non-existent
+        # config key: keystore.p12` — 173 times over 5h40m — and document-service was DOWN.
+        # QUARKUS_CONFIG_LOCATIONS above expects /mnt/msg-config/override.properties, which the
+        # whole-ConfigMap projection produces naturally.
         - name: msg-override
           configMap:
             name: document-service-msg-override
-            items:
-              - key: keystore.p12
-                path: keystore.p12
 ---
 apiVersion: v1
 kind: ServiceAccount

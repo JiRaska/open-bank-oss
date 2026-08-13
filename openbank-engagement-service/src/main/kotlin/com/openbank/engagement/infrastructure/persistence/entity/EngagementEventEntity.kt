@@ -4,6 +4,7 @@
 
 package com.openbank.engagement.infrastructure.persistence.entity
 
+import com.openbank.engagement.domain.model.CampaignAttribution
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
 import com.openbank.engagement.domain.model.SurfaceSlot
@@ -42,6 +43,15 @@ class EngagementEventEntity : PanacheEntityBase() {
     @Column
     var interactionRef: UUID? = null
 
+    @Column
+    var campaignId: UUID? = null
+
+    @Column
+    var campaignStepOrder: Int? = null
+
+    @Column
+    var campaignChannel: String? = null
+
     fun toDomain(): EngagementEvent = EngagementEvent(
         partyId = partyId,
         contentId = contentId,
@@ -49,6 +59,13 @@ class EngagementEventEntity : PanacheEntityBase() {
         type = EngagementEventType.valueOf(type),
         occurredAt = occurredAt,
         interactionRef = interactionRef,
+        campaignAttribution = campaignId?.let {
+            CampaignAttribution(
+                campaignId = it,
+                stepOrder = requireNotNull(campaignStepOrder),
+                channel = requireNotNull(campaignChannel),
+            )
+        },
     )
 
     companion object {
@@ -61,6 +78,9 @@ class EngagementEventEntity : PanacheEntityBase() {
             entity.type = event.type.name
             entity.occurredAt = event.occurredAt
             entity.interactionRef = event.interactionRef
+            entity.campaignId = event.campaignAttribution?.campaignId
+            entity.campaignStepOrder = event.campaignAttribution?.stepOrder
+            entity.campaignChannel = event.campaignAttribution?.channel
             return entity
         }
     }

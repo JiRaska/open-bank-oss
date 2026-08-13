@@ -34,8 +34,58 @@
 # ---------------------------------------------------------------------------------------
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+ROOT="${DEPLOY_COVERAGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 cd "$ROOT"
+
+# --self-test drives this same script over fixture trees, including the case the pre-#4576
+# subject set could not express. Kept below the ROOT resolution so the fixtures can point at it.
+if [ "${1:-}" = "--self-test" ]; then
+  SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+  TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
+  OK=0
+
+  _fixture() { # $1=dir $2=ALL_SERVICES $3=gitops image line(s) $4=released json packages
+    mkdir -p "$1/.github/workflows" "$1/.github/scripts" "$1/openbank-infra/gitops/components"
+    printf "            ALL_SERVICES='%s'\n" "$2" > "$1/.github/workflows/auto-deploy.yml"
+    printf '%s\n' "$3" > "$1/openbank-infra/gitops/components/w.yaml"
+    printf '{"packages":{%s}}\n' "$4" > "$1/release-please-config.json"
+  }
+  # `set -o pipefail` is active for this whole script, so `_run ... | grep -q ...` would take its
+  # exit status from the PIPELINE, not from grep — and the recursive run legitimately exits 1 on a
+  # FAIL fixture, which would make every `if` below read as "grep did not match" regardless of
+  # whether it did. Capture first, grep the captured text, so only grep's exit status is tested.
+  _run() { DEPLOY_COVERAGE_ROOT="$1" bash "$SELF" > "$TMP/out" 2>&1; cat "$TMP/out"; }
+
+  # A: the analytics-sink case — sandbox-tagged, deployed, NOT released, NOT built.
+  # The old subject set (released components only) reported PASS here; that is the whole bug.
+  _fixture "$TMP/a" "openbank-account-service" "  image: ecr/openbank-ghost-service:sandbox-abc123" '"openbank-account-service":{}'
+  if _run "$TMP/a" | grep -q "openbank-ghost-service"; then :; else
+    echo "SELF-TEST FAIL: an unbuilt, sandbox-tagged, unreleased workload was not flagged"; OK=1; fi
+
+  # B: a version-pinned third-party image is not ours to build and must NOT be flagged.
+  _fixture "$TMP/b" "openbank-account-service" "  image: ecr/openbank-thirdparty:9.9.9-pinned" '"openbank-account-service":{}'
+  if _run "$TMP/b" | grep -q "openbank-thirdparty"; then
+    echo "SELF-TEST FAIL: a version-pinned third-party image was flagged as a coverage gap"; OK=1; fi
+
+  # C: a built service is clean.
+  _fixture "$TMP/c" "openbank-account-service" "  image: ecr/openbank-account-service:sandbox-abc123" '"openbank-account-service":{}'
+  if ! _run "$TMP/c" | grep -q "PASS"; then
+    echo "SELF-TEST FAIL: a fully covered tree did not pass"; OK=1; fi
+
+  # D: the ratchet — a baselined entry that is now built must FAIL, or debt becomes permanent.
+  _fixture "$TMP/d" "openbank-account-service" "  image: ecr/openbank-account-service:sandbox-abc123" '"openbank-account-service":{}'
+  printf 'openbank-account-service\n' > "$TMP/d/.github/scripts/deploy-coverage-baseline.txt"
+  if ! _run "$TMP/d" | grep -q "no longer violating"; then
+    echo "SELF-TEST FAIL: a stale baseline entry did not fail the ratchet"; OK=1; fi
+
+  # E: an absent subject must not read as clean.
+  _fixture "$TMP/e" "openbank-account-service" "  no images here" '"openbank-account-service":{}'
+  if ! _run "$TMP/e" | grep -qE "no deployable workload|SUBJECTS=0"; then
+    echo "SELF-TEST FAIL: an empty subject set did not announce itself"; OK=1; fi
+
+  [ "$OK" -eq 0 ] && echo "SELF-TEST PASS: deploy-coverage is falsifiable (5 cases)"
+  exit "$OK"
+fi
 
 WORKFLOW=".github/workflows/auto-deploy.yml"
 RP_CONFIG="release-please-config.json"
@@ -68,6 +118,22 @@ ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/A
 GITOPS_REFS="$(grep -rhoE 'openbank-[a-z0-9-]+:[A-Za-z0-9._-]+' "$GITOPS" 2>/dev/null \
   | sed -E 's/:.*$//' | sort -u || true)"
 
+# Workloads pinned to a `sandbox-<sha>` tag: that tag shape IS this pipeline's output, so anything
+# wearing one is something this repo is expected to build. Derived, not hand-maintained — and it is
+# the same test auto-deploy applies to decide a service is deployable at all.
+#
+# This is what widens the gate past released components. The subject set used to be
+# release-please's package list, so a service with no version.txt was invisible: openbank-analytics-
+# sink has been deployed since 2026-07-26 and absent from ALL_SERVICES for its whole life, and this
+# gate passed every run without ever looking at it (#4553 / #4576). A gate whose scope is derived
+# from a DIFFERENT registry than the one it protects can only cover their intersection.
+#
+# Version-pinned third-party images (openbank-keycloak:26.6.3-optimized,
+# openbank-pyroscope-agent:2.5.4) are excluded by construction rather than by an allowlist entry:
+# they carry an upstream version, never a sandbox tag, so nobody has to remember to except them.
+SANDBOX_REFS="$(grep -rhoE 'openbank-[a-z0-9-]+:sandbox-[A-Za-z0-9._-]+' "$GITOPS" 2>/dev/null \
+  | sed -E 's/:.*$//' | sort -u || true)"
+
 _read_list() {
   local f="$1" line
   [ -f "$f" ] || return 0
@@ -92,9 +158,20 @@ SKIPPED=()
 KNOWN=0
 CHECKED=0
 
-for svc in "${RELEASED[@]}"; do
-  # Not deployed by ArgoCD at all (a library, or not yet registered) — out of scope.
-  _in "$svc" $GITOPS_REFS || continue
+# Subjects: every released component ArgoCD deploys (the original scope), PLUS every workload
+# wearing a sandbox tag whether or not it is a released component (the widening).
+SUBJECTS=()
+for svc in "${RELEASED[@]}"; do _in "$svc" $GITOPS_REFS && SUBJECTS+=("$svc"); done
+for svc in $SANDBOX_REFS; do _in "$svc" ${SUBJECTS[@]+"${SUBJECTS[@]}"} || SUBJECTS+=("$svc"); done
+
+if [ "${#SUBJECTS[@]}" -eq 0 ]; then
+  echo "SUBJECTS=0"
+  echo "DEPLOY-COVERAGE GATE: no deployable workload found under ${GITOPS} — the gate cannot have"
+  echo "checked anything. This is a path or parse problem, not a clean tree."
+  exit 1
+fi
+
+for svc in "${SUBJECTS[@]}"; do
   CHECKED=$((CHECKED + 1))
 
   if _in "$svc" ${ALLOWED[@]+"${ALLOWED[@]}"}; then
@@ -116,7 +193,8 @@ for svc in "${RELEASED[@]}"; do
   fi
 done
 
-echo "==> Deploy-coverage: ${CHECKED} released component(s) with a gitops workload; ${#SKIPPED[@]} allowlisted; ${KNOWN} baselined."
+echo "SUBJECTS=${CHECKED}"
+echo "==> Deploy-coverage: ${CHECKED} deployable workload(s) (released components + sandbox-tagged); ${#SKIPPED[@]} allowlisted; ${KNOWN} baselined."
 for svc in ${SKIPPED[@]+"${SKIPPED[@]}"}; do echo "  ALLOWLISTED ${svc}  (built by its own workflow)"; done
 for svc in ${BASELINED[@]+"${BASELINED[@]}"};  do echo "  BASELINED   ${svc}  (known debt — see ${BASELINE})"; done
 
@@ -124,7 +202,7 @@ RC=0
 
 if [ "${#NEW_VIOLATIONS[@]}" -gt 0 ]; then
   echo
-  echo "DEPLOY-COVERAGE GATE: FAIL — ${#NEW_VIOLATIONS[@]} released component(s) that ArgoCD deploys are"
+  echo "DEPLOY-COVERAGE GATE: FAIL — ${#NEW_VIOLATIONS[@]} deployable workload(s) that ArgoCD deploys are"
   echo "not in auto-deploy's ALL_SERVICES, so every push would silently deploy nothing for them:"
   echo
   for svc in "${NEW_VIOLATIONS[@]}"; do echo "  - ${svc}"; done
@@ -155,6 +233,6 @@ if [ "$KNOWN" -gt 0 ]; then
   echo "DEPLOY-COVERAGE GATE: PASS — no NEW gaps. ${KNOWN} known gap(s) remain in ${BASELINE}."
 else
   echo
-  echo "DEPLOY-COVERAGE GATE: PASS — every released component ArgoCD deploys is built by auto-deploy."
+  echo "DEPLOY-COVERAGE GATE: PASS — every deployable workload ArgoCD runs is built by auto-deploy."
 fi
 exit 0

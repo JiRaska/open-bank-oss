@@ -1,0 +1,62 @@
+# Zero-ready-endpoint windows, as a METRIC rather than an alert (#3806).
+#
+# WHAT THIS MEASURES
+#   ingress-nginx logs `Service "<ns>/<name>" does not have any active Endpoint.` every ~3s for as
+#   long as a Service it routes to has no ready backend. While that is true, every request to that
+#   Service returns 503. This recording rule turns those log lines into a per-Service time series so
+#   the condition has a trend, a before, and an after.
+#
+# WHY A RECORDING RULE AND NOT AN ALERT
+#   Because the condition is currently TRUE most of the day, across most of the estate. Measured on
+#   2026-08-13 over 24h of ingress-nginx logs (1126 lines sampled):
+#
+#     balances/balance-service 201   platform/copilot-service 181   customer-edge 173
+#     admin-ui/admin-ui 151          sanctions/sanctions-service 151  accounts/account-service 117
+#     iam/keycloak 56                payments/transaction-service 43  payments/sepa-payment 39
+#     payments/domestic-payment 7    payments/sepa-instant 6          developer-portal 1
+#
+#   Twelve Services, several money-path, plus Keycloak — so logins too. An alert on a condition that
+#   is already the resting state is not a signal, it is a permanently-red light nobody will look at
+#   twice; this estate's documented root cause is alert fatigue, so adding one would be a regression
+#   even though the condition is real. The alert belongs AFTER #3806's replica work, when a firing
+#   rule would mean something changed. This rule is what makes that change visible.
+#
+# WHY LOGS AND NOT kube-state-metrics
+#   There is no `kube_endpoint_address_available` in this kube-state-metrics version. What exists is
+#   `kube_endpointslice_endpoints{ready="true"}`, one series PER ENDPOINT ADDRESS — so a Service with
+#   zero ready endpoints has no series at all rather than a series reading zero, and the obvious
+#   `sum by (...) == 0` matches nothing precisely when it matters. Verified against live Prometheus
+#   during the 09:43 outage: that query returned zero results while the ingress log described the
+#   outage line by line. The ingress controller names every affected Service automatically, which is
+#   also what stops this from becoming a hand-kept list of services to watch.
+#
+# The rule extracts the Service from the message so the series is per Service, not per namespace —
+# `ingress-nginx` as a label would say only "something is down somewhere".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: loki-rules-endpoint-availability
+  namespace: observability
+  labels:
+    loki_rule: "1"
+    app.kubernetes.io/part-of: observability
+data:
+  endpoint-availability.yaml: |
+    groups:
+      - name: openbank.logs.endpoint-availability
+        interval: 1m
+        rules:
+          # Log lines per minute, per Service, while it has no ready endpoint. The VALUE is a
+          # nginx-internal repeat rate and means nothing on its own; `> 0` is the whole signal,
+          # and the useful queries are `count_over_time(... > 0)` for how often, and
+          # `sum_over_time` for roughly how long.
+          - record: openbank:service_no_ready_endpoints:rate1m
+            expr: |
+              sum by (target_namespace, target_service) (
+                rate(
+                  {namespace="ingress-nginx"}
+                    |= "does not have any active Endpoint"
+                    | regexp `Service "(?P<target_namespace>[^/]+)/(?P<target_service>[^"]+)"`
+                  [1m]
+                )
+              )
