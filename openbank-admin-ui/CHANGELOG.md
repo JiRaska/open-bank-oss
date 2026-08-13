@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.117.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.116.0...admin-ui-v0.117.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** add governed audience library ([#4653](https://github.com/JiRaska/open-bank-oss/issues/4653)) ([f2dc472](https://github.com/JiRaska/open-bank-oss/commit/f2dc472990b45978e4f0486099ac4589404cb08e)), closes [#4652](https://github.com/JiRaska/open-bank-oss/issues/4652)
+
+## [0.116.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.115.0...admin-ui-v0.116.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** add app-first journey recipes ([#4643](https://github.com/JiRaska/open-bank-oss/issues/4643)) ([fa06243](https://github.com/JiRaska/open-bank-oss/commit/fa06243b5673dd0b06e3efe175a481bc66c495c9))
+
+## [0.115.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.1...admin-ui-v0.115.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add journey path experiments ([#4588](https://github.com/JiRaska/open-bank-oss/issues/4588)) ([3077571](https://github.com/JiRaska/open-bank-oss/commit/307757110c42470d51d9fdfbdf869fb133fcf447))
+
+## [0.114.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.0...admin-ui-v0.114.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** label regulatory preview honestly ([#4610](https://github.com/JiRaska/open-bank-oss/issues/4610)) ([7b9c592](https://github.com/JiRaska/open-bank-oss/commit/7b9c592aed59b6081f607e1257c7418897b11766))
+
+## [0.114.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.113.0...admin-ui-v0.114.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** strengthen operator dashboard ([#4598](https://github.com/JiRaska/open-bank-oss/issues/4598)) ([914ab71](https://github.com/JiRaska/open-bank-oss/commit/914ab71e1d9542f74ebe2e06c0c27f6ff3de07c1))
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
+
+### Bug Fixes
+
+* **admin-ui:** load regulatory templates ([#4602](https://github.com/JiRaska/open-bank-oss/issues/4602)) ([9629531](https://github.com/JiRaska/open-bank-oss/commit/96295319c727c43407ac87628b596e27d26153bb))
+
+## [0.113.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.112.0...admin-ui-v0.113.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app banner channel ([#4577](https://github.com/JiRaska/open-bank-oss/issues/4577)) ([d95c85c](https://github.com/JiRaska/open-bank-oss/commit/d95c85cf3fbe0428e4cc5e44bcca27d05bc574ab))
+
 ## [0.112.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.3...admin-ui-v0.112.0) (2026-08-13)
 
 

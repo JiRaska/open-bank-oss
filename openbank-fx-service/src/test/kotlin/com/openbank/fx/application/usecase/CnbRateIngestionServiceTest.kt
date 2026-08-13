@@ -92,4 +92,64 @@ class CnbRateIngestionServiceTest {
         assertThat(result.skipped).isEqualTo(1)
         coVerify(exactly = 0) { repo.save(match { it.baseCurrency == "EUR" }) }
     }
+
+    // ── #3921 step 3: getCnbRate(asOf) resolves the fixing that was in effect on a given day ───
+
+    @Test
+    fun `getCnbRate without asOf keeps asking for the latest still-valid fixing`() = runBlocking<Unit> {
+        val repo = mockk<FxRateRepository>()
+        val stored = cnbRate()
+        coEvery { repo.findLatestBySource("EUR", "CZK", RateSource.CNB) } returns stored
+
+        val result = service(repo, mockk()).getCnbRate("eur", "czk")
+
+        assertThat(result).isEqualTo(stored)
+        // The live daily path must not move onto the as-of query by accident: that query has no
+        // wall-clock component, so silently routing today's revaluation through it would change
+        // which row a same-day re-ingestion resolves to.
+        coVerify(exactly = 0) { repo.findBySourceAsOf(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `getCnbRate with asOf asks for the window containing the START of that Prague day`() = runBlocking<Unit> {
+        val repo = mockk<FxRateRepository>()
+        val stored = cnbRate()
+        val at = slot<Instant>()
+        coEvery { repo.findBySourceAsOf(eq("EUR"), eq("CZK"), eq(RateSource.CNB), capture(at)) } returns stored
+
+        val result = service(repo, mockk()).getCnbRate("eur", "czk", LocalDate.of(2026, 5, 27))
+
+        assertThat(result).isEqualTo(stored)
+        // Prague midnight, not UTC midnight and not "now": the validity bounds this is compared
+        // against are written by `ingest` in exactly this zone, so any other instant would compare
+        // a date against bounds it does not share an origin with.
+        assertThat(at.captured).isEqualTo(LocalDate.of(2026, 5, 27).atStartOfDay(prague).toInstant())
+        coVerify(exactly = 0) { repo.findLatestBySource(any(), any(), any()) }
+    }
+
+    @Test
+    fun `getCnbRate with asOf returns null for a day no fixing covered - never a fallback`() = runBlocking<Unit> {
+        val repo = mockk<FxRateRepository>()
+        coEvery { repo.findBySourceAsOf(any(), any(), any(), any()) } returns null
+
+        val result = service(repo, mockk()).getCnbRate("EUR", "CZK", LocalDate.of(2020, 1, 1))
+
+        // The fallback IS the bug: it is how a backfill marks an old day at today's rate and
+        // reports success. Absent must stay absent so ledger skips the leg loudly.
+        assertThat(result).isNull()
+        coVerify(exactly = 0) { repo.findLatestBySource(any(), any(), any()) }
+    }
+
+    private fun cnbRate() = FxRate(
+        id = java.util.UUID.randomUUID(),
+        baseCurrency = "EUR",
+        quoteCurrency = "CZK",
+        bidRate = java.math.BigDecimal("25.145"),
+        askRate = java.math.BigDecimal("25.145"),
+        rateType = RateType.INDICATIVE,
+        source = RateSource.CNB,
+        validFrom = expectedValidFrom,
+        validTo = expectedValidFrom.plusSeconds(259_200),
+        createdAt = Instant.parse("2026-05-30T12:30:00Z"),
+    )
 }

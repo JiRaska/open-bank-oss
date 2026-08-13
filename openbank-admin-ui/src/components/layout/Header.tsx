@@ -136,8 +136,8 @@ export function Header() {
         >
           {language.toUpperCase()}
         </button>
-        <IconBtn><HelpCircle size={15} /></IconBtn>
-        <IconBtn><Bell size={15} /></IconBtn>
+        <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} /></HeaderLink>
+        <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} /></HeaderLink>
         <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 6px' }} />
 
         {/* User menu */}
@@ -239,17 +239,17 @@ export function Header() {
   )
 }
 
-function IconBtn({ children }: { children: React.ReactNode }) {
+function HeaderLink({ href, label, children }: { href: string; label: string; children: React.ReactNode }) {
   return (
-    <button style={{
+    <Link href={href} aria-label={label} title={label} style={{
       width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
       borderRadius: '6px', border: 'none', background: 'transparent',
-      color: 'var(--text-secondary)', cursor: 'pointer', transition: 'background 0.12s',
+      color: 'var(--text-secondary)', cursor: 'pointer', transition: 'background 0.12s', textDecoration: 'none',
     }}
       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
       onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
     >
       {children}
-    </button>
+    </Link>
   )
 }

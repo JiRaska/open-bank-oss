@@ -5,7 +5,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Clock3, Megaphone, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -19,6 +19,11 @@ import {
 import { StepEditor } from '@/components/campaigns/StepEditor'
 import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
 import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
+import {
+  JourneyRecipePicker,
+  type JourneyRecipe,
+  type JourneyRecipeId,
+} from '@/components/campaigns/JourneyRecipePicker'
 
 /**
  * Campaign Studio — authoring on a canvas (ADR-0221 D1).
@@ -65,12 +70,20 @@ const TEMPLATES: Record<string, string[]> = {
   // One variable, and that is the channel's rule rather than a simplification: a push renders its
   // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
+  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
 }
 
 /** Which channel each template renders on. The service refuses a step whose two disagree. */
 const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
   MARKETING_PRODUCT_OFFER: 'EMAIL',
   MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
+  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER',
+  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER',
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER',
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER',
 }
 
 const newStep = (): EditorStep => ({
@@ -86,6 +99,8 @@ const newStep = (): EditorStep => ({
 export default function NewCampaignPage() {
   const { t } = useLanguage()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedAudience = searchParams.get('audience')
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
@@ -98,6 +113,7 @@ export default function NewCampaignPage() {
   const [trigger, setTrigger] = useState('')
   const [entryUnavailable, setEntryUnavailable] = useState(false)
   const [steps, setSteps] = useState<EditorStep[]>([newStep()])
+  const [journeyRecipe, setJourneyRecipe] = useState<JourneyRecipeId | null>('RETURN_TO_APP')
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
   // Null = no cap, which is the service's own default (absent stopCondition runs every step).
@@ -116,6 +132,10 @@ export default function NewCampaignPage() {
   const templateLabels: Record<string, string> = {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
     MARKETING_PRODUCT_OFFER_PUSH: t('Nabídka produktu', 'Product offer'),
+    MARKETING_PRODUCT_OFFER_BANNER: t('Nabídka v banneru', 'Banner offer'),
+    MARKETING_PRODUCT_OFFER_CAROUSEL: t('Nabídka v carouselu', 'Carousel offer'),
+    MARKETING_PRODUCT_OFFER_PRODUCT_FEED: t('Nabídka ve feedu produktů', 'Product feed offer'),
+    MARKETING_PRODUCT_OFFER_REWARDS_HUB: t('Nabídka v centru odměn', 'Rewards hub offer'),
   }
 
   // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of
@@ -143,6 +163,21 @@ export default function NewCampaignPage() {
       })
       .catch(() => undefined)
   }, [])
+
+  // The Audience Library hands the exact, versioned identifier to Studio. The service still
+  // evaluates this audience on create; the query parameter only saves the marketer from selecting
+  // the same reviewed item twice and never carries an audience definition itself.
+  useEffect(() => {
+    if (!requestedAudience || !segments.some(s => `${s.name}@${s.version}` === requestedAudience)) return
+    setSegment(requestedAudience)
+    const [name, version] = requestedAudience.split('@')
+    fetch(`/api/segments/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
+      .then(r => r.json())
+      .then((d: { size?: number; state: string }) => {
+        if (d.state === 'ok') setReach(d.size ?? 0)
+      })
+      .catch(() => undefined)
+  }, [requestedAudience, segments])
 
   // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
   // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
@@ -190,6 +225,18 @@ export default function NewCampaignPage() {
       }]
     })
 
+  const applyRecipe = (recipe: JourneyRecipe) => {
+    // A recipe is only an authoring shortcut. Clone every map so opening one step can never alter
+    // another step's values through a shared object reference.
+    setSteps(recipe.steps.map(step => ({
+      ...step,
+      variables: { ...step.variables },
+      ...(step.variantBVariables ? { variantBVariables: { ...step.variantBVariables } } : {}),
+    })))
+    setJourneyRecipe(recipe.id)
+    setSelected(0)
+  }
+
   const removeStep = (i: number) =>
     setSteps(prev => {
       const next = prev.filter((_, k) => k !== i)
@@ -198,9 +245,9 @@ export default function NewCampaignPage() {
     })
 
   const incomplete = steps.some(s =>
-    (TEMPLATES[s.template] ?? []).some(v =>
-      !(s.variables[v] ?? '').trim() || (contentExperiment && !(s.variantBVariables?.[v] ?? '').trim()),
-    ),
+    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()) ||
+    (contentExperiment && (TEMPLATES[s.variantBTemplate ?? s.template] ?? [])
+      .some(v => !(s.variantBVariables?.[v] ?? '').trim())),
   )
   const entryConfigured =
     entryMode === 'MANUAL' ||
@@ -248,8 +295,12 @@ export default function NewCampaignPage() {
           ...(s.condition ? { condition: s.condition } : {}),
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
+          ...(contentExperiment && s.variantBTemplate ? { variantBTemplate: s.variantBTemplate } : {}),
+          ...(contentExperiment && s.variantBChannel ? { variantBChannel: s.variantBChannel } : {}),
+          ...(contentExperiment && s.variantBDelaySeconds !== undefined ? { variantBDelaySeconds: s.variantBDelaySeconds } : {}),
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
+          ...(s.inAppSurface ? { inAppSurface: s.inAppSurface } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -473,6 +524,8 @@ export default function NewCampaignPage() {
           )}
         </div>
       </section>
+
+      <JourneyRecipePicker selected={journeyRecipe} onApply={applyRecipe} />
 
       <section className="campaign-journey-workbench">
         <div className="campaign-workbench-heading">

@@ -1,0 +1,132 @@
+{
+  "consumer": {
+    "name": "openbank-domestic-payment"
+  },
+  "interactions": [
+    {
+      "description": "GET the document templates to resolve a PUBLISHED domestic-confirmation body",
+      "providerStates": [
+        {
+          "name": "the canonical document templates are seeded and published"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/documents/templates",
+        "query": {
+          "limit": [
+            "200"
+          ]
+        }
+      },
+      "response": {
+        "body": [
+          {
+            "bodyHtml": "<p>{{document.status}}</p>",
+            "code": "POTVRZENI_O_PLATBE_EN",
+            "status": "PUBLISHED"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].bodyHtml": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a template body plus domestic payment data to render the confirmation HTML",
+      "providerStates": [
+        {
+          "name": "the template preview renderer is available"
+        }
+      ],
+      "request": {
+        "body": {
+          "bodyHtml": "<p>{{document.status}}</p>",
+          "data": {
+            "document": {
+              "status": "COMPLETED"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/documents/templates/preview"
+      },
+      "response": {
+        "body": {
+          "renderedHtml": "<p>COMPLETED</p>"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.renderedHtml": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-document-service"
+  }
+}

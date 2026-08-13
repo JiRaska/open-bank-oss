@@ -27,5 +27,5 @@ FROM openbank_analytics.bronze_events
 WHERE aggregate_type = 'ENGAGEMENT'
   AND JSONExtractString(payload, 'campaignId') != ''
   AND JSONHas(payload, 'stepOrder')
-  AND JSONExtractString(payload, 'channel') = 'PUSH'
+  AND JSONExtractString(payload, 'channel') IN ('PUSH', 'BANNER')
 GROUP BY campaign_id, step_order, channel;

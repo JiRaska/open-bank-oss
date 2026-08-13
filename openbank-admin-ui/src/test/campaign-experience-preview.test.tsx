@@ -40,6 +40,35 @@ describe('campaign customer experience preview', () => {
     expect(container.querySelector('[data-preview-channel="EMAIL"]')).toBeTruthy()
     expect(screen.getByText(/Choose a push step/)).toBeTruthy()
   })
+
+  it('shows a banner as an authenticated app surface, not as a notification', () => {
+    const { container } = render(
+      <LanguageProvider>
+        <CampaignExperiencePreview
+          step={{ ...push, channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_BANNER' }}
+          campaignName="Summer saving"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(container.querySelector('[data-preview-channel="BANNER"]')).toBeTruthy()
+    expect(screen.getAllByText(/Home banner/)).toHaveLength(2)
+    expect(screen.getByText(/No interruption, no lock screen/)).toBeTruthy()
+  })
+
+  it('renders the selected carousel surface in the live app preview', () => {
+    const { container } = render(
+      <LanguageProvider>
+        <CampaignExperiencePreview
+          step={{ ...push, channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_CAROUSEL', inAppSurface: 'HOME_CAROUSEL' }}
+          campaignName="Summer saving"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(container.querySelector('[data-preview-surface="HOME_CAROUSEL"]')).toBeTruthy()
+    expect(screen.getAllByText(/Home carousel/)).toHaveLength(2)
+  })
 })
 
 describe('campaign launch readiness', () => {
@@ -61,6 +90,6 @@ describe('campaign launch readiness', () => {
     expect(container.querySelector('[data-readiness="audience"][data-state="waiting"]')).toBeTruthy()
     expect(container.querySelector('[data-readiness="content"][data-state="waiting"]')).toBeTruthy()
     expect(container.querySelector('[data-readiness="policy"][data-state="ready"]')).toBeTruthy()
-    expect(screen.getByText(/Journey has no push step/)).toBeTruthy()
+    expect(screen.getByText(/Journey has no in-app step/)).toBeTruthy()
   })
 })

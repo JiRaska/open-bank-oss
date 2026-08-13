@@ -174,8 +174,8 @@ enum class CampaignState { DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED }
  *
  * ADR-0200 D7 shipped this EMAIL-only behind three named blockers. Two have since cleared: the
  * per-channel marketing consent scope exists (`MARKETING_COMMS_PUSH`, ADR-0198 D4) and #1182 is
- * closed — push bodies are generic by construction. IN_APP and SMS remain out for the reasons on
- * [Channel].
+ * closed — push bodies are generic by construction. BANNER is a first-party home-surface
+ * placement, consented as an in-app impression rather than as a notification.
  */
 data class CampaignStep(
     val order: Int,
@@ -209,6 +209,20 @@ data class CampaignStep(
     val fallbackToPush: Boolean = false,
     /** A closed, app-owned destination for a push tap — never author-entered URL text. */
     val mobileDestination: MobileDestination? = null,
+    /**
+     * The authenticated-app slot a BANNER step is allowed to occupy. Null keeps placements created
+     * before multi-surface support on HOME_BANNER; it is resolved before a command leaves this
+     * service, so engagement never has to guess a customer's intended surface.
+     */
+    val inAppSurface: InAppSurface? = null,
+    /**
+     * The optional delivery shape for the B arm of a journey experiment. Leaving all three values
+     * absent keeps the existing copy-only experiment; providing a template and channel lets a
+     * marketer compare a real path, such as e-mail today against an app push tomorrow.
+     */
+    val variantBTemplate: String? = null,
+    val variantBChannel: Channel? = null,
+    val variantBDelaySeconds: Long? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -234,7 +248,7 @@ data class CampaignStep(
         TemplateCatalog.unknownVariables(template, variables).let {
             require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
         }
-        variantBVariables?.let { alternative ->
+        variantBVariables?.takeIf { variantBTemplate == null }?.let { alternative ->
             TemplateCatalog.unknownVariables(template, alternative).let {
                 require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
             }
@@ -245,8 +259,62 @@ data class CampaignStep(
         require(!fallbackToPush || template in TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL) {
             "template '$template' has no safe PUSH fallback"
         }
-        require(mobileDestination == null || channel == Channel.PUSH || fallbackToPush) {
-            "a mobile destination requires a PUSH step or an EMAIL step with PUSH fallback"
+        require(
+            mobileDestination == null ||
+                channel == Channel.PUSH ||
+                channel == Channel.BANNER ||
+                variantBChannel == Channel.PUSH ||
+                variantBChannel == Channel.BANNER ||
+                fallbackToPush,
+        ) {
+            "a mobile destination requires a PUSH or BANNER path, or an EMAIL step with PUSH fallback"
+        }
+        require(inAppSurface == null || channel == Channel.BANNER) {
+            "an in-app surface requires a BANNER step"
+        }
+        require(channel != Channel.BANNER || mobileDestination != null) {
+            "a BANNER step requires a mobile destination"
+        }
+        if (channel == Channel.BANNER) {
+            require(template == TemplateCatalog.templateForInAppSurface(inAppSurface ?: InAppSurface.HOME_BANNER)) {
+                "template '$template' does not render on ${inAppSurface ?: InAppSurface.HOME_BANNER}"
+            }
+        }
+        require((variantBTemplate == null) == (variantBChannel == null)) {
+            "a variant B path needs both its template and channel"
+        }
+        require(variantBTemplate == null || variantBVariables != null) {
+            "a variant B path needs variant B values so the campaign records an experiment"
+        }
+        require(variantBChannel != Channel.BANNER || mobileDestination != null) {
+            "a BANNER variant B path requires a mobile destination"
+        }
+        require(variantBDelaySeconds == null || variantBDelaySeconds >= 0) {
+            "variant B step delay must be >= 0"
+        }
+        variantBTemplate?.let { alternativeTemplate ->
+            val alternativeChannel = requireNotNull(variantBChannel)
+            require(TemplateCatalog.exists(alternativeTemplate)) {
+                "unknown variant B template '$alternativeTemplate' — ${TemplateCatalog.MARKETING_ONLY_REASON}"
+            }
+            require(TemplateCatalog.CHANNEL_OF[alternativeTemplate] == alternativeChannel) {
+                "variant B template '$alternativeTemplate' renders on ${TemplateCatalog.CHANNEL_OF[alternativeTemplate]}, not $alternativeChannel"
+            }
+            variantBVariables?.let { alternativeVariables ->
+                TemplateCatalog.unknownVariables(alternativeTemplate, alternativeVariables).let {
+                    require(it.isEmpty()) {
+                        "variant B template '$alternativeTemplate' does not declare ${it.sorted()}"
+                    }
+                }
+            }
+            require(!fallbackToPush || alternativeChannel == Channel.EMAIL) {
+                "an EMAIL fallback cannot be shared with a non-EMAIL variant B path"
+            }
+            if (alternativeChannel == Channel.BANNER) {
+                require(alternativeTemplate == TemplateCatalog.templateForInAppSurface(InAppSurface.HOME_BANNER)) {
+                    "a variant B BANNER path uses the reviewed HOME_BANNER card"
+                }
+            }
         }
     }
 
@@ -254,25 +322,48 @@ data class CampaignStep(
     fun variablesFor(variant: ContentVariant?): Map<String, String> =
         if (variant == ContentVariant.B) variantBVariables ?: variables else variables
 
+    /** The persisted cohort chooses delivery structure as well as copy; retries cannot reshuffle it. */
+    fun delayFor(variant: ContentVariant?): Long =
+        variantBDelaySeconds.takeIf { variant == ContentVariant.B } ?: delaySeconds
+
+    private fun templateFor(variant: ContentVariant?): String =
+        variantBTemplate.takeIf { variant == ContentVariant.B } ?: template
+
+    private fun channelFor(variant: ContentVariant?): Channel =
+        variantBChannel.takeIf { variant == ContentVariant.B } ?: channel
+
     /** Primary delivery values, kept separate from the fallback's reduced template vocabulary. */
-    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery = CampaignDelivery(
-        channel,
-        template,
-        TemplateCatalog.valuesFor(template, variablesFor(variant)),
-        mobileDestination?.deepLink.takeIf { channel == Channel.PUSH },
-    )
+    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery {
+        val selectedChannel = channelFor(variant)
+        val selectedTemplate = templateFor(variant)
+        val selectedInAppSurface = when {
+            selectedChannel != Channel.BANNER -> null
+            variant == ContentVariant.B && variantBTemplate != null -> InAppSurface.HOME_BANNER
+            else -> inAppSurface ?: InAppSurface.HOME_BANNER
+        }
+        return CampaignDelivery(
+            selectedChannel,
+            selectedTemplate,
+            TemplateCatalog.valuesFor(selectedTemplate, variablesFor(variant)),
+            mobileDestination?.deepLink.takeIf {
+                selectedChannel == Channel.PUSH || selectedChannel == Channel.BANNER
+            },
+            selectedInAppSurface,
+        )
+    }
 
     /** The only supported fallback: a consented app push after EMAIL consent was absent. */
-    fun pushFallback(variant: ContentVariant?): CampaignDelivery? = TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[template]
-        ?.takeIf { fallbackToPush }
-        ?.let { pushTemplate ->
-            CampaignDelivery(
-                Channel.PUSH,
-                pushTemplate,
-                TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
-                mobileDestination?.deepLink,
-            )
-        }
+    fun pushFallback(variant: ContentVariant?): CampaignDelivery? =
+        TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[templateFor(variant)]
+            ?.takeIf { fallbackToPush && channelFor(variant) == Channel.EMAIL }
+            ?.let { pushTemplate ->
+                CampaignDelivery(
+                    Channel.PUSH,
+                    pushTemplate,
+                    TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
+                    mobileDestination?.deepLink,
+                )
+            }
 }
 
 /** A resolved per-attempt delivery, including the channel that will be recorded for audit. */
@@ -281,9 +372,10 @@ data class CampaignDelivery(
     val template: String,
     val variables: Map<String, String>,
     val deepLink: String? = null,
+    val inAppSurface: InAppSurface? = null,
 )
 
-/** The only destinations the mobile app contract recognises for campaign pushes. */
+/** The only destinations the mobile app contract recognises for campaign push and banner taps. */
 enum class MobileDestination(val deepLink: String) {
     HOME("openbank://home"),
     SAVINGS("openbank://savings"),
@@ -292,17 +384,20 @@ enum class MobileDestination(val deepLink: String) {
     PRODUCT_HUB("openbank://products"),
 }
 
+/** Closed app inventory a campaign may use; STORIES remains product-owned, not a campaign slot. */
+enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB }
+
 /**
  * Delivery channels a campaign step may use.
  *
- * EMAIL and PUSH only, and the omissions are decisions rather than gaps. SMS has no outbound port
+ * EMAIL, PUSH and BANNER only, and the omissions are decisions rather than gaps. SMS has no outbound port
  * anywhere in the platform (ADR-0200 D7). IN_APP was *removed* from `NotificationChannel` by #2372
  * because its dispatch branch silently dropped every message; re-adding it needs a terminal-status
  * transition and a wake-signal design, not an enum entry. Listing either here would let a campaign
  * be approved against a channel that delivers nothing — the "appearance of four channels" ADR-0200
  * D7 explicitly refuses.
  */
-enum class Channel { EMAIL, PUSH }
+enum class Channel { EMAIL, PUSH, BANNER }
 
 /**
  * The campaign's own stop condition (ADR-0200 D1, issue #3585 slice 1), evaluated by the journey

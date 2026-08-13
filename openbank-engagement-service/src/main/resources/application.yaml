@@ -61,6 +61,11 @@ mp:
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      campaign-banner-placements-in:
+        connector: smallrye-kafka
+        topic: openbank.campaign.banner.placements
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset for the channels below are set via the
       # engagement-service-msg-override ConfigMap (override.properties), NOT here — a dotted leaf
       # map key under mp.messaging.incoming.<channel> in YAML never resolves to the plain

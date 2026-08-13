@@ -21,6 +21,15 @@ data class IssueCardCommand(
     val dailyLimitMinorUnits: Long,
     val monthlyLimitMinorUnits: Long,
     val deliveryAddress: String?,
+    /**
+     * ADR-0249 D1 — the delegation grant authorising this card for a holder who is not the account
+     * owner. Null for an ordinary card. card-issuance does NOT verify the grant: it has no view of
+     * account ownership and no delegation authority of its own, so it would only be re-deriving an
+     * answer it cannot check. The caller (customer-edge) proves the grant AND the grantor's SCA
+     * before it gets here; what this service owns is the consequence — the link is what lets
+     * [CardUseCase.blockCardsForRevokedGrant] find the card when the grant dies.
+     */
+    val delegationGrantId: UUID? = null,
 )
 
 data class CardStatusCommand(val cardId: UUID, val reason: String?, val changedBy: String)
@@ -100,4 +109,19 @@ interface CardUseCase {
     suspend fun listAll(): List<Card>
     suspend fun listByAccount(accountId: UUID): List<Card>
     suspend fun listByParty(partyId: UUID): List<Card>
+
+    /**
+     * ADR-0249 D2 — "revocation must bite". Ends every card issued under [grantId], returning the
+     * cards as they now stand.
+     *
+     * The card is BLOCKED, not hidden and not merely unshared: hiding it from the delegate's app
+     * leaves an instrument that still authorises at a terminal, and "the customer can no longer see
+     * the card that is still spending their money" is the worst of both outcomes. A card whose
+     * plastic was never activated (PENDING) is CANCELLED instead — `block` has no such transition,
+     * and there is nothing to preserve for a card that never lived.
+     *
+     * Idempotent: a card already in a terminal state or already BLOCKED is skipped, so a redelivered
+     * revocation event is a no-op rather than an error.
+     */
+    suspend fun blockCardsForRevokedGrant(grantId: UUID, reason: String): List<Card>
 }

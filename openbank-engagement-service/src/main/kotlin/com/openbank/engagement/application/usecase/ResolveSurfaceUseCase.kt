@@ -5,6 +5,7 @@
 package com.openbank.engagement.application.usecase
 
 import com.openbank.engagement.application.port.out.AdverseStateRepository
+import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.domain.model.DismissalRule
 import com.openbank.engagement.domain.model.EligibilitySnapshot
@@ -31,6 +32,7 @@ class ResolveSurfaceUseCase(
     private val contactGate: ContactPolicyGate,
     private val events: EngagementEventRepository,
     private val adverseState: AdverseStateRepository,
+    private val banners: CampaignBannerPlacementRepository,
 ) {
 
     sealed interface Result {
@@ -77,7 +79,11 @@ class ResolveSurfaceUseCase(
             adverseState = adverseState.activeStates(partyId),
             asOf = Instant.now(),
         )
-        return Result.Rendered(SurfaceResolver.resolve(slot, eligibility))
+        val catalogue = SurfaceResolver.resolve(slot, eligibility)
+        val campaignBanner = banners.latestForPartyAndSlot(partyId, slot)
+        // Each slot intentionally has one current campaign placement, with no opaque score or
+        // cross-surface rotation. It comes before that slot's generic catalogue fallback.
+        return Result.Rendered(listOfNotNull(campaignBanner?.toSurfaceContent()) + catalogue)
     }
 
     companion object {

@@ -118,9 +118,10 @@ def strip_comments(source: str) -> str:
     return "".join(out)
 
 
-def scan_module(module: str) -> list[str]:
+def scan_module(module: str, repo: pathlib.Path = None) -> list[str]:
     """Inference hits in a module's main sources (tests may legitimately stub a model port)."""
-    root = REPO / module / "src" / "main" / "kotlin"
+    repo = repo or REPO
+    root = repo / module / "src" / "main" / "kotlin"
     hits: list[str] = []
     if not root.is_dir():
         return hits
@@ -129,11 +130,93 @@ def scan_module(module: str) -> list[str]:
         for lineno, line in enumerate(code.splitlines(), start=1):
             for pattern, label in INFERENCE_PATTERNS:
                 if pattern.search(line):
-                    hits.append(f"{path.relative_to(REPO)}:{lineno}: {label}")
+                    hits.append(f"{path.relative_to(repo)}:{lineno}: {label}")
     return hits
 
 
+def self_test() -> int:
+    """Falsify the inference-site scanner.
+
+    EU AI Act Annex III: credit scoring is HIGH RISK. `ml-systems.yaml` declares the credit
+    decisioning engine `deployed: false`, and that declaration is what the compliance
+    documentation rests on — so the one thing that must never happen quietly is inference code
+    appearing in the credit plane while the inventory still says it is not deployed.
+
+    The scanner is a pattern list, which fails in exactly one direction: a spelling it does
+    not know is a site it does not see, and the inventory then agrees with a codebase that has
+    moved. Nothing else compares the two.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    def run(files: dict) -> list[str]:
+        td = tempfile.mkdtemp()
+        repo = pathlib.Path(td)
+        for rel, body in files.items():
+            f = repo / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body)
+        return scan_module("openbank-lending-service", repo)
+
+    K = "openbank-lending-service/src/main/kotlin/com/openbank/lending"
+
+    def case(label, hits, want):
+        got = bool(hits)
+        if got != want:
+            fails.append(f"{label}: expected hit={want}, got {hits}")
+
+    # EVERY pattern must fire. Missing one leaves that spelling free while the gate keeps
+    # reporting clean about the others — the inventory stays "true" by not looking.
+    for frag, label in (("import ai.onnxruntime.OrtSession", "onnxruntime import"),
+                        ("val s: OrtSession = x()", "OrtSession"),
+                        ("OrtEnvironment.getEnvironment()", "OrtEnvironment"),
+                        ("val i = InferenceSession(p)", "InferenceSession"),
+                        ("class Scorer(private val port: MlModelPort)", "MlModelPort")):
+        case(f"{label} is detected", run({f"{K}/Scorer.kt": frag + "\n"}), True)
+
+    # Ordinary credit code is not inference. A scanner that flags it makes the gate unusable
+    # and it gets switched off — the same outcome as not having it.
+    case("plain credit code is clean",
+         run({f"{K}/Scorer.kt": "class Scorer { fun score(x: Int) = x * 2 }\n"}), False)
+
+    # PROSE: an ADR reference or a KDoc explaining why there is no model must not read as one.
+    case("a comment naming OrtSession is not a hit",
+         run({f"{K}/Scorer.kt": "// no OrtSession here — see ml-systems.yaml deployed:false\nclass S\n"}), False)
+    case("a block comment naming MlModelPort is not a hit",
+         run({f"{K}/Scorer.kt": "/* MlModelPort is deliberately absent */\nclass S\n"}), False)
+
+    # SCOPE: src/test may legitimately stub a model port — that is a fake, not a deployment.
+    case("test sources are out of scope",
+         run({"openbank-lending-service/src/test/kotlin/T.kt": "val s: OrtSession = x()\n"}), False)
+
+    # A module with no sources yields nothing rather than raising.
+    case("a module with no kotlin dir is clean", run({}), False)
+
+    # A live read: the fixtures cannot tell that ml-systems.yaml still parses and still holds
+    # the credit system this gate is about.
+    inv = load_inventory()
+    if not inv:
+        fails.append("reading the real ml-systems.yaml produced NO systems — the inventory "
+                     "this gate compares against would be empty")
+    elif not any(sys_.get("id") == CREDIT_SYSTEM_ID for sys_ in inv):
+        fails.append(f"the real inventory no longer holds {CREDIT_SYSTEM_ID!r} — this gate's "
+                     f"subject is gone and it would report clean about nothing")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: AI-Act high-risk inventory is falsifiable "
+          f"(11 cases + a live read of {len(inv)} declared system(s))")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     systems = load_inventory()
     if not systems:
         print("::error::check-ai-act-high-risk-inventory: ml_systems is empty in ml-systems.yaml")

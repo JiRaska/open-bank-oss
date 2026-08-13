@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.18.1...card-issuance-service-v0.19.0) (2026-08-13)
+
+
+### Features
+
+* **cards:** additional cardholder — a card issued to someone else, with its own limits ([#4194](https://github.com/JiRaska/open-bank-oss/issues/4194)) ([25bd631](https://github.com/JiRaska/open-bank-oss/commit/25bd63177daa65dae31a2958cae80cdab2def3b9))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.18.0...card-issuance-service-v0.18.1) (2026-08-09)
 
 

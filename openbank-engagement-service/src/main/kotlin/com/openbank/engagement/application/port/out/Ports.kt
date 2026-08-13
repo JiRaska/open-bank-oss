@@ -5,6 +5,7 @@
 package com.openbank.engagement.application.port.out
 
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.engagement.domain.model.CampaignBannerPlacement
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.SurfaceSlot
 import java.time.Instant
@@ -34,4 +35,11 @@ interface AdverseStateRepository {
     suspend fun setActive(partyId: UUID, state: AdverseState, at: Instant)
     suspend fun clearActive(partyId: UUID, state: AdverseState)
     suspend fun activeStates(partyId: UUID): Set<AdverseState>
+}
+
+/** Latest placement wins within each closed app surface; there is no hidden cross-surface ranking. */
+interface CampaignBannerPlacementRepository {
+    suspend fun save(placement: CampaignBannerPlacement)
+    suspend fun latestForPartyAndSlot(partyId: UUID, slot: SurfaceSlot): CampaignBannerPlacement?
+    suspend fun belongsToPartyAtSlot(interactionRef: UUID, partyId: UUID, slot: SurfaceSlot): Boolean
 }

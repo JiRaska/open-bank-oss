@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.0...notification-service-v0.22.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **notification:** record device sweep liveness ([#4650](https://github.com/JiRaska/open-bank-oss/issues/4650)) ([67cfb60](https://github.com/JiRaska/open-bank-oss/commit/67cfb60b5588c2ebf1ede760ae70d927900fc48d))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.21.0...notification-service-v0.22.0) (2026-08-13)
 
 

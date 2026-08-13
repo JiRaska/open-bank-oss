@@ -62,6 +62,9 @@ class CardService(
             createdAt = now, updatedAt = now,
             panEncrypted = cipher.encrypt(credential.pan),
             cvvEncrypted = cipher.encrypt(credential.cvv),
+            // ADR-0249 D1. Carried through verbatim — see IssueCardCommand.delegationGrantId for
+            // why this service does not (and cannot) verify the grant itself.
+            delegationGrantId = cmd.delegationGrantId,
         )
         // ADR-0050: the card and its CardIssued event commit atomically via the outbox. The event
         // carries the MASKED pan only — an outbox payload lands on Kafka and in the DB in the clear.
@@ -278,6 +281,44 @@ class CardService(
         return repo.save(updated, outboxMessage(updated.id, EVENT_CARD_STATUS_CHANGED, event))
     }
 
+    /**
+     * ADR-0249 D2. See [CardUseCase.blockCardsForRevokedGrant] for why this blocks rather than hides.
+     *
+     * Each card is ended through the ordinary aggregate transitions, so the same `CardStatusChanged`
+     * event the rails already consume is emitted per card (ADR-0050) — revocation reaches the card
+     * rail by the route every other status change takes, not a private back door.
+     */
+    override suspend fun blockCardsForRevokedGrant(grantId: UUID, reason: String): List<Card> {
+        val affected = repo.findByDelegationGrantId(grantId)
+            .filter { it.status in REVOCABLE_STATUSES }
+        if (affected.isEmpty()) return emptyList()
+        val now = Instant.now(clock)
+        return affected.map { card ->
+            val updated = if (card.status == CardStatus.PENDING) {
+                card.cancel(reason, now)
+            } else {
+                card.block(reason, now)
+            }
+            val event = CardStatusChanged(
+                updated.id,
+                card.status,
+                updated.status,
+                reason,
+                CHANGED_BY_DELEGATION,
+                updated.updatedAt,
+            )
+            auditLog.infof(
+                "delegated card ended by grant revocation cardId=%s grantId=%s %s->%s at=%s",
+                card.id,
+                grantId,
+                card.status,
+                updated.status,
+                now,
+            )
+            repo.save(updated, outboxMessage(updated.id, EVENT_CARD_STATUS_CHANGED, event))
+        }
+    }
+
     override suspend fun getCard(id: UUID) = repo.findById(id)
     override suspend fun listAll() = repo.listAllCards()
     override suspend fun listByAccount(accountId: UUID) = repo.findByAccountId(accountId)
@@ -316,6 +357,16 @@ class CardService(
         private const val EXPIRY_YEARS = 4L
         private const val RESULT_SUCCESS = "SUCCESS"
         private const val RESULT_DENIED = "DENIED"
+
+        /** The `changedBy` on a status change nobody clicked — the grant's revocation caused it. */
+        const val CHANGED_BY_DELEGATION = "system:delegation"
+
+        /**
+         * Statuses a grant revocation still has something to end (ADR-0249 D2). BLOCKED is absent
+         * on purpose as well as the terminal pair: re-blocking a blocked card would overwrite the
+         * reason the customer was actually given ("lost or stolen") with a bookkeeping one.
+         */
+        val REVOCABLE_STATUSES = setOf(CardStatus.PENDING, CardStatus.ACTIVE, CardStatus.SUSPENDED)
 
         /** A card must still be usable for its PAN to be worth serving. */
         private val SECURE_DETAILS_STATUSES = setOf(CardStatus.PENDING, CardStatus.ACTIVE, CardStatus.SUSPENDED)

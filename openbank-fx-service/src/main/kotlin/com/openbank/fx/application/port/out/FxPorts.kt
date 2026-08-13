@@ -25,6 +25,32 @@ interface FxRateRepository {
     suspend fun findLatestBySource(base: String, quote: String, source: RateSource): FxRate?
 
     /**
+     * The fixing from [source] that was **in effect at [at]** for this pair, or `null` if none was.
+     *
+     * "In effect" is the stored validity window, evaluated at [at] instead of at wall-clock now:
+     * `validFrom <= at < validTo`, newest `validFrom` first. [findLatestBySource] answers the same
+     * question with `at` pinned to `Instant.now()`, which is why a belated or manual revaluation of
+     * an older business day marked that day at **today's** fixing (#3921 item 3) — the seam simply
+     * had no way to ask for any other day.
+     *
+     * Two properties this deliberately keeps rather than relaxing:
+     *
+     *  - **The `validTo` bound stays.** Dropping it would make a dead feed resolve to the last
+     *    fixing it ever published instead of to `null`, turning ledger's loud "skipping its
+     *    revaluation leg" into a silent mark at an arbitrarily old rate. The three-day window is
+     *    what makes a stale feed *absent* rather than *wrong*.
+     *  - **`validFrom <= at` is new and is a tightening.** [findLatestBySource] filters only on
+     *    `validTo`, so a future-dated fixing already in the table would be picked to value today.
+     *    It cannot value a day it was not yet valid for.
+     *
+     * With `at` = the start of today, this returns exactly what [findLatestBySource] returns for
+     * every row this service writes: `CnbRateIngestionService` sets both bounds to Prague midnights,
+     * so no row can expire between the start of the day and now. `FxRateRepositoryAsOfTest` pins
+     * that equivalence.
+     */
+    suspend fun findBySourceAsOf(base: String, quote: String, source: RateSource, at: Instant): FxRate?
+
+    /**
      * Idempotency probe for source ingestion: the rate already stored for this [source]/pair whose
      * [validFrom] equals the fixing's business day start, if any. Used to make daily ČNB upserts a no-op.
      */

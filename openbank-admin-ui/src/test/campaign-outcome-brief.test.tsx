@@ -26,7 +26,8 @@ describe('campaign outcome brief', () => {
     expect(screen.getByText('Handed off')).toBeTruthy()
     expect(screen.getByText('to notification service')).toBeTruthy()
     expect(screen.getByText('Account opened')).toBeTruthy()
-    expect(screen.getByText(/no in-app engagement is attributed/)).toBeTruthy()
+    expect(screen.getByText('Seen in app')).toBeTruthy()
+    expect(screen.getByText(/aggregate events, not people or banking conversion/)).toBeTruthy()
   })
 
   it('does not show a zero outcome when the campaign measures nothing', () => {

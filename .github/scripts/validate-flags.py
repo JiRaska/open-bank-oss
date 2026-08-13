@@ -129,7 +129,111 @@ def validate_file(path: Path) -> tuple[int, int, list[str]]:
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
+def self_test() -> int:
+    """Falsify the per-flag validator and the file walker.
+
+    A feature flag is a runtime switch over money-path behaviour, so the failures here are
+    governance ones and every single one is silent at runtime: an orphan flag nobody owns
+    outlives the person who added it, a MONEY_PATH flag without four-eyes can be flipped by
+    one person, and a flag with no expiry is permanent by omission — none of which any test
+    or deploy notices, because the flag WORKS.
+
+    The prohibited set is the sharpest case: `sanctions-screening-disabled` existing at all is
+    the finding, whatever its value, because a flag that can be flipped is a control that can
+    be turned off.
+    """
+    import tempfile, json as _json
+    from datetime import timedelta
+
+    fails: list[str] = []
+
+    def case(label, key, obj, want_hit, want_sub=""):
+        v = validate_flag(key, obj, "fixture")
+        got = bool(v)
+        if got != want_hit:
+            fails.append(f"{label}: expected violation={want_hit}, got {v}")
+        elif want_sub and not any(want_sub in x for x in v):
+            fails.append(f"{label}: flagged for the wrong reason — no {want_sub!r} in {v}")
+
+    future = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    ok_meta = {"owner": "payments-team", "classification": "STANDARD", "expiresAt": future}
+
+    # The only fully clean shape.
+    case("a well-formed flag is clean", "my-flag", {"openbank": ok_meta}, False)
+
+    # PROHIBITED: existence is the finding, whatever the value or metadata. A flag that can be
+    # flipped is a control that can be turned off.
+    case("a prohibited key is flagged even when otherwise perfect",
+         "sanctions-screening-disabled", {"openbank": ok_meta}, True, "prohibited")
+    # ...and even with no openbank block at all, because the early return must come AFTER the
+    # prohibited check — otherwise adding the flag without metadata evades the ban entirely.
+    case("a prohibited key with no metadata is still flagged",
+         "aml-screening-disabled", {}, True, "prohibited")
+
+    # Naming, so the key is addressable by the OPA policy that reads it.
+    case("a non-kebab key is flagged", "My_Flag", {"openbank": ok_meta}, True, "kebab-case")
+    case("a blank key is flagged", "", {"openbank": ok_meta}, True, "kebab-case")
+
+    # Ownership: an orphan flag outlives whoever added it.
+    case("a blank owner is flagged", "my-flag",
+         {"openbank": {**ok_meta, "owner": "   "}}, True, "owner is blank")
+
+    # MONEY_PATH without four-eyes: one person can flip a money-path behaviour.
+    case("MONEY_PATH without fourEyes is flagged", "my-flag",
+         {"openbank": {**ok_meta, "classification": "MONEY_PATH"}}, True, "fourEyes")
+    case("MONEY_PATH with fourEyes is clean", "my-flag",
+         {"openbank": {**ok_meta, "classification": "MONEY_PATH", "fourEyes": True}}, False)
+
+    # Expiry: missing means permanent by omission; expired means overdue; unparseable must not
+    # be swallowed as "no expiry set".
+    case("a missing expiresAt is flagged", "my-flag",
+         {"openbank": {"owner": "x", "classification": "STANDARD"}}, True, "expiresAt is missing")
+    case("an expired flag is flagged", "my-flag",
+         {"openbank": {**ok_meta, "expiresAt": past}}, True, "expired at")
+    case("an unparseable expiresAt is flagged", "my-flag",
+         {"openbank": {**ok_meta, "expiresAt": "soon"}}, True, "not a valid ISO-8601")
+
+    # A flag with no openbank block is out of scope — third-party flagd files exist and
+    # demanding our metadata of them would make the gate unusable.
+    case("a flag with no openbank block is out of scope", "my-flag", {"state": "ENABLED"}, False)
+
+    # --- the file walker ---------------------------------------------------------------
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "a").mkdir()
+        good = root / "a" / "x.flagd.json"
+        good.write_text(_json.dumps({"flags": {"my-flag": {"openbank": ok_meta}}}))
+        # Directories a scan must never descend into: build output is a COPY, so every finding
+        # would be reported twice, and a hidden dir is not source.
+        for skip in ("build", ".git", "node_modules"):
+            d = root / skip; d.mkdir()
+            (d / "y.flagd.json").write_text(_json.dumps({"flags": {}}))
+        found = {p.name for p in find_flagd_files(root)}
+        if found != {"x.flagd.json"}:
+            fails.append(f"the walker descended where it should not: {sorted(found)}")
+
+        # Malformed JSON must be a VIOLATION, not a skip: a file that cannot be parsed is a
+        # file whose flags were never checked, and silence about it reads as compliance.
+        bad = root / "a" / "bad.flagd.json"
+        bad.write_text("{ not json")
+        checked, count, msgs = validate_file(bad)
+        if count != 1 or not any("invalid JSON" in m for m in msgs):
+            fails.append(f"malformed JSON was not reported as a violation: {msgs}")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: feature-flag governance is falsifiable (16 cases)")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     repo_root = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(".")
     files = find_flagd_files(repo_root)
 

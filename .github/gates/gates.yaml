@@ -667,13 +667,14 @@ gates:
   # (finrep-service 0.4.0). Harmless but noisy; classifies from the PR title since the squash
   # commit doesn't exist yet at PR-CI time. PR-only: no PR title to classify on a push to main.
   - id: release-scope-mismatch-gate
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "release-scope-mismatch gate (rules.yaml release_scope_mismatch, advisory)"
     group: supplychain
     mode: advisory
     verified: "2026-08-09 — heuristic by design (classifies from PR title before the squash commit exists); PR-only, still noisy-not-wrong, no graduation planned"
     when: pull_request
     needs_base: required
+    selftest: python3 openbank-infra/scripts/check-release-scope-mismatch.py --self-test
+    selftest_expect: pass
     run: |
       set -euo pipefail
       python3 openbank-infra/scripts/check-release-scope-mismatch.py \
@@ -894,7 +895,6 @@ gates:
   # `target_enforce_date`. rules.yaml can no longer be the only place that knows a gate exists.
   # ENFORCED from day one — the tree is clean as of this PR.
   - id: advisory-gate-registration
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "advisory-gate registration (issue #2392, enforced)"
     group: supplychain
     # ENFORCED, despite the word "advisory" in the name — this is the gate ABOUT advisory
@@ -902,6 +902,8 @@ gates:
     # once flagged itself for the same reason), which is why `mode:` is declared here
     # rather than inferred anywhere.
     mode: enforced
+    selftest: python3 .github/scripts/check-advisory-gate-registration.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
@@ -940,10 +942,11 @@ gates:
   # job stops at its first failing gate, leaving later steps `skipped`, not `pass`. Run it
   # locally before pushing: python3 .github/scripts/check-prompt-registry.py
   - id: prompt-registry-integrity
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "prompt-registry integrity (ADR-0148, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-prompt-registry.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-prompt-registry.py
 
@@ -970,10 +973,11 @@ gates:
   # at its first failing gate, leaving later steps `skipped`, not `pass`. Run it locally before
   # pushing: python3 .github/scripts/check-evals-registry.py
   - id: evals-registry-integrity
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "evals-registry integrity (ADR-0148, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-evals-registry.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-evals-registry.py
 
@@ -1209,10 +1213,11 @@ gates:
   # ENFORCED for the same reason as its sibling: over a generated claim, advisory means "the
   # document does not match reality", and there is no judgement left to exercise.
   - id: ai-act-high-risk-inventory-vs-code
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-ai-act-high-risk-inventory.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-ai-act-high-risk-inventory.py
 
@@ -2134,6 +2139,24 @@ gates:
     run: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
 
+  # aggregate_type is a domain discriminator, not content — an unfolded literal comparison is one
+  # producer rename away from silently matching nothing (#4553: a Grafana tile read 0 against a true
+  # 4 for its whole life; silver_current_state split one account into two current-state rows that
+  # never reconcile). Ratchet, not zero: superseded migration-file text is baselined, see the
+  # checker's own header for why editing that text in place would be a no-op.
+  - id: aggregate-type-case-fold
+    min_subjects: 1500   # 2367 files scanned today (2026-08-13)
+    name: "aggregate_type comparisons are case-folded (issue #4604, enforced)"
+    group: data
+    mode: enforced
+    rationale: "An unfolded aggregate_type literal silently matches nothing the moment a producer's spelling changes, which already zeroed a live Grafana tile and split one account's history across two unreconciled rows in silver_current_state."
+    review_after: "2027-02-13"
+    selftest: |
+      python3 .github/scripts/check-aggregate-type-case-fold.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-aggregate-type-case-fold.py --root .
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
@@ -2200,13 +2223,14 @@ gates:
   # startup with `checksum mismatch`). PR-only and diff-scoped against the
   # resolved PR diff base, same as api-contract above.
   - id: db-migration-gate
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
     group: data
     mode: advisory
     verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
     when: pull_request
     needs_base: required
+    selftest: python3 openbank-infra/scripts/check-db-migration.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
 
@@ -2277,13 +2301,14 @@ gates:
       python3 .github/scripts/check-event-contract-code-agreement.py
 
   - id: schema-compat-gate
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
     group: data
     mode: advisory
     verified: "2026-08-09 — on track for ADR-0144's 2026-09-15 enforce target"
     when: pull_request
     needs_base: required
+    selftest: python3 .github/scripts/check-event-schema-compat.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
 
@@ -2422,10 +2447,11 @@ gates:
   # MONEY_PATH → fourEyes=true, expiresAt in the future, no prohibited keys.
   # stdlib-only Python script mirrors the Kotlin FlagDefinition.validate() rules.
   - id: feature-flag-governance
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "feature-flag governance (ADR-0067, issue #419)"
     group: security
     mode: enforced
+    selftest: python3 .github/scripts/validate-flags.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/validate-flags.py .
 

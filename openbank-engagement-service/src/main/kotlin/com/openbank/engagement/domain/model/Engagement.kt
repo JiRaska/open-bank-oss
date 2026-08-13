@@ -10,15 +10,17 @@ import java.util.UUID
 /** ADR-0220 D2: the four events the app posts back. */
 enum class EngagementEventType { IMPRESSION, CLICK, DISMISS, CONVERSION }
 
-/** Server-owned campaign context resolved from an opaque PUSH interaction reference. */
+/** Server-owned campaign context resolved from an opaque app interaction reference. */
 data class CampaignAttribution(val campaignId: UUID, val stepOrder: Int, val channel: String) {
     init {
         require(stepOrder >= 0) { "campaign step order must be non-negative" }
-        require(channel == PUSH_CHANNEL) { "only PUSH interaction references are attributable" }
+        require(channel in ATTRIBUTABLE_CHANNELS) { "only PUSH and BANNER interactions are attributable" }
     }
 
     companion object {
         const val PUSH_CHANNEL = "PUSH"
+        const val BANNER_CHANNEL = "BANNER"
+        val ATTRIBUTABLE_CHANNELS = setOf(PUSH_CHANNEL, BANNER_CHANNEL)
     }
 }
 
@@ -35,7 +37,7 @@ data class EngagementEvent(
     val slot: SurfaceSlot,
     val type: EngagementEventType,
     val occurredAt: Instant,
-    /** Opaque campaign PUSH handoff reference, validated by customer-edge before this service sees it. */
+    /** Opaque campaign app interaction reference, validated by customer-edge before this service sees it. */
     val interactionRef: UUID? = null,
     /** Absent for organic in-app content; never accepted from the public mobile API on its own. */
     val campaignAttribution: CampaignAttribution? = null,

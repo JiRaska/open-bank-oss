@@ -4,6 +4,8 @@
 
 package com.openbank.engagement.domain.model
 
+import java.util.UUID
+
 /**
  * Named slots the app registers to render content into (ADR-0220 D1). A slot has no content of
  * its own — it is a place, not a message, exactly the distinction that keeps this from being the
@@ -35,6 +37,12 @@ data class SurfaceContent(
     val slot: SurfaceSlot,
     val type: SurfaceContentType,
     val variables: Set<String>,
+    /** Values exist only on a trusted, campaign-assigned placement; catalogue items declare keys. */
+    val values: Map<String, String> = emptyMap(),
+    /** Bank-owned app route, never a marketer-entered URL. */
+    val deepLink: String? = null,
+    /** Opaque campaign send-log id used only when the app reports an interaction back. */
+    val interactionRef: UUID? = null,
 ) {
     init {
         require(id.isNotBlank()) { "content id must not be blank" }

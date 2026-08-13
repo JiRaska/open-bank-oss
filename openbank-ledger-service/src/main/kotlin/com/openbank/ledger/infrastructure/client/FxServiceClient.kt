@@ -29,12 +29,22 @@ import java.time.Instant
 @Produces(MediaType.APPLICATION_JSON)
 interface FxServiceClient {
 
+    /**
+     * [asOf] pins the business day the fixing must have been in effect on (ISO `yyyy-MM-dd`).
+     * fx-service accepts it only alongside `source=CNB` and answers 404 — not the newest fixing —
+     * for a day none covers (#3921).
+     *
+     * This is an outbound rest-client INTERFACE, so the non-nullable parameters are supplied by the
+     * caller and checked at compile time; the `check-nonnull-jaxrs-params.py` rule about nullable
+     * `@QueryParam` is about inbound resources, and does not apply here.
+     */
     @GET
     @Path("/rates/{base}/{quote}")
     fun getRate(
         @PathParam("base") base: String,
         @PathParam("quote") quote: String,
         @QueryParam("source") source: String,
+        @QueryParam("asOf") asOf: String,
     ): Uni<FxRateResponse>
 }
 
