@@ -134,9 +134,11 @@ describe('campaign console + reach', () => {
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
     await waitFor(() => expect(screen.getByText('Enrolled')).toBeTruthy())
-    expect(screen.getByText('45')).toBeTruthy()
+    // Portfolio pulse gives the cross-campaign total while the row keeps the per-campaign
+    // number, so both deliberately surface the same single-campaign value.
+    expect(screen.getAllByText('45')).toHaveLength(2)
     // 2 sent against 43 suppressed is the whole story — "2 sent" alone reads as a tiny audience.
-    expect(screen.getByText('43')).toBeTruthy()
+    expect(screen.getAllByText('43')).toHaveLength(2)
   })
 
   it('omits the reach columns entirely when the deployed service cannot answer', async () => {
