@@ -13,8 +13,13 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.nio.file.Files
+import java.nio.file.Path
+import java.security.KeyStore
 import java.time.Duration
 import java.util.UUID
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 
 /**
  * Singleton upstream proxy client (ADR-0065).
@@ -64,6 +69,14 @@ class UpstreamClient {
     // Quarkus to this dotted property.
     @ConfigProperty(name = "openbank.upstream.client-secret", defaultValue = "")
     var clientSecret: String = ""
+
+    /**
+     * Optional PEM CA certificate for the private HTTPS campaign validator. The edge currently
+     * uses HTTP for its other in-cluster calls, so an empty value keeps development fixtures on
+     * the platform default while GitOps mounts the private CA only in the deployed edge.
+     */
+    @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file", defaultValue = "")
+    var tlsTrustCertificateFile: String = ""
 
     // SSRF hardening: every public method below takes a caller-supplied `url` and hands it to
     // URI.create() with no host check of its own — it relies entirely on callers building `url`
@@ -127,7 +140,26 @@ class UpstreamClient {
             .version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofMillis(connectTimeoutMs))
             .followRedirects(HttpClient.Redirect.NEVER)
+            .apply {
+                tlsTrustCertificateFile.takeIf { it.isNotBlank() }
+                    ?.let { sslContext(trustContext(Path.of(it))) }
+            }
             .build()
+    }
+
+    private fun trustContext(certificatePath: Path): SSLContext {
+        val certificates = Files.newInputStream(certificatePath).use { input ->
+            java.security.cert.CertificateFactory.getInstance("X.509").generateCertificates(input)
+        }
+        require(certificates.isNotEmpty()) { "TLS trust certificate file is empty: $certificatePath" }
+        val trustStore = KeyStore.getInstance(KeyStore.getDefaultType()).apply { load(null, null) }
+        certificates.forEachIndexed { index, certificate ->
+            trustStore.setCertificateEntry("upstream-ca-$index", certificate)
+        }
+        val trustManagers = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply {
+            init(trustStore)
+        }
+        return SSLContext.getInstance("TLS").apply { init(null, trustManagers.trustManagers, null) }
     }
 
     @Volatile private var cachedToken: String? = null
