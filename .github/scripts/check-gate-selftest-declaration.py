@@ -334,14 +334,12 @@ DEBT = {
     "ai-act-high-risk-inventory-vs-code": DEBT_MARKER,
     "ai-governance-snapshot-drift": DEBT_MARKER,
     "authz-enforce-pdp-sidecar-parity": DEBT_MARKER,
-    "critical-alert-egress": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
     "deploy-coverage-guard": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
     "evals-registry-integrity": DEBT_MARKER,
     "event-consumer-liveness": DEBT_MARKER,
-    "event-contract-coverage-ratchet": DEBT_MARKER,
     "feature-flag-governance": DEBT_MARKER,
     "gen-network-policies-drift-gate": DEBT_MARKER,
     "gitops-ref-integrity-guard": DEBT_MARKER,
@@ -353,7 +351,6 @@ DEBT = {
     "rolesallowed-realm-parity": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
-    "threat-model-coverage": DEBT_MARKER,
 }
 
 if __name__ == "__main__":

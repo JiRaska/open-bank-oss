@@ -2192,6 +2192,8 @@ gates:
     name: "event-contract coverage ratchet (ADR-0006, enforced)"
     group: data
     mode: enforced
+    selftest: python3 .github/scripts/check-event-contract-coverage.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-event-contract-coverage.py
 
@@ -2295,6 +2297,8 @@ gates:
     name: "critical-alert egress (rules.yaml: alerting, enforced)"
     group: security
     mode: enforced
+    selftest: python3 .github/scripts/check-critical-alert-egress.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-critical-alert-egress.py
 
@@ -2306,6 +2310,8 @@ gates:
     name: "threat-model coverage (ADR-0030 D2)"
     group: security
     mode: enforced
+    selftest: python3 openbank-infra/scripts/check-threat-models.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-threat-models.py
 
