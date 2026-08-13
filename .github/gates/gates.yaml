@@ -666,6 +666,8 @@ gates:
     verified: "2026-08-09 — heuristic by design (classifies from PR title before the squash commit exists); PR-only, still noisy-not-wrong, no graduation planned"
     when: pull_request
     needs_base: required
+    selftest: python3 openbank-infra/scripts/check-release-scope-mismatch.py --self-test
+    selftest_expect: pass
     run: |
       set -euo pipefail
       python3 openbank-infra/scripts/check-release-scope-mismatch.py \
@@ -874,6 +876,8 @@ gates:
     # once flagged itself for the same reason), which is why `mode:` is declared here
     # rather than inferred anywhere.
     mode: enforced
+    selftest: python3 .github/scripts/check-advisory-gate-registration.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
@@ -2243,6 +2247,8 @@ gates:
     verified: "2026-08-09 — on track for ADR-0144's 2026-09-15 enforce target"
     when: pull_request
     needs_base: required
+    selftest: python3 .github/scripts/check-event-schema-compat.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-event-schema-compat.py --base "${PR_DIFF_BASE}"
 
