@@ -451,6 +451,14 @@ main {
 .campaign-workbench-status { display: inline-flex; align-items: center; gap: .4rem; flex: 0 0 auto; padding: .43rem .62rem; border: 1px solid #e0e4ff; border-radius: 99px; background: #f5f5ff; color: #5550be; font-size: .69rem; font-weight: 800; }
 .campaign-workbench-status span { width: .42rem; height: .42rem; border-radius: 99px; background: #7c72ff; box-shadow: 0 0 0 .22rem rgba(124,114,255,.12); }
 .campaign-journey-workbench > .space-y-0 > div:first-child { border-color: #d7dded; box-shadow: 0 12px 25px rgba(58, 65, 113, .06); }
+.campaign-surface-map { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; padding: .85rem .95rem; border: 1px solid #e1e6f5; border-radius: .95rem; background: linear-gradient(105deg, #f8f9ff 0%, #fff 48%, #f6fffd 100%); }
+.campaign-surface-map h3 { color: var(--campaign-ink); font-size: .84rem; font-weight: 780; letter-spacing: -.02em; }
+.campaign-surface-map > div > p:last-child { margin-top: .18rem; color: var(--campaign-muted); font-size: .69rem; }
+.campaign-surface-map-items { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .42rem; }
+.campaign-surface-map-items > span { display: inline-flex; align-items: center; gap: .32rem; padding: .38rem .48rem; border: 1px solid #e0e5f5; border-radius: .58rem; background: rgba(255,255,255,.86); color: #42516b; font-size: .68rem; font-weight: 750; white-space: nowrap; }
+.campaign-surface-map-items svg { color: var(--campaign-violet); }
+.campaign-surface-map-items strong { display: inline-grid; min-width: 1.15rem; height: 1.15rem; place-items: center; border-radius: 99px; background: #edeaff; color: #5e57cf; font-size: .61rem; }
+.campaign-surface-map-empty { color: var(--campaign-muted) !important; font-weight: 650 !important; }
 .campaign-measurement-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem; margin-top: 1rem; }
 .campaign-measurement-card {
   display: flex;
@@ -564,7 +572,8 @@ main {
   .campaign-brief-card .campaign-section-heading { margin-bottom: .8rem; }
   .campaign-brief-card .input + .input { margin-top: .65rem !important; }
   .campaign-measurement-grid { grid-template-columns: 1fr; }
-  .campaign-workbench-heading, .campaign-composer-footer { align-items: flex-start; flex-direction: column; }
+  .campaign-workbench-heading, .campaign-composer-footer, .campaign-surface-map { align-items: flex-start; flex-direction: column; }
+  .campaign-surface-map-items { justify-content: flex-start; }
   .campaign-recipe-heading { align-items: flex-start; flex-direction: column; }
   .campaign-recipe-heading > span { text-align: left; }
   .campaign-composer-footer-actions { justify-content: flex-start; }

@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Clock3, Megaphone, Send, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BellRing, Clock3, Mail, Megaphone, PanelsTopLeft, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
 import {
@@ -357,6 +357,12 @@ export default function NewCampaignPage() {
     (entryMode === 'TRIGGER' && trigger !== '')
   const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
     contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+  // A campaign is an experience across surfaces, not a list of transport rows. Keep this compact
+  // overview next to the canvas so a marketer can scan the whole customer footprint without
+  // opening every node. It is derived solely from the steps that will be sent to campaign-service.
+  const experienceSurfaces = (['PUSH', 'BANNER', 'EMAIL'] as EditorChannel[])
+    .map(channel => ({ channel, count: steps.filter(step => step.channel === channel).length }))
+    .filter(({ count }) => count > 0)
 
   const setContentExperimentEnabled = (enabled: boolean) => {
     setContentExperiment(enabled)
@@ -683,6 +689,23 @@ export default function NewCampaignPage() {
         )}
 
         </div>
+
+        <aside className="campaign-surface-map" aria-label={t('Přehled zákaznických ploch', 'Customer surface overview')}>
+          <div>
+            <p className="campaign-composer-eyebrow"><PanelsTopLeft className="h-3.5 w-3.5" /> {t('Zážitek napříč aplikací', 'Experience across the app')}</p>
+            <h3>{t('Co lidé skutečně uvidí', 'What people will actually see')}</h3>
+            <p>{t('Jen plochy z této cesty. Nic se nedoplňuje domněnkou.', 'Only surfaces in this journey. Nothing is inferred.')}</p>
+          </div>
+          <div className="campaign-surface-map-items" data-testid="campaign-surface-map">
+            {experienceSurfaces.length === 0 ? (
+              <span className="campaign-surface-map-empty">{t('Přidejte první ověřený krok.', 'Add the first reviewed step.')}</span>
+            ) : experienceSurfaces.map(({ channel, count }) => {
+              const Icon = channel === 'PUSH' ? BellRing : channel === 'BANNER' ? PanelsTopLeft : Mail
+              const label = channel === 'PUSH' ? t('Push', 'Push') : channel === 'BANNER' ? t('Banner v aplikaci', 'In-app banner') : t('E-mail', 'Email')
+              return <span key={channel} data-surface={channel}><Icon className="h-3.5 w-3.5" /> {label}<strong>{count}</strong></span>
+            })}
+          </div>
+        </aside>
 
         <div className="campaign-studio-companion-grid">
           <CampaignExperiencePreview step={selected === null ? undefined : steps[selected]} campaignName={name} />
