@@ -389,6 +389,45 @@ class CampaignRestContractIT {
         }
     }
 
+    @Test
+    fun `two decision paths can name the same explicit source step`() {
+        val body = """
+            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[
+               {"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":2,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_CONFIRMED","conditionSourceOrder":1},
+               {"order":3,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_NOT_CONFIRMED","conditionSourceOrder":1}
+             ]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        }
+    }
+
     /**
      * These terminal reasons are operator-visible contract values, not internal workflow detail.
      * Drive the real endpoint over rows that can only be produced by live journey control: a test

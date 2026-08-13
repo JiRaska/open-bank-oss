@@ -27,6 +27,9 @@ interface Campaign {
     order: number
     template: string
     delaySeconds: number
+    channel?: 'EMAIL' | 'PUSH' | 'BANNER'
+    condition?: 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
+    conditionSourceOrder?: number
     variantBVariables?: Record<string, string> | null
     fallbackToPush?: boolean
     mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null

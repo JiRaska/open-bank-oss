@@ -177,6 +177,13 @@ interface SendLogRepository {
     suspend fun latestDeliveryStatusBeforeStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
 
     /**
+     * The newest observable delivery state for one explicitly named source step.  This is separate
+     * from [latestDeliveryStatusBeforeStep]: a multi-path decision must not let a skipped sibling
+     * change the condition's source.
+     */
+    suspend fun deliveryStatusForStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? = null
+
+    /**
      * One page of send attempts for a campaign, newest first — the operator view of what happened.
      *
      * Paged at the repository, not in the caller: a campaign's send log has one row per party per

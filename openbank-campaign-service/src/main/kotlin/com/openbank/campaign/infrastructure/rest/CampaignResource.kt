@@ -78,6 +78,8 @@ data class StepRequest(
     val delaySeconds: Long = 0,
     /** Optional branch condition (ADR-0200 D1, #3585). Absent means the step always runs. */
     val condition: StepCondition? = null,
+    /** Optional explicit earlier source step for a multi-path decision. */
+    val conditionSourceOrder: Int? = null,
     /** The B-arm values for a campaign-wide content experiment; absent keeps one shared message. */
     val variantBVariables: Map<String, String>? = null,
     /** Use the catalogue's safe PUSH counterpart only when this EMAIL step lacks email consent. */
@@ -126,6 +128,7 @@ private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
         it.variables,
         it.delaySeconds,
         it.condition,
+        it.conditionSourceOrder,
         it.variantBVariables,
         it.fallbackToPush,
         it.mobileDestination,
