@@ -90,7 +90,7 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     await expect(page.getByText('Throughput', { exact: true })).toHaveCount(0)
 
     await expect(page.getByRole('link', { name: 'Help and documentation' })).toHaveAttribute('href', '/docs')
-    await expect(page.getByRole('link', { name: 'Approvals' })).toHaveAttribute('href', '/approvals')
+    await expect(page.locator('header').getByRole('link', { name: 'Approvals' })).toHaveAttribute('href', '/approvals')
 
     // The approved dashboard direction is deliberately denser than the old generic-card
     // layout: four factual metrics at desktop, then a two-column service overview. These
