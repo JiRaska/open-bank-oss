@@ -66,19 +66,14 @@ REQUIRED = {
 }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--enforce", action="store_true", help="fail the build instead of warning")
-    args = parser.parse_args()
+def evaluate(charters: dict) -> list[str]:
+    """The comparison, separated from file loading so a self-test can drive it.
 
-    if not AGENTS_YAML.exists():
-        print(f"::error::{AGENTS_YAML} not found — this check cannot pass vacuously.")
-        return 1
-
-    doc = yaml.safe_load(AGENTS_YAML.read_text())
-    charters = {a.get("id"): a for a in (doc or {}).get("agents", []) or []}
-
-    findings = []
+    Inline in main() it could only be exercised by editing the real agents.yaml, which is how
+    a branch stays unfalsified — and this one binds a CHARTER CLAIM to a code seam, so a
+    silent failure means the charter advertises a control the code does not implement.
+    """
+    findings: list[str] = []
     for charter_id, requirements in REQUIRED.items():
         charter = charters.get(charter_id)
         if charter is None:
@@ -96,6 +91,70 @@ def main() -> int:
                 findings.append(
                     f"charter '{charter_id}': data_scope.{key} is {actual!r}, expected {expected!r}. {why}"
                 )
+    return findings
+
+
+def self_test() -> int:
+    """Falsify the comparison against fixture charters."""
+    fails: list[str] = []
+
+    def case(label, charters, want_findings):
+        got = evaluate(charters)
+        if bool(got) != want_findings:
+            fails.append(f"{label}: expected findings={want_findings}, got {got}")
+
+    cid = next(iter(REQUIRED))
+    key, (expected, _why) = next(iter(REQUIRED[cid].items()))
+
+    # The only clean shape: the charter declares exactly what the code enforces.
+    case("a matching declaration is clean", {cid: {"data_scope": {key: expected}}}, False)
+    # THE DEFECT: the charter advertises a weaker control than the code implements.
+    case("a differing declaration is FLAGGED", {cid: {"data_scope": {key: "unmasked"}}}, True)
+    # ABSENCE of the key is not agreement — a missing declaration must not read as the right one.
+    case("a missing data_scope key is FLAGGED", {cid: {"data_scope": {}}}, True)
+    case("a missing data_scope block is FLAGGED", {cid: {}}, True)
+    # The charter disappearing entirely is the quiet case: a rename unbinds the claim from the
+    # code, and nothing else notices.
+    case("an absent charter is FLAGGED", {}, True)
+    case("an empty charter map is FLAGGED", {"someone-else": {}}, True)
+
+    # And the real agents.yaml must still parse and still contain the charter — a fixture-only
+    # self-test cannot tell that this script's REQUIRED keys still refer to anything.
+    if AGENTS_YAML.exists():
+        live = yaml.safe_load(AGENTS_YAML.read_text()) or {}
+        ids = {a.get("id") for a in (live.get("agents") or [])}
+        for cid_ in REQUIRED:
+            if cid_ not in ids:
+                fails.append(f"REQUIRED names charter {cid_!r}, which agents.yaml no longer declares")
+    else:
+        fails.append("agents.yaml not found from this script's location")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: mcp charter data_scope binding is falsifiable (6 cases + a live read)")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--enforce", action="store_true", help="fail the build instead of warning")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
+
+    if not AGENTS_YAML.exists():
+        print(f"::error::{AGENTS_YAML} not found — this check cannot pass vacuously.")
+        return 1
+
+    doc = yaml.safe_load(AGENTS_YAML.read_text())
+    charters = {a.get("id"): a for a in (doc or {}).get("agents", []) or []}
+
+    findings = evaluate(charters)
 
     checked = sum(len(v) for v in REQUIRED.values())
     if not findings:
