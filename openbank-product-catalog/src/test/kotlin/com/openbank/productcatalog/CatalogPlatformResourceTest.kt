@@ -62,7 +62,11 @@ class CatalogPlatformResourceTest {
         }
 
         validateInsurance(INSURANCE_ATTRIBUTES, expectedValid = true, schemaVersion = 2)
-        validateInsurance(INSURANCE_ATTRIBUTES.dropLast(1) + ",\"cardConfig\":{}}", expectedValid = false, schemaVersion = 2)
+        validateInsurance(
+            INSURANCE_ATTRIBUTES.dropLast(1) + ",\"cardConfig\":{}}",
+            expectedValid = false,
+            schemaVersion = 2,
+        )
         validateInsurance(
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"FIXED","perils":[],"exclusions":[],"limits":[],"deductibles":[],"underwritingQuestions":[]}""",
             expectedValid = false,
@@ -419,7 +423,9 @@ class CatalogPlatformResourceTest {
         (
             Given {
                 contentType("application/json")
-                body("""{"code":"$code","schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion}}""")
+                body(
+                    """{"code":"$code","schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion}}""",
+                )
             } When {
                 post("/api/v2/specifications")
             } Then {

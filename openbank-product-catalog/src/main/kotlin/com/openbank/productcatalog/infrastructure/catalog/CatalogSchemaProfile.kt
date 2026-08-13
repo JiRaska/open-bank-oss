@@ -28,48 +28,60 @@ class CatalogSchemaProfile {
     private fun visit(node: JsonNode, depth: Int, conditionalFragment: Boolean) {
         require(depth <= MAX_NESTING_DEPTH) { "catalog schema nesting exceeds $MAX_NESTING_DEPTH" }
         when {
-            node.isObject -> {
-                val ref = node.get("\$ref")?.asText()
-                require(ref == null || ref.startsWith("#/\$defs/")) {
-                    "catalog schema references must target local \$defs"
-                }
-                require(!node.has("\$dynamicRef")) { "catalog schema must not use dynamic references" }
-                require(depth == 0 || !node.has("\$id")) { "nested schema ids are forbidden" }
-                val types = node.get("type")?.let { type ->
-                    when {
-                        type.isTextual -> setOf(type.asText())
-                        type.isArray -> type.map(JsonNode::asText).toSet()
-                        else -> emptySet()
-                    }
-                }.orEmpty()
-                val objectApplicator = OBJECT_APPLICATORS.any(node::has)
-                if (!conditionalFragment && ("object" in types || objectApplicator)) {
-                    require(
-                        node.get("additionalProperties")?.isBoolean == true &&
-                            !node.get("additionalProperties").asBoolean(),
-                    ) {
-                        "every object schema must set additionalProperties to false"
-                    }
-                }
-                node.fields().forEachRemaining { (keyword, child) ->
-                    // Conditional roots are partial schemas over their enclosing closed object.
-                    // Descendants introduced beneath them are ordinary schemas and must close
-                    // every object they define.
-                    if (keyword in SCHEMA_MAP_KEYWORDS && child.isObject) {
-                        // `properties` and `$defs` are dictionaries whose *values* are schemas.
-                        // A valid product attribute may itself be named `required`, `properties`,
-                        // etc.; treating the dictionary as a schema makes such an attribute
-                        // spuriously fail the closed-object profile.
-                        child.fields().forEachRemaining { (_, schema) ->
-                            visit(schema, depth + 1, conditionalFragment = false)
-                        }
-                    } else {
-                        visit(child, depth + 1, keyword in CONDITIONAL_KEYWORDS)
-                    }
-                }
-            }
-            node.isArray -> node.elements().forEachRemaining { visit(it, depth + 1, conditionalFragment) }
+            node.isObject -> visitObject(node, depth, conditionalFragment)
+            node.isArray -> visitArray(node, depth, conditionalFragment)
         }
+    }
+
+    private fun visitObject(node: JsonNode, depth: Int, conditionalFragment: Boolean) {
+        requireLocalReferences(node, depth)
+        requireClosedObjects(node, conditionalFragment)
+        node.fields().forEachRemaining { (keyword, child) ->
+            visitChild(keyword, child, depth)
+        }
+    }
+
+    private fun requireLocalReferences(node: JsonNode, depth: Int) {
+        val ref = node.get("\$ref")?.asText()
+        require(ref == null || ref.startsWith("#/\$defs/")) {
+            "catalog schema references must target local \$defs"
+        }
+        require(!node.has("\$dynamicRef")) { "catalog schema must not use dynamic references" }
+        require(depth == 0 || !node.has("\$id")) { "nested schema ids are forbidden" }
+    }
+
+    private fun requireClosedObjects(node: JsonNode, conditionalFragment: Boolean) {
+        val declaresObject = "object" in schemaTypes(node) || OBJECT_APPLICATORS.any(node::has)
+        if (!conditionalFragment && declaresObject) {
+            require(
+                node.get("additionalProperties")?.isBoolean == true &&
+                    !node.get("additionalProperties").asBoolean(),
+            ) {
+                "every object schema must set additionalProperties to false"
+            }
+        }
+    }
+
+    private fun schemaTypes(node: JsonNode): Set<String> = node.get("type")?.let { type ->
+        when {
+            type.isTextual -> setOf(type.asText())
+            type.isArray -> type.map(JsonNode::asText).toSet()
+            else -> emptySet()
+        }
+    }.orEmpty()
+
+    private fun visitChild(keyword: String, child: JsonNode, depth: Int) {
+        if (keyword in SCHEMA_MAP_KEYWORDS && child.isObject) {
+            // `properties` and `$defs` are dictionaries whose *values* are schemas. A valid
+            // product attribute may itself be named `required`, `properties`, etc.
+            child.fields().forEachRemaining { (_, schema) -> visit(schema, depth + 1, false) }
+        } else {
+            visit(child, depth + 1, keyword in CONDITIONAL_KEYWORDS)
+        }
+    }
+
+    private fun visitArray(node: JsonNode, depth: Int, conditionalFragment: Boolean) {
+        node.elements().forEachRemaining { visit(it, depth + 1, conditionalFragment) }
     }
 
     private fun visitInstance(node: JsonNode, depth: Int) {

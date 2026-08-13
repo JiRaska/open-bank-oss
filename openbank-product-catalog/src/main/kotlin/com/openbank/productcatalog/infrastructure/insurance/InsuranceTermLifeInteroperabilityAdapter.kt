@@ -43,7 +43,7 @@ class InsuranceTermLifeInteroperabilityAdapter {
         ),
     )
 
-    private fun characteristic(name: String, value: Any) = mapOf("name" to name, "value" to value)
+    private fun characteristic(name: String, value: Any): Map<String, Any> = mapOf("name" to name, "value" to value)
 
     private fun objectValue(root: CatalogValue.ObjectValue, name: String): Map<String, Any> =
         (root.values[name] as? CatalogValue.ObjectValue)?.toWire()
@@ -52,25 +52,29 @@ class InsuranceTermLifeInteroperabilityAdapter {
     private fun optionalObject(root: CatalogValue.ObjectValue, name: String): Map<String, Any>? =
         (root.values[name] as? CatalogValue.ObjectValue)?.toWire()
 
-    private fun arrayObjects(root: CatalogValue.ObjectValue, name: String): List<Map<String, Any>> =
-        ((root.values[name] as? CatalogValue.ArrayValue)?.values ?: throw IllegalArgumentException(
-            "term-life attributes require array '$name'",
-        )).mapIndexed { index, value ->
+    private fun arrayObjects(root: CatalogValue.ObjectValue, name: String): List<Map<String, Any>> {
+        val values = (root.values[name] as? CatalogValue.ArrayValue)?.values
+            ?: throw IllegalArgumentException("term-life attributes require array '$name'")
+        return values.mapIndexed { index, value ->
             (value as? CatalogValue.ObjectValue)?.toWire()
                 ?: throw IllegalArgumentException("term-life '$name' element $index must be an object")
         }
+    }
 
     private fun text(root: CatalogValue.ObjectValue, name: String): String =
         (root.values[name] as? CatalogValue.TextValue)?.value
             ?: throw IllegalArgumentException("term-life attributes require text '$name'")
 
-    private fun textOrDecimal(root: CatalogValue.ObjectValue, name: String): Any = when (val value = root.values[name]) {
-        is CatalogValue.TextValue -> value.value
-        is CatalogValue.DecimalValue -> value.value.toPlainString()
-        else -> throw IllegalArgumentException("term-life attributes require text or decimal '$name'")
-    }
+    private fun textOrDecimal(root: CatalogValue.ObjectValue, name: String): Any =
+        when (val value = root.values[name]) {
+            is CatalogValue.TextValue -> value.value
+            is CatalogValue.DecimalValue -> value.value.toPlainString()
+            else -> throw IllegalArgumentException("term-life attributes require text or decimal '$name'")
+        }
 
-    private fun CatalogValue.ObjectValue.toWire(): Map<String, Any> = values.mapValues { (_, value) -> value.toWireValue() }
+    private fun CatalogValue.ObjectValue.toWire(): Map<String, Any> = values.mapValues { (_, value) ->
+        value.toWireValue()
+    }
 
     private fun CatalogValue.toWireValue(): Any = when (this) {
         CatalogValue.NullValue -> ""

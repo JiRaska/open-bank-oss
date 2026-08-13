@@ -38,8 +38,9 @@ class CatalogBoundaryValidationTest {
 
         given().contentType("application/json")
             .body(
-                    """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":2},""" +
-                    """"name":{"en":"Boundary"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{"code":"$tooLong","kind":"RATE",""" +
+                """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":2},""" +
+                    """"name":{"en":"Boundary"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[""" +
+                    """{"code":"$tooLong","kind":"RATE",""" +
                     """"value":"1","unit":"annual","cadence":"ANNUALLY"}]}""",
             )
             .post("/api/v2/offerings/$offeringId/revisions").then()
@@ -63,8 +64,9 @@ class CatalogBoundaryValidationTest {
         listOf("1e3", "01").forEach { invalidValue ->
             given().contentType("application/json")
                 .body(
-                        """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":2},""" +
-                        """"name":{"en":"Boundary"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{"code":"PREMIUM","kind":"RATE",""" +
+                    """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":2},""" +
+                        """"name":{"en":"Boundary"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[""" +
+                        """{"code":"PREMIUM","kind":"RATE",""" +
                         """"value":"$invalidValue","unit":"annual","cadence":"ANNUALLY"}]}""",
                 )
                 .post("/api/v2/offerings/$offeringId/revisions").then()
