@@ -17,6 +17,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.security.KeyStore
 import java.time.Duration
+import java.util.Optional
 import java.util.UUID
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManagerFactory
@@ -75,8 +76,8 @@ class UpstreamClient {
      * uses HTTP for its other in-cluster calls, so an empty value keeps development fixtures on
      * the platform default while GitOps mounts the private CA only in the deployed edge.
      */
-    @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file", defaultValue = "")
-    lateinit var tlsTrustCertificateFile: String
+    @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file")
+    lateinit var tlsTrustCertificateFile: Optional<String>
 
     // SSRF hardening: every public method below takes a caller-supplied `url` and hands it to
     // URI.create() with no host check of its own — it relies entirely on callers building `url`
@@ -141,8 +142,9 @@ class UpstreamClient {
             .connectTimeout(Duration.ofMillis(connectTimeoutMs))
             .followRedirects(HttpClient.Redirect.NEVER)
             .apply {
-                tlsTrustCertificateFile.takeIf { it.isNotBlank() }
-                    ?.let { sslContext(trustContext(Path.of(it))) }
+                tlsTrustCertificateFile
+                    .filter { it.isNotBlank() }
+                    .ifPresent { sslContext(trustContext(Path.of(it))) }
             }
             .build()
     }

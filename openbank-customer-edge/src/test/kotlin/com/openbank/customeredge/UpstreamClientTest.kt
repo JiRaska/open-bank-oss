@@ -261,7 +261,7 @@ class UpstreamClientTest {
                 tokenEndpointBase = "$baseUrl/realms/openbank"
                 clientId = "openbank-edge"
                 clientSecret = "test-secret"
-                tlsTrustCertificateFile = ""
+                tlsTrustCertificateFile = java.util.Optional.empty()
                 connectTimeoutMs = 2000
                 requestTimeoutMs = 2000
             }
