@@ -10,7 +10,7 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 import NewCampaignPage from '@/app/campaigns/new/page'
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
 
 const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
 
@@ -27,6 +27,18 @@ const CADENCES = {
 const TRIGGERS = {
   state: 'ok',
   items: [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
+}
+
+const TEMPLATES = {
+  state: 'ok',
+  items: [
+    { template: 'MARKETING_PRODUCT_OFFER', channel: 'EMAIL', variables: ['offerTitle', 'offerText', 'ctaText'] },
+    { template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: ['offerTitle'] },
+    { template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_BANNER' },
+    { template: 'MARKETING_PRODUCT_OFFER_CAROUSEL', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_CAROUSEL' },
+    { template: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'PRODUCT_FEED' },
+    { template: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'REWARDS_HUB' },
+  ],
 }
 
 function detail(state: string) {
@@ -51,8 +63,9 @@ function detail(state: string) {
 
 function mockFetch(routes: Record<string, unknown>) {
   return vi.fn(async (url: string) => {
-    const match = Object.keys(routes).find(k => String(url).includes(k))
-    return { ok: true, status: 200, json: async () => (match ? routes[match] : {}) }
+    const key = String(url)
+    const match = Object.keys(routes).find(k => key.includes(k))
+    return { ok: true, status: 200, json: async () => (match ? routes[match] : key.includes('/api/campaigns/templates') ? TEMPLATES : {}) }
   })
 }
 
@@ -113,6 +126,7 @@ describe('campaign studio', () => {
     vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     // Mobile is the studio's starting surface. E-mail remains available when a campaign genuinely
     // needs its richer template, and that switch—not the initial screen—owns these three fields.
     fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
@@ -136,6 +150,7 @@ describe('campaign studio', () => {
       if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
       if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url.includes('/api/campaigns/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
       if (url === '/api/campaigns') {
         createBody = JSON.parse(String(init?.body))
         return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
@@ -145,6 +160,7 @@ describe('campaign studio', () => {
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
     await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Recurring welcome' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Keep new customers engaged' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
@@ -168,6 +184,7 @@ describe('campaign studio', () => {
       if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
       if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url.includes('/api/campaigns/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
       if (url === '/api/campaigns') {
         createBody = JSON.parse(String(init?.body))
         return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
@@ -177,6 +194,7 @@ describe('campaign studio', () => {
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
     await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Two headlines' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
@@ -218,11 +236,13 @@ describe('campaign studio', () => {
       if (String(url).includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
       if (String(url).includes('/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (String(url).includes('/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (String(url).includes('/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
       return { ok: true, status: 200, json: async () => ({}) }
     }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
     await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Fallback offer' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)

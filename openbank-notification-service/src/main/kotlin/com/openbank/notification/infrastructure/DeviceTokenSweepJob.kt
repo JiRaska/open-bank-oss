@@ -4,14 +4,19 @@
 
 package com.openbank.notification.infrastructure
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import io.quarkus.logging.Log
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution.SKIP
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 
@@ -40,6 +45,19 @@ class DeviceTokenSweepJob {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /**
+     * Registers the boot-seeded ADR-0237 heartbeat before the first nightly sweep. The sweep
+     * intentionally catches its failures, so only a completed repository call may record success.
+     */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
     // TooGenericExceptionCaught: a non-critical nightly sweep must not surface as a Quarkus
     // Scheduler failure — ANY fault is logged and tomorrow's tick sweeps the same rows again.
     @Suppress("TooGenericExceptionCaught")
@@ -48,6 +66,7 @@ class DeviceTokenSweepJob {
         val threshold = Instant.now(clock).minus(STALE_DAYS, ChronoUnit.DAYS)
         try {
             val count = repo.sweepStale(threshold).awaitSuspending()
+            liveness?.recordSuccess()
             if (count > 0) Log.infof("Swept %d stale device tokens (threshold %s)", count, threshold)
         } catch (err: Exception) {
             Log.errorf(err, "Failed to sweep stale device tokens")
@@ -56,5 +75,7 @@ class DeviceTokenSweepJob {
 
     companion object {
         private const val STALE_DAYS = 90L
+        private const val WORKFLOW_NAME = "device-token-stale-sweep"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }

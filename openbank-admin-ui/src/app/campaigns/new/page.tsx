@@ -5,7 +5,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Clock3, Megaphone, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -14,11 +14,17 @@ import {
   JourneyEditor,
   MAX_STEPS,
   type EditorChannel,
+  type EditorInAppSurface,
   type EditorStep,
 } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
 import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
 import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
+import {
+  JourneyRecipePicker,
+  type JourneyRecipe,
+  type JourneyRecipeId,
+} from '@/components/campaigns/JourneyRecipePicker'
 
 /**
  * Campaign Studio — authoring on a canvas (ADR-0221 D1).
@@ -57,43 +63,33 @@ interface CampaignTrigger {
   humanForm: string
 }
 
+/** The reviewed content choice served by campaign-service, rather than a second client-side copy. */
+interface CampaignTemplate {
+  template: string
+  channel: EditorChannel
+  variables: string[]
+  inAppSurface?: EditorInAppSurface | null
+}
+
 type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
 
-/** Mirrors the service's catalogue; the service rejects anything not in its own copy. */
-const TEMPLATES: Record<string, string[]> = {
-  MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
-  // One variable, and that is the channel's rule rather than a simplification: a push renders its
-  // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
-  MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
-  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
-  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
-  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
-  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
-}
-
-/** Which channel each template renders on. The service refuses a step whose two disagree. */
-const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
-  MARKETING_PRODUCT_OFFER: 'EMAIL',
-  MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
-  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER',
-  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER',
-  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER',
-  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER',
-}
-
-const newStep = (): EditorStep => ({
+const newStep = (choice: CampaignTemplate): EditorStep => ({
   // The studio starts with the primary owned surface: the bank app. E-mail remains a supported
   // channel, but leading an app-first campaign with it made the canvas teach the wrong product.
-  template: 'MARKETING_PRODUCT_OFFER_PUSH',
-  channel: 'PUSH',
+  template: choice.template,
+  channel: choice.channel,
   variables: {},
   delaySeconds: 0,
-  mobileDestination: 'HOME',
+  ...(choice.channel === 'PUSH' || choice.channel === 'BANNER' ? { mobileDestination: 'HOME' as const } : {}),
+  ...(choice.inAppSurface ? { inAppSurface: choice.inAppSurface } : {}),
 })
 
 export default function NewCampaignPage() {
   const { t } = useLanguage()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedAudience = searchParams.get('audience')
+  const draftId = searchParams.get('draft')
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
@@ -101,11 +97,14 @@ export default function NewCampaignPage() {
   const [segments, setSegments] = useState<Segment[]>([])
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
+  const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
+  const [contentCatalogueState, setContentCatalogueState] = useState<'loading' | 'ok' | 'unavailable'>('loading')
   const [entryMode, setEntryMode] = useState<EntryMode>('MANUAL')
   const [cadence, setCadence] = useState('')
   const [trigger, setTrigger] = useState('')
   const [entryUnavailable, setEntryUnavailable] = useState(false)
-  const [steps, setSteps] = useState<EditorStep[]>([newStep()])
+  const [steps, setSteps] = useState<EditorStep[]>([])
+  const [journeyRecipe, setJourneyRecipe] = useState<JourneyRecipeId | null>('RETURN_TO_APP')
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
   // Null = no cap, which is the service's own default (absent stopCondition runs every step).
@@ -120,6 +119,13 @@ export default function NewCampaignPage() {
   const [contentExperiment, setContentExperiment] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+
+  const templates = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.variables])) as Record<string, string[]>
+  const templateChannel = Object.fromEntries(contentCatalogue.map(entry => [entry.template, entry.channel])) as Record<string, EditorChannel>
+  const templateSurface = Object.fromEntries(
+    contentCatalogue.flatMap(entry => entry.inAppSurface ? [[entry.inAppSurface, entry.template] as const] : []),
+  ) as Partial<Record<EditorInAppSurface, string>>
+  const defaultStep = () => contentCatalogue.find(entry => entry.channel === 'PUSH') ?? contentCatalogue[0]
 
   const templateLabels: Record<string, string> = {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
@@ -156,28 +162,9 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }, [])
 
-  // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
-  // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
-  // cron field that looks valid while doing something different in Temporal.
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/campaigns/cadences').then(r => r.json()),
-      fetch('/api/campaigns/triggers').then(r => r.json()),
-    ])
-      .then(([cadenceResponse, triggerResponse]: [
-        { items?: Cadence[]; state?: string },
-        { items?: CampaignTrigger[]; state?: string },
-      ]) => {
-        if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
-        if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
-        if (cadenceResponse.state !== 'ok' || triggerResponse.state !== 'ok') setEntryUnavailable(true)
-      })
-      .catch(() => setEntryUnavailable(true))
-  }, [])
-
   // The reach is the segment's own preview, run by the service — the same evaluation enrolment runs.
   // A number computed here from a different query would agree with the send only by luck.
-  const previewReach = (ref: string) => {
+  function previewReach(ref: string) {
     setReach(null)
     const [segName, segVersion] = ref.split('@')
     if (!segName) return
@@ -189,18 +176,167 @@ export default function NewCampaignPage() {
       .catch(() => undefined)
   }
 
+  // A campaign is editable only before submit.  Load the real stored definition rather than
+  // reconstructing it from the canvas, otherwise an omitted later field could silently disappear
+  // when a maker saves an unrelated change.
+  useEffect(() => {
+    if (!draftId) return
+    fetch(`/api/campaigns/${encodeURIComponent(draftId)}`)
+      .then(r => r.json())
+      .then((d: { campaign?: {
+        state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
+        steps?: EditorStep[]; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
+        holdoutPercent?: number; schedule?: { cadence: string } | null; trigger?: string | null
+      }; sources?: { campaign?: string } }) => {
+        const campaign = d.campaign
+        if (d.sources?.campaign !== 'ok' || !campaign || campaign.state !== 'DRAFT') {
+          setError(t('Tento koncept už nelze upravit.', 'This campaign draft can no longer be edited.'))
+          return
+        }
+        setName(campaign.name ?? '')
+        setGoal(campaign.goal ?? '')
+        if (campaign.segmentRef) {
+          const ref = `${campaign.segmentRef.name}@${campaign.segmentRef.version}`
+          setSegment(ref)
+          previewReach(ref)
+        }
+        if (campaign.steps?.length) {
+          setSteps(campaign.steps)
+          setSelected(0)
+        }
+        setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
+        setConversionRule(campaign.conversionRule ?? null)
+        setHoldoutPercent(campaign.holdoutPercent ?? 0)
+        setContentExperiment(campaign.steps?.some(step => step.variantBVariables !== undefined) ?? false)
+        if (campaign.schedule) {
+          setEntryMode('SCHEDULE')
+          setCadence(campaign.schedule.cadence)
+        } else if (campaign.trigger) {
+          setEntryMode('TRIGGER')
+          setTrigger(campaign.trigger)
+        }
+        setJourneyRecipe(null)
+      })
+      .catch(() => setError(t('Koncept se nepodařilo načíst.', 'The campaign draft could not be loaded.')))
+  // previewReach is deliberately called from this initial hydration only; it has no unstable
+  // dependencies and is declared in the component closure.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftId])
+
+  // The Audience Library hands the exact, versioned identifier to Studio. The service still
+  // evaluates this audience on create; the query parameter only saves the marketer from selecting
+  // the same reviewed item twice and never carries an audience definition itself.
+  useEffect(() => {
+    if (!requestedAudience || !segments.some(s => `${s.name}@${s.version}` === requestedAudience)) return
+    setSegment(requestedAudience)
+    const [name, version] = requestedAudience.split('@')
+    fetch(`/api/segments/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
+      .then(r => r.json())
+      .then((d: { size?: number; state: string }) => {
+        if (d.state === 'ok') setReach(d.size ?? 0)
+      })
+      .catch(() => undefined)
+  }, [requestedAudience, segments])
+
+  // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
+  // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
+  // cron field that looks valid while doing something different in Temporal.
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/campaigns/cadences').then(r => r.json()),
+      fetch('/api/campaigns/triggers').then(r => r.json()),
+      fetch('/api/campaigns/templates').then(r => r.json()),
+    ])
+      .then(([cadenceResponse, triggerResponse, templateResponse]: [
+        { items?: Cadence[]; state?: string },
+        { items?: CampaignTrigger[]; state?: string },
+        { items?: CampaignTemplate[]; state?: string },
+      ]) => {
+        if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
+        if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
+        if (cadenceResponse.state !== 'ok' || triggerResponse.state !== 'ok') setEntryUnavailable(true)
+        if (templateResponse.state === 'ok' && (templateResponse.items?.length ?? 0) > 0) {
+          setContentCatalogue(templateResponse.items ?? [])
+          setContentCatalogueState('ok')
+        } else {
+          setContentCatalogueState('unavailable')
+        }
+      })
+      .catch(() => {
+        setEntryUnavailable(true)
+        setContentCatalogueState('unavailable')
+      })
+  }, [])
+
+  // A new journey gets a server-approved app-first step only after the catalogue arrives. There is
+  // intentionally no browser fallback: a stale template fails after a marketer has authored it.
+  useEffect(() => {
+    if (draftId || contentCatalogueState !== 'ok') return
+    const first = defaultStep()
+    if (!first) return
+    setSteps(previous => previous.length === 0 ? [newStep(first)] : previous)
+    setSelected(previous => previous ?? 0)
+  // The catalogue state changes only when its authoritative response arrives.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contentCatalogueState, draftId])
+
   const updateStep = (i: number, next: EditorStep) =>
     setSteps(prev => prev.map((s, k) => (k === i ? next : s)))
 
   const addStep = () =>
     setSteps(prev => {
       if (prev.length >= MAX_STEPS) return prev
+      const first = defaultStep()
+      if (!first) return prev
       setSelected(prev.length)
       return [...prev, {
-        ...newStep(),
+        ...newStep(first),
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       }]
     })
+
+  /**
+   * A binary decision is an authoring shortcut over the service's two complementary, observable
+   * delivery conditions. Keeping both steps adjacent makes their shared predecessor unambiguous:
+   * when the first path is skipped, the second still evaluates that predecessor; when it sends,
+   * the second condition is false. The workflow has covered this replay-safe semantics since #3585.
+   */
+  const addDeliveryDecision = () =>
+    setSteps(prev => {
+      if (prev.length < 1 || prev.length > MAX_STEPS - 2) return prev
+      const first = defaultStep()
+      if (!first) return prev
+      const decisionStep = (condition: EditorStep['condition']): EditorStep => ({
+        ...newStep(first),
+        condition,
+        ...(contentExperiment ? { variantBVariables: {} } : {}),
+      })
+      setSelected(prev.length)
+      return [
+        ...prev,
+        decisionStep('IF_PREVIOUS_CONFIRMED'),
+        decisionStep('IF_PREVIOUS_NOT_CONFIRMED'),
+      ]
+    })
+
+  const applyRecipe = (recipe: JourneyRecipe) => {
+    const verified = recipe.steps.every(step =>
+      templates[step.template] !== undefined && templateChannel[step.template] === step.channel,
+    )
+    if (!verified) {
+      setError(t('Tento recept používá obsah, který už není v ověřeném katalogu.', 'This recipe uses content no longer in the verified catalogue.'))
+      return
+    }
+    // A recipe is only an authoring shortcut. Clone every map so opening one step can never alter
+    // another step's values through a shared object reference.
+    setSteps(recipe.steps.map(step => ({
+      ...step,
+      variables: { ...step.variables },
+      ...(step.variantBVariables ? { variantBVariables: { ...step.variantBVariables } } : {}),
+    })))
+    setJourneyRecipe(recipe.id)
+    setSelected(0)
+  }
 
   const removeStep = (i: number) =>
     setSteps(prev => {
@@ -210,8 +346,9 @@ export default function NewCampaignPage() {
     })
 
   const incomplete = steps.some(s =>
-    (TEMPLATES[s.template] ?? []).some(v => !(s.variables[v] ?? '').trim()) ||
-    (contentExperiment && (TEMPLATES[s.variantBTemplate ?? s.template] ?? [])
+    templates[s.template] === undefined ||
+    templates[s.template].some(v => !(s.variables[v] ?? '').trim()) ||
+    (contentExperiment && (templates[s.variantBTemplate ?? s.template] ?? [])
       .some(v => !(s.variantBVariables?.[v] ?? '').trim())),
   )
   const entryConfigured =
@@ -219,7 +356,7 @@ export default function NewCampaignPage() {
     (entryMode === 'SCHEDULE' && cadence !== '') ||
     (entryMode === 'TRIGGER' && trigger !== '')
   const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
-    !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+    contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
 
   const setContentExperimentEnabled = (enabled: boolean) => {
     setContentExperiment(enabled)
@@ -240,8 +377,8 @@ export default function NewCampaignPage() {
     setSaving(true)
     setError(null)
     const [segName, segVersion] = segment.split('@')
-    fetch('/api/campaigns', {
-      method: 'POST',
+    fetch(draftId ? `/api/campaigns/${encodeURIComponent(draftId)}` : '/api/campaigns', {
+      method: draftId ? 'PUT' : 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         name: name.trim(),
@@ -282,7 +419,7 @@ export default function NewCampaignPage() {
           d.message ??
             d.error ??
             (d.state === 'forbidden'
-              ? t('Nemáte oprávnění zakládat kampaně.', 'You are not permitted to create campaigns.')
+              ? t('Nemáte oprávnění tento koncept upravit.', 'You are not permitted to revise this draft.')
               : t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')),
         )
       })
@@ -300,7 +437,7 @@ export default function NewCampaignPage() {
           <div>
             <p className="campaign-composer-eyebrow"><Sparkles className="h-3.5 w-3.5" /> {t('Campaign studio', 'Campaign studio')}</p>
             <PageHeader
-              title={t('Nová kampaň', 'New campaign')}
+              title={draftId ? t('Upravit koncept', 'Edit draft') : t('Nová kampaň', 'New campaign')}
               subtitle={t(
                 'Navrhněte zážitek v aplikaci, zprávu a okamžik, kdy má přijít. Aktivaci pak vždy potvrdí druhý člověk.',
                 'Design the in-app moment, the message and when it appears. A second person always confirms activation.',
@@ -490,6 +627,8 @@ export default function NewCampaignPage() {
         </div>
       </section>
 
+      {contentCatalogueState === 'ok' && <JourneyRecipePicker selected={journeyRecipe} onApply={applyRecipe} />}
+
       <section className="campaign-journey-workbench">
         <div className="campaign-workbench-heading">
           <div>
@@ -499,6 +638,13 @@ export default function NewCampaignPage() {
           </div>
           <span className="campaign-workbench-status"><span /> {steps.length}/{MAX_STEPS} {t('kroků', 'steps')}</span>
         </div>
+        {contentCatalogueState !== 'ok' && (
+          <p className="text-xs text-muted-foreground" data-content-catalogue-state={contentCatalogueState}>
+            {contentCatalogueState === 'loading'
+              ? t('Načítáme ověřený katalog obsahu…', 'Loading the reviewed content catalogue…')
+              : t('Katalog obsahu teď není dostupný; nové kroky ani recepty nenabízíme.', 'The content catalogue is unavailable; new steps and recipes are not offered.')}
+          </p>
+        )}
         {/* space-y-0 around the canvas+panel pair: any gap between them undoes the join. */}
         <div className="space-y-0">
         <JourneyEditor
@@ -511,6 +657,8 @@ export default function NewCampaignPage() {
           selected={selected}
           onSelect={setSelected}
           onAdd={addStep}
+          onAddDecision={addDeliveryDecision}
+          contentCatalogueReady={contentCatalogueState === 'ok'}
           onRemove={removeStep}
           templateLabels={templateLabels}
           stopAfter={stopAfter}
@@ -523,8 +671,9 @@ export default function NewCampaignPage() {
             attached
             index={selected}
             step={steps[selected]}
-            templates={TEMPLATES}
-            templateChannel={TEMPLATE_CHANNEL}
+            templates={templates}
+            templateChannel={templateChannel}
+            templateSurface={templateSurface}
             templateLabels={templateLabels}
             variableLabels={variableLabels}
             contentExperiment={contentExperiment}
@@ -703,7 +852,7 @@ export default function NewCampaignPage() {
 
       <footer className="campaign-composer-footer">
         <div>
-          <p>{t('Koncept se zatím nikomu neposílá.', 'A draft does not send anything yet.')}</p>
+          <p>{draftId ? t('Upravujete koncept; zatím nikomu nic neposílá.', 'You are revising a draft; it still sends nothing.') : t('Koncept se zatím nikomu neposílá.', 'A draft does not send anything yet.')}</p>
           <span>{t('Po kontrole jej aktivuje jiný oprávněný člověk.', 'A different authorised person activates it after review.')}</span>
         </div>
         <div className="campaign-composer-footer-actions">
@@ -712,7 +861,9 @@ export default function NewCampaignPage() {
           disabled={!ready || saving}
           className="btn btn-primary disabled:opacity-40"
         >
-          {saving ? t('Zakládám…', 'Creating…') : t('Založit koncept', 'Create draft')}
+          {saving
+            ? (draftId ? t('Ukládám…', 'Saving…') : t('Zakládám…', 'Creating…'))
+            : (draftId ? t('Uložit koncept', 'Save draft') : t('Založit koncept', 'Create draft'))}
         </button>
         {!ready && (
           <span className="text-xs text-muted-foreground">

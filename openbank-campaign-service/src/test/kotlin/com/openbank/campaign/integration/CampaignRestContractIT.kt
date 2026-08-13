@@ -85,6 +85,30 @@ class CampaignRestContractIT {
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
 
+    @Test
+    fun `maker can revise an unsubmitted draft through the HTTP contract`() {
+        val id = createDraft()
+        val revisedName = "revised-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody(revisedName))
+        } When {
+            put("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+            body("state", equalTo("DRAFT"))
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+        }
+    }
+
     private fun insertEnrolment(
         campaignId: UUID,
         state: String,
@@ -517,6 +541,32 @@ class CampaignRestContractIT {
             body("find { it.cadence == 'DAILY_MORNING' }.humanForm", org.hamcrest.Matchers.containsString("09:00"))
             // Never UTC: a cron without a zone fires an hour or two off the customer's morning.
             body("find { it.cadence == 'DAILY_MORNING' }.zone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
+    /** Studio reads the exact catalogue the aggregate validates, including authenticated app placement. */
+    @Test
+    fun `the template catalogue serves channels declared variables and in-app surfaces`() {
+        When {
+            get("/api/v1/campaigns/templates")
+        } Then {
+            statusCode(200)
+            body(
+                "template",
+                org.hamcrest.Matchers.hasItems("MARKETING_PRODUCT_OFFER", "MARKETING_PRODUCT_OFFER_BANNER"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.channel",
+                org.hamcrest.Matchers.equalTo("PUSH"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.variables",
+                org.hamcrest.Matchers.contains("offerTitle"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_BANNER' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("HOME_BANNER"),
+            )
         }
     }
 
