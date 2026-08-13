@@ -61,8 +61,7 @@ class CampaignJourneyWorkflowTest {
             condition: StepCondition? = null,
             delaySeconds: Long = 0,
             conditionSourceOrder: Int? = null,
-        ): CampaignStep =
-            CampaignStep(
+        ): CampaignStep = CampaignStep(
                 order = order,
                 template = "MARKETING_PRODUCT_OFFER",
                 channel = Channel.EMAIL,
