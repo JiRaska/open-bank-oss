@@ -199,7 +199,7 @@ function AgentDetailContent() {
               <h1 style={{ fontSize: '25px', fontWeight: 850, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.03em' }}>
                 {persona.name}
               </h1>
-              <p style={{ fontSize: '13px', fontWeight: 750, color: persona.accent, margin: '1px 0 3px' }}>
+              <p style={{ fontSize: '13px', fontWeight: 750, color: 'var(--text-primary)', margin: '1px 0 3px' }}>
                 {persona.role}
               </p>
               <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: 0, fontFamily: 'monospace' }}>
@@ -224,8 +224,8 @@ function AgentDetailContent() {
           <Card>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '18px' }}>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: persona.accent, marginBottom: '7px' }}>
-                  <Sparkles size={14} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: 'var(--text-secondary)', marginBottom: '7px' }}>
+                  <Sparkles size={14} style={{ color: persona.accent }} />
                   <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                     {t('Co dělá', 'What this colleague does')}
                   </span>
@@ -233,8 +233,8 @@ function AgentDetailContent() {
                 <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>{persona.purpose}</p>
               </div>
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: persona.accent, marginBottom: '7px' }}>
-                  <Hand size={14} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: 'var(--text-secondary)', marginBottom: '7px' }}>
+                  <Hand size={14} style={{ color: persona.accent }} />
                   <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
                     {t('Proč na tom záleží', 'Why it matters')}
                   </span>
