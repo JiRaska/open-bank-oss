@@ -334,7 +334,6 @@ DEBT = {
     "ai-governance-snapshot-drift": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
-    "deploy-coverage-guard": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
     "evals-registry-integrity": DEBT_MARKER,
     "feature-flag-governance": DEBT_MARKER,
