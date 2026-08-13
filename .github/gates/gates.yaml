@@ -2115,6 +2115,24 @@ gates:
     run: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
 
+  # aggregate_type is a domain discriminator, not content — an unfolded literal comparison is one
+  # producer rename away from silently matching nothing (#4553: a Grafana tile read 0 against a true
+  # 4 for its whole life; silver_current_state split one account into two current-state rows that
+  # never reconcile). Ratchet, not zero: superseded migration-file text is baselined, see the
+  # checker's own header for why editing that text in place would be a no-op.
+  - id: aggregate-type-case-fold
+    min_subjects: 1500   # 2367 files scanned today (2026-08-13)
+    name: "aggregate_type comparisons are case-folded (issue #4604, enforced)"
+    group: data
+    mode: enforced
+    rationale: "An unfolded aggregate_type literal silently matches nothing the moment a producer's spelling changes, which already zeroed a live Grafana tile and split one account's history across two unreconciled rows in silver_current_state."
+    review_after: "2027-02-13"
+    selftest: |
+      python3 .github/scripts/check-aggregate-type-case-fold.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-aggregate-type-case-fold.py --root .
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
