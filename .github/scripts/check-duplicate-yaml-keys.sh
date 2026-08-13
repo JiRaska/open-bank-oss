@@ -32,6 +32,71 @@
 #
 # Usage: check-duplicate-yaml-keys.sh [root-dir] [--enforce]
 set -euo pipefail
+# --- self-test ------------------------------------------------------------------------
+# SmallRye Config / SnakeYAML keep only the LAST of a repeated mapping key and discard the
+# rest — silently. The dropped block falls back to defaults, and a boot smoke-test cannot see
+# it (#1170 quarkus.http, #1193 openbank). This guard is the only thing that can, and it
+# shipped without a falsification of its own.
+#
+# Fixtures are real files at the real scanned PATHS, run through this script's own scoping —
+# a fixture placed anywhere else would prove only that yamllint works.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+
+  DUP='openbank:\n  a: 1\nopenbank:\n  b: 2\n'
+  CLEAN='openbank:\n  a: 1\n  b: 2\n'
+
+  put() { mkdir -p "$(dirname "$1")"; printf '%b' "$2" > "$1"; }
+  # NOTE on the substring: it must be a phrase only a REAL finding prints. "duplicate" is not
+  # one — it occurs in this script's own name, which the empty-scope error line carries, so a
+  # run that never opened a file matched it and the governance case silently stopped
+  # discriminating. Red for a different reason reads exactly like red for the right one.
+  expect() { # expect <label> <root> <want-rc> [flag] [substring]
+    local label="$1" root="$2" want="$3" flag="${4:-}" sub="${5:-}" out rc
+    if [ -n "$flag" ]; then out=$(bash "$0" "$root" "$flag" 2>&1); else out=$(bash "$0" "$root" 2>&1); fi
+    rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: $label — expected rc=$want, got rc=$rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
+    fi
+  }
+
+  # THE DEFECT, at a scanned path, under --enforce.
+  a="$td/dup"; put "$a/openbank-x/src/main/resources/application.yaml" "$DUP"
+  expect "a duplicate key in application.yaml fails under --enforce" "$a" 1 --enforce "SILENTLY DISCARDED"
+
+  # ...and ADVISORY mode must still exit 0, or the mode means nothing.
+  expect "the same duplicate is advisory without --enforce" "$a" 0 "" "ADVISORY"
+
+  # The only clean shape. Without this a script that failed everything would look correct.
+  b="$td/clean"; put "$b/openbank-x/src/main/resources/application.yaml" "$CLEAN"
+  expect "a file with no duplicate passes" "$b" 0 --enforce "no duplicate keys"
+
+  # The SECOND corpus: governance yaml. It is easy to lose one of two corpora silently.
+  c="$td/gov"; put "$c/openbank-libs/governance/rules.yaml" "$DUP"
+  expect "a duplicate in governance yaml is caught" "$c" 1 --enforce "SILENTLY DISCARDED"
+
+  # SCOPE: the same duplicate somewhere unscanned must NOT be reported. A gate that flags
+  # every yaml in the tree gets switched off by the first person it annoys.
+  d="$td/outofscope"
+  put "$d/openbank-x/src/main/resources/application.yaml" "$CLEAN"
+  put "$d/openbank-x/src/test/resources/application.yaml" "$DUP"
+  put "$d/some/other/place.yaml" "$DUP"
+  expect "a duplicate outside the scanned paths is ignored" "$d" 0 --enforce "no duplicate keys"
+
+  # EMPTY SCOPE is not a pass. Both corpora are large, so finding nothing means the scope
+  # moved, not that the fleet is clean (#4339).
+  e="$td/empty"; mkdir -p "$e"
+  expect "an empty scope FAILS rather than reporting clean" "$e" 1 --enforce "scope moved"
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: duplicate-YAML-key guard is falsifiable (6 cases)"
+  exit 0
+fi
+
 ROOT="."
 ENFORCE=0
 for arg in "$@"; do

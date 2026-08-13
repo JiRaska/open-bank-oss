@@ -6,11 +6,15 @@ package com.openbank.campaign.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
+import com.openbank.campaign.application.port.out.CampaignExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ContentVariantMetrics
 import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
+import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
@@ -18,10 +22,13 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
+import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
@@ -92,6 +99,10 @@ class CampaignEntity : PanacheEntityBase() {
     @Column(name = "trigger_event", length = 64)
     var triggerEvent: String? = null
 
+    /** Percentage assigned to the durable no-contact control cohort (V8). */
+    @Column(nullable = false)
+    var holdoutPercent: Int = 0
+
     @Column(nullable = false)
     lateinit var state: String
 
@@ -130,6 +141,14 @@ class EnrolmentEntity : PanacheEntityBase() {
     lateinit var startedAt: Instant
 
     var completedAt: Instant? = null
+
+    /** Stored rather than re-derived so reports keep the original experimental assignment. */
+    @Column(nullable = false)
+    var experimentCohort: String = ExperimentCohort.TREATMENT.name
+
+    /** Null for historic and no-contact rows; A/B enrolments keep the arm they were assigned. */
+    @Column(length = 1)
+    var contentVariant: String? = null
 }
 
 @Entity
@@ -163,6 +182,10 @@ class SendLogEntity : PanacheEntityBase() {
 
     @Column
     var deliveryUpdatedAt: Instant? = null
+
+    /** Actual request medium; nullable so migration leaves historical decision rows intact. */
+    @Column(length = 8)
+    var channel: String? = null
 }
 
 @Entity
@@ -221,6 +244,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         scheduleCadence = this@toEntity.schedule?.cadence
         scheduleEndAt = this@toEntity.schedule?.endAt
         triggerEvent = this@toEntity.trigger
+        holdoutPercent = this@toEntity.holdoutPercent
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -240,6 +264,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         // schedule with nothing to fire, so the cadence is what decides whether one exists.
         schedule = scheduleCadence?.let { CampaignSchedule(it, scheduleEndAt) },
         trigger = triggerEvent,
+        holdoutPercent = holdoutPercent,
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
@@ -290,6 +315,8 @@ class PanacheEnrolmentRepository :
         currentStep = this@toEntity.currentStep
         startedAt = this@toEntity.startedAt
         completedAt = this@toEntity.completedAt
+        experimentCohort = this@toEntity.experimentCohort.name
+        contentVariant = this@toEntity.contentVariant?.name
     }
 
     private fun EnrolmentEntity.toDomain(): Enrolment = Enrolment(
@@ -300,7 +327,63 @@ class PanacheEnrolmentRepository :
         currentStep,
         startedAt,
         completedAt,
+        ExperimentCohort.valueOf(experimentCohort),
+        contentVariant?.let(ContentVariant::valueOf),
     )
+}
+
+/** SQL aggregation keeps the experiment screen bounded even when a campaign has millions of rows. */
+@ApplicationScoped
+class PanacheCampaignExperimentRepository : CampaignExperimentRepository {
+    override suspend fun metrics(campaignId: UUID): List<ExperimentCohortMetrics> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.experimentCohort, count(e), count(distinct s.partyId) " +
+                    "from EnrolmentEntity e left join SendLogEntity s on " +
+                    "s.campaignId = e.campaignId and s.partyId = e.partyId and s.outcome = :converted " +
+                    "where e.campaignId = :campaignId group by e.experimentCohort",
+                Array<Any>::class.java,
+            )
+                .setParameter("converted", SendOutcome.CONVERTED.name)
+                .setParameter("campaignId", campaignId)
+                .resultList
+        }
+    }
+        .awaitSuspending()
+        .map { row ->
+            ExperimentCohortMetrics(
+                cohort = ExperimentCohort.valueOf(row[0] as String),
+                assigned = row[1] as Long,
+                converted = row[2] as Long,
+            )
+        }
+}
+
+/** A/B outcomes are grouped in SQL, never reconstructed from an unbounded send-log page. */
+@ApplicationScoped
+class PanacheCampaignContentExperimentRepository : CampaignContentExperimentRepository {
+    override suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.contentVariant, count(e), count(distinct s.partyId) " +
+                    "from EnrolmentEntity e left join SendLogEntity s on " +
+                    "s.campaignId = e.campaignId and s.partyId = e.partyId and s.outcome = :converted " +
+                    "where e.campaignId = :campaignId and e.contentVariant is not null group by e.contentVariant",
+                Array<Any>::class.java,
+            )
+                .setParameter("converted", SendOutcome.CONVERTED.name)
+                .setParameter("campaignId", campaignId)
+                .resultList
+        }
+    }
+        .awaitSuspending()
+        .map { row ->
+            ContentVariantMetrics(
+                variant = ContentVariant.valueOf(row[0] as String),
+                assigned = row[1] as Long,
+                converted = row[2] as Long,
+            )
+        }
 }
 
 @ApplicationScoped
@@ -330,6 +413,7 @@ class PanacheSendLogRepository :
                     deliveryStatus = send.deliveryStatus.name
                     deliveryReason = send.deliveryReason
                     deliveryUpdatedAt = send.deliveryUpdatedAt
+                    channel = send.channel?.name
                 },
             )
         }.awaitSuspending()
@@ -547,4 +631,5 @@ private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
     deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
     deliveryReason = deliveryReason,
     deliveryUpdatedAt = deliveryUpdatedAt,
+    channel = channel?.let(Channel::valueOf),
 )
