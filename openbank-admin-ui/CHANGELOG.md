@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.120.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.119.0...admin-ui-v0.120.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** refresh operator workspace ([#4648](https://github.com/JiRaska/open-bank-oss/issues/4648)) ([bec7f9b](https://github.com/JiRaska/open-bank-oss/commit/bec7f9b2a5725377dab8536f251c614d9f8a7647))
+
 ## [0.119.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.118.0...admin-ui-v0.119.0) (2026-08-13)
 
 

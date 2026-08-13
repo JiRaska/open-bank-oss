@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.3...audit-service-v0.14.4) (2026-08-13)
+
+
+### Bug Fixes
+
+* **audit:** recover three unread actor spellings and count the actor gap ([#4693](https://github.com/JiRaska/open-bank-oss/issues/4693)) ([ae0fecf](https://github.com/JiRaska/open-bank-oss/commit/ae0fecfac9e13d632da05363b9f4b66ab74af95b)), closes [#3994](https://github.com/JiRaska/open-bank-oss/issues/3994)
+
 ## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.2...audit-service-v0.14.3) (2026-08-13)
 
 
