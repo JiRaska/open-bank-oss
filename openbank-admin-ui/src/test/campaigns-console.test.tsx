@@ -182,7 +182,9 @@ describe('campaign console', () => {
     )
 
     await waitFor(() => expect(screen.getByText('Protected')).toBeTruthy(), { timeout: 8000 })
-    expect(screen.getByText('4000')).toBeTruthy()
+    // Outcome metrics follow the active locale, while the machine-readable reason keeps its raw
+    // aggregate below. The English console therefore displays the headline with a thousands mark.
+    expect(screen.getByText('4,000')).toBeTruthy()
     expect(screen.getByText(/4000× Consent withdrawn/)).toBeTruthy()
 
     // And the range states what fraction is on screen: "1–2" alone cannot distinguish the whole
