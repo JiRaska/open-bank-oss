@@ -72,19 +72,7 @@ class SurfaceResource(
         val slot = parseSlot(request.slot) ?: return badRequest("unknown slot '${request.slot}'")
         val type = EngagementEventType.entries.find { it.name == request.type }
             ?: return badRequest("unknown event type '${request.type}'")
-        val catalogueContent = SurfaceCatalog.ALL[request.contentId]
-        val campaignBanner = request.contentId == CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID &&
-            request.interactionRef != null &&
-            banners.belongsToParty(request.interactionRef, request.partyId)
-        if (catalogueContent == null && !campaignBanner) return badRequest("unknown content '${request.contentId}'")
-        if (catalogueContent?.slot != null && catalogueContent.slot != slot) {
-            return badRequest("content '${request.contentId}' is not renderable in slot '${request.slot}'")
-        }
-        if (campaignBanner &&
-            (slot != SurfaceSlot.HOME_BANNER || request.type !in setOf("IMPRESSION", "CLICK", "DISMISS"))
-        ) {
-            return badRequest("campaign banner is not renderable in this event")
-        }
+        val content = validateContent(request, slot) ?: return badRequest("unknown or incompatible content '${request.contentId}'")
         val campaignFields = listOf(request.campaignId, request.stepOrder, request.channel)
         val campaignAttribution = if (campaignFields.any { it != null }) {
             if (request.interactionRef == null || campaignFields.any { it == null }) {
@@ -100,7 +88,7 @@ class SurfaceResource(
         } else {
             null
         }
-        if (campaignAttribution?.channel == "BANNER" && !campaignBanner) {
+        if (campaignAttribution?.channel == "BANNER" && !content.isCampaignPlacement) {
             return badRequest("campaign banner attribution must name its assigned banner")
         }
         record.record(
@@ -115,6 +103,19 @@ class SurfaceResource(
             ),
         )
         return Response.status(Response.Status.ACCEPTED).build()
+    }
+
+    /** Keeps ownership and slot validation together: an interaction reference cannot be replayed elsewhere. */
+    private suspend fun validateContent(request: EngagementEventRequest, slot: SurfaceSlot): ValidatedContent? {
+        val catalogue = SurfaceCatalog.ALL[request.contentId]
+        if (catalogue != null) return catalogue.takeIf { it.slot == slot }?.let { ValidatedContent(false) }
+
+        val isCampaignPlacement = request.contentId == CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID &&
+            request.interactionRef != null &&
+            banners.belongsToParty(request.interactionRef, request.partyId)
+        return isCampaignPlacement
+            .takeIf { slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES }
+            ?.let { ValidatedContent(true) }
     }
 
     private fun parseSlot(name: String): SurfaceSlot? = SurfaceSlot.entries.find { it.name == name }
@@ -132,6 +133,12 @@ class SurfaceResource(
         "deepLink" to deepLink,
         "interactionRef" to interactionRef,
     )
+
+    private data class ValidatedContent(val isCampaignPlacement: Boolean)
+
+    private companion object {
+        val INTERACTION_EVENT_TYPES = setOf("IMPRESSION", "CLICK", "DISMISS")
+    }
 }
 
 data class EngagementEventRequest(
