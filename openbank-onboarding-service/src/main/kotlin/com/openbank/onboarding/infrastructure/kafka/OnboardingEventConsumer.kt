@@ -10,6 +10,7 @@ import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.infrastructure.observability.ProjectionOutcomeMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -37,6 +38,11 @@ class OnboardingEventConsumer(private val clock: Clock) {
 
     @Inject
     lateinit var objectMapper: ObjectMapper
+
+    // Field injection: the constructor already carries Clock, and detekt's LongParameterList
+    // fires AT the threshold rather than above it.
+    @Inject
+    lateinit var metrics: ProjectionOutcomeMetrics
 
     private val log = Logger.getLogger(OnboardingEventConsumer::class.java)
 
@@ -75,8 +81,12 @@ class OnboardingEventConsumer(private val clock: Clock) {
             parsePartyEvent(node)
         } catch (e: Exception) {
             log.errorf(e, "[party-events-in] Failed to map event: %.200s", payload)
+            metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.FAILED)
             return
-        } ?: return
+        } ?: run {
+            metrics.record("party-events-in", ProjectionOutcomeMetrics.Outcome.UNRECOGNISED)
+            return
+        }
         project(event, "party-events-in")
     }
 
@@ -171,20 +181,30 @@ class OnboardingEventConsumer(private val clock: Clock) {
             objectMapper.readTree(payload)
         } catch (e: Exception) {
             log.errorf(e, "[%s] Failed to parse JSON payload: %.200s", topic, payload)
+            metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
             return null
         }
-        return try {
+        val event = try {
             parse(node)
         } catch (e: Exception) {
             log.errorf(e, "[%s] Failed to map event: %.200s", topic, payload)
-            null
+            metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
+            return null
         }
+        // A null here is the QUIET drop this counter exists for: valid JSON the parser
+        // recognised nothing in. No log — it is the normal outcome for the many event types
+        // on a shared topic that onboarding legitimately ignores — so the only way to tell
+        // "ignoring what we should ignore" from "ignoring everything" is the ratio.
+        if (event == null) metrics.record(topic, ProjectionOutcomeMetrics.Outcome.UNRECOGNISED)
+        return event
     }
 
     private suspend fun project(event: OnboardingEvent, topic: String) {
         try {
             projection.applyEvent(event)
+            metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
         } catch (e: Exception) {
+            metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
             log.errorf(e, "[%s] Projection failed for event type %s", topic, event::class.simpleName)
             // Ack the message (don't rethrow) — the read-model can be re-seeded from events if needed.
         }
