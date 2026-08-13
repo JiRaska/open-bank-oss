@@ -737,7 +737,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             )}
           </section>
 
-          {detail?.sources?.engagement === 'ok' && <CampaignAttentionFunnel metrics={engagement} />}
+          {detail?.sources?.engagement === 'ok' && (
+            <CampaignAttentionFunnel
+              metrics={engagement}
+              hasMeasuredOutcome={c.conversionRule !== null && c.conversionRule !== undefined}
+              hasHoldout={(c.holdoutPercent ?? 0) > 0}
+            />
+          )}
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>

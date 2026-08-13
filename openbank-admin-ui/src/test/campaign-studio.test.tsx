@@ -261,6 +261,82 @@ describe('campaign studio', () => {
     expect(funnel.getByText('Home banner')).toBeTruthy()
     expect(funnel.getByText('120')).toBeTruthy()
     expect(funnel.getByText('15.0 %')).toBeTruthy()
+    expect(funnel.getByText('Click-event / impression-event ratio')).toBeTruthy()
+    expect(within(screen.getByTestId('campaign-attention-next-evidence')).getByText('Set a measurable outcome before choosing a surface')).toBeTruthy()
+    expect(funnel.getByText(/18 click events; 120 impression events on Home banner/)).toBeTruthy()
+  }, 15000)
+
+  it('keeps independent app events out of a made-up attention funnel', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 12 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'CLICK', count: 18 },
+          // An independently observed click is valid, but does not create an exposure path.
+          { stepOrder: 2, channel: 'PUSH', surface: 'PRODUCT_FEED', type: 'CLICK', count: 3 },
+        ],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-funnel')).toBeTruthy(), { timeout: 8000 })
+    const funnel = within(screen.getByTestId('campaign-attention-funnel'))
+    expect(funnel.getByText('150.0 %')).toBeTruthy()
+    expect(funnel.getByText(/18 click events; 12 impression events on Home banner \(event ratio 150.0 %\)/)).toBeTruthy()
+    expect(funnel.getAllByText('Click-event / impression-event ratio')).toHaveLength(2)
+  }, 15000)
+
+  it('chooses next evidence from all observed rows on an app surface', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [
+          { stepOrder: 1, channel: 'PUSH', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 80 },
+          { stepOrder: 2, channel: 'BANNER', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 80 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_CAROUSEL', type: 'IMPRESSION', count: 150 },
+        ],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-next-evidence')).toBeTruthy(), { timeout: 8000 })
+    expect(within(screen.getByTestId('campaign-attention-next-evidence')).getByText(/0 click events; 160 impression events on Home banner/)).toBeTruthy()
+  }, 15000)
+
+  it('uses holdout results, not app taps, for an incrementality decision', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        campaign: { ...active.campaign, conversionRule: 'ACCOUNT_OPENED', holdoutPercent: 10 },
+        engagement: [{ stepOrder: 1, channel: 'BANNER', surface: 'HOME_CAROUSEL', type: 'IMPRESSION', count: 40 }],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-next-evidence')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Validate the effect with the control group')).toBeTruthy()
+  }, 15000)
+
+  it('does not fabricate a surface insight before the app confirms an exposure', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-next-evidence')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Wait for the first verified exposure')).toBeTruthy()
   }, 15000)
 
   it('submits an opted-in consent fallback as part of the step definition', async () => {
