@@ -327,16 +327,7 @@ def main():
 # growing it needs a reviewer. Derived would have been worse here: a set computed from the
 # manifest agrees with the manifest by construction and could never flag anything (the same
 # self-corroboration trap as widening a known-good set with the layer it is checking).
-DEBT: dict[str, str] = {
-    "adr-registry-integrity-check": DEBT_MARKER,
-    "ai-governance-snapshot-drift": DEBT_MARKER,
-    "db-backup-association-gate": DEBT_MARKER,
-    "eu-ai-act-inventory-drift": DEBT_MARKER,
-    "gen-network-policies-drift-gate": DEBT_MARKER,
-    "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
-    "openapi-route-conformance": DEBT_MARKER,
-    "service-runbook-drift": DEBT_MARKER,
-}
+DEBT: dict[str, str] = {}
 
 if __name__ == "__main__":
     sys.exit(main())

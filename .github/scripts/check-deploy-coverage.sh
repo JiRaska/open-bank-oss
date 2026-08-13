@@ -139,12 +139,7 @@ while IFS= read -r line; do
 done < <(jq -r '.packages | keys[]' "$RP_CONFIG" | grep '^openbank-' | sort)
 
 # The hand-maintained deploy list.
-# `|| true` is load-bearing, not defensive noise. Under `set -euo pipefail` a no-match grep
-# exits 1, the pipeline inherits it, and the script DIES HERE — before the explicit check
-# below, which is therefore unreachable. Measured: a workflow with no ALL_SERVICES produced
-# rc=1 and completely EMPTY output, so the gate failed with no diagnosis at all and the error
-# text it carries had never once been printed. Same shape as check-agent-charter-registry.sh.
-ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//" || true)"
+ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//")"
 [ -n "$ALL_SERVICES" ] || { echo "ERROR: could not read ALL_SERVICES from ${WORKFLOW}." >&2; exit 2; }
 
 # Components that ArgoCD actually deploys, i.e. something references their image.
