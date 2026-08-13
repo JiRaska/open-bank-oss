@@ -320,6 +320,8 @@ gates:
     group: gitops
     mode: enforced
     budget_seconds: 30   # 7.6s in CI
+    selftest: python3 openbank-infra/scripts/gen-network-policies.py --self-test
+    selftest_expect: pass
     run: |
       # PyYAML is a SHARD prerequisite, not this gate's: run-gates.py imports it, so the
       # hash-pinned install that used to sit here now runs once per shard in ci.yml before
@@ -1077,6 +1079,8 @@ gates:
     group: registry
     mode: enforced
     budget_seconds: 90   # the registry shard is 20s in CI end to end
+    selftest: bash .github/scripts/check-adr-registry.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-adr-registry.sh
 

@@ -327,10 +327,11 @@ def main():
 # growing it needs a reviewer. Derived would have been worse here: a set computed from the
 # manifest agrees with the manifest by construction and could never flag anything (the same
 # self-corroboration trap as widening a known-good set with the layer it is checking).
-DEBT = {
-    "adr-registry-integrity-check": DEBT_MARKER,
-    "gen-network-policies-drift-gate": DEBT_MARKER,
-}
+# EMPTY, and that is the point: every gate in this manifest either declares a self-test or is
+# exempt by kind. An entry here needs a reason a reviewer accepts, and rule 3 fails on a stale
+# one in either direction — so a new debt cannot quietly become permanent, and this list
+# cannot rot back into a long one without someone deciding to let it.
+DEBT: dict[str, str] = {}
 
 if __name__ == "__main__":
     sys.exit(main())

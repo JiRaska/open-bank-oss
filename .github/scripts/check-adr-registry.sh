@@ -45,6 +45,150 @@
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
+# --- self-test ------------------------------------------------------------------------
+# The ADR registry is the decision history this repo tells auditors to read, and every rule
+# here guards a way it can quietly stop being true: two ADRs sharing a number means one of
+# them is unfindable by that number; an H1 that disagrees with its filename means a renumber
+# was half-done; a supersession declared on one side only means a superseded decision still
+# reads as live.
+#
+# None of that breaks anything at runtime — an ADR is a document — which is why the registry
+# needs a gate at all, and why the gate needs to be able to FAIL.
+#
+# The fixture runs in a directory that is NOT this repo, deliberately: check 5 does a
+# repo-wide `git grep` for ADR-NNNN references, so running it from inside the worktree would
+# score every real reference as dangling against a three-file fixture and turn every case red
+# for the wrong reason. Check 3 (index freshness) is skipped by the fixture having no
+# gen-index.sh — it calls `git checkout --`, and a self-test must not be able to touch a
+# working tree.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  SELF="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+  REAL_ADR="$(cd "$(dirname "$0")/../../docs/adr" && pwd)"
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+  # The fixture root must be a git REPO. Check 5 runs `git grep` for ADR-NNNN references, and
+  # outside a repo git exits 128 — which `set -euo pipefail` turns into the script's own exit
+  # code, so every case would fail with 128 regardless of the rule under test. An empty repo
+  # makes that grep find nothing, which is the intended condition here.
+  git -C "$td" init -q 2>/dev/null
+  git -C "$td" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init >/dev/null 2>&1
+
+  fm() { # fm <num> <title-num> [key=value overrides...]
+    local num="$1" tnum="$2"; shift 2
+    local date="2026-01-01" ds="accepted" dl="shipped" authors="[Jiri Raska]"
+    local sup="[]" supby="[]" repos="[]" tags="[ci]"
+    local summary="A one-line decision statement long enough to be a real summary of what was decided."
+    local k v
+    for kv in "$@"; do k="${kv%%=*}"; v="${kv#*=}"
+      case "$k" in
+        date) date="$v";; decision-status) ds="$v";; delivery-status) dl="$v";;
+        authors) authors="$v";; supersedes) sup="$v";; superseded-by) supby="$v";;
+        delivery-repos) repos="$v";; tags) tags="$v";; summary) summary="$v";;
+      esac
+    done
+    printf -- '---\ndate: %s\ndecision-status: %s\ndelivery-status: %s\nauthors: %s\nsupersedes: %s\nsuperseded-by: %s\ndelivery-repos: %s\ntags: %s\nsummary: "%s"\n---\n\n# ADR-%s — Title\n\n## Context\nc\n\n## Decision\nd\n\n## Alternatives considered\n- none recorded\n\n## Consequences\nx\n\n## Compliance impact\n- PCI DSS: not applicable — no cardholder data.\n' \
+      "$date" "$ds" "$dl" "$authors" "$sup" "$supby" "$repos" "$tags" "$summary" "$tnum"
+  }
+  mkdir_fixture() { # mkdir_fixture <name>  -> echoes the adr dir
+    local d="$td/$1/adr"
+    mkdir -p "$d"
+    # The schema check sources these three from ADR_DIR, so a fixture needs them; they are
+    # copied rather than re-written, so the fixture cannot drift from the real vocabulary.
+    cp "$REAL_ADR/lib-frontmatter.sh" "$REAL_ADR/tags.txt" "$REAL_ADR/known-repos.txt" "$d/" 2>/dev/null
+    echo "$d"
+  }
+  expect() { # expect <label> <adr-dir> <want-rc> [substring]
+    local label="$1" d="$2" want="$3" sub="${4:-}" out rc
+    # cd OUT of this repo: see the note above about check 5's repo-wide git grep.
+    out=$(cd "$td" && bash "$SELF" "$d" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
+    fi
+  }
+
+  # A well-formed registry. Without this case, a gate that rejects everything looks identical
+  # to a working one.
+  d=$(mkdir_fixture ok); fm 0001 0001 > "$d/0001-first.md"; fm 0002 0002 > "$d/0002-second.md"
+  expect "a well-formed registry passes" "$d" 0
+
+  # 1. TWO ADRs ON ONE NUMBER — the number stops identifying a decision, and every reference
+  #    to it becomes ambiguous. This is the failure a clean git merge produces (both branches
+  #    took the next free number).
+  d=$(mkdir_fixture dupe); fm 0001 0001 > "$d/0001-first.md"; fm 0001 0001 > "$d/0001-other.md"
+  expect "a duplicate ADR number is caught" "$d" 1 "duplicate ADR number"
+
+  # 2. H1 vs FILENAME — the half-done renumber. The file is found by its name and cited by its
+  #    heading, so a mismatch means the two disagree about which decision this is.
+  d=$(mkdir_fixture h1); fm 0001 0007 > "$d/0001-first.md"
+  expect "an H1 number that disagrees with the filename is caught" "$d" 1
+
+  # 4. FRONT MATTER. Each key absent means a field the registry publishes has no source.
+  for key in date decision-status delivery-status authors supersedes superseded-by delivery-repos tags summary; do
+    d=$(mkdir_fixture "miss-$key"); fm 0001 0001 > "$d/0001-first.md"
+    grep -v "^${key}:" "$d/0001-first.md" > "$d/tmp" && mv "$d/tmp" "$d/0001-first.md"
+    expect "a missing '$key' is caught" "$d" 1
+  done
+
+  # Closed enums: a status outside the vocabulary renders as something a reader will
+  # interpret, having never been defined.
+  d=$(mkdir_fixture badstatus); fm 0001 0001 decision-status=mostly > "$d/0001-first.md"
+  expect "a decision-status outside the enum is caught" "$d" 1
+  d=$(mkdir_fixture baddelivery); fm 0001 0001 delivery-status=soon > "$d/0001-first.md"
+  expect "a delivery-status outside the enum is caught" "$d" 1
+  # ...and every documented value must be ACCEPTED, or the gate blocks the vocabulary it
+  # enforces.
+  # `superseded` is excluded here and gets its own case below: the schema requires a
+  # non-empty superseded-by for it, which is the point — a decision cannot be marked replaced
+  # without naming what replaced it, or the reader is told it is dead and not where to go.
+  for st in proposed accepted deprecated rejected; do
+    d=$(mkdir_fixture "ok-$st"); fm 0001 0001 decision-status="$st" > "$d/0001-first.md"
+    expect "decision-status '$st' is accepted" "$d" 0
+  done
+  d=$(mkdir_fixture supersededempty); fm 0001 0001 decision-status=superseded > "$d/0001-first.md"
+  expect "'superseded' with an EMPTY superseded-by is caught" "$d" 1 "name the ADR that replaced it"
+
+  # A tag outside tags.txt, and a repo outside known-repos.txt: both are closed vocabularies
+  # precisely so a typo cannot invent a category nobody searches for.
+  d=$(mkdir_fixture badtag); fm 0001 0001 tags="[not-a-real-tag]" > "$d/0001-first.md"
+  expect "a tag outside tags.txt is caught" "$d" 1
+  d=$(mkdir_fixture badrepo); fm 0001 0001 delivery-repos="[no-such-repo]" > "$d/0001-first.md"
+  expect "a delivery-repo outside known-repos.txt is caught" "$d" 1
+
+  # The summary cap exists because these render in a one-line index.
+  long=$(printf 'x%.0s' $(seq 1 300))
+  d=$(mkdir_fixture longsummary); fm 0001 0001 summary="$long" > "$d/0001-first.md"
+  expect "an over-long summary is caught" "$d" 1
+
+  # The scaffold's placeholder must never survive into a committed ADR — that is the whole
+  # point of new.sh rejecting it.
+  d=$(mkdir_fixture placeholder); fm 0001 0001 tags="[TODO-pick-from-tags.txt]" > "$d/0001-first.md"
+  expect "the scaffold placeholder tag is caught" "$d" 1
+
+  # SUPERSESSION must be declared on BOTH sides. Declared one way only, the superseded ADR
+  # still reads as live to anyone who opens it — the reader has no way to know.
+  d=$(mkdir_fixture halfsuper)
+  fm 0001 0001 superseded-by="[0002]" decision-status=superseded > "$d/0001-first.md"
+  fm 0002 0002 > "$d/0002-second.md"
+  expect "a one-sided supersession is caught" "$d" 1
+  # ...and the symmetric declaration is clean.
+  d=$(mkdir_fixture fullsuper)
+  fm 0001 0001 superseded-by="[0002]" decision-status=superseded > "$d/0001-first.md"
+  fm 0002 0002 supersedes="[0001]" > "$d/0002-second.md"
+  expect "a symmetric supersession passes" "$d" 0
+
+  # An EMPTY registry must not read as a clean one: no ADRs is a moved directory, not a
+  # project with no decisions.
+  d=$(mkdir_fixture empty)
+  expect "an empty ADR directory is an error" "$d" 1
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: ADR registry integrity is falsifiable (25 cases)"
+  exit 0
+fi
+
 ADR_DIR="${1:-docs/adr}"
 cd "$(git rev-parse --show-toplevel 2>/dev/null || echo .)"
 
@@ -374,8 +518,14 @@ fi
 # script itself (its own comments cite ADR-0128/ADR-0132 as worked examples of the defect
 # class this check exists to catch — not real dangling references). Emitted as num:file so
 # the number is sortable in field 1.
+# `|| true` is load-bearing. A no-match `git grep` exits 1, `pipefail` propagates it, and
+# `set -e` then kills the script HERE — before the verdict block below, so the run ends rc=1
+# having printed no error at all. It never fires in this repo because ADR references always
+# exist, which is exactly what makes it a trap: the first tree without one gets an
+# undiagnosable failure. Third instance of this shape found in this sweep, after
+# check-deploy-coverage.sh and check-agent-charter-registry.sh.
 git grep -InoE 'ADR-[0-9]{4}' -- ':!docs/adr/*' ':!.github/scripts/check-adr-registry.sh' 2>/dev/null \
-  | sed -E 's/^([^:]+):[0-9]+:ADR-([0-9]{4})$/\2:\1/' | sort -u > "$_adr_tmp/refs"
+  | sed -E 's/^([^:]+):[0-9]+:ADR-([0-9]{4})$/\2:\1/' | sort -u > "$_adr_tmp/refs" || true
 
 # Dangling = referenced numbers minus existing numbers. Report every citing file for
 # each, so the error names where to go, exactly as the per-reference loop did.

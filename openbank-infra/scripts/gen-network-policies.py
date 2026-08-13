@@ -159,7 +159,100 @@ def load_docs():
     return docs
 
 
+
+def self_test() -> int:
+    """Falsify the dependency extractors this generator's egress rules are built from.
+
+    A NetworkPolicy is default-deny: a call the generator does not SEE gets no egress rule,
+    and the call is then blocked in the cluster while every manifest in the repo looks
+    correct. That failure is not visible at review time and not visible at deploy time — it
+    appears as a connection timeout under load, attributed to the callee.
+
+    The extractors are two regexes over config text, and they fail in one direction only:
+    match less, generate less, block more. Every case below is a URL shape that really occurs
+    in this fleet's application.yaml files.
+
+    SCOPE, stated plainly: this covers the extraction primitives, not main()'s whole
+    rendering. The drift gate around it (regenerate + `git diff --intent-to-add`) is what
+    proves the rendered output matches what is committed, and that half is exercised by the
+    gate itself on every PR.
+    """
+    fails: list[str] = []
+
+    def urls(blob: str):
+        return sorted(URL_RE.findall(blob))
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # The everyday shape: an in-cluster service URL with an explicit port.
+    case("an http svc URL with a port is extracted",
+         urls("url: http://openbank-ledger-service.openbank.svc:8080/api"),
+         [("openbank-ledger-service", "openbank", "8080")])
+    # HTTPS must be seen too — missing it silently drops every TLS dependency.
+    case("an https svc URL is extracted",
+         urls("url: https://openbank-fx-service.openbank.svc:8443/rates"),
+         [("openbank-fx-service", "openbank", "8443")])
+    # No explicit port is legal and common; the port group is optional.
+    case("a svc URL with no port is extracted",
+         urls("url: http://openbank-party-service.openbank.svc/x"),
+         [("openbank-party-service", "openbank", "")])
+    # A CROSS-NAMESPACE call is the case that most needs a rule — same-namespace traffic may
+    # be permitted by a broader rule, cross-namespace never is.
+    case("a cross-namespace URL keeps its namespace",
+         urls("url: http://prometheus.observability.svc:9090"),
+         [("prometheus", "observability", "9090")])
+    # Several dependencies in one blob: taking only the first would silently drop the rest.
+    case("every URL in a blob is extracted",
+         urls("a: http://svc-one.openbank.svc:1\nb: http://svc-two.other.svc:2\n"),
+         [("svc-one", "openbank", "1"), ("svc-two", "other", "2")])
+
+    # NOT a cluster-internal call: an external host gets no egress rule from this scan, and
+    # inventing one would open traffic the policy is meant to bound.
+    case("an external https URL is not a svc dependency",
+         urls("url: https://api.cnb.cz/rates"), [])
+    case("a .cluster.local FQDN without .svc is not matched by this scan",
+         urls("url: http://x.openbank.pod.cluster.local:8080"), [])
+
+    # Kafka is extracted by its own pattern, because the bootstrap host carries the port that
+    # matters and the service name is not a workload.
+    kafka = sorted(KAFKA_RE.findall("bootstrap: openbank-kafka-bootstrap.messaging.svc:9093"))
+    case("a kafka bootstrap host is extracted",
+         kafka, [("openbank-kafka-bootstrap", "messaging", "9093")])
+    # A kafka bootstrap with no port is not a usable dependency — the port is mandatory in
+    # that pattern, deliberately.
+    case("a kafka bootstrap without a port is not matched",
+         sorted(KAFKA_RE.findall("bootstrap: openbank-kafka-bootstrap.messaging.svc")), [])
+
+    # The datastore-port convention: these names mark ports that must NOT be opened to the
+    # whole namespace. An empty set here would quietly widen every policy that consults it.
+    for name in ("redis", "postgres", "postgresql"):
+        if name not in INTERNAL_ONLY_PORT_NAMES:
+            fails.append(f"{name!r} is missing from INTERNAL_ONLY_PORT_NAMES — a datastore "
+                         f"port would be opened namespace-wide")
+    if "http" in INTERNAL_ONLY_PORT_NAMES:
+        fails.append("'http' must not be internal-only — every service port would be closed")
+
+    # A live read: the fixtures cannot tell that the components tree still resolves, and a
+    # generator pointed at nothing renders nothing, which the drift gate would then compare
+    # against the committed policies and report as mass deletion — or, worse, as agreement.
+    if not os.path.isdir(COMPONENTS):
+        fails.append(f"the components tree {COMPONENTS} does not exist — this generator would "
+                     f"produce no policies at all")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: network-policy dependency extraction is falsifiable (13 cases)")
+    return 0
+
 def main():
+    if "--self-test" in sys.argv:
+        sys.exit(self_test())
+
     docs = load_docs()
 
     # workload key: (ns, app.kubernetes.io/name) -> {"ports": {name: num}}
