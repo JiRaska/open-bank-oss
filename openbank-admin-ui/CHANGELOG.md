@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.115.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.1...admin-ui-v0.115.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add journey path experiments ([#4588](https://github.com/JiRaska/open-bank-oss/issues/4588)) ([3077571](https://github.com/JiRaska/open-bank-oss/commit/307757110c42470d51d9fdfbdf869fb133fcf447))
+
 ## [0.114.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.0...admin-ui-v0.114.1) (2026-08-13)
 
 

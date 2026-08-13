@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.62.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.61.0...customer-edge-v0.62.0) (2026-08-13)
+
+
+### Features
+
+* **cards:** additional cardholder — a card issued to someone else, with its own limits ([#4194](https://github.com/JiRaska/open-bank-oss/issues/4194)) ([25bd631](https://github.com/JiRaska/open-bank-oss/commit/25bd63177daa65dae31a2958cae80cdab2def3b9))
+
 ## [0.61.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.60.0...customer-edge-v0.61.0) (2026-08-13)
 
 
