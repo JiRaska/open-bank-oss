@@ -9,6 +9,7 @@ import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
+import com.openbank.campaign.application.port.out.NotificationSendRequest
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
@@ -60,7 +61,11 @@ class CampaignJourneyActivitiesTest {
     )
 
     private inner class Harness {
-        var consent = true
+        var emailConsent = true
+        var pushConsent = true
+        var consentScope: String? = null
+        var channel = Channel.EMAIL
+        var fallbackToPush = false
         var sends = 0
         var entries = listOf<SuppressionEntry>()
         var failWith: RuntimeException? = null
@@ -70,8 +75,27 @@ class CampaignJourneyActivitiesTest {
         /** Correlation ids put on the wire, in order (ADR-0239 D1). */
         val correlationIds = mutableListOf<UUID>()
 
+        /** App destinations handed to notification-service for the current delivery. */
+        val deepLinks = mutableListOf<String?>()
+
         val campaigns = object : CampaignRepository {
-            override suspend fun findById(id: UUID) = if (id == campaignId) campaign else null
+            override suspend fun findById(id: UUID) = if (id == campaignId) {
+                campaign.copy(
+                    steps = listOf(
+                        campaign.steps.single().copy(
+                            channel = channel,
+                            template = if (channel == Channel.PUSH) {
+                                "MARKETING_PRODUCT_OFFER_PUSH"
+                            } else {
+                                "MARKETING_PRODUCT_OFFER"
+                            },
+                            fallbackToPush = fallbackToPush,
+                        ),
+                    ),
+                )
+            } else {
+                null
+            }
             override suspend fun list() = listOf(campaign)
             override suspend fun save(campaign: Campaign) = campaign
             override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
@@ -113,23 +137,22 @@ class CampaignJourneyActivitiesTest {
             ): DeliveryStatus? = null
         }
         val notificationSend = object : NotificationSendPort {
-            override suspend fun requestSend(
-                partyId: UUID,
-                channel: Channel,
-                template: String,
-                recipient: String,
-                variables: Map<String, String>,
-                correlationId: UUID,
-            ) {
+            override suspend fun requestSend(request: NotificationSendRequest) {
                 sendsRequested += 1
-                correlationIds += correlationId
+                correlationIds += request.correlationId
+                deepLinks += request.deepLink
             }
         }
 
         val gate = ContactPolicyGate(
-            consent = ContactConsentPort { _, _ ->
+            consent = ContactConsentPort { _, scope ->
+                consentScope = scope
                 failWith?.let { throw it }
-                consent
+                when (scope) {
+                    "MARKETING_COMMS_EMAIL" -> emailConsent
+                    "MARKETING_COMMS_PUSH" -> pushConsent
+                    else -> false
+                }
             },
             counters = object : ContactCounterPort {
                 override suspend fun sendsInWindow(partyId: UUID, windowStart: Instant): Int {
@@ -154,7 +177,6 @@ class CampaignJourneyActivitiesTest {
                 gate,
                 notificationSend,
                 dryRun = false,
-                marketingScope = "MARKETING_COMMS_EMAIL",
             )
     }
 
@@ -227,13 +249,61 @@ class CampaignJourneyActivitiesTest {
 
     @Test
     fun `no consent maps to SUPPRESSED_CONSENT`() {
-        val h = Harness().apply { consent = false }
+        val h = Harness().apply { emailConsent = false }
         assertThat(
             runBlocking {
                 h.activities.deliverStepGated(campaignId, partyId, 1)
             },
         ).isEqualTo(StepOutcome.SUPPRESSED)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SUPPRESSED_CONSENT)
+    }
+
+    @Test
+    fun `email delivery checks the email-specific marketing consent`() {
+        val h = Harness()
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_EMAIL")
+    }
+
+    @Test
+    fun `push delivery checks push consent rather than borrowing email consent`() {
+        val h = Harness().apply { channel = Channel.PUSH }
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_PUSH")
+    }
+
+    @Test
+    fun `missing email consent falls back to a separately consented push and records the actual channel`() {
+        val h = Harness().apply {
+            emailConsent = false
+            pushConsent = true
+            fallbackToPush = true
+        }
+
+        assertThat(runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }).isEqualTo(StepOutcome.SENT)
+        assertThat(h.sendsRequested).isEqualTo(1)
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_PUSH")
+        assertThat(h.recorded.single().channel).isEqualTo(Channel.PUSH)
+    }
+
+    @Test
+    fun `a cap denial never switches to push`() {
+        val h = Harness().apply {
+            sends = 2
+            fallbackToPush = true
+        }
+
+        assertThat(
+            runBlocking {
+                h.activities.deliverStepGated(campaignId, partyId, 1)
+            },
+        ).isEqualTo(StepOutcome.SUPPRESSED)
+        assertThat(h.sendsRequested).isZero()
+        assertThat(h.recorded.single().outcome).isEqualTo(SendOutcome.SUPPRESSED_CAP)
     }
 
     @Test

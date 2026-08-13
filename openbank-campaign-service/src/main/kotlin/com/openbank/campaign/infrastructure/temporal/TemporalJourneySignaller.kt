@@ -44,16 +44,38 @@ class TemporalJourneySignaller(
     }
 
     override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) {
+        signal(campaignId, partyId, "consent revocation") { it.consentRevoked() }
+    }
+
+    override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) {
+        signal(campaignId, partyId, "campaign pause") { it.campaignPaused() }
+    }
+
+    override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) {
+        signal(campaignId, partyId, "campaign resume") { it.campaignResumed() }
+    }
+
+    override fun signalCampaignClosed(campaignId: UUID, partyId: UUID) {
+        signal(campaignId, partyId, "campaign close") { it.campaignClosed() }
+    }
+
+    override fun signalGoalReached(campaignId: UUID, partyId: UUID) {
+        signal(campaignId, partyId, "goal reached") { it.goalReached() }
+    }
+
+    private fun signal(campaignId: UUID, partyId: UUID, control: String, invoke: (CampaignJourneyWorkflow) -> Unit) {
         val workflowId = workflowId(campaignId, partyId)
         try {
             val workflow = workflowClient.newWorkflowStub(CampaignJourneyWorkflow::class.java, workflowId)
-            workflow.consentRevoked()
-            log.infof("Signalled consent revocation to %s", workflowId)
+            invoke(workflow)
+            log.infof("Signalled %s to %s", control, workflowId)
         } catch (e: io.temporal.client.WorkflowNotFoundException) {
             // A completed or never-started journey has nothing to terminate — the signal is moot.
             log.debugf(e, "No live journey %s to signal", workflowId)
         } catch (e: io.temporal.client.WorkflowServiceException) {
-            log.warnf(e, "Failed to signal journey %s", workflowId)
+            // Pause/close correctness is also backed by the campaign-state activity immediately
+            // before a send; signals are the low-latency wake-up path, not the only control.
+            log.warnf(e, "Failed to signal %s to journey %s", control, workflowId)
         }
     }
 

@@ -82,7 +82,6 @@ openbank:
     quiet-hours-start: ${CAMPAIGN_QUIET_HOURS_START:21}
     quiet-hours-end: ${CAMPAIGN_QUIET_HOURS_END:8}
     consent-grantee: party-service:marketing-comms
-    marketing-scope: MARKETING_COMMS_EMAIL
 
 consent-service:
   url: http://localhost:8106
