@@ -7,6 +7,13 @@
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { EditorChannel, EditorCondition, EditorStep } from '@/components/campaigns/JourneyEditor'
 
+const IN_APP_TEMPLATE: Record<NonNullable<EditorStep['inAppSurface']>, string> = {
+  HOME_BANNER: 'MARKETING_PRODUCT_OFFER_BANNER',
+  HOME_CAROUSEL: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+  PRODUCT_FEED: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED',
+  REWARDS_HUB: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB',
+}
+
 /**
  * Edits the step selected on the canvas.
  *
@@ -110,11 +117,14 @@ export function StepEditor({
                 onClick={() => first && onChange({
                   ...step,
                   channel: c,
-                  template: first,
+                  template: c === 'BANNER'
+                    ? IN_APP_TEMPLATE[step.inAppSurface ?? 'HOME_BANNER']
+                    : first,
                   variables: {},
                   ...(c === 'PUSH' || c === 'BANNER'
                     ? { fallbackToPush: false, mobileDestination: step.mobileDestination ?? 'HOME' }
                     : { mobileDestination: undefined }),
+                  ...(c === 'BANNER' ? { inAppSurface: step.inAppSurface ?? 'HOME_BANNER' } : { inAppSurface: undefined }),
                   ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
                 })}
                 // `.btn` again rather than a hand-rolled box — the third time tonight that a
@@ -167,10 +177,35 @@ export function StepEditor({
           <>
             <p className="text-xs text-muted-foreground">
               {t(
-                'Banner se zobrazí na domovské obrazovce přihlášené aplikace. Není to push a neobjeví se na zamčeném telefonu.',
-                'The banner is shown on the signed-in app home screen. It is not a push and never appears on a locked phone.',
+                'Zvolte přesnou plochu přihlášené aplikace. Není to push a nic se neobjeví na zamčeném telefonu.',
+                'Choose the exact signed-in app surface. It is not a push and never appears on a locked phone.',
               )}
             </p>
+            <label className="mt-3 block space-y-1.5 text-sm" data-in-app-surface={index}>
+              <span className="font-medium">{t('Plocha v aplikaci', 'In-app surface')}</span>
+              <select
+                className={field}
+                value={step.inAppSurface ?? 'HOME_BANNER'}
+                onChange={e => {
+                  const inAppSurface = e.target.value as NonNullable<EditorStep['inAppSurface']>
+                  onChange({
+                    ...step,
+                    inAppSurface,
+                    template: IN_APP_TEMPLATE[inAppSurface],
+                    variables: {},
+                    ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
+                  })
+                }}
+              >
+                <option value="HOME_BANNER">{t('Banner na domovské obrazovce', 'Home banner')}</option>
+                <option value="HOME_CAROUSEL">{t('Carousel na domovské obrazovce', 'Home carousel')}</option>
+                <option value="PRODUCT_FEED">{t('Feed produktů', 'Product feed')}</option>
+                <option value="REWARDS_HUB">{t('Centrum odměn', 'Rewards hub')}</option>
+              </select>
+              <span className="block text-xs text-muted-foreground">
+                {t('Každá plocha má schválený tvar karty; šablona se přepne spolu s ní.', 'Each surface has an approved card shape; its template changes with the surface.')}
+              </span>
+            </label>
             <label className="mt-3 block space-y-1.5 text-sm" data-mobile-destination={index}>
               <span className="font-medium">{t('Po klepnutí otevřít', 'Open after tap')}</span>
               <select
@@ -225,7 +260,9 @@ export function StepEditor({
             ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
           })}
         >
-          {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel).map(tpl => (
+          {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel && (
+            step.channel !== 'BANNER' || tpl === IN_APP_TEMPLATE[step.inAppSurface ?? 'HOME_BANNER']
+          )).map(tpl => (
             <option key={tpl} value={tpl}>
               {templateLabels[tpl] ?? tpl}
             </option>
@@ -240,8 +277,8 @@ export function StepEditor({
               )
             : step.channel === 'BANNER'
               ? t(
-                  'Banner používá schválenou kartu aplikace. Tady se vyplňují jen její pojmenované hodnoty.',
-                  'The banner uses an approved in-app card. Only its named values are filled in here.',
+                  'Plocha používá schválenou kartu aplikace. Tady se vyplňují jen její pojmenované hodnoty.',
+                  'The surface uses an approved in-app card. Only its named values are filled in here.',
                 )
               : t(
                 'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',

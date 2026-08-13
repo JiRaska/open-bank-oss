@@ -80,9 +80,9 @@ class ResolveSurfaceUseCase(
             asOf = Instant.now(),
         )
         val catalogue = SurfaceResolver.resolve(slot, eligibility)
-        val campaignBanner = if (slot == SurfaceSlot.HOME_BANNER) banners.latestForParty(partyId) else null
-        // The home slot intentionally has one campaign surface, with no opaque score or rotation.
-        // A current campaign placement comes before the generic catalogue fallback.
+        val campaignBanner = banners.latestForPartyAndSlot(partyId, slot)
+        // Each slot intentionally has one current campaign placement, with no opaque score or
+        // cross-surface rotation. It comes before that slot's generic catalogue fallback.
         return Result.Rendered(listOfNotNull(campaignBanner?.toSurfaceContent()) + catalogue)
     }
 

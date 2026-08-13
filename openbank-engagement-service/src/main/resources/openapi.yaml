@@ -14,7 +14,7 @@ info:
     existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
     graduates from shadow (D5). The customer app reaches these endpoints only through
     customer-edge, whose narrowly scoped M2M policy injects the authoritative party id.
-  version: 1.5.0
+  version: 1.6.0
 tags:
   - name: Surfaces
   - name: Eligibility

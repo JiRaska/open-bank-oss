@@ -31,6 +31,8 @@ export type EditorChannel = 'EMAIL' | 'PUSH' | 'BANNER'
 
 export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
 
+export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
+
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 
 export interface EditorStep {
@@ -46,6 +48,8 @@ export interface EditorStep {
   fallbackToPush?: boolean
   /** Closed app context reached after a push tap; never an arbitrary URL. */
   mobileDestination?: EditorMobileDestination
+  /** Closed in-app inventory for a BANNER step; absent remains the backwards-compatible home banner. */
+  inAppSurface?: EditorInAppSurface
 }
 
 export const MAX_STEPS = 5
@@ -302,7 +306,7 @@ export function JourneyEditor({
                   {t('KROK', 'STEP')} {i + 1} · {step.channel === 'PUSH'
                     ? t('PUSH', 'PUSH')
                     : step.channel === 'BANNER'
-                      ? t('BANNER V APLIKACI', 'IN-APP BANNER')
+                      ? t('PLOCHA V APLIKACI', 'IN-APP SURFACE')
                       : t('E-MAIL', 'EMAIL')}
                 </text>
                 <text x={x + 14 + ICON + 12} y={ROW_Y + 8} fontSize="13.5" fontWeight="600"

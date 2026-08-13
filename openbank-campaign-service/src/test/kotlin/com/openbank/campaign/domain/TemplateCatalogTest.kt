@@ -7,6 +7,7 @@ package com.openbank.campaign.domain
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.MobileDestination
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -101,7 +102,45 @@ class CampaignStepChannelTest {
         )
 
         assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
-        assertEquals(setOf("MARKETING_PRODUCT_OFFER_BANNER"), TemplateCatalog.forChannel(Channel.BANNER))
+        assertEquals(
+            setOf(
+                "MARKETING_PRODUCT_OFFER_BANNER",
+                "MARKETING_PRODUCT_OFFER_CAROUSEL",
+                "MARKETING_PRODUCT_OFFER_PRODUCT_FEED",
+                "MARKETING_PRODUCT_OFFER_REWARDS_HUB",
+            ),
+            TemplateCatalog.forChannel(Channel.BANNER),
+        )
+    }
+
+    @Test
+    fun `a carousel placement carries its selected surface through delivery`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+            inAppSurface = InAppSurface.HOME_CAROUSEL,
+        )
+
+        assertEquals(InAppSurface.HOME_CAROUSEL, step.primaryDelivery(null).inAppSurface)
+    }
+
+    @Test
+    fun `a banner template cannot be posted to a different app surface`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_BANNER",
+                channel = Channel.BANNER,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                mobileDestination = MobileDestination.HOME,
+                inAppSurface = InAppSurface.PRODUCT_FEED,
+            )
+        }
     }
 
     @Test
