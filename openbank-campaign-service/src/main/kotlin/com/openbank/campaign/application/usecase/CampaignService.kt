@@ -11,6 +11,7 @@ import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -44,6 +45,7 @@ data class EnrolmentOutcome(val enrolled: Int, val failed: Int)
  * [Campaign.activate] — a domain rule, not a UI convention.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Lifecycle actions are separate authenticated use cases, not helpers.
 class CampaignService(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
@@ -92,34 +94,16 @@ class CampaignService(
     }
 
     /** A draft belongs to its maker until submitted; the request never supplies that identity. */
-    suspend fun reviseDraft(
-        id: UUID,
-        name: String,
-        goal: String,
-        segmentRef: SegmentRef,
-        steps: List<CampaignStep>,
-        revisedBy: String,
-        stopCondition: StopCondition? = null,
-        conversionRule: String? = null,
-        holdoutPercent: Int = 0,
-        schedule: CampaignSchedule? = null,
-        trigger: String? = null,
-    ): Campaign {
+    suspend fun reviseDraft(id: UUID, definition: CampaignDefinition, revisedBy: String): Campaign {
         val existing = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         require(existing.createdBy == revisedBy) { "only the campaign maker can revise this draft" }
-        val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        val resolvedSegment = validateDraftReferences(
+            definition.segmentRef,
+            definition.conversionRule,
+            definition.trigger,
+        )
         return campaigns.save(
-            existing.revise(
-                name = name,
-                goal = goal,
-                segmentRef = resolvedSegment,
-                steps = steps,
-                stopCondition = stopCondition,
-                conversionRule = conversionRule,
-                holdoutPercent = holdoutPercent,
-                schedule = schedule,
-                trigger = trigger,
-            ),
+            existing.revise(definition.copy(segmentRef = resolvedSegment)),
         )
     }
 

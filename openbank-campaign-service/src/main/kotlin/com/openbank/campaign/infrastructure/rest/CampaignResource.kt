@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -112,8 +113,8 @@ data class ApprovalRequest(val approver: String? = null)
 /**
  * The authenticated caller — recorded as the maker on create and as the checker on activate.
  *
- * A top-level extension rather than a method: `CampaignResource` sits exactly at detekt's
- * `TooManyFunctions` threshold of 11, which fires AT the limit, so a private helper costs the gate.
+ * A top-level extension rather than a method: lifecycle endpoints remain separately authorized,
+ * while this keeps identity extraction outside the HTTP adapter's public surface.
  */
 private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
 
@@ -135,6 +136,18 @@ private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
     )
 }
 
+private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignDefinition(
+    name = name,
+    goal = goal,
+    segmentRef = SegmentRef(segmentName, segmentVersion),
+    steps = toSteps(),
+    stopCondition = stopCondition?.let { StopCondition(it.maxSendsPerParty) },
+    conversionRule = conversionRule,
+    holdoutPercent = holdoutPercent,
+    schedule = schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+    trigger = trigger,
+)
+
 /**
  * Operator API for the campaign first slice (ADR-0200). Activation is four-eyes gated by the
  * `campaign.activate` action (rules.yaml four_eyes.actions) and re-asserted by the domain
@@ -142,6 +155,7 @@ private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
  */
 @Path("/api/v1/campaigns")
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Each method is a separately authorised lifecycle endpoint.
 class CampaignResource(private val service: CampaignService, private val jwt: JsonWebToken) {
 
     @GET
@@ -181,16 +195,8 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
         Response.ok(
             service.reviseDraft(
                 id = id,
-                name = request.name,
-                goal = request.goal,
-                segmentRef = SegmentRef(request.segmentName, request.segmentVersion),
-                steps = request.toSteps(),
+                definition = request.toDefinition(),
                 revisedBy = jwt.principalName(),
-                stopCondition = request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
-                conversionRule = request.conversionRule,
-                holdoutPercent = request.holdoutPercent,
-                schedule = request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
-                trigger = request.trigger,
             ),
         ).build()
     }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }

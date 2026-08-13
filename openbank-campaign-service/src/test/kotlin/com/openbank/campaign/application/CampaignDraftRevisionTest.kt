@@ -11,6 +11,7 @@ import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -52,10 +53,12 @@ class CampaignDraftRevisionTest {
 
         val revised = service.reviseDraft(
             id = campaignId,
-            name = "Savings nudge v2",
-            goal = draft.goal,
-            segmentRef = draft.segmentRef,
-            steps = draft.steps,
+            definition = CampaignDefinition(
+                name = "Savings nudge v2",
+                goal = draft.goal,
+                segmentRef = draft.segmentRef,
+                steps = draft.steps,
+            ),
             revisedBy = "maker@openbank.test",
         )
 
@@ -66,10 +69,7 @@ class CampaignDraftRevisionTest {
         assertThrows<IllegalArgumentException> {
             service.reviseDraft(
                 id = campaignId,
-                name = draft.name,
-                goal = draft.goal,
-                segmentRef = draft.segmentRef,
-                steps = draft.steps,
+                definition = CampaignDefinition(draft.name, draft.goal, draft.segmentRef, draft.steps),
                 revisedBy = "other@openbank.test",
             )
         }

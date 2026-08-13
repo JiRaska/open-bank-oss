@@ -5,6 +5,7 @@
 package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -38,22 +39,32 @@ class CampaignStateMachineTest {
     @Test
     fun `only a draft can be revised`() {
         val revised = draft().revise(
-            name = "Jarní vklady",
-            goal = "Zvýšit spoření",
-            segmentRef = SegmentRef("saver-high-balance", 1),
-            steps = listOf(CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, mapOf("offerTitle" to "4 %"), 0)),
-            stopCondition = null,
-            conversionRule = null,
-            holdoutPercent = 0,
-            schedule = null,
-            trigger = null,
+            CampaignDefinition(
+                name = "Jarní vklady",
+                goal = "Zvýšit spoření",
+                segmentRef = SegmentRef("saver-high-balance", 1),
+                steps = listOf(
+                    CampaignStep(
+                        order = 0,
+                        template = "MARKETING_PRODUCT_OFFER",
+                        channel = Channel.EMAIL,
+                        variables = mapOf("offerTitle" to "4 %"),
+                        delaySeconds = 0,
+                    ),
+                ),
+            ),
         )
 
         assertEquals("Jarní vklady", revised.name)
         assertEquals("maker", revised.createdBy)
         assertThrows<IllegalArgumentException> {
             draft().submit().revise(
-                "Nesmí projít", "", SegmentRef("saver-high-balance", 1), emptyList(), null, null, 0, null, null,
+                CampaignDefinition(
+                    name = "Nesmí projít",
+                    goal = "",
+                    segmentRef = SegmentRef("saver-high-balance", 1),
+                    steps = emptyList(),
+                ),
             )
         }
     }
