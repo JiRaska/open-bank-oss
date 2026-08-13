@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.118.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.117.0...admin-ui-v0.118.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** let makers revise drafts ([#4667](https://github.com/JiRaska/open-bank-oss/issues/4667)) ([60b86bb](https://github.com/JiRaska/open-bank-oss/commit/60b86bb48e7c480bd05b79a5c8a2c544f9e2b1f4))
+
 ## [0.117.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.116.0...admin-ui-v0.117.0) (2026-08-13)
 
 
