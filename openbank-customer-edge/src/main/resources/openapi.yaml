@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.31.0
+  version: 1.34.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -31,6 +31,7 @@ tags:
   - name: WebAuthn
   - name: Documents
   - name: Preferences
+  - name: Engagement
   - name: Feedback
   - name: Cards
   - name: Lending
@@ -455,6 +456,58 @@ paths:
       responses:
         '200':
           description: Count of notifications marked read
+
+  /surfaces/{slot}:
+    get:
+      tags: [Engagement]
+      summary: Resolve a consented, typed in-app engagement surface for the caller
+      description: >-
+        Returns catalogue-backed content for a mobile slot after the engagement service applies
+        marketing consent, impression budget, adverse-state exclusions and dismissal suppression.
+        The party is always taken from the authenticated customer session; it is never a client
+        parameter. The app owns local rendering and navigation for the typed payload.
+      operationId: getEngagementSurface
+      security:
+        - customerOidc: []
+      parameters:
+        - name: slot
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+      responses:
+        '200':
+          description: Surface resolution, including an explicit state when no content may render
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngagementSurfaceResponse'
+        '400':
+          description: Unknown surface slot
+
+  /surfaces/events:
+    post:
+      tags: [Engagement]
+      summary: Record an app-observed engagement event for a surfaced item
+      description: >-
+        The party identity is injected from the customer JWT. The service accepts only a content
+        id that belongs to the declared slot, so a device cannot manufacture metrics for an
+        arbitrary campaign or content class.
+      operationId: recordEngagementSurfaceEvent
+      security:
+        - customerOidc: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EngagementSurfaceEvent'
+      responses:
+        '202':
+          description: Event persisted and queued for the engagement event stream
+        '400':
+          description: Invalid request, unknown content or content-slot mismatch
 
   /profile:
     get:
@@ -2136,6 +2189,66 @@ components:
         email:
           type: string
           format: email
+
+    EngagementSurfaceResponse:
+      type: object
+      required: [state]
+      description: >-
+        A typed server decision, not arbitrary remote UI markup. `ok` carries only catalogue ids
+        and declared presentation variables; `not_eligible` and `suppressed` are normal states,
+        not transport failures.
+      properties:
+        state:
+          type: string
+          enum: [ok, not_eligible, suppressed]
+        content:
+          type: array
+          items:
+            $ref: '#/components/schemas/EngagementSurfaceContent'
+        reason:
+          type: string
+          description: Present when the contact policy makes the caller not eligible.
+
+    EngagementSurfaceContent:
+      type: object
+      required: [id, slot, type, variables]
+      properties:
+        id:
+          type: string
+          example: SAVINGS_RATE_BANNER
+        slot:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [BANNER, CARD, STORY, CAROUSEL, OFFER]
+        variables:
+          type: array
+          items: {type: string}
+
+    EngagementSurfaceEvent:
+      type: object
+      required: [contentId, slot, type]
+      description: >-
+        `partyId` is deliberately absent: customer-edge derives it from the bearer token and
+        overwrites any unexpected field before the event reaches engagement-service. `interactionRef`
+        is optional and opaque: it may only be copied from a PUSH payload. customer-edge verifies
+        its ownership and PUSH origin before accepting the event, then resolves the server-owned
+        campaign, step and channel context. Any client-supplied attribution fields are discarded.
+      properties:
+        contentId:
+          type: string
+          example: SAVINGS_RATE_BANNER
+        slot:
+          type: string
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+        type:
+          type: string
+          enum: [IMPRESSION, CLICK, DISMISS]
+        interactionRef:
+          type: string
+          format: uuid
+          description: Opaque reference from a campaign PUSH payload, accepted only for its owning caller.
 
     FeedbackSubmission:
       type: object

@@ -37,6 +37,7 @@ import kotlinx.coroutines.async
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Instant
 import java.util.UUID
 
 private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-changed"
@@ -133,8 +134,8 @@ open class DomesticPaymentActivitiesImpl(
         // moved past this step there is nothing to do. Without the early return a re-drive of a
         // stranded payment dies here on "Invalid domestic payment status transition" and never
         // reaches settlePayment — which is the step that would actually recover it, and which is
-        // idempotent (payment-scoped key, 409 = already booked). submitScheme and settlePayment
-        // below both carry the same guard; validate was the one activity that did not (#4182).
+        // idempotent (payment-scoped key; a replay returns the existing transaction). submitScheme
+        // and settlePayment below both carry the same guard; validate was the one that did not (#4182).
         if (payment.status != DomesticPaymentStatus.RECEIVED) return@vtx Unit
         val updated = payment.transitionTo(DomesticPaymentStatus.VALIDATED, clock = clock)
         paymentRepository.update(
@@ -191,24 +192,74 @@ open class DomesticPaymentActivitiesImpl(
         Unit
     }
 
-    @Suppress("TooGenericExceptionCaught")
     override fun submitScheme(paymentId: UUID): DomesticPaymentStatus = vtx {
         if (!schemeSubmissionEnabled) return@vtx DomesticPaymentStatus.VALIDATED
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during submitScheme activity")
         if (payment.status != DomesticPaymentStatus.VALIDATED) return@vtx payment.status
-        try {
-            val outcome = schemeGatewayPort.submit(payment)
+
+        // #4218. VALIDATED alone does not mean "not yet submitted": until this guard existed, a
+        // failure of the status write AFTER a successful submit was caught below and logged as
+        // "holding in VALIDATED", leaving a live clearing item behind a row that claimed nothing
+        // was sent. A re-drive then read that row and submitted a SECOND clearing item for one
+        // payment — nothing downstream dedups it (no idempotency key on the pacs.008, and
+        // clearing-simulator does not dedup at all). The marker is what tells the two states apart.
+        //
+        // Held rather than progressed on purpose: we know a pacs.008 went out, not what the scheme
+        // said about it, and guessing either way is worse than stopping. Recovering it is an
+        // operator action against the scheme's own record — see the index this migration adds.
+        // The claim IS the guard, and it has to be one statement. Reading `schemeDispatchedAt`
+        // here and writing it below would leave a window where two attempts both see null, both
+        // pass, and both submit — the duplicate clearing item this whole change exists to prevent.
+        // The database arbitrates; `false` means we lost the race and must not send anything.
+        //
+        // Claimed BEFORE the call, so it survives any failure after it. Held rather than progressed
+        // on purpose: we know a pacs.008 went out, not what the scheme said about it, and guessing
+        // either way is worse than stopping. Recovering it is an operator action against the
+        // scheme's own record — see the index the migration adds.
+        if (!paymentRepository.claimSchemeDispatch(paymentId, Instant.now(clock))) {
+            log.errorf(
+                "Payment %s is VALIDATED but the scheme dispatch is already claimed — " +
+                    "NOT re-submitting (#4218). A clearing item may exist without a recorded " +
+                    "outcome; reconcile against the scheme before releasing this payment.",
+                paymentId,
+            )
+            return@vtx DomesticPaymentStatus.VALIDATED
+        }
+
+        // The catch covers the GATEWAY CALL ONLY (#4218). It used to wrap the status write below as
+        // well, which is what merged "never submitted" with "submitted, bookkeeping failed".
+        val outcome = try {
+            schemeGatewayPort.submit(payment)
+        } catch (ex: SchemeGatewayUnavailableException) {
+            // Ordinary "scheme is down": the gateway proved the request never left, so this payment
+            // has no clearing item and must stay re-drivable. Anything ambiguous keeps the marker
+            // and therefore stops here for good — the deliberate trade of a visible strand against
+            // a duplicate payment.
+            if (ex.requestLeftThisProcess) {
+                log.ambiguousDispatch(paymentId, ex)
+            } else {
+                paymentRepository.clearSchemeDispatch(paymentId)
+                log.warnf(ex, "Scheme gateway unreachable for payment %s; holding in VALIDATED", paymentId)
+            }
+            return@vtx DomesticPaymentStatus.VALIDATED
+        } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+            // SchemeGatewayPort's contract is fail-closed, so reaching here means the adapter itself
+            // broke its contract. That tells us nothing about whether the pacs.008 was delivered, so
+            // it is the ambiguous case: hold, keep the marker, never re-submit.
+            log.ambiguousDispatch(paymentId, ex)
+            return@vtx DomesticPaymentStatus.VALIDATED
+        }
+
+        // Everything below is local bookkeeping of a verdict we already hold. It is deliberately
+        // NOT inside a catch: swallowing a failure here is exactly what merged "never submitted"
+        // with "submitted, bookkeeping failed". Let it propagate — Temporal retries the activity,
+        // and the marker above makes that retry safe.
+        run {
             val (nextStatus, reason) = if (outcome.accepted) {
                 DomesticPaymentStatus.SENT_TO_CLEARING to null
             } else {
-                val r = when (outcome.reasonCode) {
-                    "AC04", "AC06" -> DomesticRejectReason.BENEFICIARY_ACCOUNT_CLOSED
-                    "RC01" -> DomesticRejectReason.INVALID_BANK_CODE
-                    "AM05" -> DomesticRejectReason.INSUFFICIENT_FUNDS
-                    else -> DomesticRejectReason.TECHNICAL_ERROR
-                }
-                DomesticPaymentStatus.REJECTED to r
+                DomesticPaymentStatus.REJECTED to rejectReasonFor(outcome.reasonCode)
             }
             val rejectDetail = if (nextStatus == DomesticPaymentStatus.REJECTED) {
                 "scheme reject: ${outcome.reasonCode}"
@@ -225,39 +276,67 @@ open class DomesticPaymentActivitiesImpl(
                 ),
             )
             nextStatus
-        } catch (ex: SchemeGatewayUnavailableException) {
-            log.warnf(ex, "Scheme gateway unavailable for payment %s; holding in VALIDATED", paymentId)
-            DomesticPaymentStatus.VALIDATED
-        } catch (ex: Exception) {
-            log.warnf(ex, "Unexpected error during scheme submission for payment %s; holding", paymentId)
-            DomesticPaymentStatus.VALIDATED
         }
     }
 
-    @Suppress("TooGenericExceptionCaught")
+    /**
+     * Book the funds for a payment the scheme has accepted (ADR-0108).
+     *
+     * This activity FAILS on a settlement fault instead of returning a status (#4182). Returning
+     * `SENT_TO_CLEARING` here made the activity a success, and a successful activity is one
+     * Temporal never retries — so the workflow completed on a non-terminal business state and the
+     * payment was stranded with no timer, no retry and no reader. The configured retry policy
+     * existed the whole time; nothing could ever reach it.
+     *
+     * Retrying is safe, and that is established from the code rather than assumed:
+     *  - [SettlementAdapter][com.openbank.domestic.infrastructure.client.SettlementAdapter] sends
+     *    `idempotencyKey = "domestic-settlement-<paymentId>"` — payment-scoped and stable across
+     *    attempts (no timestamp, no nonce), so every retry carries the key of the first attempt.
+     *  - transaction-service deduplicates on that key by early-returning the existing
+     *    transaction, which it answers as **201 with that transaction** — measured, not assumed:
+     *    `TransactionResource` calls `Response.created(...)` unconditionally, and the only 409s in
+     *    that service come from optimistic-lock and state-transition mappers. The adapter maps that
+     *    arm to `SettlementOutcome(settled = true)`, so an already-booked payment is a success.
+     *    (`SettlementAdapter`'s `HTTP_CONFLICT` branch is unreachable today and kept as defence.)
+     *  - the `SENT_TO_CLEARING` guard above makes the activity re-entrant: once the status write
+     *    lands, a retry (or an operator re-drive) returns `SETTLED` without calling the port again.
+     *
+     * So the failure direction is the dangerous one here, not the retry direction: a retry costs at
+     * worst a redundant round-trip that returns the same transaction, whereas swallowing costs a
+     * customer a payment that left and never arrived.
+     */
     override fun settlePayment(paymentId: UUID): DomesticPaymentStatus = vtx {
         val payment = paymentRepository.findById(paymentId)
             ?: error("Payment $paymentId not found during settlePayment activity")
         if (payment.status != DomesticPaymentStatus.SENT_TO_CLEARING) return@vtx payment.status
         try {
             settlementPort.settle(payment)
-            val updated = payment.transitionTo(DomesticPaymentStatus.SETTLED, clock = clock)
-            paymentRepository.update(
-                payment = updated,
-                outboxMessage = OutboxMessage(
-                    aggregateId = updated.id,
-                    eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = eventPublisher.statusChangedPayload(payment, updated),
-                ),
-            )
-            DomesticPaymentStatus.SETTLED
         } catch (ex: SettlementUnavailableException) {
-            log.warnf(ex, "Settlement unavailable for payment %s; holding in SENT_TO_CLEARING", paymentId)
-            DomesticPaymentStatus.SENT_TO_CLEARING
-        } catch (ex: Exception) {
-            log.warnf(ex, "Unexpected error during settlement for payment %s; holding in SENT_TO_CLEARING", paymentId)
-            DomesticPaymentStatus.SENT_TO_CLEARING
+            // Rethrown, not absorbed: this is the planned-degradation case, and failing the
+            // activity is what arms the workflow's retry policy. ERROR rather than WARN because a
+            // payment that reaches here has left the bank and has not been booked.
+            log.errorf(
+                ex,
+                "Settlement unavailable for payment %s — failing the activity so Temporal retries; " +
+                    "the payment stays in SENT_TO_CLEARING and the workflow stays running (#4182)",
+                paymentId,
+            )
+            throw ex
         }
+        // Deliberately outside the catch, and with no blanket `catch (Exception)` anywhere in this
+        // method. Any other fault — an invalid transition, a repository failure, an adapter bug —
+        // propagates with its own type, so Temporal records what actually broke instead of
+        // recording the same terminal-looking success the outage produced.
+        val updated = payment.transitionTo(DomesticPaymentStatus.SETTLED, clock = clock)
+        paymentRepository.update(
+            payment = updated,
+            outboxMessage = OutboxMessage(
+                aggregateId = updated.id,
+                eventType = PAYMENT_STATUS_CHANGED_EVENT,
+                payload = eventPublisher.statusChangedPayload(payment, updated),
+            ),
+        )
+        DomesticPaymentStatus.SETTLED
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -287,3 +366,30 @@ open class DomesticPaymentActivitiesImpl(
         }
     }
 }
+
+// Both helpers below are top-level and live AFTER the class on purpose. They are only used by
+// submitScheme, and keeping them out of the class holds DomesticPaymentActivitiesImpl under
+// detekt's TooManyFunctions threshold — which fires AT the limit, not above it. Placing them after
+// the class also avoids the trap where a top-level declaration sitting between an annotation and
+// its intended class silently steals that annotation.
+
+/** Map the scheme's `pacs.002` reason code to the rail's reject reason (ADR-0104 D4). */
+private fun rejectReasonFor(reasonCode: String?): DomesticRejectReason = when (reasonCode) {
+    "AC04", "AC06" -> DomesticRejectReason.BENEFICIARY_ACCOUNT_CLOSED
+    "RC01" -> DomesticRejectReason.INVALID_BANK_CODE
+    "AM05" -> DomesticRejectReason.INSUFFICIENT_FUNDS
+    else -> DomesticRejectReason.TECHNICAL_ERROR
+}
+
+/**
+ * A dispatch whose outcome could not be established (#4218). The marker stays set, so the rail
+ * refuses to submit this payment again and an operator has to reconcile it against the scheme's own
+ * record. ERROR, not WARN: unlike an unreachable gateway, this one needs a human.
+ */
+private fun Logger.ambiguousDispatch(paymentId: UUID, ex: Throwable) = errorf(
+    ex,
+    "Scheme submission for payment %s failed without a usable verdict — the scheme may hold a " +
+        "clearing item for it. Holding in VALIDATED and NOT re-submitting (#4218); reconcile " +
+        "against the scheme before releasing this payment.",
+    paymentId,
+)

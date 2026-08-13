@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.13.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.13.1...balance-service-v1.13.2) (2026-08-10)
+
+
+### Bug Fixes
+
+* **audit:** give the unattributed producers a real actor, and a way to say nobody did it ([#4424](https://github.com/JiRaska/open-bank-oss/issues/4424)) ([0cadda3](https://github.com/JiRaska/open-bank-oss/commit/0cadda3725280119a86dba722efa692e1f783fc9))
+
+## [1.13.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.13.0...balance-service-v1.13.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **balance:** stop a not-yet-effective credit being spendable before its value date ([#3916](https://github.com/JiRaska/open-bank-oss/issues/3916)) ([67ef850](https://github.com/JiRaska/open-bank-oss/commit/67ef8503ae469fd2fc95a97174b2f36ae1dba000))
+
 ## [1.13.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.12.3...balance-service-v1.13.0) (2026-08-07)
 
 

@@ -55,6 +55,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.jboss.resteasy.reactive.MultipartForm
 import org.jboss.resteasy.reactive.PartType
 import java.net.URI
+import java.time.Instant
 import java.util.UUID
 
 @Path("/api/v1/parties")
@@ -125,7 +126,12 @@ class PartyResource {
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
     @Operation(summary = "Create a new party (customer or company)")
-    suspend fun createParty(req: CreatePartyRequest, @HeaderParam("Idempotency-Key") idempotencyKey: String): Response {
+    suspend fun createParty(
+        req: CreatePartyRequest,
+        // Nullable by necessity — JAX-RS injects null for an absent header (#526, #3624).
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         val party = partyUseCase.createParty(req.toCommand(idempotencyKey))
         return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
     }
@@ -493,6 +499,7 @@ class PartyResource {
                             Response.Status.SERVICE_UNAVAILABLE.statusCode,
                             "DEDUP_UNAVAILABLE",
                             "RČ dedup pepper not configured; uniqueness not enforced",
+                            timestamp = Instant.now(),
                         ),
                     ).build()
             } else {
@@ -503,6 +510,7 @@ class PartyResource {
                             Response.Status.NOT_FOUND.statusCode,
                             "PARTY_NOT_FOUND",
                             "No party matches the supplied RČ",
+                            timestamp = Instant.now(),
                         ),
                     ).build()
             }

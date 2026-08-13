@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.17.0...agent-service-v1.18.0) (2026-08-09)
+
+
+### Features
+
+* **agent:** populate model_id on every AI-attributed audit event ([#3813](https://github.com/JiRaska/open-bank-oss/issues/3813)) ([0a4528c](https://github.com/JiRaska/open-bank-oss/commit/0a4528c95a08df85db9e822958d48f67c04ddb55))
+
 ## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.3...agent-service-v1.17.0) (2026-08-07)
 
 

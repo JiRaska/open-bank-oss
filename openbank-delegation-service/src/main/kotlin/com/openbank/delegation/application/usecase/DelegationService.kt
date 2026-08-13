@@ -30,6 +30,7 @@ import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.DelegationSuspended
 import com.openbank.delegation.domain.event.EventMoney
 import com.openbank.delegation.domain.model.ApprovalPolicy
+import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
 import jakarta.enterprise.context.ApplicationScoped
@@ -57,18 +58,21 @@ class DelegationResourceOwnershipException(message: String) : RuntimeException(m
 /**
  * The request carries a constraint this platform accepts in its schema but enforces nowhere.
  *
- * Today that is exactly `dailyLimit` and `monthlyLimit` (ADR-0232 D1/D6). A cumulative ceiling is
- * only a real constraint at the point where accumulated spend is OBSERVED, and no such point
- * exists: `DelegationOffered` does not even carry the two fields, so no product-service projection
- * can learn them, and nothing in the fleet decrements or counts against them. Accepting them
- * silently is the worst of the three options — the grantor comes away believing they capped the
- * delegate at 5 000 Kč/den while every payment the delegate makes is checked only against
- * `perTransactionLimit`. Refusing the field is the honest state until a counter exists.
+ * Until ADR-0249 that was exactly `dailyLimit` and `monthlyLimit` (ADR-0232 D1/D6): a cumulative
+ * ceiling is only a real constraint at the point where accumulated spend is OBSERVED, and no such
+ * point existed. `SpendReservationService` is now that point, so the two fields are accepted again
+ * — but only on a grant that can actually spend, because a cumulative ceiling on a read-only grant
+ * is still a number nothing will ever count.
+ *
+ * `approvalPolicy` other than SOLO remains refused, unchanged: nothing counts approvals.
  */
 class DelegationUnsupportedConstraintException(val code: String, message: String) : RuntimeException(message) {
     companion object {
         const val CODE_CUMULATIVE_LIMIT_UNSUPPORTED = "CUMULATIVE_LIMIT_UNSUPPORTED"
         const val CODE_APPROVAL_POLICY_UNSUPPORTED = "APPROVAL_POLICY_UNSUPPORTED"
+
+        /** ADR-0249 D5 — a spend capability with no cumulative ceiling at all. */
+        const val CODE_SPEND_WITHOUT_CEILING = "SPEND_WITHOUT_CEILING"
     }
 }
 
@@ -356,27 +360,46 @@ class DelegationService(
     }
 
     /**
-     * Refuse a grant carrying a ceiling nothing enforces, BEFORE any gate that costs the customer
-     * something. It runs ahead of the ownership lookup, the eligibility call and above all ahead of
-     * the SCA consume, for the same reason those three are ordered as they are: a request that will
-     * be refused anyway must not spend a challenge.
+     * ADR-0249 D3/D5, replacing #3613's blanket refusal of `dailyLimit` / `monthlyLimit`.
      *
-     * See [DelegationUnsupportedConstraintException] for why refusing beats accepting. The check is
-     * on the WRITE path only — an existing row that already carries a ceiling still rehydrates and
-     * still serializes, because hiding data the platform already stored would replace one wrong
-     * belief with another.
+     * The refusal was correct while nothing counted: a "5 000 Kč/den" the platform does not honour
+     * is worse than no feature, because the customer acts on it. `SpendReservationService` now
+     * counts, so the two ceilings are accepted — under two rules, both checked on the WRITE path
+     * only, ahead of the ownership lookup, the eligibility call and above all ahead of the SCA
+     * consume, so a request that will be refused anyway does not cost the customer their ceremony:
+     *
+     *  1. a cumulative ceiling requires a money-moving capability. On a read-only grant nothing
+     *     will ever reserve against it, so it would be exactly the unenforced number #3613 refused;
+     *  2. (D5) `ACCOUNT_INITIATE_PAYMENT` requires at least one of the two. "Unlimited access to
+     *     someone else's account" is a product decision no bank should make by omission.
+     *
+     * Rule 2 is deliberately scoped to `ACCOUNT_INITIATE_PAYMENT`, the capability D5 names, and not
+     * to every [DelegationGrant.EXECUTION_CAPABILITIES] entry: `SAVINGS_WITHDRAW` grants are
+     * already live without ceilings, and silently invalidating the shape they were offered under
+     * would be an unrelated behaviour change smuggled in on this one.
+     *
+     * Both rules live here rather than in the aggregate's `init` for a specific reason: grants
+     * written before ADR-0249 carry `ACCOUNT_INITIATE_PAYMENT` and no ceiling at all — #3613 made
+     * sure of it — so an invariant in the constructor would make every one of them unrehydratable
+     * the moment this deploys.
      */
     private fun rejectUnenforcedCeilings(command: OfferDelegationCommand) {
-        val unenforced = buildList {
-            if (command.dailyLimit != null) add("dailyLimit")
-            if (command.monthlyLimit != null) add("monthlyLimit")
-        }
-        if (unenforced.isNotEmpty()) {
+        val hasCumulativeCeiling = command.dailyLimit != null || command.monthlyLimit != null
+        val canSpend = command.capabilities.any { it in DelegationGrant.EXECUTION_CAPABILITIES }
+        if (hasCumulativeCeiling && !canSpend) {
             throw DelegationUnsupportedConstraintException(
                 code = DelegationUnsupportedConstraintException.CODE_CUMULATIVE_LIMIT_UNSUPPORTED,
-                message = "${unenforced.joinToString(" and ")} cannot be accepted: this platform enforces only " +
-                    "perTransactionLimit. No service counts cumulative spend against a grant, so a ceiling set " +
-                    "here would never be applied to any payment. Omit the field (ADR-0232 D1/D6).",
+                message = "dailyLimit/monthlyLimit cannot be accepted on a grant with no money-moving " +
+                    "capability: nothing reserves spend against it, so the ceiling would never be applied " +
+                    "to anything. Omit the field, or grant a spending capability (ADR-0249 D3).",
+            )
+        }
+        if (DelegationCapability.ACCOUNT_INITIATE_PAYMENT in command.capabilities && !hasCumulativeCeiling) {
+            throw DelegationUnsupportedConstraintException(
+                code = DelegationUnsupportedConstraintException.CODE_SPEND_WITHOUT_CEILING,
+                message = "ACCOUNT_INITIATE_PAYMENT requires a dailyLimit or a monthlyLimit: a delegate who may " +
+                    "initiate payments with no cumulative ceiling has unlimited access to someone else's " +
+                    "account, which is not something this platform grants by omission (ADR-0249 D5).",
             )
         }
     }

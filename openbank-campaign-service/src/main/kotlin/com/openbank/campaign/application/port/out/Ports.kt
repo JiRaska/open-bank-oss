@@ -6,8 +6,11 @@ package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -40,6 +43,24 @@ interface EnrolmentRepository {
     suspend fun save(enrolment: Enrolment): Enrolment
 }
 
+/** One independently measured cohort of a campaign holdout experiment. */
+data class ExperimentCohortMetrics(val cohort: ExperimentCohort, val assigned: Long, val converted: Long)
+
+/**
+ * A cohort-aware read model. It is separate from [EnrolmentRepository] because deriving it by
+ * loading enrolments and send logs into Kotlin would be unbounded work on the operator path.
+ */
+interface CampaignExperimentRepository {
+    suspend fun metrics(campaignId: UUID): List<ExperimentCohortMetrics>
+}
+
+/** Counts remain in SQL so an A/B read stays bounded for a campaign with millions of enrolments. */
+data class ContentVariantMetrics(val variant: ContentVariant, val assigned: Long, val converted: Long)
+
+interface CampaignContentExperimentRepository {
+    suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics>
+}
+
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
 data class StepOutcomeCount(val stepOrder: Int, val outcome: SendOutcome, val count: Long)
 
@@ -59,9 +80,25 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
  */
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
+/** Server-owned campaign context for one opaque app interaction reference. */
+data class CampaignInteractionAttribution(val campaignId: UUID, val stepOrder: Int, val channel: Channel)
+
+@Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
+
+    /**
+     * Whether [interactionRef] names an attributable app placement made to [partyId]. This is intentionally a
+     * yes/no capability: the customer edge must never learn the campaign, step or another
+     * party from a reference supplied by a device.
+     *
+     * The fail-closed default keeps lightweight fakes safe. Production overrides it with the
+     * send-log lookup; an adapter that has not implemented attribution cannot accidentally
+     * validate a client-controlled reference.
+     */
+    suspend fun attributionForAppInteraction(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
+        null
 
     /**
      * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1
@@ -159,28 +196,57 @@ interface ConsentCheckPort {
     suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean
 }
 
+/** One immutable request from campaign orchestration to notification-service. */
+data class NotificationSendRequest(
+    val partyId: UUID,
+    val channel: Channel,
+    val template: String,
+    val recipient: String,
+    val variables: Map<String, String>,
+    /** Send-log row id; campaign needs this mandatory to join a delivery outcome back. */
+    val correlationId: UUID,
+    /** Closed mobile-app route, present only on a PUSH delivery. */
+    val deepLink: String? = null,
+    /**
+     * Opaque, producer-owned reference carried only in a PUSH routing envelope. It is deliberately
+     * not a campaign id, party id, content id or URL: the app may return it later as evidence of
+     * an interaction, but it cannot use it to discover or select another campaign.
+     *
+     * Today it equals this request's send-log id. The later customer-edge/engagement join must
+     * validate ownership against that row before it attributes anything (issue #4480).
+     */
+    val interactionRef: UUID? = null,
+)
+
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
-    /**
-     * [correlationId] is the send-log row id this request belongs to (ADR-0239 D1).
-     *
-     * Required, not optional: the whole reason the campaign publishes here is to hear back what
-     * became of the message, and a nullable parameter is one a caller forgets. The receiving
-     * contract keeps it optional for producers that genuinely do not care — this one does.
-     */
-    suspend fun requestSend(
-        partyId: UUID,
-        channel: Channel,
-        template: String,
-        recipient: String,
-        variables: Map<String, String>,
-        correlationId: UUID,
-    )
+    suspend fun requestSend(request: NotificationSendRequest)
+}
+
+/** One approved, customer-specific placement for a closed authenticated-app surface. */
+data class BannerPlacementRequest(
+    val interactionRef: UUID,
+    val partyId: UUID,
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val template: String,
+    val variables: Map<String, String>,
+    val deepLink: String,
+    val inAppSurface: InAppSurface,
+)
+
+/** Campaign emits placement commands; engagement-service owns rendering and event recording. */
+interface BannerPlacementPort {
+    suspend fun place(request: BannerPlacementRequest)
 }
 
 /** ADR-0200 D2 push: signals a live journey that consent was revoked for its party. */
 interface JourneySignaller {
     fun signalConsentRevoked(campaignId: UUID, partyId: UUID)
+    fun signalCampaignPaused(campaignId: UUID, partyId: UUID)
+    fun signalCampaignResumed(campaignId: UUID, partyId: UUID)
+    fun signalCampaignClosed(campaignId: UUID, partyId: UUID)
+    fun signalGoalReached(campaignId: UUID, partyId: UUID)
     fun startJourney(campaignId: UUID, partyId: UUID)
 }
 

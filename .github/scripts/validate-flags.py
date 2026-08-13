@@ -17,7 +17,6 @@
 # Exit 0 = all flags valid. Exit 1 = violations found (CI gate fails).
 
 import json
-import os
 import re
 import sys
 from datetime import datetime, timezone

@@ -193,6 +193,18 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
+    /**
+     * The app's server-driven engagement surfaces. This is deliberately separate from
+     * notification-service: an app surface is rendered after the customer opens the app, it is
+     * not an outbound notification pretending to have been delivered (ADR-0220 D1).
+     */
+    @ConfigProperty(name = "openbank.edge.engagement-service-url")
+    lateinit var engagementServiceUrl: String
+
+    /** Campaign validates opaque PUSH interaction references before engagement data is appended. */
+    @ConfigProperty(name = "openbank.edge.campaign-service-url")
+    lateinit var campaignServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.statement-service-url")
     lateinit var statementServiceUrl: String
 
@@ -2596,6 +2608,99 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- In-app engagement surfaces ---
+
+    /**
+     * Resolve one named mobile surface for the authenticated customer. The app receives only a
+     * typed, catalogue-backed payload; it owns presentation, accessibility and local navigation.
+     * The party id is derived from the JWT and injected only at this boundary, never accepted from
+     * the device, so changing a query parameter cannot render another customer's campaign.
+     */
+    @GET
+    @Path("/surfaces/{slot}")
+    @Authorize(action = "customer.engagement.read", resource = "#slot")
+    @Blocking
+    fun getSurface(@PathParam("slot") slot: String): Response {
+        if (slot !in SURFACE_SLOTS) return Response.status(Response.Status.BAD_REQUEST).build()
+        val customer = customer()
+        return upstream.get(
+            "$engagementServiceUrl/api/v1/surfaces/$slot?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * Record what the app actually observed: impression, click or dismissal. The edge overwrites
+     * any supplied partyId with the JWT party id before forwarding, which makes the feedback loop
+     * meaningful without turning it into an IDOR write primitive. Content/slot/type validation is
+     * owned by engagement-service, alongside the catalogue it validates against.
+     *
+     * When the app includes an interactionRef from a PUSH payload, it is validated against the
+     * campaign send log for this JWT party before it can become an attribution datum. A reference
+     * for another party, a non-PUSH send, or an unknown id all receive the same public error — the
+     * endpoint must never disclose which of those cases happened.
+     */
+    @POST
+    @Path("/surfaces/events")
+    @Authorize(action = "customer.engagement.record-event")
+    @Blocking
+    fun recordSurfaceEvent(body: String): Response {
+        val customer = customer()
+        val event = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
+            ?: return badRequest("Malformed engagement event")
+        // A phone can report attention, never a product outcome. Campaign-service already derives
+        // conversions from authoritative account/card events; accepting this value here would let
+        // a client turn a click into revenue attribution.
+        if (event.path("type").asText() == "CONVERSION") {
+            return badRequest("Conversions must originate from authoritative product events")
+        }
+        // These fields are server-owned. Remove any client attempt before optionally filling them
+        // from campaign-service's validated send-log row below.
+        event.remove(listOf("campaignId", "stepOrder", "channel"))
+        val interactionRefNode = event.get("interactionRef")
+        if (interactionRefNode != null) {
+            if (!interactionRefNode.isTextual) return badRequest("Invalid interaction reference")
+            val interactionRef = runCatching { UUID.fromString(interactionRefNode.asText()) }.getOrNull()
+                ?: return badRequest("Invalid interaction reference")
+            val validation = upstream.get(
+                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef/attribution",
+                customer.partyId.toString(),
+            )
+            if (validation.status != Response.Status.OK.statusCode) {
+                // 400/403/404 are deliberately indistinguishable to the mobile client. Upstream
+                // failure stays a 502 so the client can safely retry instead of discarding an event.
+                return if (validation.status >= UPSTREAM_SERVER_ERROR_MIN) {
+                    Response.status(Response.Status.BAD_GATEWAY).build()
+                } else {
+                    badRequest("Invalid interaction reference")
+                }
+            }
+            val attribution = runCatching {
+                objectMapper.readTree(validation.entity as? String ?: "")
+            }.getOrNull() ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val campaignId = attribution.path("campaignId").asText()
+                .takeIf { runCatching { UUID.fromString(it) }.isSuccess }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val stepOrder = attribution.path("stepOrder").asInt(0)
+                .takeIf { it >= 0 && attribution.has("stepOrder") }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val channel = attribution.path("channel").asText()
+            if (channel !in setOf("PUSH", "BANNER")) {
+                return Response.status(Response.Status.BAD_GATEWAY).build()
+            }
+            event.put("campaignId", campaignId)
+            event.put("stepOrder", stepOrder)
+            event.put("channel", channel)
+        }
+        event.put("partyId", customer.partyId.toString())
+        val enriched = objectMapper.writeValueAsString(event)
+        return upstream.post(
+            "$engagementServiceUrl/api/v1/surfaces/events",
+            customer.partyId.toString(),
+            enriched,
+        )
+    }
+
     // --- Theme preferences (ADR-0190) — edge-local, party-keyed, roams the app look ---
 
     /** The caller's stored ThemeSpec, 404 when none. Party is taken from the JWT, never the client. */
@@ -3833,6 +3938,15 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
+        private val SURFACE_SLOTS: Set<String> = setOf(
+            "HOME_BANNER",
+            "HOME_CAROUSEL",
+            "STORIES",
+            "PRODUCT_FEED",
+            "REWARDS_HUB",
+        )
+
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
         private const val THEME_SPEC_MAX_BYTES = 8 * 1024
@@ -3961,6 +4075,9 @@ class CustomerEdgeResource(
 
         /** Upper bound for upstream error text carried into an audit detail field. */
         private const val AUDIT_DETAIL_MAX_CHARS = 300
+
+        /** HTTP status classes start at this value; named to keep upstream-retry policy legible. */
+        private const val UPSTREAM_SERVER_ERROR_MIN = 500
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
         internal const val SCA_EXEMPTION_OWN_ACCOUNT = "PSD2_RTS_ART15_OWN_ACCOUNT"
@@ -4414,8 +4531,15 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Link the applicant's new Keycloak sub (KEYCLOAK_ID) to the matched existing party in pid —
-     * the ADR-0072 §5 identity merge so one human across channels maps to one golden-record party.
+     * Link the applicant's new Keycloak sub (KEYCLOAK_ID) to the matched existing party in pid, so
+     * one human arriving through another channel maps to one golden-record party (ADR-0072 §5
+     * identity unification).
+     *
+     * This is an external-id ATTACHMENT, not a party merge: it creates no `MERGED` party, moves no
+     * accounts and retires no row. The real merge is ADR-0179's `POST /api/v1/parties/{id}/merge`
+     * on party-service (four-eyes gated), whose `merged_into` pointer this service follows at
+     * request time in [PartyMergeResolver] — do not confuse the two (issue #1984).
+     *
      * Best-effort: returns true on a 2xx; failures are audited via the caller but never block
      * onboarding. The pid endpoint is idempotent and 409s a sub already linked elsewhere.
      */

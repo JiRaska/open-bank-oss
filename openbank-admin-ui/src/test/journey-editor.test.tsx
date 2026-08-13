@@ -9,8 +9,22 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { JourneyEditor, MAX_STEPS, type EditorStep } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
 
-const TEMPLATES = { MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'] }
-const TPL_CHANNEL = { MARKETING_PRODUCT_OFFER: 'EMAIL' as const }
+const TEMPLATES = {
+  MARKETING_PRODUCT_OFFER: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
+  MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
+}
+const TPL_CHANNEL = {
+  MARKETING_PRODUCT_OFFER: 'EMAIL' as const,
+  MARKETING_PRODUCT_OFFER_PUSH: 'PUSH' as const,
+  MARKETING_PRODUCT_OFFER_BANNER: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER' as const,
+}
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
 // own copy — asserting the rendered label against the same map the component reads would be vacuous.
@@ -127,5 +141,72 @@ describe('step editor', () => {
     // Named the way the fields above are named. Listing `offerText` under a field labelled
     // "Offer text" would send someone hunting for a control that is not on the screen.
     expect(screen.getByText(/Offer text, Button text/)).toBeTruthy()
+  })
+
+  it('lets an email step opt into push only for absent email consent', () => {
+    const onChange = vi.fn()
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.click(document.querySelector('[data-push-fallback="0"] input')!)
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ fallbackToPush: true }))
+    expect(screen.getByText(/not a second attempt after an email delivery failure/i)).toBeTruthy()
+  })
+
+  it('gives a push a closed app destination instead of an arbitrary campaign URL', () => {
+    const onChange = vi.fn()
+    const push: EditorStep = {
+      channel: 'PUSH', template: 'MARKETING_PRODUCT_OFFER_PUSH', variables: { offerTitle: 'Savings' }, delaySeconds: 0,
+      mobileDestination: 'HOME',
+    }
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    const select = document.querySelector('[data-mobile-destination="0"] select')!
+    fireEvent.change(select, { target: { value: 'SAVINGS' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ mobileDestination: 'SAVINGS' }))
+    expect(screen.getByText(/not a campaign-entered URL/i)).toBeTruthy()
+  })
+
+  it('offers a banner as an in-app placement with the same closed destination contract', () => {
+    const onChange = vi.fn()
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.click(document.querySelector('[data-channel-pick="BANNER"]')!)
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_BANNER', mobileDestination: 'HOME',
+    }))
+  })
+
+  it('switches a campaign placement to its matching carousel template', () => {
+    const onChange = vi.fn()
+    const banner: EditorStep = {
+      channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_BANNER', variables: {}, delaySeconds: 0,
+      mobileDestination: 'HOME', inAppSurface: 'HOME_BANNER',
+    }
+    render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.change(document.querySelector('[data-in-app-surface="0"] select')!, { target: { value: 'HOME_CAROUSEL' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      inAppSurface: 'HOME_CAROUSEL', template: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+    }))
   })
 })

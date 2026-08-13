@@ -5,8 +5,11 @@
 // BFF proxy to HolmesGPT /api/chat (ADR-0031 D9). Tests pin input validation,
 // upstream forwarding, response extraction and error paths without hitting the
 // real HolmesGPT service.
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
+import { auth } from '@/auth'
+
+vi.mock('@/auth', () => ({ auth: vi.fn() }))
 
 function makeReq(body: unknown): NextRequest {
   return new NextRequest('http://localhost/api/iaops/rca', {
@@ -21,7 +24,37 @@ afterEach(() => {
   delete process.env.HOLMES_URL
 })
 
+beforeEach(() => {
+  vi.mocked(auth).mockResolvedValue({ user: { roles: ['ROLE_OPERATOR'] } } as never)
+})
+
 describe('POST /api/iaops/rca', () => {
+  it('refuses unauthenticated direct API calls before invoking HolmesGPT', async () => {
+    vi.mocked(auth).mockResolvedValue(null as never)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { POST } = await import('@/app/api/iaops/rca/route')
+
+    const res = await POST(makeReq({ ask: 'Why is transaction-service crashing?' }))
+
+    expect(res.status).toBe(401)
+    expect(await res.json()).toEqual({ error: 'unauthorized' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses roles without the system:view permission', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { roles: ['ROLE_VIEWER'] } } as never)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { POST } = await import('@/app/api/iaops/rca/route')
+
+    const res = await POST(makeReq({ ask: 'Why is transaction-service crashing?' }))
+
+    expect(res.status).toBe(403)
+    expect(await res.json()).toEqual({ error: 'forbidden' })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('returns 400 when ask is missing', async () => {
     vi.resetModules()
     const { POST } = await import('@/app/api/iaops/rca/route')
@@ -68,20 +101,19 @@ describe('POST /api/iaops/rca', () => {
     expect(body.rca).toBe('CPU throttling caused latency spike.')
   })
 
-  it('returns 502 on non-ok upstream response', async () => {
+  it('returns a safe envelope on a non-ok upstream response', async () => {
     process.env.HOLMES_URL = 'http://holmes-mock'
     vi.resetModules()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: false,
       status: 503,
-      text: async () => 'Service Unavailable',
-      statusText: 'Service Unavailable',
+      text: async () => 'internal upstream diagnostic',
     }))
     const { POST } = await import('@/app/api/iaops/rca/route')
     const res = await POST(makeReq({ ask: 'Alert: PodCrashLooping on balance-service' }))
-    expect(res.status).toBe(503)
+    expect(res.status).toBe(502)
     const body = await res.json()
-    expect(body.error).toMatch(/HolmesGPT error/)
+    expect(body).toEqual({ error: 'upstream_error' })
   })
 
   it('returns 502 on network failure', async () => {
@@ -92,6 +124,6 @@ describe('POST /api/iaops/rca', () => {
     const res = await POST(makeReq({ ask: 'Alert: PodCrashLooping on balance-service' }))
     expect(res.status).toBe(502)
     const body = await res.json()
-    expect(body.error).toMatch(/investigation failed/)
+    expect(body).toEqual({ error: 'upstream_error' })
   })
 })

@@ -14,7 +14,12 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
+import java.sql.Connection
+import java.sql.DriverManager
+import java.sql.Timestamp
+import java.time.Instant
 import java.util.UUID
 
 /**
@@ -48,6 +53,7 @@ class SurfaceRestContractIT {
                     "lending-events-in",
                     "party-events-in",
                     "fraud-hold-events-in",
+                    "campaign-banner-placements-in",
                 )
 
         override fun stop() = InMemoryConnector.clear()
@@ -116,8 +122,306 @@ class SurfaceRestContractIT {
         }
     }
 
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `an event for content not in the rendered catalogue is rejected rather than polluting metrics`() {
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"${UUID.randomUUID()}","contentId":"NOT_A_CATALOGUE_ITEM","slot":"HOME_BANNER","type":"CLICK"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `validated campaign attribution survives the real HTTP to database path`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"PUSH"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "PUSH"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a placed campaign banner carries BANNER attribution through the real HTTP path`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(interactionRef, party, campaignId)
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"CAMPAIGN_HOME_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "BANNER"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a campaign carousel is attributed only in its assigned app surface`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(
+            interactionRef,
+            party,
+            campaignId,
+            slot = "HOME_CAROUSEL",
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+        )
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"CAMPAIGN_HOME_CAROUSEL","slot":"HOME_CAROUSEL","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "BANNER"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a banner interaction cannot be attached to a catalogue card`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(interactionRef, party, campaignId)
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `partial campaign attribution is rejected rather than silently counted`() {
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"${UUID.randomUUID()}","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","campaignId":"${UUID.randomUUID()}"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    // ── AdverseStateResource (issue #4265 item 1) ──────────────────────────────────────────────
+    //
+    // These live in THIS class rather than a second @QuarkusTest deliberately. A new IT class would
+    // need its own `switchIncomingChannelsToInMemory(...)` list, and that list is exactly the thing
+    // that goes stale: #4297 is adding a fourth consumer (`dispute-events-in`) right now, and a
+    // second copy would silently start reaching for a real broker the day it lands. One boot, one
+    // channel list, one place to update.
+
+    /**
+     * The route is SERVED, not merely compiled. A Kotlin annotation binds to the NEXT declaration,
+     * so a `@Path` that slid onto something other than its class leaves the resource unregistered
+     * and every call 404s while a unit test calling the class directly stays green — the exact
+     * failure `McpEndpointRoutingIT` exists for. Only a real HTTP request can tell 200 from 404
+     * here, which is why this assertion is a status code and not a returned object.
+     */
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a party with no adverse state gets a served 200 and an empty list, not a 404`() {
+        val body = adverseStates(UUID.randomUUID())
+        assertThat(body.getList<String>("adverseStates")).isEmpty()
+    }
+
+    /**
+     * The read reaches the real table. The row is written with plain JDBC because a Hibernate
+     * Reactive Panache repository cannot be driven from a bare `@QuarkusTest` thread (`No current
+     * Vertx context found`); only the HTTP request carries a Vert.x context, so the write goes
+     * around the repository and the read goes through it — which is what makes this a test of the
+     * endpoint rather than of a mock.
+     */
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `states materialised in party_adverse_state are visible over HTTP, sorted`() {
+        val party = UUID.randomUUID()
+        insertAdverseState(party, "FRAUD_HOLD")
+        insertAdverseState(party, "ARREARS")
+
+        // Sorted by name, not insertion order: the repository hands back a Set, whose iteration
+        // order is an implementation detail no response body may depend on.
+        assertThat(adverseStates(party).getList<String>("adverseStates"))
+            .containsExactly("ARREARS", "FRAUD_HOLD")
+    }
+
+    /**
+     * One party's flags never leak into another's. Cheap to assert, and the only thing standing
+     * between a per-party read and a fleet-wide one is a single `where` clause.
+     */
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a second party does not see the first party's adverse state`() {
+        val flagged = UUID.randomUUID()
+        insertAdverseState(flagged, "ERASURE_REQUESTED")
+
+        assertThat(adverseStates(UUID.randomUUID()).getList<String>("adverseStates")).isEmpty()
+    }
+
+    /**
+     * An absent `partyId` is a 400, not a 500. This is the assertion the repo's nonnull-JAX-RS rule
+     * exists for: JAX-RS injects null for an absent query parameter, so a non-nullable `UUID` here
+     * would answer 500 — and in a `suspend fun`, which emits no `checkNotNullParameter` intrinsic,
+     * the null would flow into the body instead and the `requireNotNull` guard would be the only
+     * thing catching it. Declared nullable + `requireNotNull` → libs-runtime's
+     * `IllegalArgumentExceptionMapper` → 400.
+     */
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `an absent partyId is a 400, not a 500`() {
+        When {
+            get("/api/v1/eligibility/adverse-states")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    private fun adverseStates(partyId: UUID) = Given {
+        queryParam("partyId", partyId.toString())
+    } When {
+        get("/api/v1/eligibility/adverse-states")
+    } Then {
+        statusCode(200)
+    } Extract {
+        body().jsonPath()
+    }
+
+    /** The JDBC URL is the one EngagementPostgresTestResource injected — never a second copy. */
+    private fun insertAdverseState(partyId: UUID, state: String) {
+        openTestDatabase().use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO party_adverse_state (id, party_id, state, set_at) VALUES (?, ?, ?, ?)",
+            ).use { st ->
+                st.setObject(1, UUID.randomUUID())
+                st.setObject(2, partyId)
+                st.setString(3, state)
+                st.setTimestamp(4, Timestamp.from(Instant.now()))
+                st.executeUpdate()
+            }
+        }
+    }
+
+    private fun insertCampaignBanner(
+        interactionRef: UUID,
+        partyId: UUID,
+        campaignId: UUID,
+        slot: String = "HOME_BANNER",
+        template: String = "MARKETING_PRODUCT_OFFER_BANNER",
+    ) {
+        openTestDatabase().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO campaign_banner_placement
+                    (interaction_ref, party_id, campaign_id, step_order, template, values_json, deep_link, placed_at, slot)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { st ->
+                st.setObject(1, interactionRef)
+                st.setObject(2, partyId)
+                st.setObject(3, campaignId)
+                st.setInt(4, 0)
+                st.setString(5, template)
+                st.setString(6, """{"offerTitle":"Savings","offerText":"Four percent","ctaText":"Explore"}""")
+                st.setString(7, "openbank://savings")
+                st.setTimestamp(8, Timestamp.from(Instant.now()))
+                st.setString(9, slot)
+                st.executeUpdate()
+            }
+        }
+    }
+
+    private fun readCampaignAttributionFor(partyId: UUID): StoredCampaignAttribution? = openTestDatabase().use { conn ->
+        readCampaignAttribution(conn, partyId)
+    }
+
+    private fun openTestDatabase(): Connection {
+        val config = ConfigProvider.getConfig()
+        return DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        )
+    }
+
+    private fun readCampaignAttribution(connection: Connection, partyId: UUID): StoredCampaignAttribution? =
+        connection.prepareStatement(
+            """
+        SELECT interaction_ref, campaign_id, campaign_step_order, campaign_channel
+        FROM engagement_event
+        WHERE party_id = ?
+        ORDER BY occurred_at DESC
+        LIMIT 1
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, partyId)
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) {
+                    null
+                } else {
+                    StoredCampaignAttribution(
+                        interactionRef = rows.getObject("interaction_ref", UUID::class.java),
+                        campaignId = rows.getObject("campaign_id", UUID::class.java),
+                        stepOrder = rows.getInt("campaign_step_order"),
+                        channel = rows.getString("campaign_channel"),
+                    )
+                }
+            }
+        }
+
     private companion object {
         /** Any stable principal id: the endpoints gate on the ROLE, not on this value. */
         const val TEST_OPERATOR = "00000000-0000-0000-0000-000000000099"
     }
+
+    private data class StoredCampaignAttribution(
+        val interactionRef: UUID,
+        val campaignId: UUID,
+        val stepOrder: Int,
+        val channel: String,
+    )
 }

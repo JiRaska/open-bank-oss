@@ -34,6 +34,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -47,6 +48,9 @@ class TransactionServiceTest {
     private lateinit var workflowStub: PaymentWorkflow
 
     private lateinit var service: TransactionService
+
+    private val clock: Clock = Clock.systemUTC()
+    private var lastSaved: Transaction? = null
 
     @BeforeEach
     fun setUp() {
@@ -84,47 +88,45 @@ class TransactionServiceTest {
     }
 
     @Test
-    fun `initiate transaction completes when workflow succeeds and emits completed event`(): Unit = runBlocking {
-        val command = initiateCommand()
+    fun `initiate transaction reports the terminal state the workflow committed, writing none itself`(): Unit =
+        runBlocking {
+            // #4238: the terminal status + completed outbox message are written by the workflow's
+            // markCompleted activity (PaymentActivitiesImpl), not here. This test used to assert the
+            // opposite — that the service itself called update(COMPLETED, completed-event) once
+            // stub.execute() returned — which is exactly the non-durable write the issue is about.
+            val command = initiateCommand()
 
-        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
-        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
-        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+            every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
+            stubWorkflowCommitted(TransactionStatus.COMPLETED)
+            every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
-        val result = service.initiateTransaction(command)
+            val result = service.initiateTransaction(command)
 
-        assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
-        assertThat(result.completedAt).isNotNull()
-        assertThat(result.referenceNumber).startsWith("TXN")
-        assertThat(result.amount).isEqualTo(Money.of(command.amount, command.currencyCode))
+            assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
+            assertThat(result.completedAt).isNotNull()
+            assertThat(result.referenceNumber).startsWith("TXN")
+            assertThat(result.amount).isEqualTo(Money.of(command.amount, command.currencyCode))
 
-        coVerify {
-            transactionRepository.save(
-                match {
-                    it.idempotencyKey == command.idempotencyKey &&
-                        it.type == command.type &&
-                        it.status == TransactionStatus.PENDING
-                },
-                match<OutboxMessage> {
-                    it.eventType == "openbank.transactions.transaction.initiated" &&
-                        it.aggregateId == result.id &&
-                        it.payload.contains("initiated")
-                },
-            )
-            transactionRepository.update(
-                match { it.id == result.id && it.status == TransactionStatus.COMPLETED },
-                match<OutboxMessage> {
-                    it.eventType == "openbank.transactions.transaction.completed" &&
-                        it.aggregateId == result.id &&
-                        it.payload.contains("completed")
-                },
-            )
+            coVerify {
+                transactionRepository.save(
+                    match {
+                        it.idempotencyKey == command.idempotencyKey &&
+                            it.type == command.type &&
+                            it.status == TransactionStatus.PENDING
+                    },
+                    match<OutboxMessage> {
+                        it.eventType == "openbank.transactions.transaction.initiated" &&
+                            it.aggregateId == result.id &&
+                            it.payload.contains("initiated")
+                    },
+                )
+                // The state comes from the row the workflow wrote — one read, no second write.
+                transactionRepository.findById(result.id)
+            }
+            coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
+            verify(exactly = 1) { workflowStub.execute(result.id) }
         }
-        verify(exactly = 1) { workflowStub.execute(result.id) }
-    }
 
     @Test
     fun `initiate transaction drives through Temporal payment workflow`(): Unit = runBlocking {
@@ -133,9 +135,7 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
-        every { eventPublisher.completedPayload(any()) } returns "{}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
 
         val result = service.initiateTransaction(command)
 
@@ -156,9 +156,7 @@ class TransactionServiceTest {
             fxRatePort.getRate("EUR", "CZK")
         } returns FxRateView("EUR", "CZK", BigDecimal("24.50"), BigDecimal("25.00"))
         every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
-        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
@@ -182,9 +180,7 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
-        every { eventPublisher.completedPayload(any()) } returns "{}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
@@ -201,9 +197,7 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
-        every { eventPublisher.completedPayload(any()) } returns "{}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
@@ -214,14 +208,14 @@ class TransactionServiceTest {
     }
 
     @Test
-    fun `initiate transaction fails when workflow does not complete and emits failed event`(): Unit = runBlocking {
+    fun `initiate transaction reports FAILED from the workflow without writing it here`(): Unit = runBlocking {
+        // Mirror of the completed case: the failed status + failed event are the workflow's
+        // markFailed activity, so the service only reports what was committed (#4238).
         val command = initiateCommand()
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
-        every { eventPublisher.failedPayload(any(), any()) } returns "{\"event\":\"failed\"}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.FAILED)
         every { workflowStub.execute(any()) } returns SagaState.FAILED
 
         val result = service.initiateTransaction(command)
@@ -230,15 +224,7 @@ class TransactionServiceTest {
         assertThat(result.failedAt).isNotNull()
         assertThat(result.failureReason).contains("FAILED")
 
-        coVerify {
-            transactionRepository.update(
-                match { it.id == result.id && it.status == TransactionStatus.FAILED },
-                match<OutboxMessage> {
-                    it.eventType == "openbank.transactions.transaction.failed" &&
-                        it.payload.contains("failed")
-                },
-            )
-        }
+        coVerify(exactly = 0) { transactionRepository.update(any(), any()) }
     }
 
     @Test
@@ -278,15 +264,14 @@ class TransactionServiceTest {
         )
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
-        coEvery { transactionRepository.findById(original.id) } returns original
         coEvery {
             transactionRepository.update(match { it.status == TransactionStatus.REVERSED })
         } answers { firstArg() }
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returnsMany listOf(null, null)
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
-        every { eventPublisher.completedPayload(any()) } returns "{}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        // The original is read by id too; the reversal credit's own reload comes from the stub above.
+        coEvery { transactionRepository.findById(original.id) } returns original
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.reverseTransaction(command)
@@ -345,9 +330,7 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
-        every { eventPublisher.completedPayload(any()) } returns "{}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
@@ -375,9 +358,7 @@ class TransactionServiceTest {
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{\"event\":\"initiated\"}"
-        every { eventPublisher.completedPayload(any()) } returns "{\"event\":\"completed\"}"
-        coEvery { transactionRepository.save(any(), any()) } answers { firstArg() }
-        coEvery { transactionRepository.update(any(), any()) } answers { firstArg() }
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
         every { workflowStub.execute(any()) } returns SagaState.COMPLETED
 
         val result = service.initiateTransaction(command)
@@ -385,6 +366,26 @@ class TransactionServiceTest {
         // Booked at scale 2 (CZK minor units), value preserved — no exception thrown.
         assertThat(result.amount).isEqualTo(Money.of(BigDecimal("123.00"), "CZK"))
         assertThat(result.amount.amount.scale()).isEqualTo(2)
+    }
+
+    /**
+     * Stands in for the workflow's terminal-write activity (#4238): `save` records the PENDING row,
+     * and the re-read the service does after `stub.execute()` returns hands back the row in the
+     * state the workflow committed. Any test that stubs this and still sees `update(...)` called by
+     * the service has caught the ownership regressing.
+     */
+    private fun stubWorkflowCommitted(terminalStatus: TransactionStatus) {
+        coEvery { transactionRepository.save(any(), any()) } answers {
+            firstArg<Transaction>().also { lastSaved = it }
+        }
+        coEvery { transactionRepository.findById(any()) } answers {
+            val saved = lastSaved ?: return@answers null
+            when (terminalStatus) {
+                TransactionStatus.COMPLETED -> saved.complete(clock)
+                TransactionStatus.FAILED -> saved.fail("Payment workflow did not complete (state=FAILED)", clock)
+                else -> saved
+            }
+        }
     }
 
     private fun initiateCommand() = InitiateTransactionCommand(

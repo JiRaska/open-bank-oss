@@ -30,7 +30,7 @@ The service follows the OpenBank hexagonal layout (ADR-0002): a framework-free d
 | **Domain** | `com.openbank.kyc.domain.model` | `KycCase`, `KycCheck` and the enums `KycCaseStatus`, `RiskLevel`, `CheckType`, `CheckStatus`. Pure Kotlin, zero framework imports. |
 | **Application** | `com.openbank.kyc.application` | `KycService` — open / list / get / update-check / approve / reject use cases, including the idempotent `openCaseForParty`. Defines outbound ports under `application.port.out`. |
 | **Adapters — inbound** | `infrastructure.rest`, `infrastructure.kafka` | `KycResource` (REST), `PartyEventConsumer` (`PARTY_CREATED` → auto-open). |
-| **Adapters — outbound** | `infrastructure.persistence`, `infrastructure.kafka`, `infrastructure.outbox` | `KycRepository` (Panache), `KafkaKycOutboxEventPublisher` / `KycEventPublisher`, `KycOutboxDispatcher`. |
+| **Adapters — outbound** | `infrastructure.persistence`, `infrastructure.kafka`, `infrastructure.outbox` | `KycRepository` (Panache), `KafkaKycOutboxEventPublisher`, `KycOutboxDispatcher`. |
 | **Cross-cutting** | `infrastructure.authz` | `AuthzProducer` wiring the OPA-backed `@Authorize` (ADR-0034). |
 
 ### Key ports (`application.port.out`)
@@ -48,7 +48,7 @@ KYC decisions are propagated with the transactional outbox pattern so a state ch
 3. `publishWithResilience` is wrapped in MicroProfile Fault Tolerance — `@Bulkhead(1)`, `@CircuitBreaker`, `@Retry(2)`, `@Timeout(3000)` — to isolate Kafka outages.
 4. On success the row is marked `SENT`; on failure `markFailed` records the error and `attempt_count` for a later retry.
 
-> Note: `KycEventPublisher` also emits events on the `kyc-events-out` channel directly (e.g. `publishCaseOpened`). The outbox table is the durable, at-least-once path; both publish to the same topic `openbank.kyc.events`.
+> Note: KYC lifecycle events leave the service ONLY through `kyc_outbox`, written in the same transaction as the case state change (issue #4007) and relayed on `kyc-outbox-out` to topic `openbank.kyc.events`. The direct `kyc-events-out` emitter that used to publish the same events after the commit was removed — two publishers on one topic would race, and only one of them can be atomic.
 
 ### Inbound consumer
 

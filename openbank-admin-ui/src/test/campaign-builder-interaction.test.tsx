@@ -80,7 +80,7 @@ describe('campaign builder interaction', () => {
  * fields on a push step would promise a delivery the platform refuses to make (#1182).
  */
 describe('campaign builder channels', () => {
-  it('switching a step to push narrows the fields to the ones that channel can carry', async () => {
+  it('starts app-first and switching channels exposes only fields that channel can carry', async () => {
     vi.stubGlobal('fetch', vi.fn(async (u: string) =>
       String(u).includes('/preview')
         ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
@@ -90,7 +90,14 @@ describe('campaign builder channels', () => {
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('active-clients'), { timeout: 8000 })
 
-    // Email: the template's three declared variables.
+    // App-first: a new campaign opens on push with only its headline field.
+    expect(container.querySelector('[data-step="0"]')!.getAttribute('data-channel')).toBe('PUSH')
+    expect(container.querySelectorAll('[id^="var-0-"]').length).toBe(1)
+    expect(document.getElementById('var-0-offerTitle')).toBeTruthy()
+    expect(document.getElementById('var-0-offerText')).toBeNull()
+
+    // Email remains available and exposes the template's three declared variables.
+    fireEvent.click(container.querySelector('[data-channel-pick="EMAIL"]')!)
     expect(container.querySelectorAll('[id^="var-0-"]').length).toBe(3)
 
     fireEvent.click(container.querySelector('[data-channel-pick="PUSH"]')!)

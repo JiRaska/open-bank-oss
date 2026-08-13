@@ -31,3 +31,15 @@
 # tolerated on 2026-07-16: their ECR repositories were created, their first images built,
 # signed and attested, and both are now in ALL_SERVICES. The debt this file recorded lasted
 # a few hours, which is the point of a ratchet.
+
+# 2026-08-13: the gate's subject set widened from "released components" to "released components
+# + anything wearing a sandbox tag" (#4553 -> #4576's discovery that analytics-sink had been
+# undeployed since 2026-07-26 with the gate reporting PASS the whole time, because it had no
+# version.txt and was invisible to the old subject set). The widening immediately found these two,
+# which is the point of widening it — but auto-deploy's "Build fast-jars" step is Gradle/Quarkus
+# fast-jar specific (./gradlew ... -Dquarkus.package.jar.type=fast-jar), and neither of these is a
+# Quarkus service, so adding them to ALL_SERVICES would send a static site and a Python app through
+# a Gradle build and fail outright. That is real work — a build path, not a one-line list entry —
+# so it is baselined, not silently fixed with the wrong tool.
+openbank-developer-portal
+openbank-document-renderer

@@ -10,6 +10,7 @@ import com.openbank.delegation.domain.model.DelegationGrant
 import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
+import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.CollectionTable
@@ -23,6 +24,7 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.Table
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -161,8 +163,23 @@ class DelegationGrantEntity : PanacheEntityBase() {
         closedReason = closedReason,
     )
 
-    private fun toMoney(amount: BigDecimal?, currency: String?): Money? =
-        if (amount != null && currency != null) Money.of(amount, currency) else null
+    /**
+     * Re-scales to the currency's minor unit on the way out, which is not cosmetic: the columns are
+     * NUMERIC(20,6) and Postgres hands back a `BigDecimal` of scale 6, while [Money] refuses a scale
+     * wider than the currency has — so a CZK ceiling read straight through threw
+     * "Amount scale 6 exceeds currency CZK fraction digits 2" and took the whole GET with it.
+     *
+     * It never surfaced before ADR-0249 because #3613 refused `dailyLimit`/`monthlyLimit` at the
+     * offer API, so no row in any environment carried one, and `perTransactionLimit` happened to be
+     * written and read back inside one session's cache in every test that set it. Making the
+     * cumulative ceilings acceptable again is what first put a scale-6 number in front of this
+     * mapper. HALF_EVEN never rounds here: nothing writes more precision than the currency has.
+     */
+    private fun toMoney(amount: BigDecimal?, currency: String?): Money? {
+        if (amount == null || currency == null) return null
+        val code = CurrencyCode.of(currency.trim())
+        return Money(amount.setScale(code.defaultFractionDigits, RoundingMode.HALF_EVEN), code)
+    }
 
     private fun toExposure(): Exposure? {
         val noScalarExposure = maxViews == null && watermark == null && allowDownload == null

@@ -199,9 +199,10 @@ independent review gate.
   `webServer` runs `next dev`, and a hidden error/warning overlay can inject elements that match a
   naive text regex (e.g. `/\d+\/\d+/` also matches the overlay's own pagination badge). Scope
   assertions to `main` (page content) or a specific landmark rather than a bare `page.getByText`.
-- The `E2E tests (Playwright)` CI step is currently `continue-on-error: true` (advisory, not a merge
-  gate) pending full browser-dep provisioning across the runner pool — see `ci.yml` for the exact
-  condition to watch before tightening it.
+- The `E2E tests (Playwright)` CI step is enforced inside the ui-build job (#653) and, since
+  #3675, merge-blocking for admin-ui-touching PRs: `Validate manifests` depends on the `ui`
+  aggregator, which fails on any ui-build failure. It stays path-scoped — a PR that touches no
+  admin-ui file skips the suite entirely.
 
 ## Build & verify
 

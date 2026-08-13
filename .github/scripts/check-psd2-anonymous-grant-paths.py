@@ -116,9 +116,16 @@ def strip_rego_comments(src: str) -> str:
     return "\n".join(line.split("#", 1)[0] for line in src.splitlines())
 
 
-def granted_actions() -> set[str]:
-    """The action set the ANONYMOUS rule grants, read out of the rego (comments stripped)."""
-    body = strip_rego_comments(REGO.read_text())
+def granted_actions(rego_text: str | None = None) -> set[str]:
+    """The action set the ANONYMOUS rule grants, read out of the rego (comments stripped).
+
+    Takes the TEXT rather than reading the path, so the self-test can drive it. The two
+    `sys.exit` calls below are deliberate: a rule that has vanished, or one that no longer
+    gates on ANONYMOUS, is not "zero granted actions" — it is the gate having lost its
+    subject, and reporting a clean comparison about it would be the exact failure this whole
+    class of guard exists to prevent.
+    """
+    body = strip_rego_comments(rego_text if rego_text is not None else REGO.read_text())
     match = re.search(
         rf'allowed_reasons contains "{ANONYMOUS_RULE}" if \{{(.*?)\n\}}',
         body,
@@ -134,9 +141,9 @@ def granted_actions() -> set[str]:
     return set(re.findall(r'"(psd2\.[a-z]+)"', rule))
 
 
-def gated_prefixes() -> tuple[set[str], set[str]]:
+def gated_prefixes(filter_text: str | None = None) -> tuple[set[str], set[str]]:
     """(gated prefixes, excluded prefixes) read out of EidasMtlsFilter's `gated` predicate."""
-    src = strip_kotlin_comments(FILTER.read_text())
+    src = strip_kotlin_comments(filter_text if filter_text is not None else FILTER.read_text())
     match = re.search(r"val gated\s*=(.*?)\n\s*if \(!gated\)", src, re.DOTALL)
     if not match:
         sys.exit(f"FATAL: `val gated = ... ; if (!gated)` not found in {FILTER.relative_to(REPO)}")
@@ -188,7 +195,102 @@ def annotated_endpoints() -> list[tuple[Path, int, str, str]]:
     return found
 
 
+def self_test() -> int:
+    """Falsify the two readers this gate compares.
+
+    PSD2 lets a TPP reach certain endpoints ANONYMOUSLY — no user token — which is only safe
+    because eIDAS mTLS proves the caller is a licensed institution first. The rego grant and
+    the filter's path list are written in different languages, in different files, by
+    different people; if they drift, the anonymous grant survives while the mTLS gate no
+    longer covers those paths, and the endpoints become open to anyone. Nothing else in CI
+    compares them.
+
+    Both readers are regex-over-source, so both can silently return LESS than the truth — and
+    less means fewer paths to check, which is the direction that reports clean.
+    """
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    rego = (
+        'allowed_reasons contains "%s" if {\n'
+        '  input.principal.type == "ANONYMOUS"\n'
+        '  input.action in {"psd2.read", "psd2.consent"}\n'
+        '  # "psd2.commented" must not be counted\n'
+        '}\n'
+    ) % ANONYMOUS_RULE
+    case("granted actions are read, comments excluded",
+         sorted(granted_actions(rego)), ["psd2.consent", "psd2.read"])
+
+    # A rule that no longer gates on ANONYMOUS is a CHANGED subject, not an empty result. The
+    # script exits fatally; the self-test asserts that rather than letting it pass quietly.
+    import contextlib, io
+    for label, text in (
+        ("a vanished rule", 'allowed_reasons contains "other" if {\n  true\n}\n'),
+        ("a rule that dropped ANONYMOUS",
+         'allowed_reasons contains "%s" if {\n  input.principal.type == "HUMAN"\n}\n' % ANONYMOUS_RULE),
+    ):
+        sink = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(sink), contextlib.redirect_stdout(sink):
+                granted_actions(text)
+        except SystemExit:
+            pass
+        else:
+            fails.append(f"{label} did not abort — the gate would compare against an empty set "
+                         f"and report agreement it never established")
+
+    # --- the filter's path predicate ------------------------------------------------------
+    kt = (
+        'val gated = path.startsWith("/api/v1/accounts") ||\n'
+        '            path.startsWith("/api/v1/payments") &&\n'
+        '            !path.startsWith("/api/v1/payments/public")\n'
+        '    if (!gated) return\n'
+    )
+    inc, exc = gated_prefixes(kt)
+    case("included prefixes are read", sorted(inc), ["/api/v1/accounts", "/api/v1/payments"])
+    case("a NEGATED prefix is an exclusion, not an inclusion", sorted(exc), ["/api/v1/payments/public"])
+
+    # PROSE: a KDoc naming a path must not become a gated prefix — that would invent coverage
+    # the filter does not have, which is the direction that reads as safe.
+    # The comment must sit INSIDE the `val gated = ... if (!gated)` span. Placed above it, as
+    # the first version of this fixture had it, the regex never sees it and the stripper is
+    # never exercised — the deliberate break went UNCAUGHT.
+    kt2 = (
+        'val gated = path.startsWith("/api/v1/accounts") ||\n'
+        '            // path.startsWith("/api/v1/never") was removed, see #x\n'
+        '            path.startsWith("/api/v1/payments")\n'
+        '    if (!gated) return\n'
+    )
+    inc2, _e = gated_prefixes(kt2)
+    if "/api/v1/never" in inc2:
+        fails.append("a path named in a comment was read as a gated prefix")
+
+    # A live read of both real files: fixtures cannot tell that either file still parses.
+    live_actions = granted_actions()
+    live_inc, _live_exc = gated_prefixes()
+    if not live_actions:
+        fails.append("the real rego yielded NO granted actions")
+    if not live_inc:
+        fails.append("the real filter yielded NO gated prefixes — the gate would compare "
+                     "nothing against nothing")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: psd2 anonymous-grant parity is falsifiable "
+          f"(8 cases + a live read of {len(live_actions)} action(s), {len(live_inc)} prefix(es))")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--enforce", action="store_true")
     args = parser.parse_args()
@@ -209,7 +311,7 @@ def main() -> int:
         if not gated:
             violations.append((file, line, action, path))
 
-    print(f"psd2 anonymous-grant path guard (issue #2169)")
+    print("psd2 anonymous-grant path guard (issue #2169)")
     print(f"  granted to ANONYMOUS : {', '.join(sorted(actions))}")
     print(f"  gated prefixes       : {', '.join(sorted(included))}")
     print(f"  excluded prefixes    : {', '.join(sorted(excluded)) or '(none)'}")

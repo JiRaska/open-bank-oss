@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/v0.23.0...v0.24.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/v0.22.0...v0.23.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app banner channel ([#4577](https://github.com/JiRaska/open-bank-oss/issues/4577)) ([d95c85c](https://github.com/JiRaska/open-bank-oss/commit/d95c85cf3fbe0428e4cc5e44bcca27d05bc574ab))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/v0.21.0...v0.22.0) (2026-08-13)
+
+
+### Features
+
+* add trusted campaign engagement analytics ([#4555](https://github.com/JiRaska/open-bank-oss/issues/4555)) ([22ab0ba](https://github.com/JiRaska/open-bank-oss/commit/22ab0ba6930bff0d70594ab2ee72cf5407bee0b8))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/v0.20.0...v0.21.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** validate push engagement attribution ([#4526](https://github.com/JiRaska/open-bank-oss/issues/4526)) ([512c831](https://github.com/JiRaska/open-bank-oss/commit/512c831570cc654246f92e4447d5b868b40957f8))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/v0.19.0...v0.20.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add push interaction reference ([#4516](https://github.com/JiRaska/open-bank-oss/issues/4516)) ([1bb708b](https://github.com/JiRaska/open-bank-oss/commit/1bb708b5f3d5bd8af2c578f4f530bd665bbe7e3e))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/v0.18.1...v0.19.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/v0.18.0...v0.18.1) (2026-08-08)
 
 

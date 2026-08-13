@@ -87,6 +87,74 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-09** — Settlement outage no longer completes the workflow on a non-terminal state
+  (#4182). No new trust boundary and no new caller: the outbound edge to transaction-service is
+  unchanged, and what changes is what this service does when that edge fails. Previously
+  `settlePayment` caught `SettlementUnavailableException` — and, more broadly, every `Exception` —
+  and *returned* `SENT_TO_CLEARING`. Temporal drives activity retries off activity failure, so an
+  activity that returns is a success: the configured retry policy was structurally unreachable on
+  precisely the fault it exists for, and `DomesticPaymentWorkflowImpl.process` completed on a
+  business state that is not terminal.
+  - **Availability / non-repudiation (STRIDE-D, -R)** is the property at stake. The money left the
+    payer's instruction path and was never booked, while the workflow, the API response and every
+    tier-1 rule reported success — the only artefact anywhere was one WARN line, and a row that
+    stops changing raises nothing. The blanket `catch (Exception)` additionally made a settlement
+    *bug* indistinguishable from a planned degradation.
+  - **Mitigation**: the activity now fails. `SettlementUnavailableException` is logged at ERROR and
+    rethrown; the blanket catch is gone, so any other fault propagates with its own type. The
+    workflow therefore retries under its existing policy and, if the fault persists, ends as
+    **failed** — a state Temporal surfaces and an operator can re-drive — rather than completed.
+  - **Why retrying is safe rather than a duplicate-payment risk**, established from the code and
+    not assumed: `SettlementAdapter` sends `idempotencyKey = "domestic-settlement-<paymentId>"`,
+    payment-scoped and stable across attempts; transaction-service deduplicates on it by
+    early-returning the existing transaction (`TransactionService.initiateTransaction`), which it
+    answers as **201 with that transaction** — not 409, and the adapter maps that arm to
+    `settled = true` too; and the `SENT_TO_CLEARING` guard makes the activity re-entrant once the
+    status write lands. The `HTTP_CONFLICT` branch in `SettlementAdapter` is unreachable today and
+    kept only as defence if that service ever starts answering 409.
+
+    One caveat that follows from the early return and is NOT covered: it returns the existing row
+    whatever its status, so a first attempt that committed the transaction but died before posting
+    hands a retry a `PENDING` transaction as 201, which the adapter reads as `settled = true`. The
+    fix belongs in transaction-service; recorded here so the safety argument is not read as wider
+    than it is. This is the opposite of the #4218 dispatch
+    edge, where no downstream deduplication exists and holding is therefore the correct trade.
+  - **Residual risk**: the retry window is unchanged (3 attempts, 10 min schedule-to-close), so a
+    multi-hour outage still ends in a failed workflow with the payment in `SENT_TO_CLEARING`. That
+    is a visible, re-drivable strand rather than a silent one, but it is still a strand needing a
+    human. A resumable state with a sweeper (issue #4182's second suggestion) is deliberately left
+    out of scope — it needs a new status and a migration. `DomesticPaymentStrandedGauge` (#3273)
+    exports age-in-status and is the reader for it meanwhile.
+  - **Rollback**: revert the commit; the previous behaviour was to swallow and return
+    `SENT_TO_CLEARING`.
+
+- **2026-08-09** — Duplicate clearing submission closed (#4218). No new trust boundary and no new
+  caller: the outbound edge to the scheme gateway (`pacs.008` → clearing-simulator / CERTIS) is the
+  same one, and what changes is how many times a single payment may cross it. Previously: **more
+  than once.** `submitScheme` wrapped both the outbound call and the follow-up status write in one
+  `try/catch`, so a database failure after a successful submit was caught and logged as "holding in
+  VALIDATED" — leaving a live clearing item behind a row asserting nothing was sent. A re-drive read
+  that row and submitted again. Nothing downstream deduplicates: the `pacs.008` carries no
+  idempotency key (only a deterministic `messageId`, which the receiver is free to ignore) and
+  `openbank-clearing-simulator` performs no deduplication of any kind.
+  - **Integrity (STRIDE-T)** is the property at stake, and it was violated in the worst available
+    direction — an unauthorised *duplicate* money movement arising from an internal failure, with
+    no external attacker required and no signal beyond one WARN line.
+  - **Mitigation**: a `scheme_dispatched_at` marker written before the outbound call and in its own
+    transaction, so it outlives any failure of the work that follows; `submitScheme` refuses to
+    submit a payment that already carries it. The catch now covers the gateway call only, so a
+    failed status write surfaces instead of being reported as "not submitted".
+  - **New residual risk, accepted deliberately**: an ambiguous failure (a timeout, where the scheme
+    may or may not hold the item) now **strands** the payment in VALIDATED rather than retrying it.
+    The marker is cleared only when the gateway proves the request never left this process
+    (`ConnectException` / `UnknownHostException`), which keeps the ordinary "scheme is down" case
+    re-drivable. For an outbound money instruction a strand an operator can see is the correct
+    trade against a duplicate nobody can recall — but it is a strand, it needs a human, and it is
+    logged at ERROR for that reason. The partial index added in V8 is the query that finds them.
+  - **Not addressed here**: `DomesticPaymentRepositoryImpl.update` still has no compare-and-set and
+    the entity no `@Version`, so two concurrent workflows can both write one transition (#4218
+    item 3). Pre-existing, independent of this defect, and deliberately left out of a money-path
+    fix rather than enlarged into an aggregate-wide locking change.
 - **2026-08-07** — ADR-0248 #3: new outbound trust boundary, `domestic-payment-service →
   document-service (GET /api/v1/documents/templates, POST /api/v1/documents/templates/preview,
   OIDC client-credentials)`, plus a new customer-facing endpoint
@@ -238,3 +306,20 @@ not change any existing request's outcome until explicitly flipped.
   — the exact condition #3274 exists to fix. Rollback: revert; the adapter's previous behaviour was
   to store the account id in `partyId`. Recorded here because #3431's measurement showed this change
   landed with no threat-model update.
+
+- **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
+  clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
+  `timestamp` to `Instant.EPOCH` and no call site passed it, so every error this service served
+  carried `1970-01-01T00:00:00Z`. The field is now a required constructor argument, stamped
+  `Instant.now()` at construction in this service's mappers. **Risk class = information
+  disclosure**, and it is a deliberate, bounded increase: error responses now reveal the server's
+  wall-clock time to any caller who can provoke an error, including an unauthenticated one on
+  endpoints that answer 401/403 through this envelope. Assessed as acceptable — the value is
+  second-resolution UTC already implied by the HTTP `Date` header on the same response, so it
+  discloses nothing a caller could not already read, and it is what makes the envelope's own
+  instruction ("contact support with traceId=…") actionable by letting support bind a trace to a
+  moment. No new field, no new endpoint, no authorization or ingress change; the response SHAPE is
+  unchanged (`string`/`date-time`), so no API-contract bump under ADR-0048. Not a timing oracle:
+  the stamp is taken when the error object is built, not measured against request start, so it
+  does not expose per-request processing duration. Rollback: revert; the field is
+  serialisation-only and nothing persists it.

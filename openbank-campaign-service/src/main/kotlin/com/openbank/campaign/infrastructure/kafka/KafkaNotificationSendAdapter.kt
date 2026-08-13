@@ -5,17 +5,22 @@
 package com.openbank.campaign.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.campaign.application.port.out.BannerPlacementPort
+import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.NotificationSendPort
+import com.openbank.campaign.application.port.out.NotificationSendRequest
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.smallrye.reactive.messaging.MutinyEmitter
+import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
-import java.util.UUID
-import com.openbank.campaign.domain.model.Channel as CampaignChannel
+import org.eclipse.microprofile.reactive.messaging.Message
 
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors
  * notification-service's `NotificationRequest` (partyId, channel, template, recipient, variables,
- * correlationId); the template name resolves against the notification-service catalogue there, so an
+ * correlationId, interactionRef); the template name resolves against the notification-service catalogue there, so an
  * unknown template fails closed at the choke point, not here.
  *
  * The payload is hand-built as a map rather than shared as a type — the two services do not share a
@@ -29,30 +34,58 @@ class KafkaNotificationSendAdapter(
     private val mapper: ObjectMapper,
 ) : NotificationSendPort {
 
-    override suspend fun requestSend(
-        partyId: UUID,
-        channel: CampaignChannel,
-        template: String,
-        recipient: String,
-        variables: Map<String, String>,
-        correlationId: UUID,
-    ) {
+    override suspend fun requestSend(request: NotificationSendRequest) {
+        val fields = linkedMapOf(
+            "partyId" to request.partyId.toString(),
+            // Was hardcoded "EMAIL". A step's channel now travels with it — with the constant in place a
+            // PUSH step was delivered as an email, silently, because notification-service believed
+            // the payload over the campaign.
+            "channel" to request.channel.name,
+            "template" to request.template,
+            "recipient" to request.recipient,
+            "variables" to request.variables,
+            // ADR-0239 D1 — the send-log row id. notification-service echoes it back on
+            // `openbank.notification.outcomes.v1`, which is the only way this service can learn
+            // that a send it recorded as SENT was in fact suppressed or never delivered (#3663).
+            "correlationId" to request.correlationId.toString(),
+        )
+        // This is transport metadata, never a template variable. The notification renderer's
+        // closed variable schema therefore cannot accidentally interpolate a navigation route.
+        request.deepLink?.let { fields["deepLink"] = it }
+        // An opaque per-send reference for an eventual app interaction. It deliberately travels
+        // beside the deep link rather than inside the template variables or customer content.
+        request.interactionRef?.let { fields["interactionRef"] = it.toString() }
+        val payload = mapper.writeValueAsString(fields)
+        emitter.send(payload).toCompletableFuture().join()
+    }
+}
+
+/**
+ * A banner is a first-party placement command, not a notification request. Its own topic prevents
+ * notification-service receiving a channel it cannot render.
+ */
+@ApplicationScoped
+class KafkaBannerPlacementAdapter(
+    @Channel("campaign-banner-placements-out") private val emitter: MutinyEmitter<String>,
+    private val mapper: ObjectMapper,
+) : BannerPlacementPort {
+    override suspend fun place(request: BannerPlacementRequest) {
         val payload = mapper.writeValueAsString(
-            mapOf(
-                "partyId" to partyId.toString(),
-                // Was hardcoded "EMAIL". A step's channel now travels with it — with the constant in place a
-                // PUSH step was delivered as an email, silently, because notification-service believed
-                // the payload over the campaign.
-                "channel" to channel.name,
-                "template" to template,
-                "recipient" to recipient,
-                "variables" to variables,
-                // ADR-0239 D1 — the send-log row id. notification-service echoes it back on
-                // `openbank.notification.outcomes.v1`, which is the only way this service can learn
-                // that a send it recorded as SENT was in fact suppressed or never delivered (#3663).
-                "correlationId" to correlationId.toString(),
+            linkedMapOf(
+                "interactionRef" to request.interactionRef.toString(),
+                "partyId" to request.partyId.toString(),
+                "campaignId" to request.campaignId.toString(),
+                "stepOrder" to request.stepOrder,
+                "template" to request.template,
+                "variables" to request.variables,
+                "deepLink" to request.deepLink,
+                "inAppSurface" to request.inAppSurface.name,
             ),
         )
-        emitter.send(payload).toCompletableFuture().join()
+        // The compacted placement topic retains the current assignment for this send interaction.
+        val metadata = OutgoingKafkaRecordMetadata.builder<String>()
+            .withKey(request.interactionRef.toString())
+            .build()
+        emitter.sendMessage(Message.of(payload).addMetadata(metadata)).awaitSuspending()
     }
 }

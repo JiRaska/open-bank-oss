@@ -1,0 +1,272 @@
+# case-coordinator-agent: the swarm case-coordinator runtime (ADR-0244). Owns one Temporal
+# case workflow per disposition target, gates mid-run join/contribute signals per charter
+# (the in-process CaseCapabilityGate, deny-by-default — the OPA adapter evaluating the same
+# decisions is the tracked follow-up), and emits exactly one HITL proposal per case to
+# `proposal-events` via the transactional outbox (case_outbox, dispatched on mTLS :9093).
+#
+# State: CNPG case-coordinator-db in this namespace (case history + outbox), Temporal
+# namespace openbank-casecoord (task queue case-coordinator), KafkaUser case-coordinator
+# (producer-only). OIDC resource server validates admin-ui BFF bearer tokens; the REST
+# surface is @RolesAllowed-gated (ROLE_ADMIN/ROLE_VIEWER read, ROLE_OPERATOR write).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: case-coordinator-agent
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: case-coordinator-agent
+    app.kubernetes.io/part-of: platform
+spec:
+  replicas: 1
+  # Terminate-first (same shape as agent-service, #3545): single-replica pilot, and a
+  # rolling surge would briefly run TWO Temporal workers on the same task queue plus two
+  # outbox dispatchers — legal for Temporal, but the pilot keeps exactly one worker so the
+  # case budget/convergence accounting stays trivially attributable.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: case-coordinator-agent
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: case-coordinator-agent
+        app.kubernetes.io/part-of: platform
+      annotations:
+        # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
+        # Must match case-coordinator-opa-bundle's openbank.tech/policy-checksum (CI verifies).
+        openbank.tech/policy-checksum: "e05f4db0c00ea4b8"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: case-coordinator-agent
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-51b1db59
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8146
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_OIDC_AUTH_SERVER_URL
+              value: http://keycloak.iam.svc:8080/realms/openbank
+            # Shared `openbank-services` realm client secret (ESO case-coordinator-oidc,
+            # remoteRef account-service/OIDC_CLIENT_SECRET — the entry 28 services read).
+            # NOT optional (gate oidc-client-secret-wiring, #2929): a missing credential must
+            # pin the pod at CreateContainerConfigError — loud — rather than serve 401s.
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: case-coordinator-oidc
+                  key: OIDC_CLIENT_SECRET
+            # Case store (CNPG case-coordinator-db). QUARKUS_* env overrides the
+            # application.yaml placeholders (JDBC_URL/REACTIVE_URL/POSTGRES_*) by config ordinal.
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://case-coordinator-db-rw.platform.svc:5432/openbank_casecoordinator
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: postgresql://case-coordinator-db-rw.platform.svc:5432/openbank_casecoordinator
+            - name: QUARKUS_DATASOURCE_USERNAME
+              valueFrom: { secretKeyRef: { name: case-coordinator-db-app, key: username } }
+            - name: QUARKUS_DATASOURCE_PASSWORD
+              valueFrom: { secretKeyRef: { name: case-coordinator-db-app, key: password } }
+            # Temporal case workflows (ADR-0244 D1). The repo default is enabled=false —
+            # the worker only boots because this manifest flips it. Namespace must exist
+            # (temporal-namespace-config.yaml NAMESPACES; registration hook + reconcile CronJob).
+            - name: TEMPORAL_ENABLED
+              value: "true"
+            - name: TEMPORAL_HOST
+              value: temporal-frontend.temporal.svc.cluster.local:7233
+            - name: TEMPORAL_NAMESPACE
+              value: openbank-casecoord
+            # HITL proposal outbox (ADR-0244 D7): producer-only, mTLS listener :9093
+            # (ADR-0137; plaintext :9092 is denied cluster-wide since the fleet sweep).
+            # Keystore/truststore projected into this namespace by the ExternalSecrets in
+            # kafka-case-coordinator-mtls.yaml.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "openbank-cluster-kafka-bootstrap.messaging.svc:9093"
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka-keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: case-coordinator-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka-truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
+            # Synthesis model call (ADR-0244 D9): routed through the in-cluster LiteLLM
+            # gateway (ADR-0174/0175) — only the ai-platform gateway pod may leave the
+            # cluster, and litellm-config maps this exact model id (deepinfra backend).
+            # Without the endpoint override the service would default to api.deepinfra.com,
+            # which the NetworkPolicy egress denies.
+            - name: CASE_COORDINATOR_MODEL_ENDPOINT
+              value: http://litellm.ai-platform.svc:4000/v1
+            # LiteLLM virtual key (ESO case-coordinator-litellm; reuses KEY_AGENT_SERVICE
+            # until a per-service virtual key is provisioned in Vault — a Vault admin action).
+            - name: CASE_COORDINATOR_MODEL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: case-coordinator-litellm
+                  key: CASE_COORDINATOR_MODEL_API_KEY
+                  # Optional so an un-seeded key degrades the synthesis call to a
+                  # deterministic failure instead of CrashLooping the pod (SRCFG00040).
+                  optional: true
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
+            # Policy decision point: the OPA sidecar in this pod (localhost:8181). The
+            # in-process CaseCapabilityGate is the enforcement layer today; the adapter
+            # querying this PDP is the tracked follow-up (issue #4187 scope note).
+            - name: QUARKUS_REST_CLIENT_OPA_URL
+              value: http://localhost:8181
+          startupProbe:
+            tcpSocket:
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /q/health/live
+              port: management
+            periodSeconds: 15
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka-keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka-truststore
+              readOnly: true
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 768Mi
+        # OPA policy decision point (ADR-0031 D2 / ADR-0034 pattern). Serves the agents.rego
+        # bundle (case-coordinator-opa-bundle ConfigMap) over localhost:8181. Nothing queries
+        # it yet — the capability-gate adapter is the tracked follow-up — but the sidecar and
+        # the bundle ship WITH the deployment so the follow-up is a service-code-only change.
+        - name: opa
+          image: docker.io/openpolicyagent/opa:1.17.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --server
+            # Bind on the pod network so kubelet httpGet probes can reach /health (the OPA
+            # image is scratch, no in-container exec probe is possible — agent-service shape).
+            # Reachability is fenced by the platform NetworkPolicies.
+            - --addr=0.0.0.0:8181
+            - --log-level=info
+            - --bundle
+            - /bundle
+          ports:
+            - name: opa
+              containerPort: 8181
+          readinessProbe:
+            httpGet:
+              path: /health?bundles=true
+              port: 8181
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8181
+            periodSeconds: 15
+            failureThreshold: 3
+          volumeMounts:
+            - name: opa-bundle
+              mountPath: /bundle/agents.rego
+              subPath: agents.rego
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/agents/data.yaml
+              subPath: agents-data.yaml
+              readOnly: true
+            - name: opa-bundle
+              mountPath: /bundle/.manifest
+              subPath: manifest.json
+              readOnly: true
+            # OPA writes temp files during bundle load — required with readOnlyRootFilesystem.
+            - name: opa-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: opa-tmp
+          emptyDir: {}
+        - name: opa-bundle
+          configMap:
+            name: case-coordinator-opa-bundle
+        - name: kafka-keystore
+          secret:
+            secretName: case-coordinator-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: case-coordinator-agent
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: case-coordinator-agent
+spec:
+  selector:
+    app.kubernetes.io/name: case-coordinator-agent
+  ports:
+    - name: http
+      port: 8146
+      targetPort: http

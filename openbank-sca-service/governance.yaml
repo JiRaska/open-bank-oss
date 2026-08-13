@@ -10,10 +10,12 @@ dataClassification: restricted
 retentionPolicy: 5 years
 evidenceExported: true
 lineage:
-  upstream:
-    - serviceName: psd2-service
-      relationType: api
-      description: triggers
+  upstream: []
+    # Removed (issue #3982): `psd2-service (api, "triggers")` — the duplicate half of the edge
+    # psd2-service also declared as its own `downstream`. See the note there: psd2-service holds
+    # no sca-service client and no SCA_SERVICE_URL. The callers that really hold a
+    # ScaChallengeClient are account-, consent-, delegation- and document-service, each declared
+    # on its own side.
 databaseLineage:
   ownedDatabases:
     - openbank_sca

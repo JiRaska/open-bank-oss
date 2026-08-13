@@ -7,6 +7,13 @@
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { EditorChannel, EditorCondition, EditorStep } from '@/components/campaigns/JourneyEditor'
 
+const IN_APP_TEMPLATE: Record<NonNullable<EditorStep['inAppSurface']>, string> = {
+  HOME_BANNER: 'MARKETING_PRODUCT_OFFER_BANNER',
+  HOME_CAROUSEL: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+  PRODUCT_FEED: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED',
+  REWARDS_HUB: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB',
+}
+
 /**
  * Edits the step selected on the canvas.
  *
@@ -26,6 +33,7 @@ export function StepEditor({
   templateChannel,
   templateLabels,
   variableLabels,
+  contentExperiment = false,
   onChange,
   onClose,
   attached = false,
@@ -45,6 +53,8 @@ export function StepEditor({
    * actual question and a bare box does not answer it.
    */
   variableLabels: Record<string, { label: string; example: string }>
+  /** When enabled, every step has a B-arm copy to compare against its original A-arm values. */
+  contentExperiment?: boolean
   onChange: (next: EditorStep) => void
   onClose: () => void
   /**
@@ -94,7 +104,7 @@ export function StepEditor({
       <div className="space-y-1.5">
         <span className="text-sm font-medium">{t('Kanál', 'Channel')}</span>
         <div className="flex gap-2">
-          {(['EMAIL', 'PUSH'] as EditorChannel[]).map(c => {
+          {(['EMAIL', 'PUSH', 'BANNER'] as EditorChannel[]).map(c => {
             const first = Object.keys(templates).find(tpl => templateChannel[tpl] === c)
             const active = step.channel === c
             return (
@@ -104,7 +114,19 @@ export function StepEditor({
                 data-channel-pick={c}
                 data-selected={active ? 'true' : 'false'}
                 disabled={!first}
-                onClick={() => first && onChange({ ...step, channel: c, template: first, variables: {} })}
+                onClick={() => first && onChange({
+                  ...step,
+                  channel: c,
+                  template: c === 'BANNER'
+                    ? IN_APP_TEMPLATE[step.inAppSurface ?? 'HOME_BANNER']
+                    : first,
+                  variables: {},
+                  ...(c === 'PUSH' || c === 'BANNER'
+                    ? { fallbackToPush: false, mobileDestination: step.mobileDestination ?? 'HOME' }
+                    : { mobileDestination: undefined }),
+                  ...(c === 'BANNER' ? { inAppSurface: step.inAppSurface ?? 'HOME_BANNER' } : { inAppSurface: undefined }),
+                  ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
+                })}
                 // `.btn` again rather than a hand-rolled box — the third time tonight that a
                 // house primitive existed and a worse copy was written next to it. `py-1.5` is not
                 // even generated in this build, so the copy rendered cramped.
@@ -115,18 +137,111 @@ export function StepEditor({
                     : undefined
                 }
               >
-                {c === 'EMAIL' ? t('E-mail', 'Email') : t('Push do aplikace', 'App push')}
+                {c === 'EMAIL'
+                  ? t('E-mail', 'Email')
+                  : c === 'PUSH'
+                    ? t('Push do aplikace', 'App push')
+                    : t('Banner v aplikaci', 'In-app banner')}
               </button>
             )
           })}
         </div>
         {step.channel === 'PUSH' && (
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Push nese jen titulek. Nabídku si člověk přečte v aplikaci po klepnutí — do notifikace se osobní obsah nedává.',
-              'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
-            )}
-          </p>
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Push nese jen titulek. Nabídku si člověk přečte v aplikaci po klepnutí — do notifikace se osobní obsah nedává.',
+                'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
+              )}
+            </p>
+            <label className="mt-3 block space-y-1.5 text-sm" data-mobile-destination={index}>
+              <span className="font-medium">{t('Po klepnutí otevřít', 'Open after tap')}</span>
+              <select
+                className={field}
+                value={step.mobileDestination ?? 'HOME'}
+                onChange={e => onChange({ ...step, mobileDestination: e.target.value as EditorStep['mobileDestination'] })}
+              >
+                <option value="HOME">{t('Domovská obrazovka', 'Home')}</option>
+                <option value="SAVINGS">{t('Spoření', 'Savings')}</option>
+                <option value="CARDS">{t('Karty', 'Cards')}</option>
+                <option value="PAYMENTS">{t('Platby', 'Payments')}</option>
+                <option value="PRODUCT_HUB">{t('Produkty', 'Products')}</option>
+              </select>
+              <span className="block text-xs text-muted-foreground">
+                {t('Jde o pevný deep-link aplikace, ne URL zadanou do kampaně.', 'This is a fixed app deep link, not a campaign-entered URL.')}
+              </span>
+            </label>
+          </>
+        )}
+        {step.channel === 'BANNER' && (
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Zvolte přesnou plochu přihlášené aplikace. Není to push a nic se neobjeví na zamčeném telefonu.',
+                'Choose the exact signed-in app surface. It is not a push and never appears on a locked phone.',
+              )}
+            </p>
+            <label className="mt-3 block space-y-1.5 text-sm" data-in-app-surface={index}>
+              <span className="font-medium">{t('Plocha v aplikaci', 'In-app surface')}</span>
+              <select
+                className={field}
+                value={step.inAppSurface ?? 'HOME_BANNER'}
+                onChange={e => {
+                  const inAppSurface = e.target.value as NonNullable<EditorStep['inAppSurface']>
+                  onChange({
+                    ...step,
+                    inAppSurface,
+                    template: IN_APP_TEMPLATE[inAppSurface],
+                    variables: {},
+                    ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
+                  })
+                }}
+              >
+                <option value="HOME_BANNER">{t('Banner na domovské obrazovce', 'Home banner')}</option>
+                <option value="HOME_CAROUSEL">{t('Carousel na domovské obrazovce', 'Home carousel')}</option>
+                <option value="PRODUCT_FEED">{t('Feed produktů', 'Product feed')}</option>
+                <option value="REWARDS_HUB">{t('Centrum odměn', 'Rewards hub')}</option>
+              </select>
+              <span className="block text-xs text-muted-foreground">
+                {t('Každá plocha má schválený tvar karty; šablona se přepne spolu s ní.', 'Each surface has an approved card shape; its template changes with the surface.')}
+              </span>
+            </label>
+            <label className="mt-3 block space-y-1.5 text-sm" data-mobile-destination={index}>
+              <span className="font-medium">{t('Po klepnutí otevřít', 'Open after tap')}</span>
+              <select
+                className={field}
+                value={step.mobileDestination ?? 'HOME'}
+                onChange={e => onChange({ ...step, mobileDestination: e.target.value as EditorStep['mobileDestination'] })}
+              >
+                <option value="HOME">{t('Domovská obrazovka', 'Home')}</option>
+                <option value="SAVINGS">{t('Spoření', 'Savings')}</option>
+                <option value="CARDS">{t('Karty', 'Cards')}</option>
+                <option value="PAYMENTS">{t('Platby', 'Payments')}</option>
+                <option value="PRODUCT_HUB">{t('Produkty', 'Products')}</option>
+              </select>
+              <span className="block text-xs text-muted-foreground">
+                {t('Banner vede jen na pevný deep-link aplikace, nikdy na URL vložené do kampaně.', 'A banner can use only a fixed app deep link, never a campaign-entered URL.')}
+              </span>
+            </label>
+          </>
+        )}
+        {step.channel === 'EMAIL' && (
+          <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm" data-push-fallback={index}>
+            <input
+              type="checkbox"
+              checked={step.fallbackToPush === true}
+              onChange={e => onChange({ ...step, fallbackToPush: e.target.checked })}
+            />
+            <span>
+              <span className="font-medium">{t('Když chybí e-mailový souhlas, zkusit push', 'When email consent is absent, try push')}</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                {t(
+                  'Push projde vlastním souhlasem i stejnými limity. Není to druhý pokus po nedoručení e-mailu.',
+                  'Push goes through its own consent and the same limits. It is not a second attempt after an email delivery failure.',
+                )}
+              </span>
+            </span>
+          </label>
         )}
       </div>
 
@@ -138,9 +253,16 @@ export function StepEditor({
           id={`tpl-${index}`}
           className={field}
           value={step.template}
-          onChange={e => onChange({ ...step, template: e.target.value, variables: {} })}
+          onChange={e => onChange({
+            ...step,
+            template: e.target.value,
+            variables: {},
+            ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
+          })}
         >
-          {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel).map(tpl => (
+          {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel && (
+            step.channel !== 'BANNER' || tpl === IN_APP_TEMPLATE[step.inAppSurface ?? 'HOME_BANNER']
+          )).map(tpl => (
             <option key={tpl} value={tpl}>
               {templateLabels[tpl] ?? tpl}
             </option>
@@ -153,7 +275,12 @@ export function StepEditor({
                 'Šablona notifikace je pevná. Tady se vyplňuje jen její titulek.',
                 'The notification template is fixed. Only its headline is filled in here.',
               )
-            : t(
+            : step.channel === 'BANNER'
+              ? t(
+                  'Plocha používá schválenou kartu aplikace. Tady se vyplňují jen její pojmenované hodnoty.',
+                  'The surface uses an approved in-app card. Only its named values are filled in here.',
+                )
+              : t(
                 'Text e-mailu je v šabloně. Tady se vyplňují jen její pojmenované hodnoty.',
                 'The email copy lives in the template. Only its named values are filled in here.',
               )}
@@ -174,6 +301,37 @@ export function StepEditor({
           />
         </div>
       ))}
+
+      {contentExperiment && (
+        <div className="rounded-md border border-dashed p-3 space-y-3" data-variant-b-editor={index}>
+          <div>
+            <p className="text-sm font-medium">{t('Varianta B', 'Variant B')}</p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Každý člověk zůstane po celou cestu ve stejné variantě. Změňte jen hodnoty, které chcete porovnat.',
+                'Each person stays in the same variant throughout the journey. Change only the values you want to compare.',
+              )}
+            </p>
+          </div>
+          {declared.map(v => (
+            <div key={v} className="space-y-1.5">
+              <label htmlFor={`var-b-${index}-${v}`} className="text-sm font-medium">
+                {variableLabels[v]?.label ?? v}
+              </label>
+              <input
+                id={`var-b-${index}-${v}`}
+                className={field}
+                placeholder={variableLabels[v]?.example ?? ''}
+                value={step.variantBVariables?.[v] ?? ''}
+                onChange={e => onChange({
+                  ...step,
+                  variantBVariables: { ...step.variantBVariables, [v]: e.target.value },
+                })}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* The gate, next to the delay, because the two together answer "when does this go out, and to
           whom". `CONFIRMED` is delivery as notification-service reports it (ADR-0239 D3) — never

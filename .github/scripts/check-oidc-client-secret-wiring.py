@@ -42,10 +42,20 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
 FILTER_MARKERS = ("OidcClientRequestReactiveFilter", "OidcClientRequestFilter")
 ENV_NAME = "OIDC_CLIENT_SECRET"
+
+# Shared library modules — never their own Deployment/Rollout, so they can never carry an
+# OIDC_CLIENT_SECRET env ref of their own; a mention of a FILTER_MARKERS name anywhere in their
+# source (code OR a KDoc comparing themselves to a real filter, as `SyntheticTaintClientFilter`'s
+# KDoc does) is therefore an unfixable-by-design false positive, never a real gap. This is a small,
+# stable set of directory names — not a growing debt list — so a hand-kept exclusion is the
+# `rules.yaml: agpl_modules` shape, not the kind this repo distrusts.
+NON_DEPLOYABLE_MODULES = frozenset({"openbank-libs", "openbank-libs-domain", "openbank-libs-runtime"})
 
 # Workloads still carrying `optional: true` on a secret that IS provisioned by an ExternalSecret.
 # Not flipped here on purpose: `optional: false` makes the pod refuse to start if the Secret is
@@ -68,18 +78,60 @@ OPTIONAL_TRUE_PENDING_LIVE_CHECK: dict[str, str] = {
 }
 
 
+def strip_kotlin_comments(src: str) -> str:
+    """Remove `//` and `/* */` comments so a KDoc mentioning a marker CLASS NAME by way of
+    comparison (`SyntheticTaintClientFilter`'s KDoc names `OidcClientRequestReactiveFilter` as a
+    sibling registration, never wiring one itself) does not read as the code wiring it. Kotlin
+    block comments NEST, so track depth rather than matching the first `*/`.
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(src), 0
+    while i < n:
+        two = src[i : i + 2]
+        if depth:
+            if two == "/*":
+                depth += 1
+                i += 2
+                continue
+            if two == "*/":
+                depth -= 1
+                i += 2
+                continue
+            out.append("\n" if src[i] == "\n" else " ")
+            i += 1
+            continue
+        if two == "/*":
+            depth += 1
+            i += 2
+            continue
+        if two == "//":
+            j = src.find("\n", i)
+            if j == -1:
+                break
+            out.append("\n")
+            i = j + 1
+            continue
+        out.append(src[i])
+        i += 1
+    return "".join(out)
+
+
 def services_minting_tokens() -> set[str]:
     """Services whose main sources wire an OIDC client filter onto a rest-client."""
     found: set[str] = set()
-    for service in sorted(REPO.glob("openbank-*/src/main")):
+    for service in gatelib.glob(REPO, "openbank-*/src/main"):
         name = service.parts[len(REPO.parts)]
-        for path in service.rglob("*"):
+        if name in NON_DEPLOYABLE_MODULES:
+            continue
+        for path in gatelib.rglob(service, "*"):
             if not path.is_file() or path.suffix not in (".kt", ".yaml", ".yml", ".properties"):
                 continue
             try:
-                text = path.read_text(encoding="utf-8")
+                text = gatelib.read_text(path)
             except (UnicodeDecodeError, OSError):
                 continue
+            if path.suffix == ".kt":
+                text = strip_kotlin_comments(text)
             if any(marker in text for marker in FILTER_MARKERS):
                 found.add(name)
                 break
@@ -89,9 +141,9 @@ def services_minting_tokens() -> set[str]:
 def provisioned_secrets() -> set[tuple[str, str]]:
     """{(namespace, secret-name)} created by an ExternalSecret."""
     out: set[tuple[str, str]] = set()
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -107,9 +159,9 @@ def provisioned_secrets() -> set[tuple[str, str]]:
 def oidc_env_refs() -> dict[str, tuple[str, str, bool, pathlib.Path]]:
     """{workload: (namespace, secret-name, optional, manifest)} for every OIDC_CLIENT_SECRET ref."""
     refs: dict[str, tuple[str, str, bool, pathlib.Path]] = {}
-    for path in GITOPS.rglob("*.yaml"):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, UnicodeDecodeError):
             continue
         for doc in docs:

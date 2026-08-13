@@ -32,7 +32,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fx-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-c7743304
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-e80f4bc7
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8119}
@@ -80,6 +80,13 @@ spec:
               value: http://sanctions-service.sanctions.svc:8123
             - name: AML_SERVICE_URL
               value: http://aml-service.aml.svc:8117
+            # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221). fx-service scores from
+            # two call sites (FxActivitiesImpl and FxService, rail FX) and had no FRAUD_SERVICE_URL,
+            # so both resolved application.yaml's `http://localhost:8133` and the fail-open adapter
+            # logged "shadow ALLOW" on every conversion. Behaviour-neutral to wire — the verdict is
+            # observed and logged, never acted on.
+            - name: FRAUD_SERVICE_URL
+              value: http://fraud-service.fraud.svc:8133
             # NOT optional (#2929). The three rest-clients behind the ADR-0032 screening gate
             # (sanctions, aml, fraud) carry OidcClientRequestReactiveFilter; without this value
             # the default oidc-client is "not initialized" and they send no Authorization header

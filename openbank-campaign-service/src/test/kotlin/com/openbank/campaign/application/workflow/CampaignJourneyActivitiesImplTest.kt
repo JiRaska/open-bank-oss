@@ -4,8 +4,10 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.application.port.out.BannerPlacementPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ConsentCheckPort
+import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.SendLogRepository
@@ -54,6 +56,7 @@ class CampaignJourneyActivitiesImplTest {
     private val sendLog: SendLogRepository = mockk()
     private val consentCheck: ConsentCheckPort = mockk()
     private val notificationSend: NotificationSendPort = mockk()
+    private val bannerPlacement: BannerPlacementPort = mockk()
 
     private val campaignId = UUID.randomUUID()
     private val partyId = UUID.randomUUID()
@@ -79,8 +82,8 @@ class CampaignJourneyActivitiesImplTest {
             sendLog,
             gate,
             notificationSend,
+            bannerPlacement,
             dryRun = false,
-            marketingScope = "MARKETING_COMMS_EMAIL",
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }
         }
@@ -108,6 +111,7 @@ class CampaignJourneyActivitiesImplTest {
             updatedAt = Instant.now(),
         )
         coEvery { sendLog.countRecentForParty(partyId, any()) } returns 0
+        coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
     }
@@ -115,7 +119,7 @@ class CampaignJourneyActivitiesImplTest {
     @Test
     fun `a refused notification handoff records FAILED and never SENT`() {
         givenDeliverableStep()
-        coEvery { notificationSend.requestSend(partyId, any(), any(), any(), any(), any()) } throws
+        coEvery { notificationSend.requestSend(any()) } throws
             IllegalStateException("broker refused the publish")
 
         assertThatThrownBy { activities.deliverStep(campaignId, partyId, 1) }
@@ -132,7 +136,7 @@ class CampaignJourneyActivitiesImplTest {
         val recordedBeforeSend = mutableListOf<SendOutcome>()
         var handedOff = false
         coEvery {
-            notificationSend.requestSend(partyId, any(), any(), any(), any(), any())
+            notificationSend.requestSend(any())
         } answers { handedOff = true }
         coEvery { sendLog.record(any()) } answers {
             if (!handedOff) recordedBeforeSend += firstArg<SendRecord>().outcome

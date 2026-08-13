@@ -86,6 +86,9 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-09** — **`BalanceServiceClient` now reads and forwards a spendable figure the raw projection did not carry (#1745).** `effectiveAvailableAmount` on the wire is nullable and defaults to `availableAmount` when absent, so this service tolerates talking to an older balance-service during a rollout. **Risk class = none new**: this is a client-side interpretation change on an existing inbound field from an already-trusted M2M dependency (balance-service is inside this service's own trust boundary, not a new edge), no new endpoint, no new listener, no authorization change. The only new datum this service now trusts is a number it already trusted the shape of. Rollback: revert the mapping; the field is additive on balance-service's side and nothing here persists it.
+
+
 - **2026-08-09** — New inbound caller: `fraud-service` (ADR-0220 D3.5, issue #2749). Its new
   `AccountServiceClient` (fraud-service's first-ever outbound rest-client) calls
   `GET /api/v1/accounts/{accountId}` — an existing read-only, already-`@PermitAll` lookup, so no
@@ -386,3 +389,19 @@ not change any existing request's outcome until explicitly flipped.
   legacy `account_authorizations.transaction_limit` **is** enforced on this path, because wiring
   the old behaviour to a live debit route would have made an operator-set per-transaction ceiling
   decoration. Rollback: revert the edge call site — the endpoint alone moves no money.
+- **2026-08-06** — **Error-envelope disclosure: `ApiError.timestamp` now carries a real
+  clock reading.** `#3874` — the shared `ApiError` envelope (openbank-libs-domain) defaulted
+  `timestamp` to `Instant.EPOCH` and no call site passed it, so every error this service served
+  carried `1970-01-01T00:00:00Z`. The field is now a required constructor argument, stamped
+  `Instant.now()` at construction in this service's mappers. **Risk class = information
+  disclosure**, and it is a deliberate, bounded increase: error responses now reveal the server's
+  wall-clock time to any caller who can provoke an error, including an unauthenticated one on
+  endpoints that answer 401/403 through this envelope. Assessed as acceptable — the value is
+  second-resolution UTC already implied by the HTTP `Date` header on the same response, so it
+  discloses nothing a caller could not already read, and it is what makes the envelope's own
+  instruction ("contact support with traceId=…") actionable by letting support bind a trace to a
+  moment. No new field, no new endpoint, no authorization or ingress change; the response SHAPE is
+  unchanged (`string`/`date-time`), so no API-contract bump under ADR-0048. Not a timing oracle:
+  the stamp is taken when the error object is built, not measured against request start, so it
+  does not expose per-request processing duration. Rollback: revert; the field is
+  serialisation-only and nothing persists it.

@@ -57,6 +57,7 @@
 
 import argparse
 import concurrent.futures
+import json
 import os
 import pathlib
 import shutil
@@ -72,6 +73,10 @@ except ImportError:
     sys.exit(2)
 
 MANIFEST = ".github/gates/gates.yaml"
+# Must match gatelib.CACHE_DIR_ENV. Not imported from it: run-gates.py has to load and validate
+# the manifest even where a checker's dependencies are missing, and the string is the contract.
+PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
+SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -103,6 +108,19 @@ def load(root: pathlib.Path, path: str = MANIFEST):
             if k not in g:
                 sys.stderr.write(f"::error::gate {g.get('id', '<no id>')} is missing `{k}`\n")
                 sys.exit(2)
+        # A `run:` that is present but says nothing executes `bash -c ""` and exits 0 — a gate
+        # that reports PASS having done no work, which is the exact failure this runner exists
+        # to make impossible. Presence was checked; emptiness was not, and one gate in the
+        # manifest was shipping that shape deliberately. Comments are stripped first for the
+        # same reason as the ${{ }} check below: a run: block that is only prose is equally a
+        # no-op, and this is the one place that can tell.
+        if not strip_comments(str(g["run"])).strip():
+            sys.stderr.write(
+                f"::error::gate {g['id']}: `run:` is empty (or only comments). `bash -c \"\"` "
+                f"exits 0, so this gate would report PASS without executing anything. Give it "
+                f"a command, or delete the gate.\n"
+            )
+            sys.exit(2)
         if g["id"] in seen:
             sys.stderr.write(f"::error::duplicate gate id `{g['id']}`\n")
             sys.exit(2)
@@ -116,6 +134,23 @@ def load(root: pathlib.Path, path: str = MANIFEST):
         if g["when"] not in VALID_WHEN:
             sys.stderr.write(f"::error::gate {g['id']}: when `{g['when']}` not in {VALID_WHEN}\n")
             sys.exit(2)
+        budget = g.get("budget_seconds")
+        if budget is not None:
+            if isinstance(budget, bool) or not isinstance(budget, (int, float)) or budget <= 0:
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: budget_seconds `{budget}` must be a positive "
+                    f"number\n"
+                )
+                sys.exit(2)
+        floor = g.get("min_subjects")
+        if floor is not None:
+            if not isinstance(floor, int) or isinstance(floor, bool) or floor < 1:
+                sys.stderr.write(
+                    f"::error::gate {g['id']}: min_subjects `{floor}` must be a positive "
+                    f"integer. A floor of 0 states nothing — every gate clears it, including "
+                    f"one whose corpus has vanished, which is the case it exists for.\n"
+                )
+                sys.exit(2)
         exp = g.setdefault("selftest_expect", "pass")
         if exp not in VALID_EXPECT:
             sys.stderr.write(
@@ -208,6 +243,12 @@ class Result:
         self.status = "pending"  # ok | failed | warned | skipped | unfalsified
         self.output = ""
         self.seconds = 0.0
+        # Split out separately (ADR-0255 Gate Tax follow-up, external review 2026-08-10):
+        # `seconds` used to be self-test + run: combined, which made "how much does the
+        # self-test itself cost" unanswerable from the JSON without re-deriving it from the
+        # text log — measured live at 894s of gate CPU in one CI run with no way to say how
+        # much of that was falsification overhead vs the check doing its actual job.
+        self.selftest_seconds = 0.0
 
     @property
     def id(self):
@@ -286,6 +327,22 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
                 pass
 
 
+def last_subject_count(out: str):
+    """The LAST `SUBJECTS=<n>` line in a gate's output, or None.
+
+    Last, not first: a checker that reports per-corpus counts should end with the one that
+    decides, and a self-test fixture's count must never be mistaken for the real run's.
+    """
+    found = None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith(SUBJECTS_PREFIX):
+            digits = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
+            if digits.isdigit():
+                found = int(digits)
+    return found
+
+
 def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
@@ -306,7 +363,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
     selftest = gate.get("selftest")
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
+        st0 = time.monotonic()
         rc, out = _run(selftest, root, gate.get("env"), timeout, index)
+        r.selftest_seconds = time.monotonic() - st0
         buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
         if (rc == 0) != want_pass:
             r.status = "unfalsified"
@@ -329,8 +388,56 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
 
     rc, out = _run(gate["run"], root, gate.get("env"), timeout, index)
     buf.append("--- gate ---\n" + out)
-    r.output = "".join(buf)
+
+    # The subject floor. A gate that examined nothing passes everything, and its output says
+    # so out loud — `0 .kt files checked`, `0 @RolesAllowed site(s) checked` — while exiting 0.
+    # Measured 2026-08-09 by deleting the corpus: nine kotlin gates and ten gitops gates stayed
+    # green with their subject gone (#4339). Where the manifest declares `min_subjects:`, the
+    # gate must print how many things it looked at, and clear the floor.
+    floor = gate.get("min_subjects")
+    if floor is not None and rc == 0:
+        found = last_subject_count(out)
+        if found is None:
+            rc = 1
+            buf.append(
+                f"\n[run-gates] this gate declares min_subjects: {floor} but printed no "
+                f"`{SUBJECTS_PREFIX}<n>` line. The floor cannot be checked, so the gate's green "
+                f"means nothing — call gatelib.subjects(n) (python) or echo the line (shell).\n"
+            )
+        elif found < floor:
+            rc = 1
+            buf.append(
+                f"\n[run-gates] this gate examined {found} subject(s), below its declared "
+                f"floor of {floor}. Either its corpus moved (a renamed directory, a changed "
+                f"glob, a moved source root) and the gate is now a no-op, or the fleet really "
+                f"did shrink and the floor in gates.yaml needs a deliberate edit.\n"
+            )
+
     r.seconds = time.monotonic() - t0
+
+    # Wall-time budget. Nothing here ever went red for being slow, and that is how `ci.yml`'s
+    # required check went from a 0.7 min median to 2.4 min in four weeks — each gate cheap,
+    # the total unbounded, and no single change big enough to argue with.
+    #
+    # ENFORCED ONLY UNDER CI, deliberately. A developer laptop running eight gates across four
+    # cores is not a measurement: this repo's own audit read check-adr-registry.sh at 60.4s
+    # locally against a whole shard of 20s in CI. Off the runner the overrun is printed and
+    # nothing fails.
+    budget = gate.get("budget_seconds")
+    if budget is not None and r.seconds > budget:
+        on_ci = os.environ.get("CI") == "true"
+        note = (
+            f"\n[run-gates] this gate took {r.seconds:.1f}s against a budget of {budget}s. "
+            f"Budgets are set well above the observed CI time, so this is a regression rather "
+            f"than noise — profile it, or raise the number in gates.yaml deliberately.\n"
+        )
+        buf.append(note)
+        if on_ci:
+            rc = rc or 1
+        else:
+            buf.append("[run-gates] not on CI (CI != true), so the overrun does not fail.\n")
+
+    r.output = "".join(buf)
     if rc == 0:
         r.status = "ok"
     elif gate["mode"] == "advisory":
@@ -381,6 +488,46 @@ def report(results, jobs):
     return 1 if failed else 0
 
 
+def json_records(results) -> list[dict]:
+    """One record per gate, for ADR-0255's Tier 1 snapshot.
+
+    Deliberately NOT the same shape as the text report: a machine reader needs a stable,
+    typed field per property (`subjects` as an int or null, never embedded in prose it would
+    have to re-parse), which is the whole reason this exists instead of a collector re-reading
+    the printed log — CLAUDE.md documents at length why parsing a job's own log back out is
+    fragile (the log contains the step's own `run:` script text; several real false positives
+    and negatives came from exactly that). This is the structured alternative: one artifact,
+    typed, no parsing risk.
+    """
+    out = []
+    for r in results:
+        g = r.gate
+        out.append({
+            "id": g["id"],
+            "group": g.get("group"),
+            "mode": g.get("mode", "enforced"),
+            "status": r.status,
+            "seconds": round(r.seconds, 3),
+            # Purely additive: `seconds` keeps meaning "total time this gate cost" (self-test +
+            # run:, unchanged), so nothing already reading it — the admin-ui collector, the
+            # ClickHouse schema, the Grafana dashboard — has its meaning silently redefined.
+            # A consumer that wants "how much was the check itself, minus falsification
+            # overhead" computes seconds - selftest_seconds; 0.0 when there is no selftest.
+            "selftest_seconds": round(r.selftest_seconds, 3),
+            "subjects": last_subject_count(r.output),
+            "selftest_declared": bool(g.get("selftest")),
+            # A gate whose selftest is declared but came back "unfalsified" did not reach its
+            # own run: at all (see execute()) — status alone already encodes this, repeated
+            # here as an explicit boolean so a consumer never has to know that convention.
+            "selftest_passed": (
+                None if not g.get("selftest") else r.status != "unfalsified"
+            ),
+            "budget_seconds": g.get("budget_seconds"),
+            "min_subjects": g.get("min_subjects"),
+        })
+    return out
+
+
 def select(gates, args):
     sel = gates
     if args.group:
@@ -413,6 +560,9 @@ def main(argv=None):
     ap.add_argument("--list", action="store_true", help="print the manifest and exit")
     ap.add_argument("--jobs", type=int, default=0, help="concurrency (default: cpu count)")
     ap.add_argument("--timeout", type=int, default=420, help="per-gate seconds")
+    ap.add_argument("--json", metavar="PATH", help="write a structured per-gate JSON summary "
+                     "(ADR-0255) alongside the normal text report; does not change the exit "
+                     "code or the text output")
     ap.add_argument("--self-test", action="store_true", help="falsify the runner itself")
     args = ap.parse_args(argv)
 
@@ -445,10 +595,31 @@ def main(argv=None):
           f"{os.environ.get('GITHUB_EVENT_NAME', '(local)')}")
 
     index = git_index_path(root)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-        futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
-        done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+    # One YAML parse cache for the whole invocation. The gates are separate processes over one
+    # corpus — the 20 single-script python gates in the `gitops` shard cost 231s apart and 8.7s
+    # with the parse shared, same verdicts — so gatelib.py writes each parsed document here,
+    # keyed by content sha, and every later gate reads it back instead of re-decoding. Scoped
+    # to this directory and removed below: nothing survives into the next run, so a gate can
+    # never read a parse from a tree that has since changed.
+    cache = tempfile.mkdtemp(prefix="gate-parse-cache-", dir=os.environ.get("RUNNER_TEMP") or None)
+    os.environ[PARSE_CACHE_ENV] = cache
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index): g["id"] for g in sel}
+            done = {futs[f]: f.result() for f in concurrent.futures.as_completed(futs)}
+    finally:
+        os.environ.pop(PARSE_CACHE_ENV, None)
+        shutil.rmtree(cache, ignore_errors=True)
     results = [done[g["id"]] for g in sel]
+    if args.json:
+        # Written BEFORE report()'s exit code is returned, so a shard that goes on to fail
+        # still leaves its JSON behind for the artifact-upload step — an observability
+        # snapshot that only appears on a green run would be useless for the one case anyone
+        # actually wants to look at it.
+        try:
+            pathlib.Path(args.json).write_text(json.dumps(json_records(results), indent=2))
+        except OSError as exc:
+            sys.stderr.write(f"::warning::run-gates: could not write --json {args.json}: {exc}\n")
     return report(results, jobs)
 
 
@@ -499,6 +670,36 @@ gates:
     group: t
     when: pull_request
     run: "exit 1"
+  - id: floor-met
+    name: "a gate that clears its subject floor"
+    group: t
+    min_subjects: 3
+    run: "echo SUBJECTS=3"
+  - id: floor-missed
+    name: "a gate whose corpus vanished"
+    group: t
+    min_subjects: 3
+    run: "echo checked nothing; echo SUBJECTS=0"
+  - id: floor-unreported
+    name: "a gate that declares a floor and never prints a count"
+    group: t
+    min_subjects: 1
+    run: "echo all good"
+  - id: floor-last-wins
+    name: "the LAST count decides, so a self-test fixture cannot stand in for the real run"
+    group: t
+    min_subjects: 5
+    run: "echo 'SUBJECTS=1  # a self-test fixture'; echo SUBJECTS=9"
+  - id: over-budget
+    name: "a gate slower than its declared budget"
+    group: t
+    budget_seconds: 0.2
+    run: "sleep 0.5"
+  - id: within-budget
+    name: "a gate inside its budget"
+    group: t
+    budget_seconds: 30
+    run: "true"
   - id: slow
     name: "a gate that exceeds its timeout"
     group: t
@@ -510,6 +711,12 @@ gates:
 
 EXPECTED = {
     "passing": "ok",
+    "floor-met": "ok",
+    "floor-missed": "failed",
+    "floor-unreported": "failed",
+    "floor-last-wins": "ok",
+    "over-budget": "failed",
+    "within-budget": "ok",
     "failing": "failed",
     "advisory-failing": "warned",
     "harness-ok": "ok",
@@ -528,6 +735,7 @@ def self_test():
         (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
         gates = load(tmp)
         os.environ["GITHUB_EVENT_NAME"] = "push"  # so the pull_request-only gate skips
+        os.environ["CI"] = "true"  # budgets are enforced on the runner only
         results = [execute(g, tmp, is_pr=False, timeout=2) for g in gates]
         bad = []
         for r in results:
@@ -539,6 +747,55 @@ def self_test():
             # A timeout must SURFACE what the gate printed before it hung — that output is
             # usually the only clue to why. Asserting the status alone passes against a
             # timeout path that raises instead of reporting.
+            if r.id == "over-budget" and "against a budget of" not in r.output:
+                bad.append("over-budget: failed, but not for the budget reason")
+            if r.id == "floor-missed" and "below its declared floor" not in r.output:
+                bad.append("floor-missed: failed, but not for the floor reason")
+            # ADR-0255's json_records() must round-trip through json.dumps (a Result carrying
+            # something non-serialisable would crash the whole run at the very end, after
+            # every gate had already finished) and preserve the SUBJECTS= count this record
+            # exists to make machine-readable in the first place.
+            if r.id == "floor-met":
+                rec = json_records([r])[0]
+                try:
+                    json.dumps(rec)
+                except TypeError as exc:
+                    bad.append(f"floor-met: json_records() is not JSON-serialisable: {exc}")
+                if rec["subjects"] != 3:
+                    bad.append(f"floor-met: json_records() subjects want 3, got {rec['subjects']}")
+                if rec["selftest_declared"] is not False:
+                    bad.append("floor-met: selftest_declared should be False (no selftest: set)")
+            if r.id == "harness-ok":
+                rec = json_records([r])[0]
+                if rec["selftest_declared"] is not True or rec["selftest_passed"] is not True:
+                    bad.append(f"harness-ok: want selftest_declared=True/selftest_passed=True, "
+                               f"got {rec['selftest_declared']}/{rec['selftest_passed']}")
+                # A declared, PASSING selftest still costs real wall time (it ran "true", not
+                # nothing) — selftest_seconds must be measured, not left at the zero-value
+                # default that would make it indistinguishable from "no selftest at all".
+                if rec["selftest_seconds"] <= 0:
+                    bad.append(f"harness-ok: selftest_seconds should be > 0 (a selftest ran), "
+                               f"got {rec['selftest_seconds']}")
+                if rec["seconds"] < rec["selftest_seconds"]:
+                    bad.append("harness-ok: total seconds must be >= selftest_seconds "
+                               "(selftest runs before run:, never after)")
+            if r.id == "harness-broken":
+                rec = json_records([r])[0]
+                if rec["selftest_passed"] is not False:
+                    bad.append(f"harness-broken: want selftest_passed=False, "
+                               f"got {rec['selftest_passed']}")
+                if rec["selftest_seconds"] <= 0:
+                    bad.append("harness-broken: selftest_seconds should be > 0 even when the "
+                               "self-test FAILS — the harness still ran and cost real time")
+            if r.id == "floor-met":
+                # Cross-check the negative: a gate with NO selftest: must report exactly 0.0,
+                # never a stale/leaked value from a previous gate's timer in the same process.
+                rec0 = json_records([r])[0]
+                if rec0["selftest_seconds"] != 0.0:
+                    bad.append(f"floor-met: no selftest declared, selftest_seconds should be "
+                               f"0.0, got {rec0['selftest_seconds']}")
+            if r.id == "floor-unreported" and "printed no" not in r.output:
+                bad.append("floor-unreported: failed, but not for the missing-count reason")
             if r.id == "slow":
                 for stream in ("on-stdout", "on-stderr"):
                     if stream not in r.output:
@@ -564,6 +821,98 @@ def self_test():
         except SystemExit as exc:
             if exc.code != 2:
                 bad.append(f"empty manifest exited {exc.code}, want 2")
+
+        # An empty (or comment-only) run: must abort. `bash -c ""` exits 0, so without this the
+        # gate reports PASS having run nothing — and the negative case matters just as much:
+        # a run: that merely CONTAINS comments alongside a command is the normal shape here.
+        for body, want_abort in (
+            ('run: ""', True),
+            ('run: "   "', True),
+            ('run: "# only a comment"', True),
+            ('run: "# a comment\\ntrue"', False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted a no-op run: ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a run: that does have a command ({body})")
+
+        # Off the runner, the same over-budget gate must PASS — the whole point of gating the
+        # rule on CI is that a laptop's timings are not a measurement.
+        os.environ["CI"] = "false"
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(
+            "gates:\n  - id: x\n    name: x\n    group: t\n    budget_seconds: 0.2\n"
+            '    run: "sleep 0.5"\n'
+        )
+        g = load(tmp)[0]
+        r = execute(g, tmp, is_pr=False, timeout=5)
+        if r.status != "ok":
+            bad.append(f"off-CI over-budget gate: want ok, got {r.status}")
+        if "does not fail" not in r.output:
+            bad.append("off-CI over-budget gate: did not say why it was not failed")
+        os.environ["CI"] = "true"
+
+        # A budget must be a positive number.
+        for body, want_abort in (
+            ("budget_seconds: 0", True),
+            ("budget_seconds: -3", True),
+            ('budget_seconds: "30"', True),
+            ("budget_seconds: 30", False),
+            ("budget_seconds: 0.5", False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+                f'    run: "true"\n'
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted an unusable budget_seconds ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a valid budget_seconds ({body})")
+
+        # A floor must be a positive integer. `0` is the shape that matters: it reads like a
+        # declaration and asserts nothing at all.
+        for body, want_abort in (
+            ("min_subjects: 0", True),
+            ("min_subjects: -1", True),
+            ('min_subjects: "5"', True),
+            ("min_subjects: true", True),
+            ("min_subjects: 1", False),
+        ):
+            (tmp / ".github" / "gates" / "gates.yaml").write_text(
+                f"gates:\n  - id: x\n    name: x\n    group: t\n    {body}\n"
+                f"    run: \"echo SUBJECTS=1\"\n"
+            )
+            try:
+                load(tmp)
+                if want_abort:
+                    bad.append(f"load() accepted an unusable min_subjects ({body})")
+            except SystemExit:
+                if not want_abort:
+                    bad.append(f"load() rejected a valid min_subjects ({body})")
+
+        # The parse-cache contract is a STRING shared with gatelib.py, in two files that do not
+        # import each other. A rename on one side would silently turn the cross-gate cache off
+        # — everything still green, just slower, which is the kind of regression nothing here
+        # would ever notice.
+        try:
+            sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+            import gatelib
+
+            if gatelib.CACHE_DIR_ENV != PARSE_CACHE_ENV:
+                bad.append(
+                    f"parse-cache env var disagrees: run-gates has {PARSE_CACHE_ENV!r}, "
+                    f"gatelib has {gatelib.CACHE_DIR_ENV!r}"
+                )
+        except ImportError as exc:
+            bad.append(f"gatelib.py is not importable from the scripts directory: {exc}")
 
         # The ${{ }} guard: red on a real command, and — the half that actually needed
         # deciding — GREEN on a comment that merely mentions the syntax.
@@ -638,6 +987,45 @@ def self_test():
                     f"empty PR_DIFF_BASE + {decl}: failed for the wrong reason — expected "
                     f"the guard's message, got: {r.output.strip()[:120]}"
                 )
+
+        # --json end to end: a real file gets written and round-trips through json.load, and
+        # an unwritable path warns instead of taking the whole run down (main()'s own
+        # try/except, exercised here rather than only unit-testing json_records() in
+        # isolation — the file-write path is where a real deploy would actually break).
+        #
+        # The manifest on disk was overwritten by every needs_base/${{ }} case run above —
+        # restore SELF_TEST_MANIFEST before driving main() through it, or this exercises
+        # whatever single-gate fixture happened to be written last.
+        (tmp / ".github" / "gates" / "gates.yaml").write_text(SELF_TEST_MANIFEST)
+        # --timeout 3, not the 420s default: group "t" includes the "slow" fixture, which
+        # sleeps 30s specifically to exercise the timeout path — without capping it here,
+        # every future run of THIS self-test would silently cost 30 extra seconds.
+        out_path = tmp / "gate-results.json"
+        argv_json = ["--root", str(tmp), "--group", "t", "--json", str(out_path), "--timeout", "3"]
+        rc = main(argv_json)
+        if rc == 0:
+            bad.append("--json run: expected a non-zero exit (the manifest has failing gates)")
+        if not out_path.is_file():
+            bad.append("--json: no file was written")
+        else:
+            try:
+                records = json.loads(out_path.read_text())
+                if not any(r["id"] == "passing" and r["status"] == "ok" for r in records):
+                    bad.append("--json: the written file does not contain the expected record")
+            except json.JSONDecodeError as exc:
+                bad.append(f"--json: written file is not valid JSON: {exc}")
+
+        import io
+        import contextlib
+
+        sink = io.StringIO()
+        with contextlib.redirect_stderr(sink):
+            rc2 = main(["--root", str(tmp), "--group", "t", "--timeout", "3",
+                        "--json", str(tmp / "no" / "such" / "dir" / "x.json")])
+        if "could not write --json" not in sink.getvalue():
+            bad.append("--json to an unwritable path did not warn")
+        if rc2 == 0:
+            bad.append("--json to an unwritable path unexpectedly reported success overall")
 
         if bad:
             print("\n::error::run-gates self-test FAILED:")

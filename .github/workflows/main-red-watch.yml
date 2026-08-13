@@ -55,6 +55,10 @@ on:
       - "Dependency submission"
       - "Gradle wrapper validation"
       - "Release Please"
+      # Pushes to main unconditionally (issue #4240). Its red is meaningful in a way worth
+      # naming: it means the watch could NOT read the ruleset bypass log — a permission-shaped
+      # absence, not "nothing was bypassed". Exactly the state that must not stay silent.
+      - "merged past red check watch"
       # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
       # but each is a governance verdict that only ever renders on main, which
       # makes them the LEAST likely reds to be seen and the most likely to rot.

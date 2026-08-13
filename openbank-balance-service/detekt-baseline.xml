@@ -26,7 +26,9 @@
     <ID>TooGenericExceptionCaught:BalanceReconciliationScheduler.kt$BalanceReconciliationScheduler$ex: Exception</ID>
     <ID>TooGenericExceptionCaught:LedgerProjectionConsumer.kt$LedgerProjectionConsumer$e: Exception</ID>
     <ID>TooGenericExceptionCaught:LedgerProjectionService.kt$LedgerProjectionService$ex: Exception</ID>
+    <ID>TooGenericExceptionCaught:ValueDateRollScheduler.kt$ValueDateRollScheduler$ex: Exception</ID>
     <ID>TooManyFunctions:Balance.kt$Balance</ID>
+    <ID>TooManyFunctions:BalanceRepositoryImpl.kt$BalanceRepositoryImpl : BalanceRepository</ID>
     <ID>UseCheckOrError:BalanceRepositoryImpl.kt$BalanceRepositoryImpl$throw IllegalStateException("Balance not found for update")</ID>
     <ID>UseCheckOrError:BalanceRepositoryImpl.kt$HoldRepositoryImpl$throw IllegalStateException("Hold not found for update")</ID>
   </CurrentIssues>

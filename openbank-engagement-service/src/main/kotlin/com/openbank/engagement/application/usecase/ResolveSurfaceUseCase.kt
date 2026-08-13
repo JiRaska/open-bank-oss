@@ -5,6 +5,7 @@
 package com.openbank.engagement.application.usecase
 
 import com.openbank.engagement.application.port.out.AdverseStateRepository
+import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.domain.model.DismissalRule
 import com.openbank.engagement.domain.model.EligibilitySnapshot
@@ -31,6 +32,7 @@ class ResolveSurfaceUseCase(
     private val contactGate: ContactPolicyGate,
     private val events: EngagementEventRepository,
     private val adverseState: AdverseStateRepository,
+    private val banners: CampaignBannerPlacementRepository,
 ) {
 
     sealed interface Result {
@@ -55,18 +57,33 @@ class ResolveSurfaceUseCase(
         val recent = events.recentForPartyAndSlot(partyId, slot, Instant.now().minus(DISMISSAL_LOOKBACK))
         if (DismissalRule.shouldSuppress(recent)) return Result.Suppressed
 
-        // Half-real (issue #2749): ARREARS (LendingArrearsEventConsumer, openbank.lending.events)
-        // and ERASURE_REQUESTED (PartyErasureConsumer, openbank.party.events) are materialised.
-        // FRAUD_HOLD and DISPUTE_OPENED are NOT — neither signal is published as an event
-        // anywhere in this fleet today (fraud-service has no persisted hold state; dispute-service
-        // emits only on resolution, never on open). That is still an honest gap for those two, not
-        // a silent one — a party with an open dispute or fraud hold is NOT currently excluded.
+        // WHICH adverse states are materialised is NOT restated here (issue #2749). The answer is
+        // the set of @Incoming consumers in this service's infrastructure/kafka package, and
+        // AdverseState's own KDoc in Eligibility.kt tracks it. A second copy of that list in a
+        // comment is what went stale last time, and would go stale again the moment a consumer is
+        // added — which is exactly what #4297 does.
+        //
+        // What is worth keeping in place, because it is timeless and a deletion would erase it:
+        // the note that used to stand here was wrong on all three of its factual claims. It said
+        // neither the fraud nor the dispute signal is published anywhere in the fleet, that
+        // "fraud-service has no persisted hold state", and that "dispute-service emits only on
+        // resolution, never on open". Measured 2026-08-09: fraud-service persists holds
+        // (FraudHoldEntity/FraudHoldService), and dispute-service emits `dispute.opened`
+        // (DisputeService.openedOutboxMessage, landed #4087).
+        //
+        // The lesson that survives the fix: a signal missing HERE is not evidence the producer is
+        // missing. That note blamed the producing services, and a reader acting on it would have
+        // gone to fix two services that were already correct. The gap was always the consumer end.
         val eligibility = EligibilitySnapshot(
             partyId = partyId,
             adverseState = adverseState.activeStates(partyId),
             asOf = Instant.now(),
         )
-        return Result.Rendered(SurfaceResolver.resolve(slot, eligibility))
+        val catalogue = SurfaceResolver.resolve(slot, eligibility)
+        val campaignBanner = banners.latestForPartyAndSlot(partyId, slot)
+        // Each slot intentionally has one current campaign placement, with no opaque score or
+        // cross-surface rotation. It comes before that slot's generic catalogue fallback.
+        return Result.Rendered(listOfNotNull(campaignBanner?.toSurfaceContent()) + catalogue)
     }
 
     companion object {

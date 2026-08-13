@@ -48,6 +48,11 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'dispute-service':        { container: 'openbank-dispute-service',        port: 8135 },
   'sepa-instant':           { container: 'openbank-sepa-instant',           port: 8127 },
   'document-service':       { container: 'openbank-document-service',       port: 8143 },
+  'engagement-service':     { container: 'openbank-engagement-service',     port: 8153 },
+  // ADR-0097: the regulatory console reads the implemented FINREP/COREP templates
+  // through this same operator-token BFF path. Without this entry, a healthy
+  // finrep-service is invisible to the browser and the page can only show mock data.
+  'finrep-service':         { container: 'openbank-finrep-service',         port: 8140 },
   'vop-service':            { container: 'openbank-vop-service',            port: 8149 },
 }
 

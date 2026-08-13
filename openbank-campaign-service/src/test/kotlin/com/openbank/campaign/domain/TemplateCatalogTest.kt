@@ -6,6 +6,8 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -80,13 +82,66 @@ class TemplateCatalogTest {
 }
 
 /**
- * The channel/template agreement (ADR-0200 D7 as it now stands: EMAIL + PUSH).
+ * The channel/template agreement: EMAIL, PUSH and the authenticated-app BANNER.
  *
  * Both directions matter and both fail silently in production. An EMAIL step naming a push template
  * renders a one-line title as an entire email; a PUSH step naming an email template puts offer body
  * copy into an APNs payload, which is the leak #1182 closed by making push bodies generic.
  */
 class CampaignStepChannelTest {
+
+    @Test
+    fun `a banner step carries its approved values to an app destination`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_BANNER",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
+        assertEquals(
+            setOf(
+                "MARKETING_PRODUCT_OFFER_BANNER",
+                "MARKETING_PRODUCT_OFFER_CAROUSEL",
+                "MARKETING_PRODUCT_OFFER_PRODUCT_FEED",
+                "MARKETING_PRODUCT_OFFER_REWARDS_HUB",
+            ),
+            TemplateCatalog.forChannel(Channel.BANNER),
+        )
+    }
+
+    @Test
+    fun `a carousel placement carries its selected surface through delivery`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+            inAppSurface = InAppSurface.HOME_CAROUSEL,
+        )
+
+        assertEquals(InAppSurface.HOME_CAROUSEL, step.primaryDelivery(null).inAppSurface)
+    }
+
+    @Test
+    fun `a banner template cannot be posted to a different app surface`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_BANNER",
+                channel = Channel.BANNER,
+                variables = emptyMap(),
+                delaySeconds = 0,
+                mobileDestination = MobileDestination.HOME,
+                inAppSurface = InAppSurface.PRODUCT_FEED,
+            )
+        }
+    }
 
     @Test
     fun `a push step may use a push template`() {
@@ -98,6 +153,20 @@ class CampaignStepChannelTest {
             delaySeconds = 0,
         )
         assertEquals(Channel.PUSH, step.channel)
+    }
+
+    @Test
+    fun `a push step resolves an allow-listed app destination rather than an author URL`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_PUSH",
+            channel = Channel.PUSH,
+            variables = mapOf("offerTitle" to "Savings"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
     }
 
     @Test
@@ -147,5 +216,34 @@ class CampaignStepChannelTest {
     fun `the catalogue offers exactly the templates a channel can render`() {
         assertEquals(setOf("MARKETING_PRODUCT_OFFER"), TemplateCatalog.forChannel(Channel.EMAIL))
         assertEquals(setOf("MARKETING_PRODUCT_OFFER_PUSH"), TemplateCatalog.forChannel(Channel.PUSH))
+    }
+
+    @Test
+    fun `an email step can safely reduce to its push fallback without carrying email body copy`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Email body", "ctaText" to "Open"),
+            delaySeconds = 0,
+            fallbackToPush = true,
+        )
+
+        assertEquals(Channel.PUSH, step.pushFallback(null)?.channel)
+        assertEquals(mapOf("offerTitle" to "Savings"), step.pushFallback(null)?.variables)
+    }
+
+    @Test
+    fun `a push step cannot declare another push fallback`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_PUSH",
+                channel = Channel.PUSH,
+                variables = mapOf("offerTitle" to "Savings"),
+                delaySeconds = 0,
+                fallbackToPush = true,
+            )
+        }
     }
 }

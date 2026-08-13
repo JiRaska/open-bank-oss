@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.StopCondition
@@ -13,6 +14,7 @@ import java.util.UUID
 @ActivityInterface
 interface CampaignJourneyActivities {
     fun loadDefinition(campaignId: UUID): JourneyDefinition
+    fun controlState(campaignId: UUID, partyId: UUID): JourneyControlState
     fun sendsSoFar(campaignId: UUID, partyId: UUID): Int
 
     /**
@@ -37,6 +39,9 @@ interface CampaignJourneyActivities {
 /** Everything a journey needs from the campaign definition, in one activity call (#3585). */
 data class JourneyDefinition(val steps: List<CampaignStep>, val stopCondition: StopCondition?)
 
-enum class StepOutcome { SENT, SUPPRESSED }
+/** Durable state checked before every send; signals provide low latency, this provides correctness. */
+data class JourneyControlState(val campaignState: CampaignState?, val goalReached: Boolean)
 
-enum class TerminationReason { CONSENT_REVOKED, SUPPRESSED, STOPPED_MAX_SENDS }
+enum class StepOutcome { SENT, SUPPRESSED, CAMPAIGN_PAUSED, CAMPAIGN_CLOSED, GOAL_REACHED }
+
+enum class TerminationReason { CONSENT_REVOKED, CAMPAIGN_CLOSED, GOAL_REACHED, SUPPRESSED, STOPPED_MAX_SENDS }

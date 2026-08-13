@@ -9,21 +9,20 @@ import java.util.UUID
 
 /**
  * The adverse-state set ADR-0220 D1/D3.5 names verbatim: fraud-hold, arrears, dispute-opened,
- * erasure. Three of the four now have a real event to materialise from (issue #2749, verified
+ * erasure. All four now have a real event to materialise from (issues #2749 and #4262, verified
  * against `origin/main` rather than assumed): [ARREARS] (`loan.stage_changed`),
- * [ERASURE_REQUESTED] (`PARTY_ERASED`), and [FRAUD_HOLD] (`fraud.hold_changed`, a new
- * fraud-service signal — repeated REVIEW verdicts, deliberately not a new DECLINE rule; see
- * `FraudHoldService`'s KDoc for why). [DISPUTE_OPENED] is named here for the shape D1/D3.5
- * specifies, but dispute-service's outbox only emits on *resolution*, never on open, so nothing
- * publishes it yet. Do not assume "named in this enum" means "wired"; check the three consumers
- * (`LendingArrearsEventConsumer`, `PartyErasureConsumer`, `FraudHoldEventConsumer`) for what
- * actually is.
+ * [ERASURE_REQUESTED] (`PARTY_ERASED`), [FRAUD_HOLD] (`fraud.hold_changed`, a new fraud-service
+ * signal — repeated REVIEW verdicts, deliberately not a new DECLINE rule; see `FraudHoldService`'s
+ * KDoc for why), and [DISPUTE_OPENED] (`dispute.opened`/`dispute.resolved`, which bracket the
+ * window a customer is in dispute). Do not assume "named in this enum" means "wired"; check the
+ * four consumers (`LendingArrearsEventConsumer`, `PartyErasureConsumer`, `FraudHoldEventConsumer`,
+ * `DisputeOpenedEventConsumer`) for what actually is.
  */
 enum class AdverseState { FRAUD_HOLD, ARREARS, DISPUTE_OPENED, ERASURE_REQUESTED }
 
 /**
  * A pre-computed eligibility snapshot for one party (ADR-0220 D1), materialised event-driven into
- * `party_adverse_state` for the three signals that exist (see [AdverseState]'s KDoc) — this
+ * `party_adverse_state` for the four signals that exist (see [AdverseState]'s KDoc) — this
  * domain layer only defines the shape and the rule over it, not the materialisation pipeline
  * itself.
  */
