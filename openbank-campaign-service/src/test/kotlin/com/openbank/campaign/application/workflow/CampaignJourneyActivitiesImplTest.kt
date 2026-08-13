@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.application.port.out.BannerPlacementPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.ConsentCheckPort
 import com.openbank.campaign.application.port.out.ConversionContext
@@ -55,6 +56,7 @@ class CampaignJourneyActivitiesImplTest {
     private val sendLog: SendLogRepository = mockk()
     private val consentCheck: ConsentCheckPort = mockk()
     private val notificationSend: NotificationSendPort = mockk()
+    private val bannerPlacement: BannerPlacementPort = mockk()
 
     private val campaignId = UUID.randomUUID()
     private val partyId = UUID.randomUUID()
@@ -80,6 +82,7 @@ class CampaignJourneyActivitiesImplTest {
             sendLog,
             gate,
             notificationSend,
+            bannerPlacement,
             dryRun = false,
         ) {
             override fun <T> runBlockingOnWorker(block: suspend () -> T): T = runBlocking { block() }

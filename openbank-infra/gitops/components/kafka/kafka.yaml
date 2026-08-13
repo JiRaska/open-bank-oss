@@ -250,3 +250,19 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# Campaign-owned commands consumed by engagement-service. A compacted key (the campaign send-log
+# id) makes the placement idempotent across Temporal/Kafka retries while keeping the current slot
+# materialisation recoverable.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.campaign.banner.placements
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    cleanup.policy: compact

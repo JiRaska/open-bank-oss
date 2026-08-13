@@ -33,6 +33,11 @@ spec:
           name: openbank.notification.requests
           patternType: literal
         operations: [Write, Describe]
+      - resource:
+          type: topic
+          name: openbank.campaign.banner.placements
+          patternType: literal
+        operations: [Write, Describe]
       # Consume consent lifecycle events → journey revocation signals (ADR-0200 D2).
       - resource:
           type: topic

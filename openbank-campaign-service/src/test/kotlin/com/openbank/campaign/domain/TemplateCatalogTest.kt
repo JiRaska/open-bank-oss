@@ -81,13 +81,28 @@ class TemplateCatalogTest {
 }
 
 /**
- * The channel/template agreement (ADR-0200 D7 as it now stands: EMAIL + PUSH).
+ * The channel/template agreement: EMAIL, PUSH and the authenticated-app BANNER.
  *
  * Both directions matter and both fail silently in production. An EMAIL step naming a push template
  * renders a one-line title as an entire email; a PUSH step naming an email template puts offer body
  * copy into an APNs payload, which is the leak #1182 closed by making push bodies generic.
  */
 class CampaignStepChannelTest {
+
+    @Test
+    fun `a banner step carries its approved values to an app destination`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_BANNER",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
+        assertEquals(setOf("MARKETING_PRODUCT_OFFER_BANNER"), TemplateCatalog.forChannel(Channel.BANNER))
+    }
 
     @Test
     fun `a push step may use a push template`() {

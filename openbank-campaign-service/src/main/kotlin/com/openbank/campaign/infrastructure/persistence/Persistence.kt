@@ -537,15 +537,16 @@ class PanacheSendLogRepository :
      * status is deliberately not a precondition: a PUSH gateway acknowledgement is a later, weaker
      * signal and must not erase an app interaction the bank actually observed.
      */
-    override suspend fun attributionForPushInteraction(
+    override suspend fun attributionForAppInteraction(
         interactionRef: UUID,
         partyId: UUID,
     ): CampaignInteractionAttribution? = Panache.withSession {
         find(
-            "id = ?1 and partyId = ?2 and channel = ?3 and outcome = ?4",
+            "id = ?1 and partyId = ?2 and channel in (?3, ?4) and outcome = ?5",
             interactionRef,
             partyId,
             Channel.PUSH.name,
+            Channel.BANNER.name,
             SendOutcome.SENT.name,
         ).firstResult<SendLogEntity>()
     }.awaitSuspending()?.let {

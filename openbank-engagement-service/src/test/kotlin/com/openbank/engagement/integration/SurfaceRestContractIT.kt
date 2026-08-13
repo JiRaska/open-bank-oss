@@ -53,6 +53,7 @@ class SurfaceRestContractIT {
                     "lending-events-in",
                     "party-events-in",
                     "fraud-hold-events-in",
+                    "campaign-banner-placements-in",
                 )
 
         override fun stop() = InMemoryConnector.clear()
@@ -156,6 +157,50 @@ class SurfaceRestContractIT {
         assertThat(readCampaignAttributionFor(party)).isEqualTo(
             StoredCampaignAttribution(interactionRef, campaignId, 0, "PUSH"),
         )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a placed campaign banner carries BANNER attribution through the real HTTP path`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(interactionRef, party, campaignId)
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"CAMPAIGN_HOME_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "BANNER"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a banner interaction cannot be attached to a catalogue card`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(interactionRef, party, campaignId)
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
     }
 
     @Test
@@ -266,6 +311,28 @@ class SurfaceRestContractIT {
                 st.setObject(2, partyId)
                 st.setString(3, state)
                 st.setTimestamp(4, Timestamp.from(Instant.now()))
+                st.executeUpdate()
+            }
+        }
+    }
+
+    private fun insertCampaignBanner(interactionRef: UUID, partyId: UUID, campaignId: UUID) {
+        openTestDatabase().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO campaign_banner_placement
+                    (interaction_ref, party_id, campaign_id, step_order, template, values_json, deep_link, placed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { st ->
+                st.setObject(1, interactionRef)
+                st.setObject(2, partyId)
+                st.setObject(3, campaignId)
+                st.setInt(4, 0)
+                st.setString(5, "MARKETING_PRODUCT_OFFER_BANNER")
+                st.setString(6, """{"offerTitle":"Savings","offerText":"Four percent","ctaText":"Explore"}""")
+                st.setString(7, "openbank://savings")
+                st.setTimestamp(8, Timestamp.from(Instant.now()))
                 st.executeUpdate()
             }
         }

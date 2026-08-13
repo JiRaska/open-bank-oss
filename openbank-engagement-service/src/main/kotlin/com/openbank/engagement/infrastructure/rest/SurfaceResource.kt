@@ -4,9 +4,11 @@
 
 package com.openbank.engagement.infrastructure.rest
 
+import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.application.usecase.RecordEngagementEventUseCase
 import com.openbank.engagement.application.usecase.ResolveSurfaceUseCase
 import com.openbank.engagement.domain.model.CampaignAttribution
+import com.openbank.engagement.domain.model.CampaignBannerPlacement
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
 import com.openbank.engagement.domain.model.SurfaceCatalog
@@ -32,7 +34,11 @@ import java.util.UUID
  */
 @Path("/api/v1/surfaces")
 @ApplicationScoped
-class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val record: RecordEngagementEventUseCase) {
+class SurfaceResource(
+    private val resolve: ResolveSurfaceUseCase,
+    private val record: RecordEngagementEventUseCase,
+    private val banners: CampaignBannerPlacementRepository,
+) {
 
     @GET
     @Path("/{slot}")
@@ -66,11 +72,8 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
         val slot = parseSlot(request.slot) ?: return badRequest("unknown slot '${request.slot}'")
         val type = EngagementEventType.entries.find { it.name == request.type }
             ?: return badRequest("unknown event type '${request.type}'")
-        val content = SurfaceCatalog.ALL[request.contentId]
-            ?: return badRequest("unknown content '${request.contentId}'")
-        if (content.slot != slot) {
-            return badRequest("content '${request.contentId}' is not renderable in slot '${request.slot}'")
-        }
+        val content = validateContent(request, slot)
+            ?: return badRequest("unknown or incompatible content '${request.contentId}'")
         val campaignFields = listOf(request.campaignId, request.stepOrder, request.channel)
         val campaignAttribution = if (campaignFields.any { it != null }) {
             if (request.interactionRef == null || campaignFields.any { it == null }) {
@@ -86,6 +89,9 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
         } else {
             null
         }
+        if (campaignAttribution?.channel == "BANNER" && !content.isCampaignPlacement) {
+            return badRequest("campaign banner attribution must name its assigned banner")
+        }
         record.record(
             EngagementEvent(
                 partyId = request.partyId,
@@ -100,6 +106,23 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
         return Response.status(Response.Status.ACCEPTED).build()
     }
 
+    /** Keeps ownership and slot validation together: an interaction reference cannot be replayed elsewhere. */
+    private suspend fun validateContent(request: EngagementEventRequest, slot: SurfaceSlot): ValidatedContent? {
+        val catalogue = SurfaceCatalog.ALL[request.contentId]
+        if (catalogue != null) return catalogue.takeIf { it.slot == slot }?.let { ValidatedContent(false) }
+
+        val isCampaignPlacement = request.contentId == CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID &&
+            request.interactionRef != null &&
+            banners.belongsToParty(request.interactionRef, request.partyId)
+        val isInteractiveCampaignPlacement =
+            isCampaignPlacement && slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES
+        return if (isInteractiveCampaignPlacement) {
+            ValidatedContent(true)
+        } else {
+            null
+        }
+    }
+
     private fun parseSlot(name: String): SurfaceSlot? = SurfaceSlot.entries.find { it.name == name }
 
     private fun badRequest(message: String) = Response.status(
@@ -111,7 +134,16 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
         "slot" to slot.name,
         "type" to type.name,
         "variables" to variables,
+        "values" to values,
+        "deepLink" to deepLink,
+        "interactionRef" to interactionRef,
     )
+
+    private data class ValidatedContent(val isCampaignPlacement: Boolean)
+
+    private companion object {
+        val INTERACTION_EVENT_TYPES = setOf("IMPRESSION", "CLICK", "DISMISS")
+    }
 }
 
 data class EngagementEventRequest(
@@ -119,7 +151,7 @@ data class EngagementEventRequest(
     val contentId: String,
     val slot: String,
     val type: String,
-    /** Present only after customer-edge verified an opaque PUSH reference for this party. */
+    /** Present only after customer-edge verified an opaque app interaction reference for this party. */
     val interactionRef: UUID? = null,
     /** Server-owned fields: customer-edge strips client values and resolves these from campaign-service. */
     val campaignId: UUID? = null,

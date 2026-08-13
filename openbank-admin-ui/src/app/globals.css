@@ -499,12 +499,14 @@ main {
 .campaign-phone-eyebrow { color: #64748b; font-size: 0.48rem; margin-top: 0.85rem; }
 .campaign-phone h4 { font-size: 0.82rem; font-weight: 800; line-height: 1.1; margin-top: 0.18rem; }
 .campaign-phone-hero { background: linear-gradient(145deg, #ede9fe, #dbeafe); border-radius: 0.75rem; margin-top: 0.65rem; padding: 0.58rem; }
+.campaign-phone-banner { background: linear-gradient(135deg, #fef3c7 0%, #ffedd5 46%, #fae8ff 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,.75), 0 8px 18px rgba(217,119,6,.12); }
 .campaign-phone-hero span { color: #4f46e5; display: block; font-size: 0.43rem; font-weight: 800; text-transform: uppercase; }
 .campaign-phone-hero strong { display: block; font-size: 0.62rem; line-height: 1.15; margin: 0.28rem 0; }
 .campaign-phone-hero button { background: #4f46e5; border: 0; border-radius: 0.4rem; color: #fff; font-size: 0.45rem; font-weight: 700; padding: 0.28rem 0.42rem; }
 .campaign-phone-row { display: flex; gap: 0.28rem; margin-top: 0.58rem; }
 .campaign-phone-row span { background: #e2e8f0; border-radius: 0.25rem; height: 1.45rem; flex: 1; }
 .campaign-push-card { background: rgba(255,255,255,0.95); border: 1px solid rgba(255,255,255,0.75); border-radius: 0.9rem; box-shadow: 0 12px 28px rgba(0,0,0,.18); color: #0f172a; display: flex; gap: 0.48rem; max-width: 15.5rem; padding: 0.62rem; transform: rotate(-2deg); }
+.campaign-banner-card { border-color: rgba(251,191,36,.42); transform: rotate(2deg); }
 .campaign-push-icon { align-items: center; background: linear-gradient(140deg, #4f46e5, #7c3aed); border-radius: 0.45rem; color: #fff; display: flex; font-size: 0.85rem; font-weight: 800; height: 1.65rem; justify-content: center; width: 1.65rem; }
 .campaign-push-meta { color: #64748b; font-size: 0.43rem; font-weight: 800; letter-spacing: 0.04em; }
 .campaign-push-title { font-size: 0.66rem; font-weight: 800; line-height: 1.15; margin-top: 0.15rem; }

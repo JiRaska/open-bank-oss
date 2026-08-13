@@ -5,6 +5,7 @@
 package com.openbank.engagement.application.port.out
 
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.engagement.domain.model.CampaignBannerPlacement
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.SurfaceSlot
 import java.time.Instant
@@ -34,4 +35,11 @@ interface AdverseStateRepository {
     suspend fun setActive(partyId: UUID, state: AdverseState, at: Instant)
     suspend fun clearActive(partyId: UUID, state: AdverseState)
     suspend fun activeStates(partyId: UUID): Set<AdverseState>
+}
+
+/** Latest campaign banner wins for the fixed HOME_BANNER slot; no hidden ranking system exists. */
+interface CampaignBannerPlacementRepository {
+    suspend fun save(placement: CampaignBannerPlacement)
+    suspend fun latestForParty(partyId: UUID): CampaignBannerPlacement?
+    suspend fun belongsToParty(interactionRef: UUID, partyId: UUID): Boolean
 }

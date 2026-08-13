@@ -14,7 +14,7 @@ info:
     existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
     graduates from shadow (D5). The customer app reaches these endpoints only through
     customer-edge, whose narrowly scoped M2M policy injects the authoritative party id.
-  version: 1.4.0
+  version: 1.5.0
 tags:
   - name: Surfaces
   - name: Eligibility
@@ -129,6 +129,19 @@ components:
         variables:
           type: array
           items: { type: string }
+        values:
+          type: object
+          additionalProperties: { type: string }
+          description: Present only for a trusted campaign assignment; catalogue items declare keys only.
+        deepLink:
+          type: string
+          nullable: true
+          description: Closed openbank app route for a campaign banner tap.
+        interactionRef:
+          type: string
+          format: uuid
+          nullable: true
+          description: Opaque interaction reference present only on a campaign banner.
     SurfaceResponse:
       type: object
       required: [state]
@@ -159,7 +172,7 @@ components:
           type: string
           format: uuid
           description: >-
-            Opaque reference to an accepted campaign PUSH handoff. customer-edge validates that it
+            Opaque reference to an accepted campaign PUSH or BANNER placement. customer-edge validates that it
             belongs to the authenticated party before forwarding; it is absent for unattributed
             in-app content and must never be replaced with a campaign or party identifier.
         campaignId:
@@ -171,8 +184,8 @@ components:
         stepOrder:
           type: integer
           minimum: 0
-          description: Server-owned journey step that created the PUSH interaction.
+          description: Server-owned journey step that created the app interaction.
         channel:
           type: string
-          enum: [PUSH]
+          enum: [PUSH, BANNER]
           description: Server-owned originating channel. Present only with complete campaign attribution.
