@@ -46,7 +46,7 @@ const step = (delay = 0, vars: Record<string, string> = {}): EditorStep => ({
   delaySeconds: delay,
 })
 
-function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onRemove' | 'onSelect', ReturnType<typeof vi.fn>>> = {}) {
+function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onAddDecision' | 'onRemove' | 'onSelect', ReturnType<typeof vi.fn>>> = {}) {
   const props = {
     steps,
     audience: 'actives@1',
@@ -54,6 +54,7 @@ function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onRemov
     selected: null,
     onSelect: handlers.onSelect ?? vi.fn(),
     onAdd: handlers.onAdd ?? vi.fn(),
+    onAddDecision: handlers.onAddDecision,
     onRemove: handlers.onRemove ?? vi.fn(),
     templateLabels: LABELS,
   }
@@ -89,6 +90,17 @@ describe('campaign builder canvas', () => {
     expect(add).toBeTruthy()
     fireEvent.click(add!)
     expect(onAdd).toHaveBeenCalled()
+  })
+
+  it('offers a delivery decision only when its two complementary paths fit', () => {
+    const onAddDecision = vi.fn()
+    const { container } = canvas([step()], { onAddDecision })
+
+    fireEvent.click(container.querySelector('[data-add-decision="delivery"]')!)
+    expect(onAddDecision).toHaveBeenCalledTimes(1)
+
+    const full = canvas(Array.from({ length: MAX_STEPS - 1 }, () => step()), { onAddDecision })
+    expect(full.container.querySelector('[data-add-decision="delivery"]')).toBeNull()
   })
 
   it('removes the step whose node was clicked, not the last one', () => {

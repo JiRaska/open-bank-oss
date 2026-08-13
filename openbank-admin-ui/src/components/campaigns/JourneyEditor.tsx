@@ -97,6 +97,7 @@ export function JourneyEditor({
   selected,
   onSelect,
   onAdd,
+  onAddDecision,
   contentCatalogueReady = true,
   onRemove,
   templateLabels,
@@ -110,6 +111,8 @@ export function JourneyEditor({
   selected: number | null
   onSelect: (index: number | null) => void
   onAdd: () => void
+  /** Adds the complementary delivered / not-delivered pair after the current journey path. */
+  onAddDecision?: () => void
   /** Without the served catalogue, a new node would be an unverified template choice. */
   contentCatalogueReady?: boolean
   onRemove: (index: number) => void
@@ -132,6 +135,9 @@ export function JourneyEditor({
   }
 
   const canAdd = steps.length < MAX_STEPS && contentCatalogueReady
+  // A binary decision consumes two bounded journey slots. Reusing the service's complementary
+  // conditions means the authored paths remain observable and requires no invented engagement data.
+  const canAddDecision = contentCatalogueReady && steps.length >= 1 && steps.length <= MAX_STEPS - 2 && onAddDecision
   // Entry + steps + the add affordance, which occupies a slot so the canvas does not jump when a
   // step is added.
   const cols = 1 + steps.length + (canAdd ? 1 : 0)
@@ -413,6 +419,30 @@ export function JourneyEditor({
           </text>
         )}
       </svg>
+      {canAddDecision && (
+        <div className="border-t border-dashed px-4 py-3" data-decision-creator>
+          <button
+            type="button"
+            onClick={onAddDecision}
+            className="flex w-full items-center gap-3 rounded-lg border border-dashed px-3 py-2 text-left text-sm transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface)]"
+            data-add-decision="delivery"
+          >
+            <span
+              aria-hidden="true"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-base font-semibold"
+              style={{ background: 'color-mix(in srgb, var(--warning) 14%, transparent)', color: 'var(--warning)' }}
+            >
+              ⑂
+            </span>
+            <span>
+              <span className="block font-medium text-foreground">{t('Rozdělit podle doručení', 'Split by delivery')}</span>
+              <span className="block text-xs text-muted-foreground">
+                {t('Vytvoří dvě výhradní cesty: doručeno a bez potvrzeného doručení.', 'Creates two exclusive paths: delivered and not confirmed delivered.')}
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
