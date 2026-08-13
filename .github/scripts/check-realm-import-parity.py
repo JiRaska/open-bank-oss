@@ -47,13 +47,33 @@
 #   already paid for. Only a Vault write clears it, and a Vault write is not something a PR can
 #   do.
 #
-#   So today's measured gap is declared in KNOWN_STALE, the same shape check-kafka-dotted-keys
-#   and check-pact-provider-replay use. That buys the property that matters: a NEW divergence —
-#   an eleventh role added to the template, a client removed from the import artifact — is red
-#   on the next run instead of disappearing into a gap that was already red. And the baseline
-#   is checked in BOTH directions, so the day the owner runs the reconcile the entry becomes
-#   stale and this script says so, which is what turns "someone should do the Vault write" into
-#   a signal rather than a note in an issue.
+#   So the gap is baselined, the same shape check-kafka-dotted-keys and check-pact-provider-replay
+#   use. WHAT is baselined changed on 2026-08-13, and the reason is the whole point of this block.
+#
+#   The first version (#3655) baselined the DIFFERENCE — the set of names the template declared
+#   and the artifact lacked. A difference is a function of BOTH sides, and only one of them is
+#   frozen. So every legitimate addition to the template landed as `missing`, was absent from the
+#   baseline, and was reported as "NEW since #3246" — new drift, on a run where nothing about the
+#   drift had changed. #4028 (2026-08-07) did exactly that: a correct, additive, template-only PR
+#   declaring `service-account-openbank-mcp-service`, which this thread had asked for. The CronJob
+#   has been red every night since, on a finding whose only remedy was to hand-append the name
+#   here — i.e. the detector fired on the wrong event, and the response it trained was "append a
+#   name to silence a red", which is how a baseline rots.
+#
+#   So the baseline is now IMPORT_BASELINE: the names the import artifact ACTUALLY CARRIES, the
+#   side that is frozen. The gap itself (`declaredNotImported`) is reported, always, and is not a
+#   finding while the artifact matches its baseline — it is #3246's one known defect, and it grows
+#   with every template merge by construction. What IS a finding is the artifact moving:
+#
+#     * names GAINED  -> a Vault write happened. Either the #3246 reconcile (empty this realm's
+#                        entry; parity is then enforced in full) or an out-of-band write nobody
+#                        reviewed. Both need a human, and neither was distinguishable before.
+#     * names LOST    -> a Vault write REMOVED something the artifact used to carry. This is the
+#                        direction that makes a rebuild worse, and the old shape could not see it
+#                        at all: shrinking the artifact only ever GREW the difference, which read
+#                        as ordinary template drift.
+#     * a realm with NO baseline entry -> full parity required, no exceptions. That is the
+#                        post-reconcile steady state the runbook's close-out PR creates.
 #
 # WHAT IT DELIBERATELY DOES NOT DO
 #   It does not compare secret VALUES, and it must not: the template carries `__PLACEHOLDER__`
@@ -88,34 +108,35 @@ BUILTIN_CLIENTS = frozenset(
 BUILTIN_ROLES = frozenset({"offline_access", "uma_authorization", "uma_protection"})
 
 # ---------------------------------------------------------------------------
-# The measured 2026-08-03 gap (#3246). Every entry is a name the committed template declares
-# and the deployed import artifact does not carry, i.e. a name a cold-started cluster would
-# LOSE. Cleared by the Vault reconcile in docs/runbooks/0009-keycloak-realm-import-reconcile.md
-# — after which this dict must be emptied, and this script fails until it is.
+# What the deployed import artifact CARRIES — not what it lacks. Measured 2026-08-13 by decoding
+# the two projected Secrets, i.e. the exact bytes keycloak.yaml's `realm-import` volume mounts:
 #
-# There is deliberately no baseline for the other direction (a name in the import artifact that
-# git does not declare): none exists today, and one appearing is exactly the review-nobody-did
-# case a cold start would materialise.
+#   kubectl -n iam get secret keycloak-realm-import           -o jsonpath='{.data}'   (1951 B)
+#   kubectl -n iam get secret keycloak-customers-realm-import -o jsonpath='{.data}'   (6333 B)
+#
+# Byte-identical to the artifact #3246 measured on 2026-08-02, so this records a frozen object,
+# which is the property that makes it a usable baseline. Every name here is also declared by the
+# committed template — the artifact is a strict ANCESTOR — and check_realm_import_parity_test.py
+# asserts that, so an entry cannot drift into naming something git never reviewed.
+#
+# A realm listed here is in the #3246 gap: its `declaredNotImported` set is expected and is not a
+# finding. A realm NOT listed here is held to full parity. The reconcile in
+# docs/runbooks/0009-keycloak-realm-import-reconcile.md is what moves a realm from the first state
+# to the second: after the Vault write the artifact no longer matches this record, the run goes red
+# saying so, and the close-out PR DELETES that realm's entry rather than emptying its dimensions.
+# (An entry with empty sets is not the same statement — it would assert an empty artifact.)
 # ---------------------------------------------------------------------------
-KNOWN_STALE = {
+IMPORT_BASELINE = {
     "openbank": {
-        "roles": {
-            "ROLE_AUDITOR", "ROLE_COMPLIANCE", "ROLE_CREDIT_RISK", "ROLE_DEMO", "ROLE_KYC",
-            "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER", "ROLE_LENDING_OFFICER", "ROLE_PAYMENTS",
-            "ROLE_SUPERVISOR", "mcp-caller",
-        },
-        "clients": {
-            "apicurio-registry", "argocd", "goalert", "openbank-edge", "openbank-glitchtip",
-            "openbank-grafana", "openbank-mcp-service", "openbao",
-        },
-        "users": {
-            "compliance2@openbank.local", "compliance@openbank.local", "demo@openbank.local",
-            "service-account-openbank-edge", "service-account-openbank-services",
-        },
+        "roles": {"ROLE_ADMIN", "ROLE_API", "ROLE_OPERATOR", "ROLE_VIEWER"},
+        "clients": {"openbank-admin-ui", "openbank-services"},
+        "users": {"admin@openbank.local"},
     },
     "openbank-customers": {
-        "roles": set(),
-        "clients": {"customer-edge-admin", "openbank-edge-webauthn"},
+        # `defaultRoles` (the flat Keycloak <=12 spelling this artifact still uses) is not a role
+        # DECLARATION and _names does not read it; ROLE_CUSTOMER is declared under roles.realm.
+        "roles": {"ROLE_CUSTOMER"},
+        "clients": {"openbank-app"},
         "users": set(),
     },
 }
@@ -211,39 +232,63 @@ def main(argv=None) -> int:
             report["realms"][realm] = {"status": "unchecked"}
             continue
 
-        baseline = KNOWN_STALE.get(realm, {})
+        baseline = IMPORT_BASELINE.get(realm)
         entry = {"status": "checked", "inSync": True}
+        entry["importArtifactBaselined"] = baseline is not None
         for dim in DIMENSIONS:
             missing = want[dim] - have[dim]
             extra = have[dim] - want[dim]
-            known = set(baseline.get(dim, set()))
-            new_missing = sorted(missing - known)
-            healed = sorted(known - missing)
             entry[f"declaredNotImported/{dim}"] = sorted(missing)
             entry[f"importedNotDeclared/{dim}"] = sorted(extra)
-            entry[f"newSince3246/{dim}"] = new_missing
             if missing or extra:
                 entry["inSync"] = False
-            for n in new_missing:
-                findings.append(
-                    f"realm `{realm}`: {dim[:-1]} `{n}` is declared in the committed template "
-                    f"and is NOT in the import artifact Keycloak would read. A cold-started "
-                    f"cluster would not have it. This is NEW since #3246 — it is not in "
-                    f"KNOWN_STALE. Reconcile the Vault copy "
-                    f"(docs/runbooks/0009-keycloak-realm-import-reconcile.md).",
-                )
+
+            # A name the artifact carries and git declares nowhere. Never baselined, in either
+            # shape: a cold start would create it and no review ever saw it.
             for n in sorted(extra):
                 findings.append(
                     f"realm `{realm}`: {dim[:-1]} `{n}` is in the import artifact and declared "
                     f"NOWHERE in git. A cold start would create it and no review ever saw it. "
                     f"Add it to the template, or remove it from the Vault copy.",
                 )
-            for n in healed:
+
+            if baseline is None:
+                # No recorded gap for this realm: full parity, which is the post-reconcile state.
+                entry[f"importArtifactGained/{dim}"] = []
+                entry[f"importArtifactLost/{dim}"] = []
+                for n in sorted(missing):
+                    findings.append(
+                        f"realm `{realm}`: {dim[:-1]} `{n}` is declared in the committed template "
+                        f"and is NOT in the import artifact Keycloak would read. A cold-started "
+                        f"cluster would not have it, and this realm has no #3246 baseline entry, "
+                        f"so it is held to full parity. Reconcile the Vault copy "
+                        f"(docs/runbooks/0009-keycloak-realm-import-reconcile.md).",
+                    )
+                continue
+
+            # Baselined realm: the gap is #3246's known defect and grows with every template
+            # merge, so it is reported and not raised. What is raised is the ARTIFACT moving.
+            base = set(baseline.get(dim, set()))
+            gained = sorted(have[dim] - base)
+            lost = sorted(base - have[dim])
+            entry[f"importArtifactGained/{dim}"] = gained
+            entry[f"importArtifactLost/{dim}"] = lost
+            for n in gained:
+                if n in extra:
+                    continue  # already reported above, and more precisely
                 findings.append(
-                    f"realm `{realm}`: {dim[:-1]} `{n}` is listed in KNOWN_STALE but the import "
-                    f"artifact now carries it — the #3246 reconcile has happened. Delete this "
-                    f"entry from KNOWN_STALE in check-realm-import-parity.py; a baseline that "
-                    f"outlives its gap is a gate that is green about nothing.",
+                    f"realm `{realm}`: the import artifact now carries {dim[:-1]} `{n}`, which "
+                    f"the baseline recorded it did not — something has written to the Vault "
+                    f"copy. If this is the #3246 reconcile, delete this realm's entry from "
+                    f"IMPORT_BASELINE so parity is enforced in full "
+                    f"(docs/runbooks/0009-keycloak-realm-import-reconcile.md). If it is not, "
+                    f"an unreviewed write reached the artifact a rebuild would import.",
+                )
+            for n in lost:
+                findings.append(
+                    f"realm `{realm}`: the import artifact NO LONGER carries {dim[:-1]} `{n}`, "
+                    f"which the baseline recorded it did. A write to the Vault copy removed it, "
+                    f"so a cold-started cluster now reproduces strictly less than it did before.",
                 )
         report["realms"][realm] = entry
 
@@ -252,14 +297,15 @@ def main(argv=None) -> int:
         for f in findings:
             sys.stderr.write(f"::error title=Keycloak realm import parity::{f}\n")
         sys.stderr.write(
-            f"::error::check-realm-import-parity: {len(findings)} finding(s). The committed "
-            f"template and the artifact Keycloak would import disagree beyond the #3246 "
-            f"baseline.\n",
+            f"::error::check-realm-import-parity: {len(findings)} finding(s). The artifact "
+            f"Keycloak would import has moved away from its recorded baseline, or carries a "
+            f"name git declares nowhere.\n",
         )
         return 1
     checked = ", ".join(sorted(imported))
     print(
-        f"realm import parity: no drift beyond the #3246 baseline for {checked}.",
+        f"realm import parity: the import artifact matches its recorded baseline for {checked}; "
+        f"the #3246 gap itself is unchanged (see declaredNotImported/* in the report).",
         file=sys.stderr,
     )
     return 0
@@ -294,59 +340,81 @@ def _self_test() -> int:
         comp.mkdir(parents=True)
 
         def run(tmpl, imp, baseline):
+            """baseline=None models a realm with no IMPORT_BASELINE entry (full parity)."""
             (comp / "realm-template.json").write_text(json.dumps(tmpl))
             p = root / "imp.json"
             p.write_text(json.dumps(imp))
-            saved = dict(KNOWN_STALE)
-            KNOWN_STALE.clear()
-            KNOWN_STALE.update(baseline)
+            saved = dict(IMPORT_BASELINE)
+            IMPORT_BASELINE.clear()
+            if baseline is not None:
+                IMPORT_BASELINE.update(baseline)
             try:
                 return main(["--root", str(root), "--import", f"{tmpl['realm']}={p}"])
             finally:
-                KNOWN_STALE.clear()
-                KNOWN_STALE.update(saved)
+                IMPORT_BASELINE.clear()
+                IMPORT_BASELINE.update(saved)
 
-        empty = {"openbank": {d: set() for d in DIMENSIONS}}
+        def base(roles=(), clients=(), users=()):
+            return {"openbank": {"roles": set(roles), "clients": set(clients),
+                                 "users": set(users)}}
 
-        # 1. identical documents, empty baseline -> clean. The negative case: without it a
-        #    checker that always reports drift would pass every other case here.
+        # 1. identical documents, no baseline -> clean. The negative case: without it a checker
+        #    that always reports drift would pass every other case here.
         check("identical sets must be clean",
               run(_doc("openbank", ["R"], ["c"], ["u"]),
-                  _doc("openbank", ["R"], ["c"], ["u"]), empty) == 0)
+                  _doc("openbank", ["R"], ["c"], ["u"]), None) == 0)
 
-        # 2. a role in the template and not the import artifact, unbaselined -> red.
-        check("declared-not-imported role must be red",
-              run(_doc("openbank", ["R", "S"]), _doc("openbank", ["R"]), empty) == 1)
+        # 2. an unbaselined realm is held to full parity — a role the artifact lacks is red.
+        check("declared-not-imported role must be red without a baseline",
+              run(_doc("openbank", ["R", "S"]), _doc("openbank", ["R"]), None) == 1)
 
-        # 3. the same gap, baselined -> green. This is what keeps the first run off the alert.
+        # 3. the same gap, with the artifact matching its baseline -> green. This is what keeps
+        #    the first run off the alert while #3246's Vault write is outstanding.
         check("baselined gap must be green",
-              run(_doc("openbank", ["R", "S"]), _doc("openbank", ["R"]),
-                  {"openbank": {"roles": {"S"}, "clients": set(), "users": set()}}) == 0)
+              run(_doc("openbank", ["R", "S"]), _doc("openbank", ["R"]), base(roles=["R"])) == 0)
 
-        # 4. a baseline entry whose gap has closed -> red. Without this the baseline would
-        #    silently become permanent once the reconcile lands.
-        check("stale baseline entry must be red",
+        # 4. THE REGRESSION THIS SHAPE EXISTS FOR (#4028): the template gains a name while the
+        #    artifact is unchanged. That is the same one gap, one entry larger — it must NOT be
+        #    reported as new drift. Under the old difference-keyed baseline this returned 1, and
+        #    the CronJob was red nightly from 2026-08-07 because of it.
+        check("template growth against an unchanged artifact must stay green",
+              run(_doc("openbank", ["R", "S", "T"]), _doc("openbank", ["R"]),
+                  base(roles=["R"])) == 0)
+
+        # 5. the artifact GAINS a template-declared name -> red. This is the reconcile landing
+        #    (or an unreviewed Vault write); either way the baseline must not outlive it.
+        check("artifact gaining a name must be red",
               run(_doc("openbank", ["R", "S"]), _doc("openbank", ["R", "S"]),
-                  {"openbank": {"roles": {"S"}, "clients": set(), "users": set()}}) == 1)
+                  base(roles=["R"])) == 1)
 
-        # 5. a name in the import artifact that git does not declare -> red, never baselined.
+        # 6. the artifact LOSES a name it used to carry -> red. The old shape could not see this
+        #    at all: a shrinking artifact only ever grew the difference, which read as template
+        #    drift and was silenced by baselining the name.
+        check("artifact losing a name must be red",
+              run(_doc("openbank", ["R", "S"]), _doc("openbank", []),
+                  base(roles=["R"])) == 1)
+
+        # 7. a name in the import artifact that git does not declare -> red, never baselined.
         check("imported-not-declared must be red",
-              run(_doc("openbank", ["R"]), _doc("openbank", ["R", "GHOST"]), empty) == 1)
+              run(_doc("openbank", ["R"]), _doc("openbank", ["R", "GHOST"]), None) == 1)
 
-        # 6. same for clients and users, since each dimension is compared separately and a
-        #    loop that dropped one would still pass cases 1-5.
+        # 8. same for clients and users, since each dimension is compared separately and a
+        #    loop that dropped one would still pass the cases above.
         check("client dimension must be compared",
-              run(_doc("openbank", ["R"], ["a"]), _doc("openbank", ["R"], []), empty) == 1)
+              run(_doc("openbank", ["R"], ["a"]), _doc("openbank", ["R"], []), None) == 1)
         check("user dimension must be compared",
-              run(_doc("openbank", ["R"], [], ["u"]), _doc("openbank", ["R"], [], []), empty) == 1)
+              run(_doc("openbank", ["R"], [], ["u"]), _doc("openbank", ["R"], [], []), None) == 1)
+        check("client dimension must be compared against the baseline",
+              run(_doc("openbank", ["R"], ["a"]), _doc("openbank", ["R"], ["a"]),
+                  base(roles=["R"], clients=[])) == 1)
 
-        # 7. built-ins on the live/import side must never register as drift.
+        # 9. built-ins on the live/import side must never register as drift.
         check("builtin clients must be ignored",
               run(_doc("openbank", ["R"], ["a"]),
-                  _doc("openbank", ["R"], ["a", "account", "admin-cli"]), empty) == 0)
+                  _doc("openbank", ["R"], ["a", "account", "admin-cli"]), None) == 0)
         check("builtin roles must be ignored",
               run(_doc("openbank", ["R"]),
-                  _doc("openbank", ["R", "offline_access", "default-roles-openbank"]), empty) == 0)
+                  _doc("openbank", ["R", "offline_access", "default-roles-openbank"]), None) == 0)
 
         # 8. a realm supplied under the wrong name must abort, not compare.
         (comp / "realm-template.json").write_text(json.dumps(_doc("openbank", ["R"])))

@@ -158,20 +158,26 @@ kubectl -n iam get externalsecret keycloak-realm-import \
   -o jsonpath='{.status.conditions}'
 ```
 
-Then re-run the pre-flight comparison. It must now go **red** with a "listed in
-KNOWN_STALE but the import artifact now carries it" finding for every reconciled
-name — that is the check telling you the baseline has outlived its gap, not a
-regression.
+Then re-run the pre-flight comparison. It must now go **red** with a "the import
+artifact now carries ..." finding for every reconciled name — that is the check
+telling you the artifact has moved off its recorded baseline, not a regression.
+(Measured 2026-08-13 against the rendered templates: 27 such findings across both
+realms.)
 
 ## Close-out (a PR, and it is required)
 
-Empty `KNOWN_STALE` in `.github/scripts/check-realm-import-parity.py`. Until that
-lands, the `keycloak-realm-drift` CronJob fails nightly and `KubeJobFailed` fires.
-The failure is deliberate: a baseline that survives its own reconcile is a gate that
-is green about nothing, and the only way anyone learns the write happened is for the
-detector to say so.
+**Delete** the two realm entries from `IMPORT_BASELINE` in
+`.github/scripts/check-realm-import-parity.py` — do not merely empty their dimension
+sets. `IMPORT_BASELINE` records what the artifact *carries*, so an entry with empty
+sets asserts an empty artifact; an absent entry is what means "no known gap, hold
+this realm to full parity".
 
-With `KNOWN_STALE` empty, the next role, client or user added to a template and not
+Until that PR lands, the `keycloak-realm-drift` CronJob fails nightly and
+`KubeJobFailed` fires. The failure is deliberate: a baseline that survives its own
+reconcile is a gate that is green about nothing, and the only way anyone learns the
+write happened is for the detector to say so.
+
+With both entries gone, the next role, client or user added to a template and not
 propagated to Vault is red on the following night's run — which is the property this
 whole exercise buys, and the thing neither of the two older comparisons can provide.
 
