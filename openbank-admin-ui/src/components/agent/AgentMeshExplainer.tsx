@@ -27,11 +27,11 @@ export function AgentMeshExplainer({ language }: { language: Language }) {
   const t = (cs: string, en: string) => language === 'cs' ? cs : en
 
   return (
-    <section id="ai-mesh" className={styles.mesh} aria-labelledby="ai-mesh-title">
+    <section id="ai-swarm" className={styles.mesh} aria-labelledby="ai-swarm-title">
       <div className={styles.heading}>
         <div>
           <span className={styles.eyebrow}><Network size={13} /> {t('Spolupráce agentů', 'Agent collaboration')}</span>
-          <h2 id="ai-mesh-title">{t('Co je AI mesh?', 'What is the AI mesh?')}</h2>
+          <h2 id="ai-swarm-title">{t('Co je AI swarm?', 'What is the AI swarm?')}</h2>
           <p>{t(
             'Není to jeden „superagent“ ani automat, který rozhoduje sám. Je to řízený způsob, jak si specializovaní agenti předají jeden případ a připraví společný podklad pro člověka.',
             'It is neither a single “super-agent” nor an automation that decides by itself. It is a governed way for specialist agents to work on one case and prepare a shared brief for a person.',
@@ -40,7 +40,7 @@ export function AgentMeshExplainer({ language }: { language: Language }) {
         <span className={styles.humanFirst}><Hand size={13} /> {t('Člověk má poslední slovo', 'A human has the final say')}</span>
       </div>
 
-      <ol className={styles.flow} aria-label={t('Jak AI mesh spolupracuje', 'How the AI mesh collaborates')}>
+      <ol className={styles.flow} aria-label={t('Jak AI swarm spolupracuje', 'How the AI swarm collaborates')}>
         <MeshStep number="1" icon={FileSearch}
           title={t('Přijde podnět', 'A signal arrives')}
           detail={t('Například alert, nález nebo požadavek na prověření.', 'For example, an alert, finding, or request for review.')} />

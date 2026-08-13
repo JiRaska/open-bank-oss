@@ -223,8 +223,8 @@ export function AgentMeshMap({ agentId, mesh, language }: {
           <span>{t('Deklarované třídy (ne runtime stav)', 'Declared classes (not runtime state)')}</span>
           {mesh.declaredCaseClasses.map(caseClass => <code key={caseClass}>{caseClass}</code>)}
         </div>
-        <Link href="/iaops#ai-mesh" className={styles.meshLink}>
-          {t('Jak mesh funguje', 'How the mesh works')} <ArrowRight size={13} />
+        <Link href="/iaops#ai-swarm" className={styles.meshLink}>
+          {t('Jak swarm funguje', 'How the swarm works')} <ArrowRight size={13} />
         </Link>
         <Link href="/iaops/cases" className={styles.meshLink}>
           {t('Otevřít živá case vlákna', 'Open live case threads')} <ArrowRight size={13} />

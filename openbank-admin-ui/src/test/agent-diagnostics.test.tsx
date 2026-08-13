@@ -131,14 +131,15 @@ describe('agent operating diagnostics', () => {
     expect(screen.getByText('1 chartered specialist')).toBeInTheDocument()
     expect(screen.getByText(/Actual runtime admission is controlled by the coordinator allowlist/)).toBeInTheDocument()
     expect(screen.getByText('Declared classes (not runtime state)')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /How the swarm works/ })).toHaveAttribute('href', '/iaops#ai-swarm')
     expect(screen.queryByText(/connected specialists/i)).not.toBeInTheDocument()
   })
 
-  it('explains the mesh on the AIOps overview without presenting it as live topology', () => {
+  it('explains the swarm on the AIOps overview without presenting it as live topology', () => {
     render(<AgentMeshExplainer language="en" />)
 
-    expect(screen.getByRole('heading', { name: 'What is the AI mesh?' })).toBeInTheDocument()
-    expect(screen.getByRole('list', { name: 'How the AI mesh collaborates' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'What is the AI swarm?' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'How the AI swarm collaborates' })).toBeInTheDocument()
     expect(screen.getAllByRole('listitem')).toHaveLength(4)
     expect(screen.getByText(/not a live view of connected agents/i)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Browse case threads/ })).toHaveAttribute('href', '/iaops/cases')
