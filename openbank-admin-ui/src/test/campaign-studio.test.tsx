@@ -10,7 +10,7 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 import NewCampaignPage from '@/app/campaigns/new/page'
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
 
 const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
 

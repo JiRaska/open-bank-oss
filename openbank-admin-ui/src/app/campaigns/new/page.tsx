@@ -5,7 +5,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Clock3, Megaphone, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -99,6 +99,8 @@ const newStep = (): EditorStep => ({
 export default function NewCampaignPage() {
   const { t } = useLanguage()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const requestedAudience = searchParams.get('audience')
 
   const [name, setName] = useState('')
   const [goal, setGoal] = useState('')
@@ -161,6 +163,21 @@ export default function NewCampaignPage() {
       })
       .catch(() => undefined)
   }, [])
+
+  // The Audience Library hands the exact, versioned identifier to Studio. The service still
+  // evaluates this audience on create; the query parameter only saves the marketer from selecting
+  // the same reviewed item twice and never carries an audience definition itself.
+  useEffect(() => {
+    if (!requestedAudience || !segments.some(s => `${s.name}@${s.version}` === requestedAudience)) return
+    setSegment(requestedAudience)
+    const [name, version] = requestedAudience.split('@')
+    fetch(`/api/segments/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
+      .then(r => r.json())
+      .then((d: { size?: number; state: string }) => {
+        if (d.state === 'ok') setReach(d.size ?? 0)
+      })
+      .catch(() => undefined)
+  }, [requestedAudience, segments])
 
   // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
   // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
