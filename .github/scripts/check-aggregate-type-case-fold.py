@@ -32,7 +32,7 @@
 # already documents why editing an old file's body in place is a no-op. So V2/V3/V4/V6's own
 # unfolded text is dead once V7 redefines the same view names, and this gate does not require
 # rewriting history to prove that — it baselines the specific occurrences that #4604 confirmed are
-# superseded, in `check-aggregate-type-case-fold-baseline.txt`, shrink-only, same shape as
+# superseded, in `aggregate-type-case-fold-baseline.txt`, shrink-only, same shape as
 # `deploy-coverage-baseline.txt`.
 #
 #   python3 .github/scripts/check-aggregate-type-case-fold.py --root .
@@ -56,7 +56,7 @@ COMPARISON_RE = re.compile(r"aggregate_type\s*(=|!=|<>)\s*'|aggregate_type\s+IN\
 # the column name (`upper(aggregate_type)`, `upper( aggregate_type )`).
 FOLDED_PREFIX_RE = re.compile(r"(upper|lower)\(\s*$", re.IGNORECASE)
 
-BASELINE = Path(__file__).resolve().parent / "check-aggregate-type-case-fold-baseline.txt"
+BASELINE = Path(__file__).resolve().parent / "aggregate-type-case-fold-baseline.txt"
 
 
 def find_violations(text: str) -> list[tuple[int, str]]:
