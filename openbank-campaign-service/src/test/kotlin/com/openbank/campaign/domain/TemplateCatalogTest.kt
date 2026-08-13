@@ -6,8 +6,8 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
-import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue

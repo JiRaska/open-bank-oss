@@ -274,7 +274,8 @@ data class CampaignStep(
         template,
         TemplateCatalog.valuesFor(template, variablesFor(variant)),
         mobileDestination?.deepLink.takeIf { channel == Channel.PUSH || channel == Channel.BANNER },
-        inAppSurface?.takeIf { channel == Channel.BANNER } ?: InAppSurface.HOME_BANNER.takeIf { channel == Channel.BANNER },
+        inAppSurface?.takeIf { channel == Channel.BANNER }
+            ?: InAppSurface.HOME_BANNER.takeIf { channel == Channel.BANNER },
     )
 
     /** The only supported fallback: a consented app push after EMAIL consent was absent. */

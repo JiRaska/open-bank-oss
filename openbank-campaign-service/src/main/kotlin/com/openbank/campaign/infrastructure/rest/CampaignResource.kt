@@ -8,8 +8,8 @@ import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
-import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.InAppSurface
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition

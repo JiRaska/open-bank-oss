@@ -5,12 +5,12 @@
 package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
-import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
