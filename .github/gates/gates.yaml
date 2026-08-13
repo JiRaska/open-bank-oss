@@ -2356,6 +2356,28 @@ gates:
     run: |
       python3 .github/scripts/check-critical-alert-egress.py
 
+  # A Helm valuesObject key the chart does not read is discarded silently — no error, no
+  # ArgoCD diff — so the manifest keeps asserting configuration that was never applied.
+  # apps/argo-rollouts.yaml put `metrics` at the top level instead of `controller.metrics`;
+  # no ServiceMonitor was created, Prometheus held zero rollout_* series, and three Rollout
+  # readiness alerts covered 0 of 21 Rollouts while evaluating `health: ok` (#4584).
+  # Decides by RENDERING with and without each top-level key, not by comparing against the
+  # chart's values.yaml — the schema comparison was built first and false-positived on 15 of
+  # 20 apps (charts read undeclared values, and accept free-form sub-trees). ENFORCED.
+  # Needs `helm` (preinstalled on ubuntu-latest) and egress to the public chart repos; the
+  # checker exits non-zero rather than passing if either is missing, because "could not
+  # check" and "checked and clean" must not render the same. ~35s for the 20 sources.
+  - id: helm-values-key-effect
+    name: "helm valuesObject keys have effect (rules.yaml: alerting, enforced)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-helm-values-keys.py --self-test
+    selftest_expect: pass
+    min_subjects: 15   # 20 Helm sources with a valuesObject today (2026-08-13)
+    budget_seconds: 180
+    run: |
+      python3 .github/scripts/check-helm-values-keys.py
+
   # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
   # threat model. stdlib-only gate, ratchets coverage (a new money-path
   # service or a deleted/stubbed model fails here). Part of the always-run,

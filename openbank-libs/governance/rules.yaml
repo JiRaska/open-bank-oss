@@ -813,6 +813,19 @@ alerting:
   ci_producer: ".github/scripts/check-critical-alert-egress.py"
   checked_manifest: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
 
+  # An alert can also fail by never reaching its subject. Every top-level key an ArgoCD
+  # Application hands a Helm chart via `helm.valuesObject` must demonstrably change the
+  # rendered output; Helm discards an unknown key with no error and no ArgoCD diff.
+  # apps/argo-rollouts.yaml spelled `metrics` at the top level where the chart wants
+  # `controller.metrics`, so no ServiceMonitor was ever created, Prometheus held zero
+  # rollout_* series, and three Rollout alerts covered 0 of 21 Rollouts while reading
+  # `health: ok` — an expression over an absent metric is an empty result, not an error
+  # (#4584). Measured by rendering with and without each key, never by schema comparison,
+  # which false-positives on free-form chart sub-trees.
+  helm_values_keys_must_have_effect: true
+  helm_values_ci_producer: ".github/scripts/check-helm-values-keys.py"
+  helm_values_checked_manifests: "openbank-infra/gitops/apps/*.yaml"
+
 review:
   default_approvals: 1
   money_path_approvals: 2
