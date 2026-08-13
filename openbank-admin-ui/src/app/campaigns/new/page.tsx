@@ -66,6 +66,9 @@ const TEMPLATES: Record<string, string[]> = {
   // title plus a fixed generic body, so there is nowhere for offer copy to go (#1182).
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
   MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
 }
 
 /** Which channel each template renders on. The service refuses a step whose two disagree. */
@@ -73,6 +76,9 @@ const TEMPLATE_CHANNEL: Record<string, EditorChannel> = {
   MARKETING_PRODUCT_OFFER: 'EMAIL',
   MARKETING_PRODUCT_OFFER_PUSH: 'PUSH',
   MARKETING_PRODUCT_OFFER_BANNER: 'BANNER',
+  MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER',
+  MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER',
+  MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER',
 }
 
 const newStep = (): EditorStep => ({
@@ -119,6 +125,9 @@ export default function NewCampaignPage() {
     MARKETING_PRODUCT_OFFER: t('Nabídka produktu', 'Product offer'),
     MARKETING_PRODUCT_OFFER_PUSH: t('Nabídka produktu', 'Product offer'),
     MARKETING_PRODUCT_OFFER_BANNER: t('Nabídka v banneru', 'Banner offer'),
+    MARKETING_PRODUCT_OFFER_CAROUSEL: t('Nabídka v carouselu', 'Carousel offer'),
+    MARKETING_PRODUCT_OFFER_PRODUCT_FEED: t('Nabídka ve feedu produktů', 'Product feed offer'),
+    MARKETING_PRODUCT_OFFER_REWARDS_HUB: t('Nabídka v centru odměn', 'Rewards hub offer'),
   }
 
   // The template declares `offerTitle`; a marketer writes a headline. Same field, and only one of
@@ -253,6 +262,7 @@ export default function NewCampaignPage() {
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
+          ...(s.inAppSurface ? { inAppSurface: s.inAppSurface } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),

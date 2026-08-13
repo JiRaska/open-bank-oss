@@ -48,7 +48,7 @@ class ResolveSurfaceUseCaseTest {
     }
 
     private fun banners() = mockk<CampaignBannerPlacementRepository>().also {
-        coEvery { it.latestForParty(any()) } returns null
+        coEvery { it.latestForPartyAndSlot(any(), any()) } returns null
     }
 
     @Test
@@ -70,7 +70,7 @@ class ResolveSurfaceUseCaseTest {
         val placements = mockk<CampaignBannerPlacementRepository>()
         val ref = UUID.randomUUID()
         coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns emptyList()
-        coEvery { placements.latestForParty(party) } returns CampaignBannerPlacement(
+        coEvery { placements.latestForPartyAndSlot(party, SurfaceSlot.HOME_BANNER) } returns CampaignBannerPlacement(
             ref,
             party,
             UUID.randomUUID(),
@@ -92,6 +92,24 @@ class ResolveSurfaceUseCaseTest {
         assertThat(content.id).isEqualTo(CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID)
         assertThat(content.interactionRef).isEqualTo(ref)
         assertThat(content.deepLink).isEqualTo("openbank://savings")
+    }
+
+    @Test
+    fun `a campaign carousel is returned only in its selected app surface`(): Unit = runBlocking {
+        val events = mockk<EngagementEventRepository>()
+        val placements = mockk<CampaignBannerPlacementRepository>()
+        coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_CAROUSEL, any()) } returns emptyList()
+        coEvery { placements.latestForPartyAndSlot(party, SurfaceSlot.HOME_CAROUSEL) } returns CampaignBannerPlacement(
+            UUID.randomUUID(), party, UUID.randomUUID(), 0, "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            "openbank://savings", Instant.now(), SurfaceSlot.HOME_CAROUSEL,
+        )
+
+        val result = ResolveSurfaceUseCase(gate(), events, adverseStates(), placements)
+            .resolve(party, SurfaceSlot.HOME_CAROUSEL) as ResolveSurfaceUseCase.Result.Rendered
+
+        assertThat(result.content.single().id).isEqualTo("CAMPAIGN_HOME_CAROUSEL")
+        assertThat(result.content.single().slot).isEqualTo(SurfaceSlot.HOME_CAROUSEL)
     }
 
     @Test

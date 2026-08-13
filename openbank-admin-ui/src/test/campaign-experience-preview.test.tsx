@@ -52,8 +52,22 @@ describe('campaign customer experience preview', () => {
     )
 
     expect(container.querySelector('[data-preview-channel="BANNER"]')).toBeTruthy()
-    expect(screen.getByText(/Banner in the signed-in app/)).toBeTruthy()
+    expect(screen.getAllByText(/Home banner/)).toHaveLength(2)
     expect(screen.getByText(/No interruption, no lock screen/)).toBeTruthy()
+  })
+
+  it('renders the selected carousel surface in the live app preview', () => {
+    const { container } = render(
+      <LanguageProvider>
+        <CampaignExperiencePreview
+          step={{ ...push, channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_CAROUSEL', inAppSurface: 'HOME_CAROUSEL' }}
+          campaignName="Summer saving"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(container.querySelector('[data-preview-surface="HOME_CAROUSEL"]')).toBeTruthy()
+    expect(screen.getAllByText(/Home carousel/)).toHaveLength(2)
   })
 })
 

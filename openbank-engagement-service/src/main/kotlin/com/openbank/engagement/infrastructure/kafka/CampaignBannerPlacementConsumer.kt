@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.domain.model.CampaignBannerPlacement
+import com.openbank.engagement.domain.model.SurfaceSlot
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -34,6 +35,8 @@ class CampaignBannerPlacementConsumer(
                 values = mapper.convertValue(node.required("variables"), MAP_TYPE),
                 deepLink = node.requiredText("deepLink"),
                 placedAt = Instant.now(),
+                slot = SurfaceSlot.entries.find { it.name == node.requiredText("inAppSurface") }
+                    ?: error("unknown inAppSurface"),
             )
             placements.save(placement)
         } catch (e: Exception) {

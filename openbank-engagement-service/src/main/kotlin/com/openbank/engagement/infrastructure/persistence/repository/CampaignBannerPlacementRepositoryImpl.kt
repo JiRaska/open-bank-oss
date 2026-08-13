@@ -24,11 +24,15 @@ class CampaignBannerPlacementRepositoryImpl(private val mapper: ObjectMapper) :
         }.awaitSuspending()
     }
 
-    override suspend fun latestForParty(partyId: UUID): CampaignBannerPlacement? = Panache.withSession {
-        find("partyId = ?1 order by placedAt desc", partyId).firstResult()
+    override suspend fun latestForPartyAndSlot(partyId: UUID, slot: com.openbank.engagement.domain.model.SurfaceSlot): CampaignBannerPlacement? = Panache.withSession {
+        find("partyId = ?1 and slot = ?2 order by placedAt desc", partyId, slot.name).firstResult()
     }.awaitSuspending()?.toDomain(mapper)
 
-    override suspend fun belongsToParty(interactionRef: UUID, partyId: UUID): Boolean = Panache.withSession {
-        count("interactionRef = ?1 and partyId = ?2", interactionRef, partyId)
+    override suspend fun belongsToPartyAtSlot(
+        interactionRef: UUID,
+        partyId: UUID,
+        slot: com.openbank.engagement.domain.model.SurfaceSlot,
+    ): Boolean = Panache.withSession {
+        count("interactionRef = ?1 and partyId = ?2 and slot = ?3", interactionRef, partyId, slot.name)
     }.awaitSuspending() == 1L
 }

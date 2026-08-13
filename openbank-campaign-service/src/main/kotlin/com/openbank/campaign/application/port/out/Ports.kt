@@ -5,6 +5,7 @@
 package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
@@ -222,7 +223,7 @@ interface NotificationSendPort {
     suspend fun requestSend(request: NotificationSendRequest)
 }
 
-/** One approved, customer-specific placement for the authenticated app home surface. */
+/** One approved, customer-specific placement for a closed authenticated-app surface. */
 data class BannerPlacementRequest(
     val interactionRef: UUID,
     val partyId: UUID,
@@ -231,6 +232,7 @@ data class BannerPlacementRequest(
     val template: String,
     val variables: Map<String, String>,
     val deepLink: String,
+    val inAppSurface: InAppSurface,
 )
 
 /** Campaign emits placement commands; engagement-service owns rendering and event recording. */
