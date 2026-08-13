@@ -26,6 +26,23 @@ const stub = () => vi.stubGlobal('fetch', vi.fn(async (u: string) =>
         { name: 'savers', version: 2, rules: ['has a savings account', 'balance over 50 000 CZK'] }] }) }))
 
 describe('campaign builder interaction', () => {
+  it('turns an app-first recipe into an explicit, editable multi-surface journey', async () => {
+    stub()
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('savers'), { timeout: 8000 })
+
+    fireEvent.click(container.querySelector('[data-journey-recipe="IN_APP_DISCOVERY"]')!)
+
+    expect(container.querySelectorAll('[data-step]').length).toBe(2)
+    expect(container.querySelector('[data-step="0"]')!.getAttribute('data-channel')).toBe('BANNER')
+    expect(container.querySelector('[data-step="1"]')!.getAttribute('data-channel')).toBe('BANNER')
+    expect(container.querySelector('[data-journey-recipe="IN_APP_DISCOVERY"]')!.getAttribute('data-selected')).toBe('true')
+    // A recipe must reveal its first node for immediate editing, rather than act as a hidden
+    // black-box automation.
+    expect(container.querySelector('[data-step-editor="0"]')).toBeTruthy()
+  }, 25000)
+
   it('adds steps up to the domain cap, and the add affordance then disappears', async () => {
     stub()
     const { container, getByText } = render(
