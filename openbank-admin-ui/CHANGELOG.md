@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.124.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.123.0...admin-ui-v0.124.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** guide campaign attention decisions ([89d6fd1](https://github.com/JiRaska/open-bank-oss/commit/89d6fd144691d34fa61ba631346f0b0c413e6dcc)), closes [#4476](https://github.com/JiRaska/open-bank-oss/issues/4476)
+
 ## [0.123.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.122.0...admin-ui-v0.123.0) (2026-08-13)
 
 
