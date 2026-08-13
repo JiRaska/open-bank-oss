@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/v0.23.0...v0.24.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/v0.22.0...v0.23.0) (2026-08-13)
 
 
