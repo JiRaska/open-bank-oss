@@ -243,6 +243,12 @@ class Result:
         self.status = "pending"  # ok | failed | warned | skipped | unfalsified
         self.output = ""
         self.seconds = 0.0
+        # Split out separately (ADR-0255 Gate Tax follow-up, external review 2026-08-10):
+        # `seconds` used to be self-test + run: combined, which made "how much does the
+        # self-test itself cost" unanswerable from the JSON without re-deriving it from the
+        # text log — measured live at 894s of gate CPU in one CI run with no way to say how
+        # much of that was falsification overhead vs the check doing its actual job.
+        self.selftest_seconds = 0.0
 
     @property
     def id(self):
@@ -357,7 +363,9 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
     selftest = gate.get("selftest")
     if selftest:
         want_pass = gate.get("selftest_expect", "pass") == "pass"
+        st0 = time.monotonic()
         rc, out = _run(selftest, root, gate.get("env"), timeout, index)
+        r.selftest_seconds = time.monotonic() - st0
         buf.append(f"--- self-test (must {'PASS' if want_pass else 'FAIL'}) ---\n" + out)
         if (rc == 0) != want_pass:
             r.status = "unfalsified"
@@ -500,6 +508,12 @@ def json_records(results) -> list[dict]:
             "mode": g.get("mode", "enforced"),
             "status": r.status,
             "seconds": round(r.seconds, 3),
+            # Purely additive: `seconds` keeps meaning "total time this gate cost" (self-test +
+            # run:, unchanged), so nothing already reading it — the admin-ui collector, the
+            # ClickHouse schema, the Grafana dashboard — has its meaning silently redefined.
+            # A consumer that wants "how much was the check itself, minus falsification
+            # overhead" computes seconds - selftest_seconds; 0.0 when there is no selftest.
+            "selftest_seconds": round(r.selftest_seconds, 3),
             "subjects": last_subject_count(r.output),
             "selftest_declared": bool(g.get("selftest")),
             # A gate whose selftest is declared but came back "unfalsified" did not reach its
@@ -756,11 +770,30 @@ def self_test():
                 if rec["selftest_declared"] is not True or rec["selftest_passed"] is not True:
                     bad.append(f"harness-ok: want selftest_declared=True/selftest_passed=True, "
                                f"got {rec['selftest_declared']}/{rec['selftest_passed']}")
+                # A declared, PASSING selftest still costs real wall time (it ran "true", not
+                # nothing) — selftest_seconds must be measured, not left at the zero-value
+                # default that would make it indistinguishable from "no selftest at all".
+                if rec["selftest_seconds"] <= 0:
+                    bad.append(f"harness-ok: selftest_seconds should be > 0 (a selftest ran), "
+                               f"got {rec['selftest_seconds']}")
+                if rec["seconds"] < rec["selftest_seconds"]:
+                    bad.append("harness-ok: total seconds must be >= selftest_seconds "
+                               "(selftest runs before run:, never after)")
             if r.id == "harness-broken":
                 rec = json_records([r])[0]
                 if rec["selftest_passed"] is not False:
                     bad.append(f"harness-broken: want selftest_passed=False, "
                                f"got {rec['selftest_passed']}")
+                if rec["selftest_seconds"] <= 0:
+                    bad.append("harness-broken: selftest_seconds should be > 0 even when the "
+                               "self-test FAILS — the harness still ran and cost real time")
+            if r.id == "floor-met":
+                # Cross-check the negative: a gate with NO selftest: must report exactly 0.0,
+                # never a stale/leaked value from a previous gate's timer in the same process.
+                rec0 = json_records([r])[0]
+                if rec0["selftest_seconds"] != 0.0:
+                    bad.append(f"floor-met: no selftest declared, selftest_seconds should be "
+                               f"0.0, got {rec0['selftest_seconds']}")
             if r.id == "floor-unreported" and "printed no" not in r.output:
                 bad.append("floor-unreported: failed, but not for the missing-count reason")
             if r.id == "slow":
