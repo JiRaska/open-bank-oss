@@ -523,8 +523,9 @@ class NotificationConsumerIT {
     }
 
     @Test
-    fun `PUSH payload carries only an allow-listed deep link alongside the opaque notification id`() {
+    fun `PUSH payload carries an allow-listed deep link and opaque interaction reference`() {
         val partyId = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
         val token = "apns-campaign-deep-link-token-it"
         OffContextPushSender.SENT.clear()
         seedActiveDevice(partyId, token)
@@ -537,11 +538,13 @@ class NotificationConsumerIT {
                 recipient = "campaign@example.com",
                 variables = mapOf("name" to "Campaign customer"),
                 deepLink = "openbank://savings",
+                interactionRef = interactionRef,
             ),
         )
 
         assertThat(OffContextPushSender.SENT.single { it.token == token }.data)
             .containsEntry("deepLink", "openbank://savings")
+            .containsEntry("interactionRef", interactionRef.toString())
             .containsKey("notificationId")
     }
 

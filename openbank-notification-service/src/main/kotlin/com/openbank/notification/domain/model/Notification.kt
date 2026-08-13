@@ -114,6 +114,12 @@ data class NotificationRequest(
     val correlationId: UUID? = null,
     /** Optional bank-owned app route for a PUSH tap; never a template variable. */
     val deepLink: String? = null,
+    /**
+     * Opaque producer-owned reference supplied only for a PUSH interaction. It is passed to the
+     * device as routing metadata and is not persisted as notification content or emitted in a
+     * delivery outcome. campaign-service currently supplies its send-log id (issue #4480).
+     */
+    val interactionRef: UUID? = null,
 )
 
 /** Closed allow-list for navigation metadata sent through FCM/APNs. */

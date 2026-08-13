@@ -740,6 +740,13 @@ components:
           type: string
           enum: [openbank://home, openbank://savings, openbank://cards, openbank://payments, openbank://products]
           description: Optional allow-listed mobile route for a PUSH tap. Never customer content.
+        interactionRef:
+          type: string
+          format: uuid
+          description: >-
+            Optional opaque producer-owned PUSH interaction reference. campaign-service supplies
+            its send-log id; it is neither a campaign id nor party identity and is not a delivery
+            outcome correlation.
 
     SwiftMessageEventPayload:
       allOf:
