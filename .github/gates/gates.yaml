@@ -697,9 +697,19 @@ gates:
   # nothing; there is no build failure because there is no build. Six instances by
   # 2026-07-16 (the 6 control agents, document-service, clearing-simulator, finrep,
   # vop), each fixed by hand and documented in an auto-deploy.yml comment. The comments
-  # did not stop the seventh. ENFORCED, with a shrink-only baseline for the known debt.
+  # did not stop the seventh: analytics-sink was undeployed from 2026-07-26 to 2026-08-13
+  # (#4553 / #4576) and this gate reported PASS every run, because its subject set was
+  # release-please's RELEASED components — analytics-sink owns no OLTP database and cuts
+  # no release (ADR-0022), so it has no version.txt and was structurally invisible to a
+  # gate whose whole job is catching exactly this. Widened 2026-08-13: the subject is now
+  # released components PLUS anything wearing a `sandbox-<sha>` tag, since that tag shape
+  # IS auto-deploy's own output and needs no second registry to define it. The widening
+  # immediately found two more (developer-portal, document-renderer) — non-Quarkus builds
+  # that need real build-path work, so they are baselined rather than force-fit into the
+  # Gradle fast-jar step. ENFORCED, with a shrink-only baseline for the known debt.
   - id: deploy-coverage-guard
-    name: "deploy-coverage guard (released + gitops => in ALL_SERVICES, enforced)"
+    min_subjects: 45   # 60 deployable workloads today (2026-08-13)
+    name: "deploy-coverage guard (released + sandbox-tagged => in ALL_SERVICES, enforced)"
     group: supplychain
     mode: enforced
     selftest: bash .github/scripts/check-deploy-coverage.sh --self-test
@@ -2109,6 +2119,8 @@ gates:
     name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
     group: data
     mode: enforced
+    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery."
+    review_after: "2027-02-13"
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
     selftest_expect: pass
@@ -2249,6 +2261,8 @@ gates:
     name: "event contract vs code agreement (ADR-0006, enforced)"
     group: data
     mode: enforced
+    rationale: "A published event schema that drifts from its producer data class gives consumers a contract the running service cannot emit."
+    review_after: "2027-02-13"
     min_subjects: 2
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
@@ -2910,6 +2924,23 @@ gates:
     min_subjects: 3   # 5 advisory-mode gates today (2026-08-09)
     run: |
       python3 .github/scripts/check-advisory-finding-staleness.py --today "$(date -u +%F)" --enforce
+
+  # A gate must say why it exists and when to re-check that reason (#4339 followup, external
+  # review 2026-08-10). Declares its OWN rationale/review_after below rather than exempting
+  # itself — a gate about missing declarations exempting itself is the #2450 shape this repo
+  # already learned to avoid (check-advisory-gate-registration.py, check-gate-subject-floor.py
+  # both declare their own floor for the same reason).
+  - id: gate-lifecycle-metadata
+    name: "every gate declares why it exists and when to recheck (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A gate manifest that only says WHAT each gate checks accumulates entries nobody can evaluate for removal — this is the field that lets a future audit ask 'does this still catch something real' instead of re-deriving it from scratch."
+    review_after: "2027-02-10"
+    min_subjects: 100   # ~140 gates today (2026-08-10)
+    selftest: python3 .github/scripts/check-gate-lifecycle-metadata.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-gate-lifecycle-metadata.py --today "$(date -u +%F)" --enforce
 
   - id: gate-subject-floor
     name: "every gate declares how much it expects to find (#4339, enforced)"

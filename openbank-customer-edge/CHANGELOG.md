@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.61.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.60.0...customer-edge-v0.61.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app banner channel ([#4577](https://github.com/JiRaska/open-bank-oss/issues/4577)) ([d95c85c](https://github.com/JiRaska/open-bank-oss/commit/d95c85cf3fbe0428e4cc5e44bcca27d05bc574ab))
+
+## [0.60.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.59.0...customer-edge-v0.60.0) (2026-08-13)
+
+
+### Features
+
+* add trusted campaign engagement analytics ([#4555](https://github.com/JiRaska/open-bank-oss/issues/4555)) ([22ab0ba](https://github.com/JiRaska/open-bank-oss/commit/22ab0ba6930bff0d70594ab2ee72cf5407bee0b8))
+
 ## [0.59.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.58.0...customer-edge-v0.59.0) (2026-08-13)
 
 

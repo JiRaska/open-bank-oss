@@ -53,6 +53,7 @@ class SurfaceRestContractIT {
                     "lending-events-in",
                     "party-events-in",
                     "fraud-hold-events-in",
+                    "campaign-banner-placements-in",
                 )
 
         override fun stop() = InMemoryConnector.clear()
@@ -138,13 +139,14 @@ class SurfaceRestContractIT {
 
     @Test
     @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
-    fun `a validated opaque interaction reference survives the real HTTP to database path`() {
+    fun `validated campaign attribution survives the real HTTP to database path`() {
         val party = UUID.randomUUID()
         val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
         Given {
             contentType("application/json")
             body(
-                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
+                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"PUSH"}""",
             )
         } When {
             post("/api/v1/surfaces/events")
@@ -152,7 +154,98 @@ class SurfaceRestContractIT {
             statusCode(202)
         }
 
-        assertThat(readInteractionRefFor(party)).isEqualTo(interactionRef)
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "PUSH"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a placed campaign banner carries BANNER attribution through the real HTTP path`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(interactionRef, party, campaignId)
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"CAMPAIGN_HOME_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "BANNER"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a campaign carousel is attributed only in its assigned app surface`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(
+            interactionRef,
+            party,
+            campaignId,
+            slot = "HOME_CAROUSEL",
+            template = "MARKETING_PRODUCT_OFFER_CAROUSEL",
+        )
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"CAMPAIGN_HOME_CAROUSEL","slot":"HOME_CAROUSEL","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(202)
+        }
+
+        assertThat(readCampaignAttributionFor(party)).isEqualTo(
+            StoredCampaignAttribution(interactionRef, campaignId, 0, "BANNER"),
+        )
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a banner interaction cannot be attached to a catalogue card`() {
+        val party = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        insertCampaignBanner(interactionRef, party, campaignId)
+
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"$party","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef","campaignId":"$campaignId","stepOrder":0,"channel":"BANNER"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `partial campaign attribution is rejected rather than silently counted`() {
+        Given {
+            contentType("application/json")
+            body(
+                """{"partyId":"${UUID.randomUUID()}","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","campaignId":"${UUID.randomUUID()}"}""",
+            )
+        } When {
+            post("/api/v1/surfaces/events")
+        } Then {
+            statusCode(400)
+        }
     }
 
     // ── AdverseStateResource (issue #4265 item 1) ──────────────────────────────────────────────
@@ -253,8 +346,37 @@ class SurfaceRestContractIT {
         }
     }
 
-    private fun readInteractionRefFor(partyId: UUID): UUID? = openTestDatabase().use { conn ->
-        readInteractionRef(conn, partyId)
+    private fun insertCampaignBanner(
+        interactionRef: UUID,
+        partyId: UUID,
+        campaignId: UUID,
+        slot: String = "HOME_BANNER",
+        template: String = "MARKETING_PRODUCT_OFFER_BANNER",
+    ) {
+        openTestDatabase().use { conn ->
+            conn.prepareStatement(
+                """
+                INSERT INTO campaign_banner_placement
+                    (interaction_ref, party_id, campaign_id, step_order, template, values_json, deep_link, placed_at, slot)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { st ->
+                st.setObject(1, interactionRef)
+                st.setObject(2, partyId)
+                st.setObject(3, campaignId)
+                st.setInt(4, 0)
+                st.setString(5, template)
+                st.setString(6, """{"offerTitle":"Savings","offerText":"Four percent","ctaText":"Explore"}""")
+                st.setString(7, "openbank://savings")
+                st.setTimestamp(8, Timestamp.from(Instant.now()))
+                st.setString(9, slot)
+                st.executeUpdate()
+            }
+        }
+    }
+
+    private fun readCampaignAttributionFor(partyId: UUID): StoredCampaignAttribution? = openTestDatabase().use { conn ->
+        readCampaignAttribution(conn, partyId)
     }
 
     private fun openTestDatabase(): Connection {
@@ -266,15 +388,40 @@ class SurfaceRestContractIT {
         )
     }
 
-    private fun readInteractionRef(connection: Connection, partyId: UUID): UUID? = connection.prepareStatement(
-        "SELECT interaction_ref FROM engagement_event WHERE party_id = ? ORDER BY occurred_at DESC LIMIT 1",
-    ).use { statement ->
-        statement.setObject(1, partyId)
-        statement.executeQuery().use { rows -> if (rows.next()) rows.getObject(1, UUID::class.java) else null }
-    }
+    private fun readCampaignAttribution(connection: Connection, partyId: UUID): StoredCampaignAttribution? =
+        connection.prepareStatement(
+            """
+        SELECT interaction_ref, campaign_id, campaign_step_order, campaign_channel
+        FROM engagement_event
+        WHERE party_id = ?
+        ORDER BY occurred_at DESC
+        LIMIT 1
+            """.trimIndent(),
+        ).use { statement ->
+            statement.setObject(1, partyId)
+            statement.executeQuery().use { rows ->
+                if (!rows.next()) {
+                    null
+                } else {
+                    StoredCampaignAttribution(
+                        interactionRef = rows.getObject("interaction_ref", UUID::class.java),
+                        campaignId = rows.getObject("campaign_id", UUID::class.java),
+                        stepOrder = rows.getInt("campaign_step_order"),
+                        channel = rows.getString("campaign_channel"),
+                    )
+                }
+            }
+        }
 
     private companion object {
         /** Any stable principal id: the endpoints gate on the ROLE, not on this value. */
         const val TEST_OPERATOR = "00000000-0000-0000-0000-000000000099"
     }
+
+    private data class StoredCampaignAttribution(
+        val interactionRef: UUID,
+        val campaignId: UUID,
+        val stepOrder: Int,
+        val channel: String,
+    )
 }
