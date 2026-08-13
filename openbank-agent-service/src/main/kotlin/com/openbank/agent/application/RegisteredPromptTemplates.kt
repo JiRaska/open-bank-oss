@@ -19,7 +19,7 @@ internal object RegisteredPromptTemplates {
     private const val PAGE_CONTEXT_CLAUSE = " Operator is viewing: {{page_context}}."
 
     private val oversightTemplate = loadRegisteredPrompt("compliance-officer", "oversight.v1")
-    private val uiAssistantTemplate = loadRegisteredPrompt("ui-assistant", "system.v2")
+    private val uiAssistantTemplate = loadRegisteredPrompt("ui-assistant", "system.v3")
 
     internal fun oversightPrompt(pendingTitles: List<String>): String = if (pendingTitles.isEmpty()) {
         normalizeTrailingWhitespace(oversightTemplate.replace(OVERSIGHT_DUPLICATE_CLAUSE, ""))

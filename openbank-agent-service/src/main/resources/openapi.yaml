@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.10.0"
+  version: "1.11.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -24,7 +24,8 @@ info:
     UI posts to `/agent/chat`, the loop runs each tool through the OPA policy gate, and every
     model completion emits an AI-attributed audit event. `/agent/models` lists the registered
     models. The demo ships a single offline mock provider; adding a real model is a config entry,
-    not a code change.
+    not a code change. Catalog review uses `get_catalog_revision`, a read-only MCP tool that returns
+    one exact v2 offering revision; it cannot author, replace, publish or retire product terms.
 
     This is an internal service — not exposed via API Gateway to external TPPs.
   license:

@@ -367,7 +367,7 @@ class AgentChatService {
         )
     }
 
-    // system.v2 — registered at openbank-libs/governance/prompts/ui-assistant/system.v2.md; keep the
+    // system.v3 — registered at openbank-libs/governance/prompts/ui-assistant/system.v3.md; keep the
     // two byte-identical after {{page_context}} substitution (ADR-0148; the parity check is a
     // follow-up, so today it is on us).
     //

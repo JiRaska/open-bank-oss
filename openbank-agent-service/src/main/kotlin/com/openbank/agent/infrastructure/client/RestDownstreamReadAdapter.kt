@@ -48,6 +48,9 @@ class RestDownstreamReadAdapter : DownstreamReadPort {
     lateinit var productCatalogClient: ProductCatalogClient
 
     @Inject @RestClient
+    lateinit var genericCatalogClient: GenericCatalogReadClient
+
+    @Inject @RestClient
     lateinit var ledgerClient: LedgerServiceClient
 
     @Inject @RestClient
@@ -99,6 +102,10 @@ class RestDownstreamReadAdapter : DownstreamReadPort {
         "list_products" -> productCatalogClient.listProducts(arguments["limit"]?.asInt() ?: DEFAULT_CATALOG_LIMIT)
         "get_product" -> productCatalogClient.getProduct(arguments.requiredString("productId"))
         "get_product_fees" -> productCatalogClient.getProductFees(arguments.requiredString("productId"))
+        "get_catalog_revision" -> genericCatalogClient.getRevision(
+            offeringId = arguments.requiredString("offeringId"),
+            revisionId = arguments.requiredString("revisionId"),
+        )
         "list_ledger_journals" -> ledgerClient.listJournals(arguments["limit"]?.asInt() ?: DEFAULT_LIMIT)
         "get_trial_balance" -> ledgerClient.trialBalance(arguments["asOf"]?.asText())
         "aml_list_cases" -> amlClient.listCases(
@@ -197,6 +204,7 @@ class RestDownstreamReadAdapter : DownstreamReadPort {
             "list_products",
             "get_product",
             "get_product_fees",
+            "get_catalog_revision",
             "list_ledger_journals",
             "get_trial_balance",
             "aml_list_cases",
