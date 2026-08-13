@@ -9,18 +9,15 @@
 # producer, and each claim names its source — see the delegation-service contract for the same
 # convention.
 #
-# NO CONSUMER EXISTS (allowlisted: `openbank-libs/governance/rules.yaml:
-# event_consumer_liveness.allowlist`, topic `openbank.engagement.events`) and NO GITOPS DEPLOYMENT
-# is live (`openbank-infra/gitops/components/engagement/*` is inert — the workload is not in
-# auto-deploy.yml's ALL_SERVICES). This contract documents the wire shape the producer WILL send
-# once turned on, ahead of both — same ordering ADR-0006 itself prescribes: "producers before
-# consumers" (#1916).
+# The producer and analytics consumer are live in GitOps. analytics-sink projects only the
+# server-resolved campaign/step/channel context; partyId and the opaque interaction reference stay
+# out of the campaign gold aggregate.
 
 asyncapi: 3.0.0
 
 info:
   title: OpenBank Engagement Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Impression/click/dismiss/conversion feedback for an in-app engagement surface (ADR-0220 D2).
 
@@ -40,8 +37,7 @@ servers:
     protocol: kafka-secure
     description: |
       Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS in the shipped design;
-      the gitops slice merged so far has NO KafkaUser for this service (deferred, see the file
-      header), so nothing can actually authenticate to produce yet.
+      producer and analytics consumer each use a dedicated least-privilege KafkaUser.
 
 channels:
   engagementEvents:
@@ -77,8 +73,8 @@ operations:
       contract. Configured as `mp.messaging.outgoing.engagement-outbox-out` in its
       `application.yaml`.
 
-      **Consumers: none.** See the file header — allowlisted in `rules.yaml`, not silently absent.
-      The intended consumers are the analytics layer (ADR-0022) and ADR-0221's campaign dashboards.
+      **Consumer: `openbank-analytics-sink`.** It stores the event in bronze and builds the
+      privacy-safe `gold_campaign_engagement` projection consumed by the campaign Control Room.
     messages:
       - $ref: '#/channels/engagementEvents/messages/EngagementEvent'
 
@@ -119,20 +115,27 @@ components:
       name: EngagementEvent
       title: A customer action on one piece of catalogued surface content
       summary: |
-        Not a `DomainEvent` envelope — this payload is the exact `mapOf(...)` literal
-        `EngagementEventRepositoryImpl.save` builds, no wrapper, no `aggregateType`/`version`
-        fields (there is no aggregate here to version).
+        Not a `DomainEvent` envelope — this payload is the exact map
+        `EngagementEventRepositoryImpl.save` builds. `aggregateType` and `aggregateId` are analytics
+        addressing for this immutable observation, not a mutable domain aggregate/version.
       contentType: application/json
       traits:
         - $ref: '#/components/messageTraits/outboxHeaders'
       payload:
         type: object
-        required: [eventId, partyId, contentId, slot, type, occurredAt]
+        required: [eventId, aggregateType, aggregateId, partyId, contentId, slot, type, occurredAt]
         properties:
           eventId:
             type: string
             format: uuid
             description: Same value as the `ce-id` header — the outbox row's own id.
+          aggregateType:
+            type: string
+            const: ENGAGEMENT
+          aggregateId:
+            type: string
+            format: uuid
+            description: Event-scoped analytics key; equal to eventId so separate observations never collapse.
           partyId:
             type: string
             format: uuid
@@ -153,3 +156,17 @@ components:
             description: >-
               `Instant.toString()` — ISO-8601. Set by `SurfaceResource.postEvent` to `Instant.now()`
               at the moment the app's POST was received, not client-reported.
+          interactionRef:
+            type: string
+            format: uuid
+            description: Opaque PUSH handoff reference, validated for party ownership by customer-edge.
+          campaignId:
+            type: string
+            format: uuid
+            description: Server-resolved campaign id; present only with the complete attribution tuple.
+          stepOrder:
+            type: integer
+            minimum: 0
+          channel:
+            type: string
+            const: PUSH

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.112.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.3...admin-ui-v0.112.0) (2026-08-13)
+
+
+### Features
+
+* add trusted campaign engagement analytics ([#4555](https://github.com/JiRaska/open-bank-oss/issues/4555)) ([22ab0ba](https://github.com/JiRaska/open-bank-oss/commit/22ab0ba6930bff0d70594ab2ee72cf5407bee0b8))
+* **admin-ui:** elevate campaign composer ([#4540](https://github.com/JiRaska/open-bank-oss/issues/4540)) ([28bddcc](https://github.com/JiRaska/open-bank-oss/commit/28bddcc13c1e52c9dc8354babdd88f0295ebb7f2))
+* **governance:** add gate lifecycle metadata gate, split selftest_seconds ([#4521](https://github.com/JiRaska/open-bank-oss/issues/4521)) ([d9951da](https://github.com/JiRaska/open-bank-oss/commit/d9951dab5e68c43c9328eeb702369c0f08e7672f))
+
 ## [0.111.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.2...admin-ui-v0.111.3) (2026-08-13)
 
 

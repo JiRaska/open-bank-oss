@@ -75,6 +75,19 @@ spec:
           name: openbank-campaign-service-card-conversions
           patternType: literal
         operations: [Read, Describe]
+      # Event-trigger enrolment consumes the same product topics independently from conversion
+      # attribution. Keep exact per-channel groups: they must match application.yaml and must not
+      # share offsets with the conversion consumers (issue #4569).
+      - resource:
+          type: group
+          name: openbank-campaign-service-account-triggers
+          patternType: literal
+        operations: [Read, Describe]
+      - resource:
+          type: group
+          name: openbank-campaign-service-card-triggers
+          patternType: literal
+        operations: [Read, Describe]
       # A separate group from the one above on purpose: two channels sharing a group makes
       # one member set out of two disjoint subscriptions, so a rebalance on either topic
       # churns the other and the offsets can never be reset independently.
