@@ -21,6 +21,7 @@ import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
+import com.openbank.notification.domain.model.MobileDeepLink
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcome
@@ -206,6 +207,14 @@ class NotificationConsumer {
                 req.template.variables.sorted(),
                 unknown.sorted(),
             )
+            return Uni.createFrom().voidItem()
+        }
+        val validDeepLink = req.deepLink == null ||
+            (req.channel == NotificationChannel.PUSH && MobileDeepLink.isAllowed(req.deepLink))
+        if (!validDeepLink) {
+            // The deep link controls device navigation, so it gets the same allow-list posture as
+            // template identifiers. Do not log the rejected value; it may be attacker-controlled.
+            log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
         return dispatch(req)
@@ -609,7 +618,7 @@ class NotificationConsumer {
                 val targets = tokens.map { Triple(it.deviceId, PushPlatform.valueOf(it.platform), it.token) }
                 val sends = targets.map { (deviceId, platform, token) ->
                     pushSender.send(
-                        PushMessage(platform, token, subject, pushText, mapOf("template" to req.template.name)),
+                        PushMessage(platform, token, subject, pushText, pushData(req, entity)),
                     ).map { result ->
                         // Recorded here, where the platform is in scope. Counter increments are
                         // thread-safe, so running off the event loop (the adapters complete on the
@@ -625,6 +634,18 @@ class NotificationConsumer {
                     .chain { results -> persistPushFanOut(req, entity, results) }
                     .replaceWithVoid()
             }
+    }
+
+    /**
+     * FCM/APNs data is a routing envelope, not customer content. `notificationId` lets an app
+     * fetch the authenticated full detail after a generic wake-up; `deepLink` is only admitted by
+     * [MobileDeepLink] before this method runs. Neither carries balances, names, offers or other
+     * lock-screen-visible material.
+     */
+    private fun pushData(req: NotificationRequest, entity: NotificationEntity): Map<String, String> = buildMap {
+        put("template", req.template.name)
+        put("notificationId", entity.notificationId.toString())
+        req.deepLink?.let { put("deepLink", it) }
     }
 
     /**

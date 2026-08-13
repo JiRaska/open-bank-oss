@@ -112,7 +112,9 @@ export function StepEditor({
                   channel: c,
                   template: first,
                   variables: {},
-                  ...(c === 'PUSH' ? { fallbackToPush: false } : {}),
+                  ...(c === 'PUSH'
+                    ? { fallbackToPush: false, mobileDestination: step.mobileDestination ?? 'HOME' }
+                    : { mobileDestination: undefined }),
                   ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
                 })}
                 // `.btn` again rather than a hand-rolled box — the third time tonight that a
@@ -131,12 +133,31 @@ export function StepEditor({
           })}
         </div>
         {step.channel === 'PUSH' && (
-          <p className="text-xs text-muted-foreground">
-            {t(
-              'Push nese jen titulek. Nabídku si člověk přečte v aplikaci po klepnutí — do notifikace se osobní obsah nedává.',
-              'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
-            )}
-          </p>
+          <>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                'Push nese jen titulek. Nabídku si člověk přečte v aplikaci po klepnutí — do notifikace se osobní obsah nedává.',
+                'A push carries the headline only. The offer is read in the app after the tap — personal content never goes into a notification.',
+              )}
+            </p>
+            <label className="mt-3 block space-y-1.5 text-sm" data-mobile-destination={index}>
+              <span className="font-medium">{t('Po klepnutí otevřít', 'Open after tap')}</span>
+              <select
+                className={field}
+                value={step.mobileDestination ?? 'HOME'}
+                onChange={e => onChange({ ...step, mobileDestination: e.target.value as EditorStep['mobileDestination'] })}
+              >
+                <option value="HOME">{t('Domovská obrazovka', 'Home')}</option>
+                <option value="SAVINGS">{t('Spoření', 'Savings')}</option>
+                <option value="CARDS">{t('Karty', 'Cards')}</option>
+                <option value="PAYMENTS">{t('Platby', 'Payments')}</option>
+                <option value="PRODUCT_HUB">{t('Produkty', 'Products')}</option>
+              </select>
+              <span className="block text-xs text-muted-foreground">
+                {t('Jde o pevný deep-link aplikace, ne URL zadanou do kampaně.', 'This is a fixed app deep link, not a campaign-entered URL.')}
+              </span>
+            </label>
+          </>
         )}
         {step.channel === 'EMAIL' && (
           <label className="mt-3 flex cursor-pointer items-start gap-2 text-sm" data-push-fallback={index}>

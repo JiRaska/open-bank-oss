@@ -715,7 +715,7 @@ components:
 
     NotificationRequestPayload:
       type: object
-      required: [partyId, channel, templateId]
+      required: [partyId, channel, template, recipient, variables]
       properties:
         partyId:
           type: string
@@ -723,13 +723,23 @@ components:
         channel:
           type: string
           enum: [EMAIL, PUSH]
-        templateId:
+        template:
           type: string
-          enum: [ACCOUNT_OPENED, PAYMENT_COMPLETED, KYC_REJECTED, OTP_CODE, WELCOME]
+          description: Closed notification-service template identifier.
+        recipient:
+          type: string
         variables:
           type: object
           additionalProperties:
             type: string
+        correlationId:
+          type: string
+          format: uuid
+          description: Optional producer-owned delivery-outcome correlation id.
+        deepLink:
+          type: string
+          enum: [openbank://home, openbank://savings, openbank://cards, openbank://payments, openbank://products]
+          description: Optional allow-listed mobile route for a PUSH tap. Never customer content.
 
     SwiftMessageEventPayload:
       allOf:

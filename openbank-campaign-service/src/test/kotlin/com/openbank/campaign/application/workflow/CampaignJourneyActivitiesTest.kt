@@ -9,6 +9,7 @@ import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
+import com.openbank.campaign.application.port.out.NotificationSendRequest
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
@@ -74,6 +75,9 @@ class CampaignJourneyActivitiesTest {
         /** Correlation ids put on the wire, in order (ADR-0239 D1). */
         val correlationIds = mutableListOf<UUID>()
 
+        /** App destinations handed to notification-service for the current delivery. */
+        val deepLinks = mutableListOf<String?>()
+
         val campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = if (id == campaignId) {
                 campaign.copy(
@@ -133,16 +137,10 @@ class CampaignJourneyActivitiesTest {
             ): DeliveryStatus? = null
         }
         val notificationSend = object : NotificationSendPort {
-            override suspend fun requestSend(
-                partyId: UUID,
-                channel: Channel,
-                template: String,
-                recipient: String,
-                variables: Map<String, String>,
-                correlationId: UUID,
-            ) {
+            override suspend fun requestSend(request: NotificationSendRequest) {
                 sendsRequested += 1
-                correlationIds += correlationId
+                correlationIds += request.correlationId
+                deepLinks += request.deepLink
             }
         }
 

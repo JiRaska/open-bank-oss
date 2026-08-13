@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.21.0
+  version: 1.22.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -586,6 +586,14 @@ components:
             gate for PUSH consent and sends that reduced, lock-screen-safe title only if allowed.
             It never bypasses quiet hours, frequency caps, suppression lists or a gate outage, and
             it does not attempt a second send after an asynchronous delivery failure.
+        mobileDestination:
+          type: string
+          nullable: true
+          enum: [HOME, SAVINGS, CARDS, PAYMENTS, PRODUCT_HUB]
+          description: >-
+            Bank-owned destination opened after a PUSH tap. This is a closed app-route contract,
+            never an author-entered URL; absent preserves existing campaigns. It is valid on a
+            PUSH step, or on an EMAIL step only when its consent-missing fallback is PUSH.
         delaySeconds: { type: integer, minimum: 0 }
         condition:
           description: >-

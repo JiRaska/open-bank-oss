@@ -244,6 +244,7 @@ export default function NewCampaignPage() {
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
+          ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
