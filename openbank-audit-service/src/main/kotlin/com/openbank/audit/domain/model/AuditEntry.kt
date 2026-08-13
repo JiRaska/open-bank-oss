@@ -99,6 +99,48 @@ enum class AttributionSource {
     ABSENT,
 }
 
+/**
+ * Whether an audit row names the actor that caused the operation, and — where it does not —
+ * whether the producer SAID SO or simply stayed silent (#3994).
+ *
+ * **Not persisted, deliberately.** The sibling provenance markers ([AttributionSource],
+ * [OccurredAtSource]) each needed a column of their own because the field they describe carries a
+ * SENTINEL: `source_service = "unknown"` and an ingest-substituted `occurred_at` are both
+ * indistinguishable, in the stored row, from a real value. `actor_id` has no sentinel — it is
+ * plain SQL `NULL` — so this classification is already fully derivable from the two columns the
+ * table has:
+ *
+ * ```
+ * DECLARED  <=>  actor_id IS NOT NULL
+ * SYSTEM    <=>  actor_id IS NULL AND actor_type IS NOT NULL
+ * ABSENT    <=>  actor_id IS NULL AND actor_type IS NULL
+ * ```
+ *
+ * Adding a fourth `*_source` column for it would restate what the row already says, and grow the
+ * chain-hashed evidentiary record to hold a value that asserts nothing new. The gap this enum
+ * closes is not in the TABLE — a `GROUP BY` has always been able to answer it — it is that no
+ * TIME SERIES existed, so nothing could alert or degrade on the actor gap, and 75% of the trail
+ * reached that state unremarked. See `openbank.audit.actor.missing`.
+ */
+enum class ActorProvenance {
+    /** The producer named an actor: `requestedBy`, `actorId` or `initiatedByPartyId`. */
+    DECLARED,
+
+    /**
+     * No actor id, but the producer classified the actor anyway (`actorType`, e.g. `SYSTEM` for a
+     * scheduled balance update). An ASSERTED absence — the producer is on record that no human
+     * identity applies, which is a materially different claim from having forgotten one.
+     */
+    SYSTEM,
+
+    /**
+     * Neither an id nor a type: the producer said nothing about who acted. A SILENT absence, and
+     * the state 75% of the live trail is in — including `PARTY_CREATED`, `KYC_CASE_APPROVED`,
+     * `AccountStatusChanged` and `ConsentRevoked`, which are decisions with a decider.
+     */
+    ABSENT,
+}
+
 enum class OccurredAtSource {
     /** The producer sent a parseable `occurredAt`; [AuditEntry.occurredAt] is the real event time. */
     EVENT,
