@@ -13,6 +13,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -184,10 +185,51 @@ class SanctionsServiceTest {
         coVerify {
             repo.updateWithEvent(
                 match { it.status == SanctionsCheckStatus.CLEAR && it.reviewedBy == "analyst-1" },
-                eq("SanctionChecked"),
+                // Was `eq("SanctionChecked")` — the same literal the screening path asserts, so
+                // this assertion actively ENCODED the defect #1035 reports: it passed precisely
+                // because the two paths were indistinguishable, and would have gone red at the
+                // fix. Replaced, not deleted; the differentiation itself is pinned by
+                // `screen and review emit distinct event types` below.
+                eq("SanctionReviewed"),
             )
         }
         coVerify(exactly = 0) { repo.saveWithEvent(any(), any()) }
+    }
+
+    /**
+     * The screening path and the analyst-review path must not put the same `eventType` on the
+     * wire (#1035).
+     *
+     * Written to FAIL against `origin/main`, where both emitted `"SanctionChecked"`: it captures
+     * the literal each path actually passes and asserts they differ. Asserting each path's
+     * literal separately cannot do this job — two such assertions stay green when someone later
+     * collapses the types back together, because neither one knows about the other.
+     */
+    @Test
+    fun `screen and review emit distinct event types`(): Unit = runBlocking {
+        val screened = slot<String>()
+        val reviewed = slot<String>()
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+        coEvery { repo.saveWithEvent(any(), capture(screened)) } answers { firstArg() }
+
+        service.screen(sampleScreenCommand(name = "Jane Citizen"))
+
+        val id = UUID.randomUUID()
+        coEvery { repo.findById(id) } returns sampleCheck(id = id, status = SanctionsCheckStatus.HIT)
+        coEvery { repo.updateWithEvent(any(), capture(reviewed)) } answers { firstArg() }
+
+        service.review(
+            ReviewCommand(
+                checkId = id,
+                reviewedBy = "analyst-1",
+                note = "cleared after manual review",
+                newStatus = SanctionsCheckStatus.CLEAR,
+            ),
+        )
+
+        assertThat(screened.captured)
+            .describedAs("screening and analyst review must be distinguishable from the envelope alone")
+            .isNotEqualTo(reviewed.captured)
     }
 
     @Test
