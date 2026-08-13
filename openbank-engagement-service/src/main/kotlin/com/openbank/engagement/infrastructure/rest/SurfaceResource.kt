@@ -72,7 +72,8 @@ class SurfaceResource(
         val slot = parseSlot(request.slot) ?: return badRequest("unknown slot '${request.slot}'")
         val type = EngagementEventType.entries.find { it.name == request.type }
             ?: return badRequest("unknown event type '${request.type}'")
-        val content = validateContent(request, slot) ?: return badRequest("unknown or incompatible content '${request.contentId}'")
+        val content = validateContent(request, slot)
+            ?: return badRequest("unknown or incompatible content '${request.contentId}'")
         val campaignFields = listOf(request.campaignId, request.stepOrder, request.channel)
         val campaignAttribution = if (campaignFields.any { it != null }) {
             if (request.interactionRef == null || campaignFields.any { it == null }) {
