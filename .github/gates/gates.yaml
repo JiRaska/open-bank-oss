@@ -87,6 +87,7 @@ gates:
   # rigged to fail in each distinct way (and to pass in the ways that must still pass, so a
   # fail-everything runner does not satisfy it either) and asserts the classification.
   - id: gate-runner-self-test
+    selftest_exempt: "is-a-test-suite — the run: IS run-gates.py --self-test"
     name: "gate runner self-test (the runner must be falsifiable too)"
     group: lint
     mode: enforced
@@ -94,6 +95,7 @@ gates:
       python3 .github/scripts/run-gates.py --self-test
 
   - id: yamllint
+    selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
     name: "yamllint"
     group: lint
     mode: enforced
@@ -152,6 +154,7 @@ gates:
         | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
+    selftest_exempt: "third-party — shellcheck's own test suite is not ours to run"
     name: "shellcheck"
     group: lint
     mode: enforced
@@ -316,6 +319,7 @@ gates:
         --canary-baseline .github/canary-rollout-realisable-baseline.txt
 
   - id: gen-network-policies-drift-gate
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
     mode: enforced
@@ -416,6 +420,7 @@ gates:
   # NetworkPolicy gate above, including --intent-to-add so a NEW service with no
   # committed runbook fails as an addition rather than being invisible to `git diff`.
   - id: service-runbook-drift
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "service runbook drift (issue #2255, enforced)"
     group: gitops
     mode: enforced
@@ -541,6 +546,7 @@ gates:
   # a bucket outside Terraform is a governance question with a real choice in it, which is
   # exactly where advisory belongs.
   - id: db-backup-association-gate
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
     mode: enforced
@@ -628,6 +634,7 @@ gates:
   # separately from the artifacts it covers — the exact shape that let 16 pacts go
   # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
   - id: governance-script-unit-tests
+    selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
@@ -660,6 +667,7 @@ gates:
   # (finrep-service 0.4.0). Harmless but noisy; classifies from the PR title since the squash
   # commit doesn't exist yet at PR-CI time. PR-only: no PR title to classify on a push to main.
   - id: release-scope-mismatch-gate
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "release-scope-mismatch gate (rules.yaml release_scope_mismatch, advisory)"
     group: supplychain
     mode: advisory
@@ -716,6 +724,7 @@ gates:
   # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
   # jq against a throwaway fixture repo — no Gradle, no network.
   - id: auto-deploy-reconcile-probe-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "auto-deploy reconcile probe unit test"
     group: supplychain
     mode: enforced
@@ -728,6 +737,7 @@ gates:
   # (never self-clearing, and therefore something the scheduled tick must NOT silence).
   # Its ordering case is the load-bearing one — see the file's header.
   - id: can-i-deploy-block-classifier-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy block classifier unit test"
     group: supplychain
     mode: enforced
@@ -739,6 +749,7 @@ gates:
   # quieter than any block: `--latest main` on a push routinely answers about the PREVIOUS
   # build, so a green can be inherited from a commit that is not the one being deployed.
   - id: can-i-deploy-version-selector-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy version selector unit test"
     group: supplychain
     mode: enforced
@@ -752,6 +763,7 @@ gates:
   # one thing standing between a justified verdict and a borrowed one, and it is a pure function
   # with no network, which is exactly why its failure path can be exercised here.
   - id: pact-version-tree-equivalence-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "pact version tree-equivalence unit test (issue #3432, enforced)"
     group: supplychain
     mode: enforced
@@ -766,6 +778,7 @@ gates:
   # degrade to `no`, which on a dispatch is #3318's REFUSE. A reconcile that cannot verify must
   # not deploy.
   - id: pact-version-probe-fail-closed-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "pact version probe fails closed (issue #3432, enforced)"
     group: supplychain
     mode: enforced
@@ -781,6 +794,7 @@ gates:
   # exercised: a contentless counterpart dominating a healthy one, and every probe failure
   # degrading to `unknown` rather than to the reassuring answer.
   - id: blocking-counterpart-probe-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
     group: supplychain
     mode: enforced
@@ -828,6 +842,7 @@ gates:
   # case is the parser one: the CLI's matrix table TRUNCATES service names, so a parser
   # that reads it names a co-deploy set no dispatch can satisfy.
   - id: co-deploy-set-derivation-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "co-deploy set derivation unit test"
     group: supplychain
     mode: enforced
@@ -879,6 +894,7 @@ gates:
   # `target_enforce_date`. rules.yaml can no longer be the only place that knows a gate exists.
   # ENFORCED from day one — the tree is clean as of this PR.
   - id: advisory-gate-registration
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "advisory-gate registration (issue #2392, enforced)"
     group: supplychain
     # ENFORCED, despite the word "advisory" in the name — this is the gate ABOUT advisory
@@ -924,6 +940,7 @@ gates:
   # job stops at its first failing gate, leaving later steps `skipped`, not `pass`. Run it
   # locally before pushing: python3 .github/scripts/check-prompt-registry.py
   - id: prompt-registry-integrity
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "prompt-registry integrity (ADR-0148, enforced)"
     group: registry
     mode: enforced
@@ -953,6 +970,7 @@ gates:
   # at its first failing gate, leaving later steps `skipped`, not `pass`. Run it locally before
   # pushing: python3 .github/scripts/check-evals-registry.py
   - id: evals-registry-integrity
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "evals-registry integrity (ADR-0148, enforced)"
     group: registry
     mode: enforced
@@ -1071,6 +1089,7 @@ gates:
       python3 .github/scripts/check-journey-catalog.py --root . --enforce
 
   - id: adr-registry-integrity-check
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "ADR registry integrity check"
     group: registry
     mode: enforced
@@ -1172,6 +1191,7 @@ gates:
   # exercise. ENFORCED, and the pyyaml the generator needs is installed by the
   # gen-network-policies step above.
   - id: eu-ai-act-inventory-drift
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
     group: registry
     mode: enforced
@@ -1189,6 +1209,7 @@ gates:
   # ENFORCED for the same reason as its sibling: over a generated claim, advisory means "the
   # document does not match reality", and there is no judgement left to exercise.
   - id: ai-act-high-risk-inventory-vs-code
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "EU AI Act Annex III inventory vs. code (ADR-0142/0216, enforced)"
     group: registry
     mode: enforced
@@ -1217,6 +1238,7 @@ gates:
   # absent+creatable, absent+refused — and validates the stub first, so a stub that fell through to
   # the real `aws` cannot report a pass. Reintroducing the #3453 defect makes it go red.
   - id: ensure-ecr-repository
+    selftest_exempt: "is-a-test-suite — the deploy path needs AWS, so the classification harness is the whole gate"
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
@@ -1582,6 +1604,7 @@ gates:
   # the generated artifact only; a stale snapshot would reintroduce the exact hand-edited
   # drift this refactor removes.
   - id: ai-governance-snapshot-drift
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry
     mode: enforced
@@ -1879,6 +1902,7 @@ gates:
   # "no exclude-paths declared" case, where src/test must COUNT rather than be assumed excluded.
   # Falsified both ways before wiring in: breaking the exclusion makes it exit 1 with 4 failures.
   - id: record-deployment-version-resolver
+    selftest_exempt: "is-a-test-suite"
     name: "record-deployment version resolver (issue #3223, enforced)"
     group: api
     mode: enforced
@@ -1897,6 +1921,7 @@ gates:
   # claims keyed by directory name, so nine real findings were silently skipped. Both are now
   # self-test cases.
   - id: runtime-conformance-comparators
+    selftest_exempt: "is-a-test-suite"
     name: "runtime conformance: claim-vs-cluster comparators (enforced)"
     group: gitops
     mode: enforced
@@ -2007,6 +2032,7 @@ gates:
   # Route SET only — it does not read schemas or status codes. Do not read a green here as
   # "this spec is true"; see the script header for the precise limits.
   - id: openapi-route-conformance
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "openapi-route-conformance — published contract vs served routes (enforced)"
     group: api
     mode: enforced
@@ -2082,6 +2108,7 @@ gates:
   # rebuilt zero consumers and left services running pre-fix images while their pods read green.
   # The self-test pins the declaration matcher and both path matchers in both directions.
   - id: libs-change-dependents
+    selftest_exempt: "is-a-test-suite"
     name: "libs change fan-out is derived (issue #2983, enforced)"
     group: gitops
     mode: enforced
@@ -2173,6 +2200,7 @@ gates:
   # startup with `checksum mismatch`). PR-only and diff-scoped against the
   # resolved PR diff base, same as api-contract above.
   - id: db-migration-gate
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
     group: data
     mode: advisory
@@ -2249,6 +2277,7 @@ gates:
       python3 .github/scripts/check-event-contract-code-agreement.py
 
   - id: schema-compat-gate
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
     group: data
     mode: advisory
@@ -2393,6 +2422,7 @@ gates:
   # MONEY_PATH → fourEyes=true, expiresAt in the future, no prohibited keys.
   # stdlib-only Python script mirrors the Kotlin FlagDefinition.validate() rules.
   - id: feature-flag-governance
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "feature-flag governance (ADR-0067, issue #419)"
     group: security
     mode: enforced
@@ -2450,6 +2480,7 @@ gates:
   # identity remains — forcing real caller auth to land before/with the port.
   # 0 violations on origin/main at introduction — a regression guard. ENFORCED.
   - id: mcp-real-port-requires-caller-auth-first
+    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "MCP real-port requires caller auth first (BLOCKER #2206, enforced)"
     group: security
     mode: enforced
@@ -2696,6 +2727,7 @@ gates:
   # verdict made the earlier one unfalsifiable — inside the very script whose job is to make
   # a non-review impossible to mistake for a clean one.
   - id: agent-review-proof-falsifiable
+    selftest_exempt: "is-a-test-suite"
     name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
     group: lint
     mode: enforced
@@ -2716,6 +2748,7 @@ gates:
   # built the normalised set inline and stayed green when that function was gutted, the
   # counter-example never reaching the code under test.
   - id: agent-review-scope-falsifiable
+    selftest_exempt: "is-a-test-suite"
     name: "ADR-0251 review scope rule is falsifiable (enforced)"
     group: lint
     mode: enforced
@@ -2808,6 +2841,7 @@ gates:
   # whose whole thesis is checking things. See the config comment for what is selected and why
   # the style rules are not.
   - id: python-lint
+    selftest_exempt: "third-party — ruff's own test suite is not ours to run"
     name: "ruff over the governance scripts (#4339, enforced)"
     group: lint
     mode: enforced
