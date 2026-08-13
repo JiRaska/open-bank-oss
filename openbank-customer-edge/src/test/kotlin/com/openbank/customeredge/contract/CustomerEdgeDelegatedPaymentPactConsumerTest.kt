@@ -110,6 +110,7 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
             tokenEndpointBase = "http://127.0.0.1:${tokenServer.address.port}"
             clientId = "openbank-edge"
             clientSecret = "pact"
+            tlsTrustCertificateFile = ""
             // The Pact mock server binds 127.0.0.1, which the production default already allows.
             allowedHostSuffixes = ".svc,127.0.0.1,localhost"
         }

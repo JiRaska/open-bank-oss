@@ -76,7 +76,7 @@ class UpstreamClient {
      * the platform default while GitOps mounts the private CA only in the deployed edge.
      */
     @ConfigProperty(name = "openbank.upstream.tls-trust-certificate-file", defaultValue = "")
-    var tlsTrustCertificateFile: String = ""
+    lateinit var tlsTrustCertificateFile: String
 
     // SSRF hardening: every public method below takes a caller-supplied `url` and hands it to
     // URI.create() with no host check of its own — it relies entirely on callers building `url`

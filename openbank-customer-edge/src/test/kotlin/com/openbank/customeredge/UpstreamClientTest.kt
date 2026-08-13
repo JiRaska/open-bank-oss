@@ -261,6 +261,7 @@ class UpstreamClientTest {
                 tokenEndpointBase = "$baseUrl/realms/openbank"
                 clientId = "openbank-edge"
                 clientSecret = "test-secret"
+                tlsTrustCertificateFile = ""
                 connectTimeoutMs = 2000
                 requestTimeoutMs = 2000
             }
