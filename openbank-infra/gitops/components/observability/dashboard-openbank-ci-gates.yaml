@@ -279,6 +279,44 @@ data:
               }
             ]
           }
+        },
+        {
+          "id": 10,
+          "type": "table",
+          "title": "Gate Tax — cost on the critical path, not summed across shards (14d)",
+          "description": "A run's actual wall-clock floor is the SLOWEST shard, not the sum of every gate in every shard (shards run in parallel jobs) — the 'Per-gate wall time' panel above ranks gates by their own seconds, which over-counts every gate sitting in a fast shard. This panel instead finds, per run, which shard was the bottleneck (max total gate-seconds across shards), then ranks gates by how often they land in that bottleneck shard and what share of ITS time they cost. A gate that is slow but always lives in a shard other gates already make slow contributes nothing to Time-to-Trusted-Change; a gate here does. Verified against live ci_gate_runs 2026-08-10: loki-rule-load-test was ~49% of the critical path on the runs where its shard was the bottleneck.",
+          "gridPos": { "x": 0, "y": 58, "w": 24, "h": 10 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "targets": [
+            {
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "WITH shard_totals AS (SELECT run_id, shard, sum(seconds) AS shard_seconds FROM openbank_analytics.ci_gate_runs WHERE run_created_at >= now() - INTERVAL 14 DAY GROUP BY run_id, shard), critical_shard AS (SELECT run_id, argMax(shard, shard_seconds) AS crit_shard, max(shard_seconds) AS crit_seconds FROM shard_totals GROUP BY run_id) SELECT g.gate_id, count() AS runs_on_critical_path, round(avg(g.seconds), 2) AS avg_seconds, round(avg(g.seconds / cs.crit_seconds) * 100, 1) AS avg_pct_of_critical_path FROM openbank_analytics.ci_gate_runs g INNER JOIN critical_shard cs ON g.run_id = cs.run_id AND g.shard = cs.crit_shard GROUP BY g.gate_id ORDER BY avg_seconds DESC LIMIT 20"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+              {
+                "matcher": { "id": "byName", "options": "avg_seconds" },
+                "properties": [{ "id": "unit", "value": "s" }]
+              },
+              {
+                "matcher": { "id": "byName", "options": "avg_pct_of_critical_path" },
+                "properties": [
+                  { "id": "unit", "value": "percent" },
+                  { "id": "custom.cellOptions", "value": { "type": "color-background" } },
+                  { "id": "thresholds", "value": { "mode": "absolute", "steps": [
+                    { "color": "green", "value": null },
+                    { "color": "yellow", "value": 15 },
+                    { "color": "red", "value": 35 }
+                  ] } }
+                ]
+              }
+            ]
+          }
         }
       ]
     }
