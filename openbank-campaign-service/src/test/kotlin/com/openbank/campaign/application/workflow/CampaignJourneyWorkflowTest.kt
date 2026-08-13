@@ -62,14 +62,14 @@ class CampaignJourneyWorkflowTest {
             delaySeconds: Long = 0,
             conditionSourceOrder: Int? = null,
         ): CampaignStep = CampaignStep(
-                order = order,
-                template = "MARKETING_PRODUCT_OFFER",
-                channel = Channel.EMAIL,
-                variables = emptyMap(),
-                delaySeconds = delaySeconds,
-                condition = condition,
-                conditionSourceOrder = conditionSourceOrder,
-            )
+            order = order,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = emptyMap(),
+            delaySeconds = delaySeconds,
+            condition = condition,
+            conditionSourceOrder = conditionSourceOrder,
+        )
     }
 
     @BeforeEach
