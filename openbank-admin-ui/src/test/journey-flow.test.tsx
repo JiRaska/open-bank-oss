@@ -15,8 +15,11 @@ import { JourneyCanvas } from '@/components/campaigns/JourneyCanvas'
  */
 
 const STEPS = [
-  { order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0 },
-  { order: 2, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 172800 },
+  { order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'PUSH' as const },
+  {
+    order: 2, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 172800, channel: 'BANNER' as const,
+    condition: 'IF_PREVIOUS_CONFIRMED' as const, conditionSourceOrder: 0,
+  },
 ]
 
 const FUNNEL = [
@@ -30,6 +33,7 @@ const FUNNEL = [
       { reason: 'SUPPRESSED_QUIET_HOURS', count: 90 },
     ],
   },
+  { stepOrder: 2, reached: 600, delivered: 420, failed: 0, skipped: 180, suppressed: [] },
 ]
 
 function renderFlow(funnel = FUNNEL, audience: number | null = 1000) {
@@ -105,5 +109,15 @@ describe('journey canvas', () => {
     renderFlow()
 
     expect(screen.getByText(/people in segment/)).toBeTruthy()
+  })
+
+  it('shows the reviewed decision and separates its other path from delivery loss', () => {
+    const { container } = renderFlow()
+
+    expect(screen.getByText(/step 1 delivered/)).toBeTruthy()
+    expect(screen.getByText(/180 took another path/)).toBeTruthy()
+    expect(container.querySelector('[data-branch="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
+    expect(screen.getByText(/STEP 1 · push/)).toBeTruthy()
+    expect(screen.getByText(/STEP 2 · banner/)).toBeTruthy()
   })
 })
