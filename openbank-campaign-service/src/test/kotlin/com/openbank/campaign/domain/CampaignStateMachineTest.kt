@@ -5,6 +5,7 @@
 package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -33,6 +34,39 @@ class CampaignStateMachineTest {
     @Test
     fun `draft submits to pending approval`() {
         assertEquals(CampaignState.PENDING_APPROVAL, draft().submit().state)
+    }
+
+    @Test
+    fun `only a draft can be revised`() {
+        val revised = draft().revise(
+            CampaignDefinition(
+                name = "Jarní vklady",
+                goal = "Zvýšit spoření",
+                segmentRef = SegmentRef("saver-high-balance", 1),
+                steps = listOf(
+                    CampaignStep(
+                        order = 0,
+                        template = "MARKETING_PRODUCT_OFFER",
+                        channel = Channel.EMAIL,
+                        variables = mapOf("offerTitle" to "4 %"),
+                        delaySeconds = 0,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("Jarní vklady", revised.name)
+        assertEquals("maker", revised.createdBy)
+        assertThrows<IllegalArgumentException> {
+            draft().submit().revise(
+                CampaignDefinition(
+                    name = "Nesmí projít",
+                    goal = "",
+                    segmentRef = SegmentRef("saver-high-balance", 1),
+                    steps = emptyList(),
+                ),
+            )
+        }
     }
 
     @Test
