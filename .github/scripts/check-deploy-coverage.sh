@@ -139,7 +139,13 @@ while IFS= read -r line; do
 done < <(jq -r '.packages | keys[]' "$RP_CONFIG" | grep '^openbank-' | sort)
 
 # The hand-maintained deploy list.
-ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//")"
+# `|| true` is load-bearing, not defensive noise: under `set -euo pipefail` a no-match grep
+# exits 1, the pipeline inherits it, and the script dies HERE — before the explicit check one
+# line below, which is therefore unreachable. Regressed by a merge-conflict resolution that
+# picked the pre-fix side of this exact line (batch 12 fixed it; the fix lived outside the
+# conflicted hunk and the diff never showed it). Caught by the self-test going UNFALSIFIED,
+# which is what that state exists to catch.
+ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//" || true)"
 [ -n "$ALL_SERVICES" ] || { echo "ERROR: could not read ALL_SERVICES from ${WORKFLOW}." >&2; exit 2; }
 
 # Components that ArgoCD actually deploys, i.e. something references their image.
