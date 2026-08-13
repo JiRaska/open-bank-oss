@@ -72,6 +72,9 @@ test('authors a measured A/B content experiment and renders its conservative res
   await page.locator('#c-name').fill('Headline comparison')
   await page.locator('#c-goal').fill('Open more accounts')
   await page.locator('[data-segment="actives@1"]').click()
+  // The studio is app-first by default. This scenario deliberately authors the richer e-mail
+  // template because both experiment arms exercise its complete variable contract.
+  await page.locator('[data-channel-pick="EMAIL"]').click()
   await page.locator('#var-0-offerTitle').fill('Save more with A')
   await page.locator('#var-0-offerText').fill('A copy')
   await page.locator('#var-0-ctaText').fill('Open')
