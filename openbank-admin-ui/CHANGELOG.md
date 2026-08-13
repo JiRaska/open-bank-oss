@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.116.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.115.0...admin-ui-v0.116.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** add app-first journey recipes ([#4643](https://github.com/JiRaska/open-bank-oss/issues/4643)) ([fa06243](https://github.com/JiRaska/open-bank-oss/commit/fa06243b5673dd0b06e3efe175a481bc66c495c9))
+
 ## [0.115.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.1...admin-ui-v0.115.0) (2026-08-13)
 
 
