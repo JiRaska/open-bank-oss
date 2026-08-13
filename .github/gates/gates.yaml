@@ -1522,6 +1522,8 @@ gates:
     name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-operator-write-naming.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
@@ -1712,6 +1714,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 1500   # 3121 .kt files today (2026-08-09)
+    selftest: bash .github/scripts/check-domain-event-occuredat.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-domain-event-occuredat.sh
 
@@ -1729,6 +1733,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
+    selftest: bash .github/scripts/check-clock-injection.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-clock-injection.sh
 
