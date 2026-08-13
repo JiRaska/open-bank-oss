@@ -36,10 +36,16 @@ class CampaignInteractionResource(private val query: CampaignInteractionQuery) {
     ): Response {
         val customerPartyId = partyId?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return Response.status(Response.Status.BAD_REQUEST).build()
-        return if (query.isValidForParty(interactionRef, customerPartyId)) {
-            Response.noContent().build()
-        } else {
-            Response.status(Response.Status.NOT_FOUND).build()
-        }
+        val attribution = query.resolve(interactionRef, customerPartyId)
+            ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(
+            CampaignInteractionAttributionResponse(
+                campaignId = attribution.campaignId,
+                stepOrder = attribution.stepOrder,
+                channel = attribution.channel.name,
+            ),
+        ).build()
     }
 }
+
+data class CampaignInteractionAttributionResponse(val campaignId: UUID, val stepOrder: Int, val channel: String)

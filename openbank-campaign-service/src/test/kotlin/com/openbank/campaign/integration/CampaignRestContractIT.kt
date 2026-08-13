@@ -18,6 +18,8 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.containsInAnyOrder
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -139,7 +141,7 @@ class CampaignRestContractIT {
                 statement.setObject(1, interactionRef)
                 statement.setObject(2, campaignId)
                 statement.setObject(3, partyId)
-                statement.setInt(4, 1)
+                statement.setInt(4, 0)
                 statement.setString(5, "SENT")
                 statement.setObject(6, OffsetDateTime.now())
                 statement.setString(7, "PENDING")
@@ -178,7 +180,7 @@ class CampaignRestContractIT {
 
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
-    fun `interaction validation is served only for the owning party and reveals no campaign data`() {
+    fun `interaction validation resolves only server-owned context for the owning party`() {
         // The validation route intentionally needs no campaign lifecycle read. Seed the minimal
         // durable parent directly, so this test runs entirely under the edge's ROLE_API identity
         // rather than borrowing an operator token to create a draft.
@@ -192,7 +194,11 @@ class CampaignRestContractIT {
         } When {
             get("/api/v1/campaigns/interactions/$interactionRef")
         } Then {
-            statusCode(204)
+            statusCode(200)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("stepOrder", equalTo(0))
+            body("channel", equalTo("PUSH"))
+            body("partyId", nullValue())
         }
 
         Given {

@@ -4,7 +4,9 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.SendLogRepository
+import com.openbank.campaign.domain.model.Channel
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -21,9 +23,10 @@ class CampaignInteractionQueryTest {
     fun `delegates the opaque reference and authoritative party to the send log`(): Unit = runBlocking {
         val interactionRef = UUID.randomUUID()
         val partyId = UUID.randomUUID()
-        coEvery { sendLog.hasPushInteractionForParty(interactionRef, partyId) } returns true
+        val attribution = CampaignInteractionAttribution(UUID.randomUUID(), 0, Channel.PUSH)
+        coEvery { sendLog.attributionForPushInteraction(interactionRef, partyId) } returns attribution
 
-        assertThat(query.isValidForParty(interactionRef, partyId)).isTrue()
-        coVerify(exactly = 1) { sendLog.hasPushInteractionForParty(interactionRef, partyId) }
+        assertThat(query.resolve(interactionRef, partyId)).isEqualTo(attribution)
+        coVerify(exactly = 1) { sendLog.attributionForPushInteraction(interactionRef, partyId) }
     }
 }
