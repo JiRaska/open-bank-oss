@@ -40,13 +40,24 @@ no list to maintain, and a contract added tomorrow is in scope the moment it is 
      (the plain-data-class shape notification-service uses) — and every such literal must have a
      message. This is what catches an event added in code and never documented.
 
-  C. PAYLOAD PROPERTIES vs PRIMARY-CONSTRUCTOR PROPERTIES (both directions). The payload schema is
+  C. PAYLOAD PROPERTIES vs THE PRODUCER'S FIELD NAMES (both directions). The payload schema is
      resolved through `$ref` and `allOf` into a flat property-name set and compared with the
      producing data class's primary-constructor property names, plus the six fields `DomainEvent`
      contributes (`eventId`, `aggregateId`, `aggregateType`, `eventType`, `version`, `occurredAt`)
      when the class extends it. This is the check with teeth: it is what would have caught the
      #3410 class of defect, where the aggregate carried `validFrom`/`validTo`/`perTransactionLimit`
      and the events did not, so consumers read fields the producer never sent.
+
+     Not every producer HAS a constructor to read. The fleet builds event payloads two ways, and
+     the second one has no data class anywhere: `mapOf("batchId" to ...)`, `buildMap { put(..) }`
+     or a raw JSON string template, written inline at the outbox call. That half used to be
+     recorded with `props=None` and check C skipped for it entirely — so for those producers this
+     gate asserted the channel and the message name and said nothing about the wire. `payload_keys`
+     now reads the field names out of the construction site for all three shapes, and the skip
+     survives only where the site cannot be tied to its event type unambiguously. It matters more
+     than the three contracts in the tree suggest: 28 of the fleet's 42 producer:topic pairs are
+     grandfathered in `.github/event-contract-baseline.txt`, and about half are this idiom, so
+     without it the #1916 migration would buy those topics no payload checking at all.
 
 WHAT IT DELIBERATELY DOES NOT CHECK
 -----------------------------------
@@ -298,19 +309,120 @@ def parse_event_classes(service_dir: pathlib.Path) -> dict[str, dict]:
     return by_event_type
 
 
+# --- payload KEYS for the hand-built-outbox idiom ----------------------------------------------
+#
+# The hand-built idiom has no constructor, which is why check C used to be skipped for it — but it
+# does not follow that the payload's field names are unknowable. They are written out literally at
+# the construction site, in one of three shapes the fleet uses:
+#
+#   mapOf("batchId" to batch.id, ...)              swift-service, clearing-service
+#   buildMap { put("partyId", ...) }               engagement-service (conditional puts included)
+#   """{"partyId":"$partyId","active":$active}"""  fraud-service (a raw JSON string template)
+#
+# Reading them turns the idiom from "unverifiable" into "verifiable", which matters well beyond the
+# three services that have contracts today: 28 of the fleet's 42 producer:topic pairs are
+# grandfathered in .github/event-contract-baseline.txt, and roughly half of them are this idiom. If
+# check C stays skipped for it, writing those contracts buys channel and message-name agreement and
+# NOT payload agreement — the check with teeth — so the migration #1916 describes would close much
+# less of the gap than it appears to.
+MAPOF_KEY_RE = re.compile(r'"([^"\\\n]+)"\s*to\s')
+BUILDMAP_KEY_RE = re.compile(r'\bput\(\s*"([^"\\\n]+)"\s*,')
+# A JSON object key inside a string template: `"name":`. Restricted to identifier-shaped names so a
+# `$interpolated` value or a formatted timestamp can never be mistaken for a key.
+JSON_KEY_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:')
+STRING_LITERAL_RE = re.compile(r'"""(?:.|\n)*?"""|"(?:[^"\\\n]|\\.)*"')
+
+
+def payload_keys(region: str) -> set[str] | None:
+    """The JSON field names a hand-built payload region writes, or None if the shape is unknown.
+
+    Returning None (rather than an empty set) for an unrecognised shape is load-bearing: an empty
+    set would be compared against the contract and report every documented property as absent from
+    the code. Unknown must stay unknown, so this only ever speaks about shapes it recognises.
+
+    The three shapes are tried in order of specificity. A `mapOf`/`buildMap` region also contains
+    string literals, so the JSON-template branch must come last or it would read the map's VALUES
+    as keys wherever one happens to contain a colon.
+    """
+    if "mapOf(" in region:
+        keys = set(MAPOF_KEY_RE.findall(region))
+    elif "buildMap" in region:
+        keys = set(BUILDMAP_KEY_RE.findall(region))
+    else:
+        # Only inside string literals: elsewhere a `"x":` shape would be a map entry or a type
+        # annotation, not a wire field.
+        keys = set()
+        for lit in STRING_LITERAL_RE.findall(region):
+            keys |= set(JSON_KEY_RE.findall(lit))
+    return keys or None
+
+
+def outbox_payload_region(src: str, span_start: int, span_end: int) -> str | None:
+    """The source region that builds this `OutboxMessage(...)` call's payload, or None.
+
+    `payload = <expr>` is either the construction itself (swift-service builds the map inline) or a
+    reference to a local built just above it (fraud-service, engagement-service). For the reference
+    case the region is bounded at the `OutboxMessage(` call — the local must be assigned before it
+    is used, so nothing after that point can contribute to the payload, and bounding it this way
+    cannot silently reach into an unrelated later statement.
+    """
+    m = re.search(r"\bpayload\s*=\s*", src[span_start:span_end])
+    if m is None:
+        return None
+    expr = src[span_start + m.end() : span_end]
+    ident = re.match(r"([A-Za-z_][A-Za-z0-9_]*)\s*[,)]", expr)
+    if ident is None:
+        return expr  # built inline in the argument list
+    decl = re.search(rf"\bval\s+{re.escape(ident.group(1))}\s*=", src[:span_start])
+    return src[decl.end() : span_start] if decl else None
+
+
 def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
     """The hand-built-outbox idiom's event-type literals — see the regexes' own docstrings.
 
-    File-wide, not class-scoped: there is no `data class` to bound the search to. `props` is
-    always `None` here, so check_contract()'s payload-property comparison (C) is skipped for
-    these entries rather than compared against a constructor this idiom does not have.
+    File-wide, not class-scoped: there is no `data class` to bound the search to.
+
+    `props` is the set of payload field names where the construction site can be read
+    unambiguously (see payload_keys / outbox_payload_region), and None otherwise — in which case
+    check_contract()'s payload-property comparison (C) is skipped for the entry, as it was for
+    every entry of this idiom before. Two guards keep the direction of any error safe:
+
+      * only an `eventType` literal INSIDE an `OutboxMessage(...)` call can acquire props, so an
+        event type passed as a function parameter (case-coordinator-agent's `emitTerminalProposal`,
+        where the payload is built in the callee) stays unknown rather than being paired with
+        whatever payload happens to sit nearby;
+      * if the same event type is emitted from several sites whose key sets DISAGREE, props falls
+        back to None. Comparing a contract against one of several disagreeing payloads is the
+        confident-wrong-answer failure this gate's own class_body() docstring warns about.
     """
     by_event_type: dict[str, dict] = {}
+    conflicting: set[str] = set()
     src_root = service_dir / "src" / "main" / "kotlin"
     if not src_root.is_dir():
         return by_event_type
     for kt in sorted(src_root.rglob("*.kt")):
         src = strip_kotlin_comments(kt.read_text(encoding="utf-8", errors="replace"))
+        # Payload key sets, keyed by the event type declared in the same OutboxMessage(...) call.
+        keys_by_type: dict[str, set[str]] = {}
+        for om in re.finditer(r"\bOutboxMessage\s*\(", src):
+            span = balanced_span(src, om.end() - 1)
+            if span is None:
+                continue
+            start, end = span
+            # Both shapes an OutboxMessage names its event type in: a bare literal, and the
+            # discriminated-union template whose static PREFIX is what the contract's message is
+            # named after (engagement-service). Same call, same payload — same association.
+            tm = BARE_EVENT_TYPE_RE.search(src[start:end]) or TEMPLATE_PREFIX_RE.search(src[start:end])
+            if tm is None:
+                continue
+            region = outbox_payload_region(src, start, end)
+            keys = payload_keys(region) if region else None
+            if keys is None:
+                continue
+            literal = tm.group(1)
+            if literal in keys_by_type and keys_by_type[literal] != keys:
+                conflicting.add(literal)
+            keys_by_type[literal] = keys
         for rx in (TEMPLATE_PREFIX_RE, BARE_EVENT_TYPE_RE):
             for m in rx.finditer(src):
                 literal = m.group(1)
@@ -318,10 +430,12 @@ def parse_outbox_literals(service_dir: pathlib.Path) -> dict[str, dict]:
                     continue
                 by_event_type[literal] = {
                     "class": None,
-                    "props": None,
+                    "props": keys_by_type.get(literal),
                     "domain_event": False,
                     "path": str(kt.relative_to(REPO)),
                 }
+    for literal in conflicting:
+        by_event_type[literal]["props"] = None
     return by_event_type
 
 
@@ -480,7 +594,10 @@ def check_contract(path: pathlib.Path) -> list[str]:
         if info is None:
             continue  # already reported by B; do not double-report
         if info["props"] is None:
-            continue  # hand-built outbox literal — no constructor to compare properties against
+            # Either a hand-built payload whose construction site could not be read unambiguously,
+            # or an event type declared away from its OutboxMessage call. Unknown, not empty.
+            continue
+        producer = info["class"] or f"the hand-built payload in {info['path']}"
         payload = msg.get("payload")
         if payload is None:
             errors.append(f"{rel}: message `{name}` declares no payload schema.")
@@ -492,12 +609,12 @@ def check_contract(path: pathlib.Path) -> list[str]:
         for extra in sorted(documented - actual):
             errors.append(
                 f"{rel}: message `{name}` documents property `{extra}`, which "
-                f"{info['class']} ({info['path']}) does not carry. A consumer written against this "
+                f"{producer} ({info['path']}) does not carry. A consumer written against this "
                 f"document reads a field the producer never sends."
             )
         for missing in sorted(actual - documented):
             errors.append(
-                f"{rel}: {info['class']} ({info['path']}) carries property `{missing}` and message "
+                f"{rel}: {producer} ({info['path']}) carries property `{missing}` and message "
                 f"`{name}` does not document it — an undocumented field on a published event."
             )
     return errors
@@ -651,6 +768,42 @@ def self_test() -> int:
             t / "openbank-delegation-service" / "src/main/kotlin/com/openbank/delegation/domain/event/DelegationEvents.kt",
             "    val reason: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
             "    val reason: String,\n    val suppressedBy: String,\n    override val occurredAt: Instant,\n) : DomainEvent(occurredAt) {\n    override val aggregateType = \"DelegationGrant\"\n    override val eventType = \"DelegationRevoked\"",
+        ),
+        "does not document it",
+    )
+    # C, hand-built JSON string template (fraud-service). Before payload_keys() existed this
+    # mutation was INVISIBLE: props was None for the whole idiom, so check C was skipped and the
+    # gate stayed green while the contract documented a field the producer had stopped sending.
+    case(
+        "documented property absent from a hand-built JSON template",
+        "openbank-fraud-service",
+        lambda t: edit(
+            t / "openbank-fraud-service" / "src/main/kotlin/com/openbank/fraud/application/usecase/FraudHoldService.kt",
+            '"ruleVersion":"$RULE_VERSION",',
+            "",
+        ),
+        "does not carry",
+    )
+    # C (other direction) on the same idiom: a field added to the wire and not to the contract.
+    case(
+        "hand-built template property undocumented",
+        "openbank-fraud-service",
+        lambda t: edit(
+            t / "openbank-fraud-service" / "src/main/kotlin/com/openbank/fraud/application/usecase/FraudHoldService.kt",
+            '"ruleVersion":"$RULE_VERSION",',
+            '"ruleVersion":"$RULE_VERSION","deviceId":"$partyId",',
+        ),
+        "does not document it",
+    )
+    # C, hand-built `buildMap` (engagement-service) — the third shape, and the one with
+    # CONDITIONAL puts, which are read as ordinary keys because a consumer can receive them.
+    case(
+        "buildMap payload property undocumented",
+        "openbank-engagement-service",
+        lambda t: edit(
+            t / "openbank-engagement-service" / "src/main/kotlin/com/openbank/engagement/infrastructure/persistence/repository/EngagementEventRepositoryImpl.kt",
+            'put("slot", event.slot.name)',
+            'put("slot", event.slot.name)\n                        put("surface", "APP")',
         ),
         "does not document it",
     )
