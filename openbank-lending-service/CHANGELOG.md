@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.2...lending-service-v0.24.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* **lending:** converge the compliance-pack registry across replicas ([#3644](https://github.com/JiRaska/open-bank-oss/issues/3644)) ([9e8fa86](https://github.com/JiRaska/open-bank-oss/commit/9e8fa8683f4d24311bd8e744084daffb952755df))
+
 ## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.1...lending-service-v0.24.2) (2026-08-10)
 
 
