@@ -16,5 +16,26 @@ package com.openbank.document.application.port.out
  * exists anywhere in this repo yet.
  */
 interface StatementDeliveryPort {
-    fun deliver(partyRef: String, documentBytes: ByteArray, contentType: String, subject: String)
+    fun deliver(partyRef: String, documentBytes: ByteArray, contentType: String, subject: String): DeliveryOutcome
+}
+
+/**
+ * What a [StatementDeliveryPort.deliver] call actually achieved.
+ *
+ * A no-op MUST NOT share a value with a real send. The port used to return `Unit`, so the only
+ * implementation — a stub that logs and sends nothing — was indistinguishable from a working
+ * channel, and [AnnualStatementDeliveryService][com.openbank.document.application.usecase.AnnualStatementDeliveryService]
+ * recorded a 400-day "delivered" idempotency key on the strength of it. That key is what a later,
+ * real channel would then consult and skip, so the stub did not merely fail to deliver — it
+ * suppressed the delivery that would eventually have succeeded.
+ *
+ * Same rule and same remedy as `PushResult.outcome` (ADR-0252 phase 0): the skipped case gets its
+ * own enum value, never a flag shared with success.
+ */
+enum class DeliveryOutcome {
+    /** The document was handed to a real channel that accepted it. Only this may be recorded. */
+    DELIVERED,
+
+    /** No channel exists or it is disabled: nothing was sent, and nothing may be recorded. */
+    SKIPPED,
 }
