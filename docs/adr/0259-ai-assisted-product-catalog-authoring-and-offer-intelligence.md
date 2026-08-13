@@ -1,7 +1,7 @@
 ---
 date: 2026-08-13
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -54,8 +54,8 @@ different human approves or rejects it, and approval still has no direct catalog
 
 ### 2. Authoring-review flow
 
-The first delivery is a Catalog Author plus Catalog Reviewer vertical slice. A Studio operator
-chooses an existing draft and explicitly starts a review. The adapter creates a bounded,
+The first delivered slice is a Catalog Reviewer. A Studio operator chooses an existing draft and
+explicitly starts a review. A future Catalog Author remains proposal-only. The adapter creates a bounded,
 immutable review context containing the revision id, ETag/content hash, schema reference, locale,
 market context, deterministic validation result and the minimal draft fields necessary for review.
 It labels all product prose and linked evidence as untrusted data.
@@ -63,7 +63,7 @@ It labels all product prose and linked evidence as untrusted data.
 The agent returns structured findings rather than free-form executable instructions:
 
 ```
-{ severity, category, instancePath, evidence, recommendation, confidence, requiresHumanDecision }
+{ severity, category, instancePath, evidence, recommendation, requiresHumanDecision }
 ```
 
 The server rejects any response that has an unknown field, more than the configured finding limit,

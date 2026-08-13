@@ -8,7 +8,7 @@ openapi: "3.1.0"
 info:
   title: OpenBank Agent Service API (MCP)
 
-  version: "1.11.0"
+  version: "1.12.0"
   description: |
     Model Context Protocol (MCP) 2.0 server exposing OpenBank domain operations as AI-callable tools.
     All requests use JSON-RPC 2.0 over HTTP POST `/mcp`.
@@ -24,8 +24,9 @@ info:
     UI posts to `/agent/chat`, the loop runs each tool through the OPA policy gate, and every
     model completion emits an AI-attributed audit event. `/agent/models` lists the registered
     models. The demo ships a single offline mock provider; adding a real model is a config entry,
-    not a code change. Catalog review uses `get_catalog_revision`, a read-only MCP tool that returns
-    one exact v2 offering revision; it cannot author, replace, publish or retire product terms.
+    not a code change. `POST /agent/catalog-reviews` turns one exact DRAFT revision into a
+    human-reviewed proposal: it has no catalog mutation path and refuses to send private draft
+    content to a hosted model.
 
     This is an internal service — not exposed via API Gateway to external TPPs.
   license:
@@ -41,6 +42,10 @@ tags:
     description: MCP JSON-RPC 2.0 endpoint
   - name: agent
     description: Admin-UI assistant — governed, server-side chat (ADR-0031)
+  - name: catalog-review
+    description: >-
+      AI-assisted draft review (ADR-0259). It reads one exact DRAFT snapshot and creates only a
+      PROPOSED human-review item; it cannot mutate or publish catalog content.
   - name: proposals
     description: >-
       HITL approval queue (ADR-0031 D4). Requires an authenticated operator bearer
@@ -217,6 +222,41 @@ paths:
                       - id: "mock-echo"
                         provider: "mock"
                         sensitivity: "HOSTED"
+
+  /agent/catalog-reviews:
+    post:
+      tags: [catalog-review]
+      operationId: createCatalogReview
+      summary: Review one exact catalog DRAFT and create a human-review proposal
+      description: |
+        ADR-0259 P6a. Fetches the exact v2 offering revision named by `offeringId` and
+        `revisionId`, requires it to still be DRAFT, then gives that fixed snapshot to a
+        self-hosted model with no tools. The response is an immutable PROPOSED record in the
+        existing HITL queue plus bounded findings. It never creates, replaces, publishes or
+        retires catalog content, determines eligibility, or enumerates private offers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CatalogReviewRequest'
+      responses:
+        "201":
+          description: Human-review proposal created from the exact snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CatalogReviewResponse'
+        "400":
+          description: Invalid identifiers, non-DRAFT revision, oversized snapshot or invalid model output
+        "401":
+          description: Missing or invalid operator bearer
+        "403":
+          description: Authenticated caller is not an operator
+        "404":
+          description: Offering or revision not found
+        "503":
+          description: No self-hosted review model is available
 
   /agent/oversight/run:
     post:
@@ -573,9 +613,74 @@ components:
           items:
             $ref: '#/components/schemas/ModelInfo'
 
+    CatalogReviewRequest:
+      type: object
+      required: [offeringId, revisionId]
+      additionalProperties: false
+      properties:
+        offeringId:
+          type: string
+          format: uuid
+        revisionId:
+          type: string
+          format: uuid
+        model:
+          type: string
+          description: Optional registered self-hosted model id. Omit to use the self-hosted default.
+
+    CatalogReviewFinding:
+      type: object
+      required: [severity, category, instancePath, evidence, recommendation, requiresHumanDecision]
+      additionalProperties: false
+      properties:
+        severity:
+          type: string
+          enum: [INFO, WARNING, HIGH]
+        category:
+          type: string
+          maxLength: 80
+        instancePath:
+          type: string
+          maxLength: 512
+          description: JSON Pointer into the reviewed revision snapshot.
+        evidence:
+          type: string
+          maxLength: 2000
+        recommendation:
+          type: string
+          maxLength: 2000
+        requiresHumanDecision:
+          type: boolean
+
+    CatalogReviewResponse:
+      type: object
+      required: [proposalId, state, contextHash, summary, findings, model]
+      additionalProperties: false
+      properties:
+        proposalId:
+          type: string
+          format: uuid
+        state:
+          type: string
+          enum: [PROPOSED]
+        contextHash:
+          type: string
+          pattern: '^[a-f0-9]{64}$'
+          description: SHA-256 of the exact snapshot reviewed by the model.
+        summary:
+          type: string
+          maxLength: 4000
+        findings:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/CatalogReviewFinding'
+        model:
+          type: string
+
     ProposalDto:
       type: object
-      required: [id, title, rationale, suggestedAction, proposedBy, proposedAt, state]
+      required: [id, title, rationale, suggestedAction, proposedBy, proposedAt, state, metadata]
       properties:
         id:
           type: string
@@ -609,6 +714,11 @@ components:
         modelId:
           type: string
           nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Immutable non-secret proposal provenance, including catalog review context hashes where present.
 
     DecisionRequest:
       type: object

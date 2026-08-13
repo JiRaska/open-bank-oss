@@ -20,6 +20,7 @@ internal object RegisteredPromptTemplates {
 
     private val oversightTemplate = loadRegisteredPrompt("compliance-officer", "oversight.v1")
     private val uiAssistantTemplate = loadRegisteredPrompt("ui-assistant", "system.v3")
+    private val catalogReviewTemplate = loadRegisteredPrompt("ui-assistant", "catalog-review.v1")
 
     internal fun oversightPrompt(pendingTitles: List<String>): String = if (pendingTitles.isEmpty()) {
         normalizeTrailingWhitespace(oversightTemplate.replace(OVERSIGHT_DUPLICATE_CLAUSE, ""))
@@ -30,6 +31,9 @@ internal object RegisteredPromptTemplates {
     internal fun uiAssistantPrompt(pageContext: String?): String = pageContext?.takeIf { it.isNotBlank() }
         ?.let { renderTemplate(uiAssistantTemplate, mapOf("page_context" to it)) }
         ?: normalizeTrailingWhitespace(uiAssistantTemplate.replace(PAGE_CONTEXT_CLAUSE, ""))
+
+    /** Purpose-bound UI-assistant mode used only with a pre-fetched, exact catalog snapshot. */
+    internal fun catalogReviewPrompt(): String = catalogReviewTemplate
 
     /**
      * Load a prompt template from the ADR-0148 registry, packaged onto the classpath at build time

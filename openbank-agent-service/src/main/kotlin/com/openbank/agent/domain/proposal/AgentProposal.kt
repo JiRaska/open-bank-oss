@@ -33,4 +33,6 @@ data class AgentProposal(
     val decisionReason: String?,
     val modelId: String?,
     val correlationId: String?,
+    /** Immutable, non-secret proposal provenance (for example a reviewed catalog snapshot hash). */
+    val metadata: Map<String, String> = emptyMap(),
 )

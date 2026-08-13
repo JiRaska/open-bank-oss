@@ -68,7 +68,7 @@ tasks.named<Copy>("processResources") {
         into("governance-prompts/compliance-officer")
     }
     from(rootProject.file("openbank-libs/governance/prompts/ui-assistant")) {
-        include("system.v3.md")
+        include("system.v3.md", "catalog-review.v1.md")
         into("governance-prompts/ui-assistant")
     }
 }

@@ -80,6 +80,8 @@ class AgentChatService {
         val model: String,
         val toolCalls: List<ToolCallRecord>,
         val isProposal: Boolean = false,
+        /** True only for the controlled, audited model-backend degradation outcome. */
+        val unavailable: Boolean = false,
     )
 
     /** [ChatOutcome] plus the run metadata the D5 audit event needs (not exposed on the wire). */
@@ -101,6 +103,18 @@ class AgentChatService {
         history: List<ChatMessage>,
         modelId: String?,
         trigger: String,
+        /**
+         * Optional, invocation-specific narrowing of the charter tool set. It can only remove
+         * tools which the charter would otherwise permit; it can never add a capability.
+         *
+         * Catalog draft review passes an empty set: its exact snapshot is supplied before the
+         * model runs and the model must not reach any live service while reviewing it.
+         */
+        offeredToolNames: Set<String>? = null,
+        /** Route non-public or regulated context to a self-hosted model (ADR-0031 D6). */
+        sensitive: Boolean = false,
+        /** Marks this bounded response as a human-review proposal in the run-level audit. */
+        proposalExpected: Boolean = false,
     ): ChatOutcome {
         // ADR-0031 D5 (#3667): resolve the acting model ONCE, up front, and carry it on the identity
         // for the whole run. Every AI-attributed audit event this run emits — the policy gate's
@@ -120,7 +134,15 @@ class AgentChatService {
             .setAttribute("openbank.agent.trigger", trigger)
             .startSpan()
         try {
-            val run = chatLoop(identity, systemPrompt, history, modelId)
+            val run = chatLoop(
+                identity = identity,
+                systemPrompt = systemPrompt,
+                history = history,
+                modelId = modelId,
+                offeredToolNames = offeredToolNames,
+                sensitive = sensitive,
+                proposalExpected = proposalExpected,
+            )
             span.setAttribute("openbank.agent.model_id", run.outcome.model)
             span.setAttribute("openbank.agent.tool_calls", run.outcome.toolCalls.size.toLong())
             span.setAttribute("openbank.agent.tokens_total", run.totalTokens)
@@ -156,11 +178,19 @@ class AgentChatService {
         }
     }
 
+    // This is intentionally the single bounded model↔tool control flow: splitting pre-flight,
+    // policy, tool-result isolation and post-run audit decisions would make it easier to bypass a
+    // governance step while preserving the model loop. Invocation-specific narrowing adds no new
+    // branch of authority; it only removes offered tools.
+    @Suppress("LongMethod", "CyclomaticComplexMethod")
     private suspend fun chatLoop(
         identity: AgentIdentity,
         systemPrompt: String,
         history: List<ChatMessage>,
         modelId: String?,
+        offeredToolNames: Set<String>?,
+        sensitive: Boolean,
+        proposalExpected: Boolean,
     ): LoopResult {
         // D7: kill switch — the highest-precedence pre-flight. A halted agent never reaches the
         // model, the tools, or even the rate limiter. Runtime break-glass > config baseline.
@@ -229,6 +259,7 @@ class AgentChatService {
         val allowedCaps = charterRegistry.allowedCapabilities(identity.agentId)
         val tools = registry.tools
             .filter { allowedCaps.isEmpty() || registry.capabilityOf(it.name) in allowedCaps }
+            .filter { offeredToolNames == null || it.name in offeredToolNames }
             .map { ToolSpec(it.name, it.description, it.inputSchema) }
         val messages = mutableListOf<ChatMessage>()
         // D6: every agent gets the untrusted-data contract appended — the markers are added by
@@ -256,6 +287,7 @@ class AgentChatService {
                         tools = if (offerTools) tools else emptyList(),
                         maxTokens = MAX_OUTPUT_TOKENS,
                     ),
+                    sensitive = sensitive,
                     actorId = identity.agentId,
                 )
             } catch (e: Exception) {
@@ -269,7 +301,7 @@ class AgentChatService {
                 }
                 log.warnf("model call failed, degrading gracefully: %s", msg)
                 return LoopResult(
-                    outcome = ChatOutcome(reply = reply, model = lastModel, toolCalls = record),
+                    outcome = ChatOutcome(reply = reply, model = lastModel, toolCalls = record, unavailable = true),
                     promptHash = promptHash,
                     totalTokens = totalTokens,
                     auditResult = AuditResult.FAILURE,
@@ -285,7 +317,7 @@ class AgentChatService {
                 val tokenWarning = rateLimiter.checkTokensPerRun(identity.agentId, totalTokens)
                 val finalReply = if (tokenWarning != null) response.content + "\n\n$tokenWarning" else response.content
                 // D4: flag replies that contain a proposal requiring human review (charter requires_human).
-                val proposal = ProposalDetector.isProposal(response.content)
+                val proposal = proposalExpected || ProposalDetector.isProposal(response.content)
                 if (proposal) {
                     log.infof(
                         "D4: proposal detected in assistant reply for agent=%s",

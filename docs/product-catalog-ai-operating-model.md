@@ -43,7 +43,9 @@ qualifies.”*
 2. Run deterministic validation first. A model never receives a broken payload as an invitation to
    repair a schema or bypass a rule.
 3. Treat model output as data. Parse a closed JSON response, cap size/depth/findings and persist the
-   exact prompt version, model id and grounded context hash.
+   exact prompt version, model id and grounded context hash. The delivered P6a reviewer currently
+   grounds one exact DRAFT revision and records its revision/schema/content/context hashes; locale,
+   market context and deterministic preflight findings are the next bounded enrichment, not inferred.
 4. A generated patch is a suggestion for an operator, never an API request emitted by the agent.
    The regular v2 mutation, ETag, audit/outbox and independent publication check remain mandatory.
 5. Use the existing agent service controls: OPA capability gate, charter quota, `draft.ticket`,

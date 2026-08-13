@@ -49,10 +49,12 @@ class AgentChatContractTest {
     }
 
     @Test
-    fun `the MCP contract documents the read-only catalog revision review seam`() {
+    fun `the contract documents the no-tools catalog draft review seam`() {
         assertThat(openapi)
-            .contains("get_catalog_revision")
-            .contains("cannot author, replace, publish or retire")
+            .contains("/agent/catalog-reviews:")
+            .contains("operationId: createCatalogReview")
+            .contains("self-hosted model with no tools")
+            .contains("cannot mutate or publish catalog content")
     }
 
     @Test

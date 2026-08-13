@@ -24,6 +24,7 @@ interface CreateProposalUseCase {
         proposedBy: String,
         modelId: String?,
         correlationId: String?,
+        metadata: Map<String, String> = emptyMap(),
     ): AgentProposal
 }
 
