@@ -52,9 +52,10 @@ import gatelib
 
 REALM_GLOB = "openbank-infra/gitops/components/keycloak/*realm-template*.json"
 ROLES_KT = "openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/Roles.kt"
+CATALOG_ROLES_KT = "openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/infrastructure/security/CatalogScopeIdentityAugmentor.kt"
 
 ANNOTATION_RE = re.compile(r"@RolesAllowed\s*\(([^)]*)\)", re.S)
-ARG_RE = re.compile(r'"([^"]+)"|Roles\.(\w+)')
+ARG_RE = re.compile(r'"([^"]+)"|(?:(Roles|CatalogRoles)\.(\w+))')
 CONST_RE = re.compile(r'const\s+val\s+(\w+)\s*[:=][^"]*"([^"]+)"')
 
 # Kotlin block comments NEST (a `/*` inside a KDoc opens a second level) — mirror that, or a KDoc
@@ -104,10 +105,12 @@ def realm_roles(root: pathlib.Path, errors):
 
 
 def role_constants(root: pathlib.Path):
-    f = root / ROLES_KT
-    if not f.is_file():
-        return {}
-    return dict(CONST_RE.findall(f.read_text()))
+    constants = {}
+    for qualifier, relative_path in (("Roles", ROLES_KT), ("CatalogRoles", CATALOG_ROLES_KT)):
+        source = root / relative_path
+        if source.is_file():
+            constants.update({f"{qualifier}.{name}": value for name, value in CONST_RE.findall(source.read_text())})
+    return constants
 
 
 def scan(root: pathlib.Path, known, consts):
@@ -116,8 +119,9 @@ def scan(root: pathlib.Path, known, consts):
         src = strip_comments(f.read_text())
         for m in ANNOTATION_RE.finditer(src):
             names = []
-            for literal, const in ARG_RE.findall(m.group(1)):
-                names.append(literal or consts.get(const, f"Roles.{const}"))
+            for literal, qualifier, const in ARG_RE.findall(m.group(1)):
+                key = f"{qualifier}.{const}" if qualifier else ""
+                names.append(literal or consts.get(key, key))
             if not names:
                 continue
             line = src[: m.start()].count("\n") + 1
