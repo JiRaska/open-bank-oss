@@ -19,6 +19,11 @@ import {
 import { StepEditor } from '@/components/campaigns/StepEditor'
 import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
 import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
+import {
+  JourneyRecipePicker,
+  type JourneyRecipe,
+  type JourneyRecipeId,
+} from '@/components/campaigns/JourneyRecipePicker'
 
 /**
  * Campaign Studio — authoring on a canvas (ADR-0221 D1).
@@ -106,6 +111,7 @@ export default function NewCampaignPage() {
   const [trigger, setTrigger] = useState('')
   const [entryUnavailable, setEntryUnavailable] = useState(false)
   const [steps, setSteps] = useState<EditorStep[]>([newStep()])
+  const [journeyRecipe, setJourneyRecipe] = useState<JourneyRecipeId | null>('RETURN_TO_APP')
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
   // Null = no cap, which is the service's own default (absent stopCondition runs every step).
@@ -201,6 +207,18 @@ export default function NewCampaignPage() {
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       }]
     })
+
+  const applyRecipe = (recipe: JourneyRecipe) => {
+    // A recipe is only an authoring shortcut. Clone every map so opening one step can never alter
+    // another step's values through a shared object reference.
+    setSteps(recipe.steps.map(step => ({
+      ...step,
+      variables: { ...step.variables },
+      ...(step.variantBVariables ? { variantBVariables: { ...step.variantBVariables } } : {}),
+    })))
+    setJourneyRecipe(recipe.id)
+    setSelected(0)
+  }
 
   const removeStep = (i: number) =>
     setSteps(prev => {
@@ -489,6 +507,8 @@ export default function NewCampaignPage() {
           )}
         </div>
       </section>
+
+      <JourneyRecipePicker selected={journeyRecipe} onApply={applyRecipe} />
 
       <section className="campaign-journey-workbench">
         <div className="campaign-workbench-heading">
