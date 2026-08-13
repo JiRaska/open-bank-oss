@@ -2081,6 +2081,8 @@ gates:
     name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
     group: data
     mode: enforced
+    rationale: "A migration present only in the operator-applied resource path disappears on a fresh ClickHouse rebuild, silently changing the analytics schema after recovery."
+    review_after: "2027-02-13"
     selftest: |
       python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
     selftest_expect: pass
@@ -2217,6 +2219,8 @@ gates:
     name: "event contract vs code agreement (ADR-0006, enforced)"
     group: data
     mode: enforced
+    rationale: "A published event schema that drifts from its producer data class gives consumers a contract the running service cannot emit."
+    review_after: "2027-02-13"
     min_subjects: 2
     selftest: |
       python3 .github/scripts/check-event-contract-code-agreement.py --self-test
