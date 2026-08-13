@@ -129,6 +129,19 @@ spec:
             # aborts the rollout if enforce regresses the error rate.
             - name: AUTHZ_ENFORCE
               value: "true"
+            # Accounting-day lock (ADR-0207 D3, #1302) moves shadow -> enforce. The
+            # evidence gate the ADR set was "would_refuse zero-or-explained after at
+            # least one full day cycle"; six cycles have now run (2026-08-07..12 all
+            # TIED_OUT) and the readout is zero from two independent sources. It was
+            # NOT taken from the shadow counter alone -- that counter is pod-local and
+            # Prometheus retains 12h, and posting volume here is far too low for a
+            # soak to mean anything. It was taken by enumerating the whole population
+            # in ledger-db: of all 168 journal entries ever written, 122 are
+            # future-dated and 46 are same-day (Prague); ZERO are backdated, so there
+            # is no posting shape in this environment that enforce would refuse.
+            # Rollback is this value alone: set back to "shadow".
+            - name: LEDGER_DAY_LOCK_MODE
+              value: "enforce"
           startupProbe:
             tcpSocket:
               port: management
