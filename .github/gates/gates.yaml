@@ -842,6 +842,8 @@ gates:
     name: "gate graduation guard (ADR-0144, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-gate-graduation.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-gate-graduation.sh
 
@@ -996,6 +998,8 @@ gates:
     name: "MCP charter data_scope binding (issue #2412, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-mcp-charter-data-scope.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
 
@@ -1103,6 +1107,8 @@ gates:
     name: "agent charter registry parity (ADR-0031/0156, enforced)"
     group: registry
     mode: enforced
+    selftest: bash .github/scripts/check-agent-charter-registry.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
