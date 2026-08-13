@@ -77,8 +77,8 @@ def charter_status(errors):
     return {e.get("id"): e.get("status") for e in (doc.get("charters", []) or []) if e.get("id")}
 
 
-def check_file(path, ids, errors):
-    rel = path.relative_to(ROOT)
+def check_file(path, ids, errors, root: pathlib.Path = None, prompts: pathlib.Path = None):
+    rel = path.relative_to(root or ROOT)
     try:
         doc = yaml.safe_load(path.read_text()) or {}
     except yaml.YAMLError as e:
@@ -95,10 +95,10 @@ def check_file(path, ids, errors):
 
     prompt = doc.get("prompt")
     if prompt is not None:
-        pf = PROMPTS / str(charter) / f"{prompt}.md"
+        pf = (prompts or PROMPTS) / str(charter) / f"{prompt}.md"
         if not pf.is_file():
             errors.append(f"{rel} — prompt '{prompt}' does not resolve to "
-                          f"{pf.relative_to(ROOT)} (dangling prompt reference)")
+                          f"{pf} (dangling prompt reference)")
 
     scenarios = doc.get("scenarios")
     if not isinstance(scenarios, list) or not scenarios:
@@ -132,7 +132,113 @@ def check_file(path, ids, errors):
     return charter
 
 
+def self_test() -> int:
+    """Falsify the eval-suite validator.
+
+    An eval suite is the only thing that can tell a prompt change from a prompt REGRESSION.
+    Every rule here fails in the same silent direction: a malformed suite that the validator
+    accepts is a suite the runner cannot execute, and a suite that never runs looks exactly
+    like a suite that passes — coverage on paper, nothing exercised.
+
+    The assertion-key check is the sharpest of them: an `assert:` the runner does not
+    understand is not an assertion at all. The scenario still "runs" and still "passes".
+    """
+    import tempfile
+
+    fails: list[str] = []
+    IDS = {"agent-a"}
+
+    def run(name: str, doc: dict, prompt_files=()):
+        td = tempfile.mkdtemp()
+        root = pathlib.Path(td)
+        (root / "evals").mkdir(parents=True)
+        f = root / "evals" / name
+        f.write_text(yaml.safe_dump(doc))
+        prompts = root / "prompts"
+        for rel in prompt_files:
+            pf = prompts / rel
+            pf.parent.mkdir(parents=True, exist_ok=True)
+            pf.write_text("body\n")
+        errs: list[str] = []
+        check_file(f, IDS, errs, root, prompts)
+        return errs
+
+    def case(label, errs, want_hit, want_sub=""):
+        got = bool(errs)
+        if got != want_hit:
+            fails.append(f"{label}: expected error={want_hit}, got {errs}")
+        elif want_sub and not any(want_sub in e for e in errs):
+            fails.append(f"{label}: errored for the wrong reason — no {want_sub!r} in {errs}")
+
+    good_sc = {"id": "happy", "description": "d", "input": "i", "assert": {"must_not_be_empty": True}}
+    good = {"charter": "agent-a", "version": "v1", "scenarios": [good_sc]}
+
+    case("a well-formed suite is clean", run("agent-a.yaml", good), False)
+
+    # Identity: a suite whose charter is not a real agent tests nothing that exists, and the
+    # filename must match or the runner cannot find the suite for a charter at all.
+    case("an unknown charter is an error",
+         run("ghost.yaml", {**good, "charter": "ghost"}), True, "not an id:")
+    case("a filename that disagrees with the charter is an error",
+         run("other.yaml", good), True, "filename must be")
+    case("a missing version is an error", run("agent-a.yaml", {**good, "version": "1"}),
+         True, "version must be v")
+
+    # A DANGLING prompt reference: the suite claims to exercise a prompt that does not exist,
+    # so it exercises nothing while reporting a prompt under test.
+    case("a dangling prompt reference is an error",
+         run("agent-a.yaml", {**good, "prompt": "main.v1"}), True, "dangling prompt")
+    case("a resolvable prompt reference is clean",
+         run("agent-a.yaml", {**good, "prompt": "main.v1"}, ["agent-a/main.v1.md"]), False)
+
+    # An EMPTY suite is the pure form of the failure: full coverage, zero assertions.
+    case("no scenarios is an error", run("agent-a.yaml", {**good, "scenarios": []}),
+         True, "non-empty list")
+    case("scenarios that is not a list is an error",
+         run("agent-a.yaml", {**good, "scenarios": {"id": "x"}}), True, "non-empty list")
+
+    # Scenario identity and required fields.
+    case("a duplicate scenario id is an error",
+         run("agent-a.yaml", {**good, "scenarios": [good_sc, dict(good_sc)]}), True, "duplicate")
+    case("a bad scenario id is an error",
+         run("agent-a.yaml", {**good, "scenarios": [{**good_sc, "id": "Bad_Id"}]}), True, "id must match")
+    for field in ("description", "input"):
+        case(f"a blank {field} is an error",
+             run("agent-a.yaml", {**good, "scenarios": [{**good_sc, field: "   "}]}),
+             True, f"{field} is required")
+
+    # THE SHARPEST ONE: an assertion key the runner does not understand is not an assertion.
+    # The scenario still runs and still passes, so the suite reports coverage it does not have.
+    case("an unknown assertion key is an error",
+         run("agent-a.yaml", {**good, "scenarios": [{**good_sc, "assert": {"must_be_true": 1}}]}),
+         True, "unknown assertion key")
+    case("an empty assert mapping is an error",
+         run("agent-a.yaml", {**good, "scenarios": [{**good_sc, "assert": {}}]}),
+         True, "non-empty mapping")
+    for known in sorted(KNOWN_ASSERTS):
+        case(f"the known assertion '{known}' is accepted",
+             run("agent-a.yaml", {**good, "scenarios": [{**good_sc, "assert": {known: "x"}}]}), False)
+
+    # A live read: the fixtures cannot tell that agents.yaml still parses.
+    live = charter_ids()
+    if not live:
+        fails.append("reading the real agents.yaml produced NO charter ids — every suite would "
+                     "be reported as belonging to an unknown charter")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: evals-registry integrity is falsifiable "
+          f"(18 cases + a live read of {len(live)} charter(s))")
+    return 0
+
+
 def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+
     if not EVALS.is_dir():
         sys.stderr.write(f"::error::evals registry directory missing: {EVALS.relative_to(ROOT)}\n")
         return 1

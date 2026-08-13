@@ -915,6 +915,8 @@ gates:
     name: "prompt-registry integrity (ADR-0148, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-prompt-registry.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-prompt-registry.py
 
@@ -944,6 +946,8 @@ gates:
     name: "evals-registry integrity (ADR-0148, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-evals-registry.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-evals-registry.py
 
@@ -2380,6 +2384,8 @@ gates:
     name: "feature-flag governance (ADR-0067, issue #419)"
     group: security
     mode: enforced
+    selftest: python3 .github/scripts/validate-flags.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/validate-flags.py .
 

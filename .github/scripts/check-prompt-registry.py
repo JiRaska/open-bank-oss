@@ -114,7 +114,7 @@ def load_manifest(ids, errors):
     return entries
 
 
-def cross_check(entries, dirs_seen, errors):
+def cross_check(entries, dirs_seen, errors, prompts: pathlib.Path = None):
     """The manifest's claim must match the tree: registered <=> a directory with exactly its files."""
     for cid, entry in sorted(entries.items()):
         status = entry.get("status")
@@ -122,7 +122,7 @@ def cross_check(entries, dirs_seen, errors):
         if status == "registered":
             declared = {str(p) for p in (entry.get("prompts") or [])}
             for name in sorted(declared):
-                if not (PROMPTS / cid / f"{name}.md").is_file():
+                if not ((prompts or PROMPTS) / cid / f"{name}.md").is_file():
                     errors.append(f"registry.yaml ({cid}) — declares prompt '{name}' but "
                                   f"prompts/{cid}/{name}.md does not exist")
             for name in sorted(files - declared):
@@ -134,7 +134,97 @@ def cross_check(entries, dirs_seen, errors):
                           f"'registered'")
 
 
+def self_test() -> int:
+    """Falsify the registry cross-check and the prompt filename rule.
+
+    What this protects: the set of prompts that has actually been REVIEWED. A prompt file
+    sitting in the tree but absent from registry.yaml is running in production outside the
+    reviewed set — nothing at runtime distinguishes it, because a prompt is just a file the
+    agent reads. The failure is entirely a governance one and entirely invisible to tests.
+
+    Both directions matter and only one is obvious: a declared prompt that does not exist is
+    loud (the agent breaks), an existing prompt nobody declared is silent.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    def run(entries, dirs_seen, files):
+        """Run cross_check against a fixture prompts tree."""
+        td = tempfile.mkdtemp()
+        root = pathlib.Path(td)
+        for rel in files:
+            f = root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text("prompt body\n")
+        errs: list[str] = []
+        cross_check(entries, dirs_seen, errs, root)
+        return errs
+
+    def case(label, errs, want_hit, want_sub=""):
+        got = bool(errs)
+        if got != want_hit:
+            fails.append(f"{label}: expected error={want_hit}, got {errs}")
+        elif want_sub and not any(want_sub in e for e in errs):
+            fails.append(f"{label}: errored for the wrong reason — no {want_sub!r} in {errs}")
+
+    reg = {"a": {"id": "a", "status": "registered", "prompts": ["main.v1"]}}
+
+    # Declared AND present: the only clean shape.
+    case("a declared prompt that exists is clean",
+         run(reg, {"a": {"main.v1"}}, ["a/main.v1.md"]), False)
+
+    # Declared but absent — loud in production, but the gate must still say so.
+    case("a declared prompt that does not exist is an error",
+         run(reg, {"a": set()}, []), True, "does not exist")
+
+    # THE SILENT ONE: a prompt file nobody declared. It runs, and it is outside the reviewed
+    # set — nothing else in the repo can tell.
+    case("an undeclared prompt FILE is an error",
+         run(reg, {"a": {"main.v1", "sneaky.v1"}}, ["a/main.v1.md", "a/sneaky.v1.md"]),
+         True, "not listed in registry.yaml")
+
+    # A non-'registered' status with files present is a contradiction: the charter claims it
+    # has no reviewed prompt while shipping one.
+    for status in sorted(NEEDS_REASON):
+        case(f"status '{status}' with prompt files present is an error",
+             run({"a": {"id": "a", "status": status}}, {"a": {"main.v1"}}, ["a/main.v1.md"]),
+             True, "must say")
+    # ...and the same status with NO files is legitimate — that is what the status means.
+    for status in sorted(NEEDS_REASON):
+        case(f"status '{status}' with no files is clean",
+             run({"a": {"id": "a", "status": status}}, {"a": set()}, []), False)
+
+    # --- the filename rule -------------------------------------------------------------
+    # Versioning is the whole point: an unversioned prompt cannot be rolled back to, and two
+    # edits become indistinguishable.
+    for good in ("main.v1.md", "risk-check.v12.md"):
+        if not FILENAME_RE.match(good):
+            fails.append(f"{good!r} should be a valid prompt filename")
+    for bad in ("main.md", "main.v.md", "Main.v1.md", "main.v1.txt", "main-v1.md"):
+        if FILENAME_RE.match(bad):
+            fails.append(f"{bad!r} should NOT be a valid prompt filename")
+
+    # A live read: the fixtures cannot tell that agents.yaml still parses and still has ids.
+    live_ids = charter_ids()
+    if not live_ids:
+        fails.append("reading the real agents.yaml produced NO charter ids — every registry "
+                     "entry would then be reported as unknown, or none checked at all")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: prompt-registry integrity is falsifiable "
+          f"(17 cases + a live read of {len(live_ids)} charter(s))")
+    return 0
+
+
 def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+
     if not PROMPTS.is_dir():
         sys.stderr.write(f"::error::prompt registry directory missing: {PROMPTS.relative_to(ROOT)}\n")
         return 1
