@@ -97,10 +97,16 @@ test.describe('ADR-0208 primitives render with real CSS applied', () => {
     // geometry checks make that information hierarchy a browser-observable contract.
     const metricGrid = page.locator('[aria-label="Platform key metrics"]')
     expect(await metricGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4)
-    expect(await metricGrid.locator('.stat-card').first().evaluate(el => getComputedStyle(el).borderTopLeftRadius)).toBe('12px')
+    expect(await metricGrid.locator('.stat-card').first().evaluate(el => getComputedStyle(el).borderTopLeftRadius)).toBe('14px')
 
     const serviceGrid = page.locator('[aria-label="Services by group"]')
     expect(await serviceGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2)
+
+    // The shell is part of the operator experience, not decorative page chrome: the
+    // navigation rail and command bar must retain their deliberate working geometry.
+    expect(Math.round((await page.locator('aside').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
+    expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
   })
 
   test('tone swatches are square with zero padding, at both sizes', async ({ page }) => {
