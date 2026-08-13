@@ -25,6 +25,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
 import java.math.BigDecimal
+import java.security.MessageDigest
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -50,13 +51,48 @@ import java.util.UUID
  * rate it returns a perfectly ordinary success. fx-service's validity window is three days and
  * date-blind, so a Friday fixing marking a Monday position is, to every other signal, a healthy run.
  *
- * **The correctness half of #3921 is NOT addressed here.** `idempotencyKey = "fx-reval-{date}"`
- * keys on the business day alone, with no rate identity, and `LedgerService.postJournal` returns
- * the existing entry on a key hit. So a re-run after a corrected or belated fixing lands returns
- * the ORIGINAL entry, emits no new event and reports `posted = true` — a success that changed
- * nothing, leaving the position valued at the superseded rate indefinitely. Fixing that needs a
- * decision about correcting entries (a rate-identity component in the key, or an explicit reversing
- * entry), not a smaller patch; the age gauge above is what makes the condition visible meanwhile.
+ * ### Corrections, and why they are a SUPERSEDING entry rather than a reversal (#3921)
+ *
+ * The key used to be `fx-reval-{date}` — the business day alone, no rate identity — and
+ * `LedgerService.postJournal` returns the existing entry on a key hit. So a re-run after a
+ * corrected or belated fixing landed returned the ORIGINAL entry, emitted no event and reported
+ * `posted = true`: a success that changed nothing, leaving the position valued at the superseded
+ * rate indefinitely. The key now carries [fixingDigest], the identity of the fixings the posting
+ * was actually built from, so a different fixing is a different key and can post.
+ *
+ * That is only safe because **this revaluation is already carry-relative, not absolute.**
+ * [FxRevaluationPosting.movement] posts `round(position * rate) − carryCzk`, where `carryCzk` is
+ * the counter-value account's trial-balance net, and the trial balance is cumulative to the
+ * business day (`entry_date <= :asOf`, `PanacheJournalRepository`). The first posting carries
+ * `entryDate = command.date`, so a correcting run READS ITS OWN PREDECESSOR and posts only the
+ * difference between the corrected mark and the mark already booked. Two entries, one correct
+ * cumulative position — not two marks added together. This is the property that makes the change
+ * safe to make at all; without it, giving the key a rate component would double-count the position.
+ *
+ * The two alternatives were rejected on that basis, not on taste:
+ *
+ *  - **Reversal-and-repost.** `LedgerUseCase.reverseJournal` exists, so it was available. It
+ *    produces three entries where one suffices and buys nothing: the delta the superseding entry
+ *    posts is arithmetically identical to (reverse + full repost), because the reversal restores
+ *    exactly the `carryCzk` the repost would then mark from. It also has a failure mode the
+ *    superseding form does not — a reversal that commits while the repost does not leaves the
+ *    position marked at nothing, whereas an interrupted superseding run leaves it marked at the
+ *    superseded (merely stale) rate, which is where it already was.
+ *  - **Overwriting the original entry.** Not available and correctly so: journal entries are
+ *    append-only here, and an attested year refuses new activity outright
+ *    (`LedgerService.requireOpenPeriod`). A correction for a closed period must fail loudly, and it
+ *    does — as a superseding posting into a locked day, which the day/period locks already govern.
+ *
+ * The repeat-run case is unchanged and needs no key at all: an identical re-run computes a movement
+ * of zero for every leg, contributes no inputs and returns `posted = false` before reaching
+ * `postJournal`. The key's remaining job is the narrow one it was always doing — two runs racing
+ * before either commits.
+ *
+ * **Degradation.** When no leg carries a `validFrom` (an fx-service that does not serve it), there
+ * is no fixing identity to key on and the key falls back to exactly `fx-reval-{date}`. Corrections
+ * are then impossible, as they were before — deliberately, since a fabricated identity would be
+ * worse than an honest inability. That state is visible: `openbank_fx_fixing_age_seconds` reads as
+ * pod-age and the entry description carries no `[fixings ...]` suffix.
  */
 @ApplicationScoped
 class FxRevaluationService(
@@ -96,10 +132,11 @@ class FxRevaluationService(
         val journalId = UUID.randomUUID()
         val lines = FxRevaluationPosting.build(journalId, exchangeDiff.id, inputs)
 
+        val idempotencyKey = idempotencyKey(command.date, fixings)
         val entry = ledger.postJournal(
             PostJournalCommand(
-                idempotencyKey = "fx-reval-${command.date}",
-                transactionId = UUID.nameUUIDFromBytes("fx-reval-${command.date}".toByteArray()),
+                idempotencyKey = idempotencyKey,
+                transactionId = UUID.nameUUIDFromBytes(idempotencyKey.toByteArray()),
                 entryDate = command.date,
                 valueDate = command.date,
                 description = "Daily FX revaluation at ČNB fixing ${command.date}${fixingSuffix(fixings)}",
@@ -109,7 +146,14 @@ class FxRevaluationService(
             ),
         )
 
-        log.infof("FX revaluation %s posted as %s: %s (fixings %s)", command.date, entry.id, movements, fixings)
+        log.infof(
+            "FX revaluation %s posted as %s under key %s: %s (fixings %s)",
+            command.date,
+            entry.id,
+            idempotencyKey,
+            movements,
+            fixings,
+        )
 
         return FxRevaluationResult(command.date, posted = true, journalId = entry.id, movements = movements)
     }
@@ -128,7 +172,9 @@ class FxRevaluationService(
         byCode: Map<String, TrialBalanceLine>,
         date: LocalDate,
     ): RevaluationLeg? {
-        val fixing = cnbRates.cnbRate(currency)
+        // The BUSINESS DAY being marked, not "now": a belated or manual run for an older date used
+        // to be marked at today's fixing, because the port had no date to ask with (#3921 item 3).
+        val fixing = cnbRates.cnbRate(currency, date)
         // Report EVERY attempt, resolved or not — a null here deliberately leaves the currency's
         // published age climbing instead of blanking the series (#3921).
         fixingFreshness.fixingObserved(currency, fixing?.validFrom)
@@ -159,6 +205,30 @@ class FxRevaluationService(
      * a fixing date, so an fx-service that does not send `validFrom` leaves the description exactly
      * as it was rather than adding an empty bracket.
      */
+    /**
+     * The posting's idempotency key: the business day, plus the identity of the fixings it was
+     * built from once any leg carries one.
+     *
+     * A digest rather than the instants themselves for two reasons: the key is bounded regardless
+     * of how many currencies ADR-0046's scope grows to, and it is a key, not a record. The record
+     * is the entry's own description, which spells every fixing out in full — so the opaque
+     * component is always resolvable from the entry it keys, which is the only place anyone
+     * reading it would look.
+     *
+     * Order-independent by construction (sorted before hashing), so the same set of fixings always
+     * yields the same key no matter what order the currency loop resolved them in.
+     */
+    private fun idempotencyKey(date: LocalDate, fixings: Map<String, Instant>): String =
+        if (fixings.isEmpty()) "fx-reval-$date" else "fx-reval-$date-${fixingDigest(fixings)}"
+
+    private fun fixingDigest(fixings: Map<String, Instant>): String {
+        val canonical = fixings.entries.sortedBy { it.key }.joinToString(",") { "${it.key}@${it.value}" }
+        return MessageDigest.getInstance("SHA-256")
+            .digest(canonical.toByteArray())
+            .joinToString("") { "%02x".format(it) }
+            .take(DIGEST_CHARS)
+    }
+
     private fun fixingSuffix(fixings: Map<String, Instant>): String =
         if (fixings.isEmpty()) "" else fixings.entries.joinToString(", ", " [fixings ", "]") { "${it.key}@${it.value}" }
 
@@ -194,6 +264,13 @@ class FxRevaluationService(
 
     private companion object {
         const val EXCHANGE_DIFF_CODE = "5900"
+
+        // 48 bits of the SHA-256 over the fixing set. The collision this must avoid is not
+        // adversarial — it is two DIFFERENT fixing sets for one business day hashing alike, which
+        // would silently restore the old "correction is a no-op" behaviour. The candidate set for a
+        // single day is a handful of values, so 2^48 is many orders of magnitude of headroom, and a
+        // longer key buys nothing legible.
+        const val DIGEST_CHARS = 12
         const val FX_REVALUED = "FxRevalued"
         val SYSTEM_USER: UUID = UUID.fromString("00000000-0000-0000-0000-000000005900")
 
