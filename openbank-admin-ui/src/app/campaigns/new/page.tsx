@@ -295,6 +295,30 @@ export default function NewCampaignPage() {
       }]
     })
 
+  /**
+   * A binary decision is an authoring shortcut over the service's two complementary, observable
+   * delivery conditions. Keeping both steps adjacent makes their shared predecessor unambiguous:
+   * when the first path is skipped, the second still evaluates that predecessor; when it sends,
+   * the second condition is false. The workflow has covered this replay-safe semantics since #3585.
+   */
+  const addDeliveryDecision = () =>
+    setSteps(prev => {
+      if (prev.length < 1 || prev.length > MAX_STEPS - 2) return prev
+      const first = defaultStep()
+      if (!first) return prev
+      const decisionStep = (condition: EditorStep['condition']): EditorStep => ({
+        ...newStep(first),
+        condition,
+        ...(contentExperiment ? { variantBVariables: {} } : {}),
+      })
+      setSelected(prev.length)
+      return [
+        ...prev,
+        decisionStep('IF_PREVIOUS_CONFIRMED'),
+        decisionStep('IF_PREVIOUS_NOT_CONFIRMED'),
+      ]
+    })
+
   const applyRecipe = (recipe: JourneyRecipe) => {
     const verified = recipe.steps.every(step =>
       templates[step.template] !== undefined && templateChannel[step.template] === step.channel,
@@ -633,6 +657,7 @@ export default function NewCampaignPage() {
           selected={selected}
           onSelect={setSelected}
           onAdd={addStep}
+          onAddDecision={addDeliveryDecision}
           contentCatalogueReady={contentCatalogueState === 'ok'}
           onRemove={removeStep}
           templateLabels={templateLabels}
