@@ -609,6 +609,21 @@ class CampaignRestContractIT {
         }
     }
 
+    /** Studio explains the live policy values but never turns them into a person-level delivery promise. */
+    @Test
+    fun `the contact guardrails are served with the active platform values`() {
+        When {
+            get("/api/v1/campaigns/guardrails")
+        } Then {
+            statusCode(200)
+            body("maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+            body("sendWindowHours", org.hamcrest.Matchers.equalTo(168))
+            body("quietHoursStart", org.hamcrest.Matchers.equalTo(21))
+            body("quietHoursEnd", org.hamcrest.Matchers.equalTo(8))
+            body("timeZone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
     /** A trigger key survives the round trip, so a campaign can declare what wakes it. */
     @Test
     fun `a campaign can declare a trigger and reads it back`() {

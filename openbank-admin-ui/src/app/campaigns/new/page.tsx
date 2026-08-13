@@ -19,7 +19,7 @@ import {
 } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
 import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
-import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
+import { CampaignLaunchReadiness, type CampaignContactGuardrails } from '@/components/campaigns/CampaignLaunchReadiness'
 import {
   JourneyRecipePicker,
   type JourneyRecipe,
@@ -99,6 +99,7 @@ export default function NewCampaignPage() {
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
   const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
   const [contentCatalogueState, setContentCatalogueState] = useState<'loading' | 'ok' | 'unavailable'>('loading')
+  const [guardrails, setGuardrails] = useState<CampaignContactGuardrails | null>(null)
   const [entryMode, setEntryMode] = useState<EntryMode>('MANUAL')
   const [cadence, setCadence] = useState('')
   const [trigger, setTrigger] = useState('')
@@ -246,11 +247,13 @@ export default function NewCampaignPage() {
       fetch('/api/campaigns/cadences').then(r => r.json()),
       fetch('/api/campaigns/triggers').then(r => r.json()),
       fetch('/api/campaigns/templates').then(r => r.json()),
+      fetch('/api/campaigns/guardrails').then(r => r.json()),
     ])
-      .then(([cadenceResponse, triggerResponse, templateResponse]: [
+      .then(([cadenceResponse, triggerResponse, templateResponse, guardrailResponse]: [
         { items?: Cadence[]; state?: string },
         { items?: CampaignTrigger[]; state?: string },
         { items?: CampaignTemplate[]; state?: string },
+        { guardrails?: CampaignContactGuardrails | null; state?: string },
       ]) => {
         if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
         if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
@@ -261,6 +264,7 @@ export default function NewCampaignPage() {
         } else {
           setContentCatalogueState('unavailable')
         }
+        if (guardrailResponse.state === 'ok' && guardrailResponse.guardrails) setGuardrails(guardrailResponse.guardrails)
       })
       .catch(() => {
         setEntryUnavailable(true)
@@ -718,6 +722,8 @@ export default function NewCampaignPage() {
             conversionRule={conversionRule}
             contentExperiment={contentExperiment}
             steps={steps}
+            stopAfter={stopAfter}
+            guardrails={guardrails}
           />
         </div>
 
