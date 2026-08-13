@@ -146,7 +146,6 @@ class CampaignRestContractIT {
                 statement.setString(8, "PUSH")
                 statement.executeUpdate()
             }
-            connection.commit()
         }
         return interactionRef
     }
@@ -174,7 +173,6 @@ class CampaignRestContractIT {
                 statement.setObject(11, OffsetDateTime.now())
                 statement.executeUpdate()
             }
-            connection.commit()
         }
     }
 
