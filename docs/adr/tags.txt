@@ -41,6 +41,7 @@ psd2-api
 api-contract
 
 # --- security, privacy, compliance -------------------------------------------
+security
 authn
 authz
 sca
