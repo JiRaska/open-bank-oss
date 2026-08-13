@@ -117,6 +117,21 @@ describe('campaign studio', () => {
     expect(screen.getByText(/fixed app deep link/i)).toBeTruthy()
   }, 15000)
 
+  it('keeps the customer-surface overview in sync with the authored journey', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(document.querySelector('[data-surface="PUSH"]')).toBeTruthy(), { timeout: 8000 })
+    // The initial app-first step is a push. The overview must reflect the actual authored channel,
+    // not an aspirational multi-channel plan.
+    expect(document.querySelector('[data-surface="BANNER"]')).toBeNull()
+
+    fireEvent.click(document.querySelector('[data-channel-pick="BANNER"]')!)
+
+    await waitFor(() => expect(document.querySelector('[data-surface="BANNER"]')).toBeTruthy(), { timeout: 8000 })
+    expect(document.querySelector('[data-surface="PUSH"]')).toBeNull()
+  }, 15000)
+
   /**
    * ADR-0176 D4 / ADR-0221 D1 step 3: a campaign supplies values, never body text. The fields
    * offered are exactly the template's declared variables — a free-form body field here would be a
