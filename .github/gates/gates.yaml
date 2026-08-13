@@ -677,6 +677,8 @@ gates:
     name: "admin-ui version sync guard (version.txt == package.json, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-admin-ui-version-sync.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-admin-ui-version-sync.sh .
 
@@ -831,6 +833,8 @@ gates:
     name: "quarkus.application.version override guard (release_invariant, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-app-version-override.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-app-version-override.sh .
 
@@ -842,6 +846,8 @@ gates:
     name: "gate graduation guard (ADR-0144, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-gate-graduation.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-gate-graduation.sh
 
@@ -996,6 +1002,8 @@ gates:
     name: "MCP charter data_scope binding (issue #2412, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-mcp-charter-data-scope.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-mcp-charter-data-scope.py --enforce
 
@@ -1103,6 +1111,8 @@ gates:
     name: "agent charter registry parity (ADR-0031/0156, enforced)"
     group: registry
     mode: enforced
+    selftest: bash .github/scripts/check-agent-charter-registry.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-agent-charter-registry.sh
 
@@ -1522,6 +1532,8 @@ gates:
     name: "operator-write naming vs. shared-M2M prohibition (GHSA-58jq-9hq3-66jr, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/check-operator-write-naming.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-operator-write-naming.py
 
@@ -1600,6 +1612,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 500   # 1184 test sources today (2026-08-09)
+    selftest: bash .github/scripts/check-test-runblocking-unit.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-test-runblocking-unit.sh .
 
@@ -1621,6 +1635,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 900   # 1889 service source files today (2026-08-09)
+    selftest: bash .github/scripts/check-exception-mapper-collision.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
@@ -1712,6 +1728,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 1500   # 3121 .kt files today (2026-08-09)
+    selftest: bash .github/scripts/check-domain-event-occuredat.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-domain-event-occuredat.sh
 
@@ -1729,6 +1747,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 70   # 142 money-path domain/application files today (2026-08-09)
+    selftest: bash .github/scripts/check-clock-injection.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-clock-injection.sh
 
