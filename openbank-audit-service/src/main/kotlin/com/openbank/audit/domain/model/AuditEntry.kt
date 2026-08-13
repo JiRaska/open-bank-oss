@@ -36,7 +36,13 @@ data class AuditEntry(
      * producer asserted (#3994).
      */
     val sourceServiceSource: AttributionSource = AttributionSource.ABSENT,
-    /** Ingress channel the event arrived through — ui|mcp|api (ADR-0226); null = unknown/legacy. */
+    /**
+     * `<namespace>:<value>` (issue #4660). The bare JSON key "channel" is independently populated
+     * by three producers with no shared vocabulary: `ingress:ui|mcp|api` (ADR-0226),
+     * `onboarding:BANKID|BRANCH|API|MOBILE_APP` (party-service), `complaint:APP|BRANCH|EMAIL|ARBITER`
+     * (dispute-service). The namespace is the source topic, resolved in `AuditConsumer.resolveChannel`
+     * — never trust the bare value's vocabulary without it. Null = no producer sent one.
+     */
     val channel: String? = null,
     /** Ordered on-behalf-of delegation chain from the RFC 8693 `act` claim (ADR-0224); empty = direct. */
     val actChain: List<String> = emptyList(),

@@ -137,9 +137,17 @@ class AuditConsumer {
                 occurredAt = eventTime ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
                 occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
-                // ADR-0226: cross-channel dimensions, additive — producers adopt them channel by
-                // channel, so absence stays null (unknown), never a guessed default.
-                channel = node.textOrNull("channel"),
+                // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
+                // sweep after #4553 found the bare JSON key "channel" independently populated by
+                // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
+                // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
+                // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
+                // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
+                // (dispute-service, via openbank.dispute.events — the only one confirmed live
+                // before this fix, all rows spelled "APP"). Storing the bare value made the column
+                // ungroupable: a caller reading "API" could not tell an onboarding channel from an
+                // ingress one. See resolveChannel() for the mapping.
+                channel = resolveChannel(node.textOrNull("channel"), address.topic),
                 actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
                 sessionId = node.textOrNull("sessionId"),
                 // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
@@ -304,6 +312,38 @@ class AuditConsumer {
         /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
+}
+
+/** Matches AuditRepository's `@Column(name = "channel", length = 32)` (V14, issue #4660). */
+private const val MAX_CHANNEL_CHARS = 32
+
+/**
+ * Namespaces a raw "channel" value by the topic it arrived on (issue #4660), rather than
+ * trusting the bare value's vocabulary. Keyed on the TOPIC, not on inferred aggregate type or
+ * event shape: the topic is the one signal every producer already agrees on (it is how they
+ * get subscribed to in the first place), so this needs no per-producer parsing and stays
+ * correct for a producer neither of us has read the code of yet — an unrecognised topic still
+ * gets its own disjoint namespace ("$topic:$raw"), it just isn't given a friendly name.
+ *
+ * The two known mappings exist only to keep the common rows short and readable within the
+ * VARCHAR(32) column (V14) — "onboarding:MOBILE_APP" (22 chars) fits; a full topic name would
+ * not ("openbank.party.events:MOBILE_APP" is 33). A top-level function, not a class member: it
+ * needs no instance state, and `AuditConsumer` was already at detekt's TooManyFunctions threshold.
+ */
+private fun resolveChannel(raw: String?, topic: String?): String? {
+    if (raw == null) return null
+    val namespace = when (topic) {
+        "openbank.party.events" -> "onboarding"
+        "openbank.dispute.events" -> "complaint"
+        // Not "openbank.customer.audit" -> "ingress": that topic exists and is subscribed, but
+        // its one real publisher (EdgeAuditPublisher) sets no "channel" field today, and
+        // AuditChannel (ADR-0226's ui/mcp/api) has no live Kafka path at all yet — McpCallAuditor
+        // only reaches LoggingAuditEventPublisher. Naming a topic for a wiring that does not
+        // exist would be a guess about where it eventually lands, not a fact. The catch-all
+        // below already gives it a disjoint namespace the day it does.
+        else -> topic ?: "unscoped"
+    }
+    return "$namespace:$raw".take(MAX_CHANNEL_CHARS)
 }
 
 /**
