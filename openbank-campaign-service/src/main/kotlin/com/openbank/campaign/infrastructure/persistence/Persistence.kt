@@ -6,10 +6,12 @@ package com.openbank.campaign.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ContentVariantMetrics
 import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
@@ -20,6 +22,8 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
@@ -141,6 +145,10 @@ class EnrolmentEntity : PanacheEntityBase() {
     /** Stored rather than re-derived so reports keep the original experimental assignment. */
     @Column(nullable = false)
     var experimentCohort: String = ExperimentCohort.TREATMENT.name
+
+    /** Null for historic and no-contact rows; A/B enrolments keep the arm they were assigned. */
+    @Column(length = 1)
+    var contentVariant: String? = null
 }
 
 @Entity
@@ -174,6 +182,10 @@ class SendLogEntity : PanacheEntityBase() {
 
     @Column
     var deliveryUpdatedAt: Instant? = null
+
+    /** Actual request medium; nullable so migration leaves historical decision rows intact. */
+    @Column(length = 8)
+    var channel: String? = null
 }
 
 @Entity
@@ -304,6 +316,7 @@ class PanacheEnrolmentRepository :
         startedAt = this@toEntity.startedAt
         completedAt = this@toEntity.completedAt
         experimentCohort = this@toEntity.experimentCohort.name
+        contentVariant = this@toEntity.contentVariant?.name
     }
 
     private fun EnrolmentEntity.toDomain(): Enrolment = Enrolment(
@@ -315,6 +328,7 @@ class PanacheEnrolmentRepository :
         startedAt,
         completedAt,
         ExperimentCohort.valueOf(experimentCohort),
+        contentVariant?.let(ContentVariant::valueOf),
     )
 }
 
@@ -339,6 +353,33 @@ class PanacheCampaignExperimentRepository : CampaignExperimentRepository {
         .map { row ->
             ExperimentCohortMetrics(
                 cohort = ExperimentCohort.valueOf(row[0] as String),
+                assigned = row[1] as Long,
+                converted = row[2] as Long,
+            )
+        }
+}
+
+/** A/B outcomes are grouped in SQL, never reconstructed from an unbounded send-log page. */
+@ApplicationScoped
+class PanacheCampaignContentExperimentRepository : CampaignContentExperimentRepository {
+    override suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.contentVariant, count(e), count(distinct s.partyId) " +
+                    "from EnrolmentEntity e left join SendLogEntity s on " +
+                    "s.campaignId = e.campaignId and s.partyId = e.partyId and s.outcome = :converted " +
+                    "where e.campaignId = :campaignId and e.contentVariant is not null group by e.contentVariant",
+                Array<Any>::class.java,
+            )
+                .setParameter("converted", SendOutcome.CONVERTED.name)
+                .setParameter("campaignId", campaignId)
+                .resultList
+        }
+    }
+        .awaitSuspending()
+        .map { row ->
+            ContentVariantMetrics(
+                variant = ContentVariant.valueOf(row[0] as String),
                 assigned = row[1] as Long,
                 converted = row[2] as Long,
             )
@@ -372,6 +413,7 @@ class PanacheSendLogRepository :
                     deliveryStatus = send.deliveryStatus.name
                     deliveryReason = send.deliveryReason
                     deliveryUpdatedAt = send.deliveryUpdatedAt
+                    channel = send.channel?.name
                 },
             )
         }.awaitSuspending()
@@ -589,4 +631,5 @@ private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
     deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
     deliveryReason = deliveryReason,
     deliveryUpdatedAt = deliveryUpdatedAt,
+    channel = channel?.let(Channel::valueOf),
 )

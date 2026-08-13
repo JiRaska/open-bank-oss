@@ -112,4 +112,19 @@ data class NotificationRequest(
      * meaningless to the producer, which is the only party that can join it back to its own row.
      */
     val correlationId: UUID? = null,
+    /** Optional bank-owned app route for a PUSH tap; never a template variable. */
+    val deepLink: String? = null,
 )
+
+/** Closed allow-list for navigation metadata sent through FCM/APNs. */
+object MobileDeepLink {
+    private val allowed = setOf(
+        "openbank://home",
+        "openbank://savings",
+        "openbank://cards",
+        "openbank://payments",
+        "openbank://products",
+    )
+
+    fun isAllowed(value: String?): Boolean = value == null || value in allowed
+}

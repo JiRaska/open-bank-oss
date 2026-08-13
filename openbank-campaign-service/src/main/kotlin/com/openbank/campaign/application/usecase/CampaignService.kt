@@ -14,6 +14,7 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
@@ -209,6 +210,7 @@ class CampaignService(
                             startedAt = Instant.now(),
                             completedAt = Instant.now(),
                             experimentCohort = cohort,
+                            contentVariant = null,
                         ),
                     )
                     started++
@@ -220,6 +222,8 @@ class CampaignService(
                     // already committed, the skip below sees it, and that party is never contacted and
                     // never retried (#2953).
                     journeys.startJourney(id, partyId)
+                    val contentVariant = ContentVariant.assign(campaign.id, partyId)
+                        .takeIf { campaign.hasContentExperiment }
                     enrolments.save(
                         Enrolment(
                             id = Ids.newId(),
@@ -230,6 +234,7 @@ class CampaignService(
                             startedAt = Instant.now(),
                             completedAt = null,
                             experimentCohort = cohort,
+                            contentVariant = contentVariant,
                         ),
                     )
                     started++

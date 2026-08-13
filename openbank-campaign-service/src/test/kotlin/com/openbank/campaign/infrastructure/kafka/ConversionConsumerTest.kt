@@ -44,7 +44,7 @@ class ConversionConsumerTest {
     private val journeys = mockk<JourneySignaller>(relaxed = true)
 
     @Test
-    fun `one product event credits only the last eligible campaign and ends that journey`() = runBlocking {
+    fun `one product event credits only the last eligible campaign and ends that journey`(): Unit = runBlocking {
         givenOverlappingCampaigns(newerAlreadyConverted = false)
         val recorded = slot<SendRecord>()
 
@@ -58,7 +58,7 @@ class ConversionConsumerTest {
     }
 
     @Test
-    fun `redelivery never shifts an already credited event to the runner-up campaign`() = runBlocking {
+    fun `redelivery never shifts an already credited event to the runner-up campaign`(): Unit = runBlocking {
         givenOverlappingCampaigns(newerAlreadyConverted = true)
 
         consumer().onAccountEvent(accountCreatedMessage())

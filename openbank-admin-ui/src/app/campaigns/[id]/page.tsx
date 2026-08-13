@@ -13,6 +13,7 @@ import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
+import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
 
 interface Campaign {
   id: string
@@ -22,7 +23,14 @@ interface Campaign {
   state: string
   createdBy: string
   approvedBy: string | null
-  steps: { order: number; template: string; delaySeconds: number }[]
+  steps: {
+    order: number
+    template: string
+    delaySeconds: number
+    variantBVariables?: Record<string, string> | null
+    fallbackToPush?: boolean
+    mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null
+  }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
   /** Percentage deliberately kept in the no-contact control cohort. */
@@ -51,6 +59,8 @@ interface Send {
    */
   deliveryStatus?: string
   deliveryReason?: string | null
+  /** Actual request medium, including a consent-authorized EMAIL → PUSH fallback. */
+  channel?: 'EMAIL' | 'PUSH' | null
 }
 
 interface SendPage {
@@ -74,6 +84,18 @@ interface Experiment {
   }
 }
 
+interface ContentExperiment {
+  a: { assigned: number; converted: number; conversionRate: number | null }
+  b: { assigned: number; converted: number; conversionRate: number | null }
+  observedLiftPercentagePoints: number | null
+  decision?: {
+    state: 'COLLECTING_DATA' | 'INCONCLUSIVE' | 'A_OUTPERFORMS_B' | 'B_OUTPERFORMS_A'
+    minimumAssignedPerVariant: number
+    aConfidenceInterval: { lower: number; upper: number } | null
+    bConfidenceInterval: { lower: number; upper: number } | null
+  }
+}
+
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -81,7 +103,8 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
-  experiment: Experiment | null;
+  experiment: Experiment | null
+  contentExperiment: ContentExperiment | null
   entryCatalogues?: {
     cadences: { cadence: string; humanForm: string; zone: string }[]
     triggers: { trigger: string; humanForm: string }[]
@@ -248,6 +271,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
   const summary = detail?.sendSummary ?? {}
   const experiment = detail?.experiment
+  const contentExperiment = detail?.contentExperiment
   const cadence = c?.schedule
     ? detail?.entryCatalogues?.cadences.find(x => x.cadence === c.schedule?.cadence)
     : undefined
@@ -298,6 +322,32 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         return t(
           '95% intervaly se oddělily ve prospěch kontroly. Zkontrolujte obsah a provedení kampaně; systém nic automaticky nevypíná.',
           'The 95% intervals separate in favour of holdout. Review campaign content and delivery; the system does not stop anything automatically.',
+        )
+    }
+  }
+
+  const contentExperimentDecisionText = (decision: ContentExperiment['decision']) => {
+    if (!decision) return t('Tato verze služby zatím neposkytuje bránu připravenosti rozhodnutí.', 'This service version does not yet provide a decision-readiness gate.')
+    switch (decision.state) {
+      case 'COLLECTING_DATA':
+        return t(
+          `Sbíráme data: pro obě varianty je potřeba alespoň ${decision.minimumAssignedPerVariant} zařazených lidí.`,
+          `Collecting data: each variant needs at least ${decision.minimumAssignedPerVariant} assigned people.`,
+        )
+      case 'INCONCLUSIVE':
+        return t(
+          'Požadovaný rozsah dat už máme, ale 95% intervaly se překrývají. Obsah teď neměňte.',
+          'The sample threshold is met, but the 95% intervals overlap. Do not change the content yet.',
+        )
+      case 'A_OUTPERFORMS_B':
+        return t(
+          '95% intervaly se oddělily ve prospěch varianty A. Je to konzervativní signál, ne automatická změna kampaně.',
+          'The 95% intervals separate in favour of variant A. It is a conservative signal, not an automatic campaign change.',
+        )
+      case 'B_OUTPERFORMS_A':
+        return t(
+          '95% intervaly se oddělily ve prospěch varianty B. Zkontrolujte výsledek; systém ji sám nenasazuje.',
+          'The 95% intervals separate in favour of variant B. Review the result; the system does not deploy it automatically.',
         )
     }
   }
@@ -370,6 +420,35 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     Object.entries(summary).filter(([outcome, count]) => outcome.startsWith('SUPPRESSED') && count > 0),
   )
 
+  const campaignNextAction = () => {
+    if (!c) return { title: '', detail: '' }
+    if (c.state === 'DRAFT') return {
+      title: t('Dokončete zadání', 'Finish the brief'),
+      detail: t('Pak ho předejte k nezávislému schválení.', 'Then submit it for independent approval.'),
+    }
+    if (c.state === 'PENDING_APPROVAL') return {
+      title: t('Vyžádejte druhé oči', 'Ask for a second pair of eyes'),
+      detail: t('Autor ji nemůže sám aktivovat.', 'The author cannot activate it alone.'),
+    }
+    if (c.state === 'PAUSED') return {
+      title: t('Rozhodněte o pokračování', 'Decide whether to resume'),
+      detail: t('Zkontrolujte cestu a teprve pak změňte stav.', 'Review the journey before changing its state.'),
+    }
+    if ((summary.FAILED ?? 0) > 0) return {
+      title: t('Prověřte neúspěšná předání', 'Review failed handoffs'),
+      detail: t('Použijte detailní log níže; potlačení pravidlem není chyba.', 'Use the detailed log below; policy suppression is not an error.'),
+    }
+    if (!c.conversionRule) return {
+      title: t('Zvažte měřitelný cíl', 'Consider a measurable outcome'),
+      detail: t('Bez něj uvidíte průchod, ale ne skutečný obchodní výsledek.', 'Without one you see flow, but not the real business outcome.'),
+    }
+    return {
+      title: t('Sledujte průchod a výsledek', 'Follow the journey and outcome'),
+      detail: t('Doručení, potlačení a konverze jsou níže oddělené, aby se nezaměnily.', 'Delivery, suppression and conversion remain separate below so they cannot be confused.'),
+    }
+  }
+  const nextAction = campaignNextAction()
+
   return (
     <div className="space-y-6">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
@@ -419,14 +498,16 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
       {!loading && !unavailable && c && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label={t('Stav', 'State')} value={c.state} />
-            <StatCard label={t('Segment', 'Segment')} value={`${c.segmentRef?.name}@${c.segmentRef?.version}`} />
-            <StatCard label={t('Zařazeno', 'Enrolled')} value={String(detail?.enrolments.length ?? 0)} />
-            {/* Surfaced as a headline number on purpose: "how many were deliberately not
-                contacted" is the question the send log exists to answer (#2895). */}
-            <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
-          </div>
+          <CampaignOutcomeBrief
+            state={c.state}
+            audience={detail?.enrolments.length ?? 0}
+            handedOff={summary.SENT ?? 0}
+            suppressed={suppressed}
+            conversion={c.conversionRule ? (summary.CONVERTED ?? 0) : null}
+            conversionLabel={c.conversionRule ? conversionLabel(c.conversionRule) : t('Cíl není měřen', 'Outcome is not measured')}
+            nextAction={nextAction.title}
+            nextActionDetail={nextAction.detail}
+          />
 
           <section className="rounded-lg border p-3 text-sm" data-campaign-entry>
             <h2 className="font-semibold">{t('Vstup do cesty', 'Journey entry')}</h2>
@@ -539,6 +620,66 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 {t(
                   'Rozdíl je popisný. Brána používá konzervativní 95% Wilsonovy intervaly a nemůže sama prokázat příčinu ani změnit běžící kampaň.',
                   'The difference is descriptive. The gate uses conservative 95% Wilson intervals; it cannot prove causality or change a running campaign itself.',
+                )}
+              </p>
+            </section>
+          )}
+
+          {c.steps.some(step => step.variantBVariables) && (
+            <section className="space-y-2 rounded-lg border p-3" data-content-experiment>
+              <div>
+                <h2 className="text-sm font-semibold">{t('Porovnání obsahu A/B', 'A/B content comparison')}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'Každý oslovený člověk zůstává ve variantě A nebo B po celou cestu. Porovnává se jen skutečná bankovní konverze.',
+                    'Each contacted person stays in A or B throughout the journey. Only real banking conversion is compared.',
+                  )}
+                </p>
+              </div>
+              {detail?.sources?.contentExperiment === 'ok' && contentExperiment ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <StatCard label={t('Varianta A', 'Variant A')} value={`${fmtRate(contentExperiment.a.conversionRate)} · ${contentExperiment.a.converted}/${contentExperiment.a.assigned}`} />
+                    <StatCard label={t('Varianta B', 'Variant B')} value={`${fmtRate(contentExperiment.b.conversionRate)} · ${contentExperiment.b.converted}/${contentExperiment.b.assigned}`} />
+                    <StatCard label={t('B − A (p. b.)', 'B − A (pp)')} value={contentExperiment.observedLiftPercentagePoints === null ? '—' : contentExperiment.observedLiftPercentagePoints.toFixed(1)} />
+                  </div>
+                  <div className="rounded-md bg-muted p-2 text-xs text-muted-foreground" data-content-experiment-decision>
+                    <span className="font-medium text-foreground">{t('Připravenost rozhodnutí: ', 'Decision readiness: ')}</span>
+                    {contentExperimentDecisionText(contentExperiment.decision)}
+                    {contentExperiment.decision?.aConfidenceInterval && contentExperiment.decision?.bConfidenceInterval && (
+                      <span>
+                        {' '}{t('95% intervaly — A ', '95% intervals — A ')}
+                        {fmtRate(contentExperiment.decision.aConfidenceInterval.lower)}–{fmtRate(contentExperiment.decision.aConfidenceInterval.upper)}
+                        {t(', B ', ', B ')}
+                        {fmtRate(contentExperiment.decision.bConfidenceInterval.lower)}–{fmtRate(contentExperiment.decision.bConfidenceInterval.upper)}.
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <DataUnavailable
+                  kind={detail?.sources?.contentExperiment === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                  service="Campaign-service"
+                  feature={t('Vyhodnocení variant obsahu', 'Content-variant result')}
+                  dense
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Rozdíl je popisný. Brána používá 95% Wilsonovy intervaly, automaticky nemění aktivní cestu a sama nedokazuje příčinu.',
+                  'The difference is descriptive. The 95% Wilson gate never changes an active journey and does not establish causality itself.',
+                )}
+              </p>
+            </section>
+          )}
+
+          {c.steps.some(step => step.fallbackToPush) && (
+            <section className="space-y-1 rounded-lg border p-3" data-channel-fallback>
+              <h2 className="text-sm font-semibold">{t('Záložní kanál', 'Fallback channel')}</h2>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'U vybraných e-mailových kroků se při chybějícím e-mailovém souhlasu zkusí push. I ten projde vlastním souhlasem, frekvenčním limitem, quiet hours a suppression listem; po nedoručení e-mailu se druhá zpráva neposílá.',
+                  'Selected email steps may try push when email consent is absent. Push still passes its own consent, frequency cap, quiet hours and suppression list; an email delivery failure never triggers a second message.',
                 )}
               </p>
             </section>
@@ -696,6 +837,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                         'Co se se zprávou skutečně stalo, podle notification-service.',
                         'What actually became of the message, as reported by notification-service.',
                       )}>{t('Doručení', 'Delivery')}</th>
+                      <th title={t(
+                        'Kanál, který campaign-service skutečně předal notification-service.',
+                        'The channel campaign-service actually handed to notification-service.',
+                      )}>{t('Kanál', 'Channel')}</th>
                       <th>{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
@@ -725,6 +870,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
+                        </td>
+                        <td>
+                          {s.channel === 'EMAIL'
+                            ? t('E-mail', 'Email')
+                            : s.channel === 'PUSH'
+                              ? t('Push', 'Push')
+                              : <span className="text-xs text-muted-foreground">—</span>}
                         </td>
                         <td className="text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>

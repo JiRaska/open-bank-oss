@@ -193,6 +193,14 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
+    /**
+     * The app's server-driven engagement surfaces. This is deliberately separate from
+     * notification-service: an app surface is rendered after the customer opens the app, it is
+     * not an outbound notification pretending to have been delivered (ADR-0220 D1).
+     */
+    @ConfigProperty(name = "openbank.edge.engagement-service-url")
+    lateinit var engagementServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.statement-service-url")
     lateinit var statementServiceUrl: String
 
@@ -2596,6 +2604,48 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- In-app engagement surfaces ---
+
+    /**
+     * Resolve one named mobile surface for the authenticated customer. The app receives only a
+     * typed, catalogue-backed payload; it owns presentation, accessibility and local navigation.
+     * The party id is derived from the JWT and injected only at this boundary, never accepted from
+     * the device, so changing a query parameter cannot render another customer's campaign.
+     */
+    @GET
+    @Path("/surfaces/{slot}")
+    @Authorize(action = "customer.engagement.read", resource = "#slot")
+    @Blocking
+    fun getSurface(@PathParam("slot") slot: String): Response {
+        if (slot !in SURFACE_SLOTS) return Response.status(Response.Status.BAD_REQUEST).build()
+        val customer = customer()
+        return upstream.get(
+            "$engagementServiceUrl/api/v1/surfaces/$slot?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * Record what the app actually observed: impression, click or dismissal. The edge overwrites
+     * any supplied partyId with the JWT party id before forwarding, which makes the feedback loop
+     * meaningful without turning it into an IDOR write primitive. Content/slot/type validation is
+     * owned by engagement-service, alongside the catalogue it validates against.
+     */
+    @POST
+    @Path("/surfaces/events")
+    @Authorize(action = "customer.engagement.record-event")
+    @Blocking
+    fun recordSurfaceEvent(body: String): Response {
+        val customer = customer()
+        val enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
+            ?: return Response.status(Response.Status.BAD_REQUEST).build()
+        return upstream.post(
+            "$engagementServiceUrl/api/v1/surfaces/events",
+            customer.partyId.toString(),
+            enriched,
+        )
+    }
+
     // --- Theme preferences (ADR-0190) — edge-local, party-keyed, roams the app look ---
 
     /** The caller's stored ThemeSpec, 404 when none. Party is taken from the JWT, never the client. */
@@ -3833,6 +3883,15 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
+        private val SURFACE_SLOTS: Set<String> = setOf(
+            "HOME_BANNER",
+            "HOME_CAROUSEL",
+            "STORIES",
+            "PRODUCT_FEED",
+            "REWARDS_HUB",
+        )
+
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
         private const val THEME_SPEC_MAX_BYTES = 8 * 1024
