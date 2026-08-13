@@ -1,11 +1,28 @@
 .dashboard {
-  max-width: 1400px;
-  padding: 28px 32px 40px;
+  max-width: 1560px;
+  min-height: 100%;
+  padding: 24px 36px 48px;
   animation: fadeIn 0.2s ease-out;
 }
 
+.dashboard :global(.page-header) {
+  position: relative;
+  align-items: center;
+  min-height: 136px;
+  margin-bottom: 18px;
+  padding: 28px;
+  overflow: hidden;
+  background: linear-gradient(118deg, #111a35 0%, #172657 54%, #30338f 100%);
+  border: 1px solid rgba(129, 140, 248, 0.42);
+  border-radius: 18px;
+  box-shadow: 0 18px 42px rgba(31, 41, 105, 0.17);
+}
+.dashboard :global(.page-header)::after { position: absolute; top: -96px; right: 15%; width: 260px; height: 260px; content: ''; pointer-events: none; background: radial-gradient(circle, rgba(165, 180, 252, 0.28), transparent 67%); }
+.dashboard :global(.page-title) { color: #fff; font-size: 29px; letter-spacing: -0.045em; }
+.dashboard :global(.page-subtitle) { max-width: 680px; color: #cbd5e1; font-size: 14px; }
+
 .headerIcon {
-  color: var(--accent);
+  color: #a5b4fc;
 }
 
 .headerActions {
@@ -15,7 +32,7 @@
 }
 
 .lastRefresh {
-  color: var(--text-tertiary);
+  color: #cbd5e1;
   font-size: 11px;
   white-space: nowrap;
 }
@@ -23,15 +40,20 @@
 .metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  gap: 14px;
   margin-bottom: 16px;
 }
 
 .metric {
   min-height: 122px;
-  padding: 18px;
-  border-radius: 12px;
+  padding: 20px;
+  border-radius: 14px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.045);
 }
+.metrics > :nth-child(1) { border-top: 3px solid var(--accent); }
+.metrics > :nth-child(2) { border-top: 3px solid var(--info); }
+.metrics > :nth-child(3) { border-top: 3px solid var(--success); }
+.metrics > :nth-child(4) { border-top: 3px solid var(--warning); }
 
 .healthOverview,
 .serviceGroup,
@@ -41,7 +63,13 @@
 
 .healthOverview {
   margin-bottom: 16px;
+  color: #dbeafe;
+  background: linear-gradient(120deg, #121c36, #1c2b55);
+  border-color: #273966;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.13);
 }
+.healthOverview:hover { border-color: #3f568d; }
+.healthOverview .sectionLabel { color: #c7d2fe; }
 
 .sectionLabel {
   margin: 0 0 14px;
@@ -77,23 +105,23 @@
 }
 
 .groupName {
-  color: var(--text-primary);
+  color: #f8fafc;
   font-size: 12px;
   font-weight: 650;
   text-transform: capitalize;
 }
 
 .groupSummary {
-  color: var(--text-secondary);
+  color: #cbd5e1;
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
 }
 
 .healthBar {
-  height: 6px;
+  height: 7px;
   overflow: hidden;
-  background: var(--border);
+  background: rgba(148, 163, 184, 0.2);
   border-radius: 999px;
 }
 
@@ -106,13 +134,14 @@
 .serviceGroups {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
   margin-bottom: 16px;
 }
 
 .serviceGroupHeader {
   margin-bottom: 14px;
 }
+.serviceGroup { min-height: 142px; border-radius: 14px; }
 
 .serviceGroupTitle {
   gap: 8px;
@@ -208,7 +237,7 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 8px 12px;
+  padding: 9px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
@@ -240,8 +269,9 @@
 
 @media (max-width: 760px) {
   .dashboard {
-    padding: 20px 16px 32px;
+    padding: 16px 14px 32px;
   }
+  .dashboard :global(.page-header) { min-height: auto; padding: 22px 18px; border-radius: 14px; }
 
   .headerActions {
     align-items: flex-end;
