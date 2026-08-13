@@ -82,7 +82,9 @@ describe('campaign console', () => {
     vi.stubGlobal('fetch', mockFetch(LIST, DETAIL))
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
-    await waitFor(() => expect(screen.getByText('smoke-offer')).toBeTruthy())
+    // The same campaign intentionally appears in the decision desk and in the complete table.
+    // A single-element query makes that useful repetition look like a UI regression.
+    await waitFor(() => expect(screen.getAllByText('smoke-offer')).toHaveLength(2))
     // The state is now rendered as a human label ("Running"), because a marketer should not have to
     // know what ACTIVE means. Both halves are asserted on purpose: the label is what the reader
     // sees, and the raw enum stays reachable as the title so the screen and the state machine can

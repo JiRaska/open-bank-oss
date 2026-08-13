@@ -143,7 +143,8 @@ describe('campaign console + reach', () => {
     vi.stubGlobal('fetch', campaignFetch(null))
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
-    await waitFor(() => expect(screen.getByText('smoke-offer')).toBeTruthy())
+    // The decision desk and the table both name the campaign; wait for the complete dashboard.
+    await waitFor(() => expect(screen.getAllByText('smoke-offer')).toHaveLength(2))
     // Zeros would read as "we reached nobody" rather than "the service cannot say".
     expect(screen.queryByText('Enrolled')).toBeNull()
     expect(screen.getByTestId('board-footnote').textContent).toMatch(/does not return them yet/)
