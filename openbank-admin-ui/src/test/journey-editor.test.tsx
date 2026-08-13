@@ -25,6 +25,12 @@ const TPL_CHANNEL = {
   MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER' as const,
   MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER' as const,
 }
+const TPL_SURFACE = {
+  HOME_BANNER: 'MARKETING_PRODUCT_OFFER_BANNER',
+  HOME_CAROUSEL: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+  PRODUCT_FEED: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED',
+  REWARDS_HUB: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB',
+}
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
 // own copy — asserting the rendered label against the same map the component reads would be vacuous.
@@ -104,7 +110,7 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -122,7 +128,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -134,7 +140,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -148,7 +154,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -166,7 +172,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -181,7 +187,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -200,7 +206,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -216,7 +222,7 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           contentExperiment: true, onChange, onClose: vi.fn(),
         })))
 
