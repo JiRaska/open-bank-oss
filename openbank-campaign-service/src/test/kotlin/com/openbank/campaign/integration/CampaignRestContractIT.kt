@@ -43,6 +43,7 @@ import java.util.UUID
 @QuarkusTestResource(CampaignRestContractIT.NoBrokerNoWorkerResource::class)
 @QuarkusTestResource(CampaignPostgresRedisTestResource::class)
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR"])
+@Suppress("LargeClass") // one HTTP contract class intentionally exercises the served campaign resource
 class CampaignRestContractIT {
 
     @Inject
