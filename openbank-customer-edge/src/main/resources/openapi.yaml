@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.34.0
+  version: 1.35.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2090,6 +2090,48 @@ components:
           type: string
           nullable: true
           description: MCC-derived merchant category for card spend (ADR-0103).
+        merchant:
+          type: object
+          nullable: true
+          description: >-
+            Resolved public identity of the merchant behind a card transaction (D5). This edge
+            forwards the field byte-for-byte from transaction-service's response, which already
+            documents the invariant that matters: absent — not an empty object — when the
+            acquirer descriptor has no catalogue match, which is most transactions. A client must
+            render exactly what it renders today when this is absent, never a guess.
+          properties:
+            cleanName:
+              type: string
+            logoUrl:
+              type: string
+              nullable: true
+            category:
+              type: string
+              nullable: true
+            geo:
+              type: object
+              nullable: true
+              description: >-
+                The SHOP's location for card-present spend, never the cardholder's. Absent for
+                card-not-present transactions — an e-shop has no location a purchase happened at.
+              properties:
+                lat:
+                  type: number
+                  format: double
+                lon:
+                  type: number
+                  format: double
+                city:
+                  type: string
+                  nullable: true
+                country:
+                  type: string
+                  nullable: true
+              required: [lat, lon]
+            source:
+              type: string
+              enum: [ENRICHED]
+          required: [cleanName, source]
 
     # Mirrors openbank-transaction-service TransactionPage (GET /api/v1/transactions is
     # cursor-paginated, not a bare array).
