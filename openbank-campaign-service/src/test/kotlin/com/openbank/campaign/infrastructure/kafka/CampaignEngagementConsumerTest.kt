@@ -16,8 +16,8 @@ import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
-import org.junit.jupiter.api.assertThrows
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.time.Instant
 import java.util.UUID
 
