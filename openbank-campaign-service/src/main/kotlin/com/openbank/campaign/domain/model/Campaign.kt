@@ -11,6 +11,23 @@ import java.time.Instant
 import java.util.UUID
 
 /**
+ * The editable definition of a draft, deliberately separate from [Campaign]'s server-owned
+ * identity, lifecycle and audit fields. A maker supplies this whole value; revision can therefore
+ * never accidentally preserve an old field merely because another endpoint forgot to pass it.
+ */
+data class CampaignDefinition(
+    val name: String,
+    val goal: String,
+    val segmentRef: SegmentRef,
+    val steps: List<CampaignStep>,
+    val stopCondition: StopCondition? = null,
+    val conversionRule: String? = null,
+    val holdoutPercent: Int = 0,
+    val schedule: CampaignSchedule? = null,
+    val trigger: String? = null,
+)
+
+/**
  * Campaign aggregate (ADR-0200). A definition — steps, delays, stop conditions — that is executed
  * as one Temporal workflow per enrolled party. Content is composed from the notification-service
  * template catalogue with declared variables; free-form bodies are rejected by construction
@@ -83,6 +100,27 @@ data class Campaign(
     fun submit(): Campaign {
         require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be submitted for approval" }
         return copy(state = CampaignState.PENDING_APPROVAL, updatedAt = Instant.now())
+    }
+
+    /**
+     * A maker may revise the definition while it is still a draft.  Once it enters approval, the
+     * exact reviewed definition is immutable: changing it afterwards would make the checker
+     * approve one journey while a different one is actually run.
+     */
+    fun revise(definition: CampaignDefinition): Campaign {
+        require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be revised" }
+        return copy(
+            name = definition.name,
+            goal = definition.goal,
+            segmentRef = definition.segmentRef,
+            steps = definition.steps.sortedBy { it.order },
+            stopCondition = definition.stopCondition,
+            conversionRule = definition.conversionRule,
+            holdoutPercent = definition.holdoutPercent,
+            schedule = definition.schedule,
+            trigger = definition.trigger,
+            updatedAt = Instant.now(),
+        )
     }
 
     fun activate(approver: String): Campaign {

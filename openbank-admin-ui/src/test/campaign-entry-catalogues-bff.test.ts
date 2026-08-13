@@ -10,18 +10,21 @@ vi.mock('@/lib/services/bff', () => ({ serverSvcUrl: (_service: string, _name: s
 describe('campaign entry catalogue BFF', () => {
   beforeEach(() => vi.resetModules())
 
-  it('forwards cadence and trigger catalogues through the authenticated BFF', async () => {
+  it('forwards entry and cross-channel content catalogues through the authenticated BFF', async () => {
     const fetchMock = vi.fn(async (url: string) => ({
       ok: true,
       status: 200,
       json: async () => url.endsWith('/cadences')
         ? [{ cadence: 'DAILY_MORNING', humanForm: 'every day at 09:00', zone: 'Europe/Prague' }]
-        : [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
+        : url.endsWith('/templates')
+          ? [{ template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle'], inAppSurface: 'HOME_BANNER' }]
+          : [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
     }))
     vi.stubGlobal('fetch', fetchMock)
 
     const { GET: cadences } = await import('@/app/api/campaigns/cadences/route')
     const { GET: triggers } = await import('@/app/api/campaigns/triggers/route')
+    const { GET: templates } = await import('@/app/api/campaigns/templates/route')
 
     await expect((await cadences()).json()).resolves.toEqual({
       items: [{ cadence: 'DAILY_MORNING', humanForm: 'every day at 09:00', zone: 'Europe/Prague' }],
@@ -31,12 +34,20 @@ describe('campaign entry catalogue BFF', () => {
       items: [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
       state: 'ok',
     })
+    await expect((await templates()).json()).resolves.toEqual({
+      items: [{ template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle'], inAppSurface: 'HOME_BANNER' }],
+      state: 'ok',
+    })
     expect(fetchMock).toHaveBeenCalledWith(
       'http://campaign/api/v1/campaigns/cadences',
       expect.objectContaining({ headers: { authorization: 'Bearer token' } }),
     )
     expect(fetchMock).toHaveBeenCalledWith(
       'http://campaign/api/v1/campaigns/triggers',
+      expect.objectContaining({ headers: { authorization: 'Bearer token' } }),
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://campaign/api/v1/campaigns/templates',
       expect.objectContaining({ headers: { authorization: 'Bearer token' } }),
     )
   })

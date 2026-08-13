@@ -25,6 +25,12 @@ const TPL_CHANNEL = {
   MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER' as const,
   MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER' as const,
 }
+const TPL_SURFACE = {
+  HOME_BANNER: 'MARKETING_PRODUCT_OFFER_BANNER',
+  HOME_CAROUSEL: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+  PRODUCT_FEED: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED',
+  REWARDS_HUB: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB',
+}
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
 // own copy — asserting the rendered label against the same map the component reads would be vacuous.
@@ -40,7 +46,7 @@ const step = (delay = 0, vars: Record<string, string> = {}): EditorStep => ({
   delaySeconds: delay,
 })
 
-function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onRemove' | 'onSelect', ReturnType<typeof vi.fn>>> = {}) {
+function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onAddDecision' | 'onRemove' | 'onSelect', ReturnType<typeof vi.fn>>> = {}) {
   const props = {
     steps,
     audience: 'actives@1',
@@ -48,6 +54,7 @@ function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onRemov
     selected: null,
     onSelect: handlers.onSelect ?? vi.fn(),
     onAdd: handlers.onAdd ?? vi.fn(),
+    onAddDecision: handlers.onAddDecision,
     onRemove: handlers.onRemove ?? vi.fn(),
     templateLabels: LABELS,
   }
@@ -85,6 +92,17 @@ describe('campaign builder canvas', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('offers a delivery decision only when its two complementary paths fit', () => {
+    const onAddDecision = vi.fn()
+    const { container } = canvas([step()], { onAddDecision })
+
+    fireEvent.click(container.querySelector('[data-add-decision="delivery"]')!)
+    expect(onAddDecision).toHaveBeenCalledTimes(1)
+
+    const full = canvas(Array.from({ length: MAX_STEPS - 1 }, () => step()), { onAddDecision })
+    expect(full.container.querySelector('[data-add-decision="delivery"]')).toBeNull()
+  })
+
   it('removes the step whose node was clicked, not the last one', () => {
     const onRemove = vi.fn()
     const { container } = canvas([step(), step(), step()], { onRemove })
@@ -104,7 +122,7 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -122,7 +140,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -134,7 +152,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -148,7 +166,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -166,7 +184,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -181,7 +199,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -200,7 +218,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -216,7 +234,7 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           contentExperiment: true, onChange, onClose: vi.fn(),
         })))
 

@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -17,6 +18,7 @@ import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.core.Response
@@ -111,10 +113,40 @@ data class ApprovalRequest(val approver: String? = null)
 /**
  * The authenticated caller — recorded as the maker on create and as the checker on activate.
  *
- * A top-level extension rather than a method: `CampaignResource` sits exactly at detekt's
- * `TooManyFunctions` threshold of 11, which fires AT the limit, so a private helper costs the gate.
+ * A top-level extension rather than a method: lifecycle endpoints remain separately authorized,
+ * while this keeps identity extraction outside the HTTP adapter's public surface.
  */
 private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
+
+private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
+    CampaignStep(
+        it.order,
+        it.template,
+        it.channel,
+        it.variables,
+        it.delaySeconds,
+        it.condition,
+        it.variantBVariables,
+        it.fallbackToPush,
+        it.mobileDestination,
+        it.inAppSurface,
+        it.variantBTemplate,
+        it.variantBChannel,
+        it.variantBDelaySeconds,
+    )
+}
+
+private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignDefinition(
+    name = name,
+    goal = goal,
+    segmentRef = SegmentRef(segmentName, segmentVersion),
+    steps = toSteps(),
+    stopCondition = stopCondition?.let { StopCondition(it.maxSendsPerParty) },
+    conversionRule = conversionRule,
+    holdoutPercent = holdoutPercent,
+    schedule = schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+    trigger = trigger,
+)
 
 /**
  * Operator API for the campaign first slice (ADR-0200). Activation is four-eyes gated by the
@@ -123,6 +155,7 @@ private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
  */
 @Path("/api/v1/campaigns")
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Each method is a separately authorised lifecycle endpoint.
 class CampaignResource(private val service: CampaignService, private val jwt: JsonWebToken) {
 
     @GET
@@ -139,28 +172,11 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @Authorize(action = "campaign.create", resource = "#request.name")
     suspend fun create(request: CreateCampaignRequest): Response {
         val createdBy = jwt.principalName()
-        val steps = request.steps.map {
-            CampaignStep(
-                it.order,
-                it.template,
-                it.channel,
-                it.variables,
-                it.delaySeconds,
-                it.condition,
-                it.variantBVariables,
-                it.fallbackToPush,
-                it.mobileDestination,
-                it.inAppSurface,
-                it.variantBTemplate,
-                it.variantBChannel,
-                it.variantBDelaySeconds,
-            )
-        }
         val campaign = service.createDraft(
             request.name,
             request.goal,
             SegmentRef(request.segmentName, request.segmentVersion),
-            steps,
+            request.toSteps(),
             createdBy,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
@@ -170,6 +186,20 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
         )
         return Response.status(Response.Status.CREATED).entity(campaign).build()
     }
+
+    /** The authenticated maker may revise only the unsubmitted definition. */
+    @PUT
+    @Path("/{id}")
+    @Authorize(action = "campaign.create", resource = "#id")
+    suspend fun revise(@PathParam("id") id: UUID, request: CreateCampaignRequest): Response = runCatching {
+        Response.ok(
+            service.reviseDraft(
+                id = id,
+                definition = request.toDefinition(),
+                revisedBy = jwt.principalName(),
+            ),
+        ).build()
+    }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 
     @POST
     @Path("/{id}/submit")
