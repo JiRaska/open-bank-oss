@@ -107,16 +107,25 @@ exactly the worklist you need for §4.
    older envelope.
 3. Remove any §3a exception you added in the same change, or it silently outlives the incident.
 
-**Do not treat a single red `Verify fleet attestations` run as the answer.**
-`.github/scripts/check-fleet-attestations.sh` special-cases only `NAME_UNKNOWN|MANIFEST_UNKNOWN|404`
-as "absent"; **every other** non-zero `cosign verify-attestation` exit — including a transient ECR
-throttle or 5xx — is counted and printed as `UNATTESTED`, i.e. a probe failure is reported as a
-supply-chain verdict. Measured 2026-08-13: run `31729895636` reported
+**Read the gate's EXIT CODE, not just its colour.**
+`.github/scripts/check-fleet-attestations.sh` exits `0` (every declared image attested), `1` (a real
+gap: `UNATTESTED` and/or `ABSENT`) or `2` (`UNKNOWN` — the probe could not run for at least one
+image: ECR throttle, 5xx, expired credentials, a cosign crash). **A 2 is not a verdict about any
+image**: re-run it, and if it persists treat it as a registry/credential problem, never as an image
+to rebuild. `Verify fleet attestations` prints a `could not run` warning annotation in that case, and
+the scheduled run deliberately does NOT open a fleet-gap issue for it.
+
+That distinction was paid for once. Until #1915 the loop special-cased only
+`NAME_UNKNOWN|MANIFEST_UNKNOWN|404` as absent and let **every other** non-zero cosign exit fall
+through to `UNATTESTED`, so a transient failure was published as a supply-chain verdict: run
+`31729895636` (2026-08-13) reported
 `UNATTESTED openbank-release-steward:sandbox-e80f4bc7 … 61 attested / 1 unattested / 62 total`,
 while the **24 other runs of that same gate that day passed on the identical, unchanged image**, and
 `cosign verify-attestation --key awskms:///alias/openbank-cosign-signing --type cyclonedx` against
-its digest `sha256:31d626…` returns *"The signatures were verified against the specified public
-key"*. Before acting on a red gate, re-run it and verify the named image by digest by hand.
+its digest `sha256:31d626…` returned *"The signatures were verified against the specified public
+key"*. Classification is now positive in both directions (an image is called `UNATTESTED` only when
+cosign says so in words) and each candidate failure is retried `VERIFY_ATTEMPTS` times first — but a
+red `1` still deserves the hand check: verify the named image by digest before rebuilding anything.
 
 ## 5. Related
 
