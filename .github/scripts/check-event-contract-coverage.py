@@ -5,14 +5,22 @@
 
 WHERE ADR-0006 ACTUALLY STANDS
 ------------------------------
-Measured, not assumed: 36 distinct topics (34 with an in-tree producer), 71 `eventType` literals,
-**0 `.avsc`, 0 `asyncapi.yaml`, and no `openbank-contracts/` directory**. The Apicurio registry the
-ADR calls for is deployed and running in the `messaging` namespace — the runtime half exists and the
-contract half does not. Every Kafka event on this platform is raw, unversioned JSON.
+Measured, not assumed. At introduction: 36 distinct topics (34 with an in-tree producer), 71
+`eventType` literals, **0 `.avsc`, 0 `asyncapi.yaml`, and no `openbank-contracts/` directory**.
+Re-measured since: 38 producer pairs across 32 services / 36 distinct topics, of which **2 now have
+an AsyncAPI contract** (delegation, notification) and 36 are grandfathered below. The `.avsc` count
+is still **0**, and no topic has a schema registered in Apicurio. The registry the ADR calls for is
+deployed and running in the `messaging` namespace — the runtime half exists and the contract half
+does not. Every Kafka event on this platform is raw, unversioned JSON.
 
 The nearest thing to a compatibility check is `check-event-schema-compat.py`, which diffs Kotlin
 data-class constructors at build time and says so itself. It cannot see a payload, so nothing
 validates one at runtime.
+
+This script checks only that a contract FILE exists. That a contract DESCRIBES its producer —
+channels against produced topics, message names against event-type literals, payload properties
+against constructor properties — is `check-event-contract-code-agreement.py`, which was added
+precisely because a file-existence check cannot see a document that is wrong.
 
 WHY A RATCHET AND NOT A GATE
 ----------------------------

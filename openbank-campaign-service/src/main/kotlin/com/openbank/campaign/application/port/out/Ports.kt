@@ -79,9 +79,21 @@ data class CampaignEnrolmentCount(val campaignId: UUID, val count: Long)
  */
 data class ConversionContext(val firstSentAt: Instant?, val alreadyConverted: Boolean)
 
+@Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
+
+    /**
+     * Whether [interactionRef] names a PUSH send made to [partyId]. This is intentionally a
+     * yes/no capability: the customer edge must never learn the campaign, step or another
+     * party from a reference supplied by a device.
+     *
+     * The fail-closed default keeps lightweight fakes safe. Production overrides it with the
+     * send-log lookup; an adapter that has not implemented attribution cannot accidentally
+     * validate a client-controlled reference.
+     */
+    suspend fun hasPushInteractionForParty(interactionRef: UUID, partyId: UUID): Boolean = false
 
     /**
      * Lifetime SENT rows for one party in one campaign — the observable state the ADR-0200 D1
