@@ -12,6 +12,61 @@ import { serverSvcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
+const CLICKHOUSE_URL = process.env.CLICKHOUSE_URL || 'http://localhost:8123'
+const CLICKHOUSE_USER = process.env.CLICKHOUSE_USER
+const CLICKHOUSE_PASSWORD = process.env.CLICKHOUSE_PASSWORD
+
+interface CampaignEngagementRow {
+  campaignId: string
+  impressions: number
+  clicks: number
+  dismissals: number
+  firstObservedAt: string
+  lastObservedAt: string
+}
+
+async function readCampaignEngagement(): Promise<{
+  state: 'ok' | 'unavailable'
+  items: CampaignEngagementRow[]
+}> {
+  const headers: Record<string, string> = { 'content-type': 'text/plain' }
+  if (CLICKHOUSE_USER) headers['X-ClickHouse-User'] = CLICKHOUSE_USER
+  if (CLICKHOUSE_PASSWORD) headers['X-ClickHouse-Key'] = CLICKHOUSE_PASSWORD
+  try {
+    const response = await fetch(`${CLICKHOUSE_URL}/?default_format=JSON`, {
+      method: 'POST',
+      headers,
+      body: `
+        SELECT campaign_id,
+               sum(impressions) AS impressions,
+               sum(clicks) AS clicks,
+               sum(dismissals) AS dismissals,
+               min(first_observed_at) AS first_observed_at,
+               max(last_observed_at) AS last_observed_at
+        FROM openbank_analytics.gold_campaign_engagement
+        GROUP BY campaign_id
+        ORDER BY last_observed_at DESC`,
+      cache: 'no-store',
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!response.ok) return { state: 'unavailable', items: [] }
+    const body = await response.json() as { data?: Record<string, unknown>[] }
+    return {
+      state: 'ok',
+      items: (body.data ?? []).map(row => ({
+        campaignId: String(row.campaign_id ?? ''),
+        impressions: Number(row.impressions ?? 0),
+        clicks: Number(row.clicks ?? 0),
+        dismissals: Number(row.dismissals ?? 0),
+        firstObservedAt: String(row.first_observed_at ?? ''),
+        lastObservedAt: String(row.last_observed_at ?? ''),
+      })).filter(row => row.campaignId.length > 0),
+    }
+  } catch {
+    return { state: 'unavailable', items: [] }
+  }
+}
+
 /**
  * Create a draft (ADR-0221 D1 step 6).
  *
@@ -84,12 +139,15 @@ export async function GET() {
     // endpoint is NEWER than the deployed service in any environment that has not rolled forward
     // yet, so a 404 here has to degrade to "no reach data" and leave the list intact. Coupling the
     // two would take the whole page down for a feature that is additive.
-    const summary = await fetch(
-      serverSvcUrl('campaign-service', 'campaign', 8128, '/api/v1/campaigns/summary'),
-      { headers, signal: AbortSignal.timeout(4000), cache: 'no-store' },
-    ).then(r => (r.ok ? r.json() : null)).catch(() => null)
+    const [summary, engagement] = await Promise.all([
+      fetch(
+        serverSvcUrl('campaign-service', 'campaign', 8128, '/api/v1/campaigns/summary'),
+        { headers, signal: AbortSignal.timeout(4000), cache: 'no-store' },
+      ).then(r => (r.ok ? r.json() : null)).catch(() => null),
+      readCampaignEngagement(),
+    ])
 
-    return NextResponse.json({ items: await res.json(), state: 'ok', summary })
+    return NextResponse.json({ items: await res.json(), state: 'ok', summary, engagement })
   } catch {
     return NextResponse.json({ items: [], state: 'unreachable' }, { status: 200 })
   }

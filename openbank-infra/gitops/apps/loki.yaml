@@ -130,6 +130,25 @@ spec:
             # The missing half. Without this a rule evaluates, fires, and is delivered nowhere.
             alertmanager_url: http://kube-prometheus-stack-alertmanager.observability.svc:9093
             enable_alertmanager_v2: true
+            # The SAME half again, for recording rules — and it is a separate switch. An alerting
+            # rule needs alertmanager_url; a RECORDING rule needs remote_write, and without it the
+            # rule evaluates on schedule and the result is dropped on the floor with no error
+            # anywhere. That is the "configured-looking and inert" shape this block's own comment
+            # above was written about, one rule type over.
+            #
+            # The receiver is the same Prometheus the k6 journeys already remote-write into
+            # (enableRemoteWriteReceiver, proven working by openbank-infra/gitops/components/
+            # observability/cronjob-journey-public-edge.yaml), so this adds a client to a path
+            # that is already carrying traffic rather than a new one to prove.
+            remote_write:
+              enabled: true
+              client:
+                url: http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write
+                queue_config:
+                  # Small: the only producer is the endpoint-availability rule, one sample per
+                  # affected Service per minute. Sized to be unmistakably not a bulk pipe.
+                  capacity: 2500
+                  max_shards: 10
           # Single-binary needs the embedded query scheduler off.
           querier:
             max_concurrent: 2

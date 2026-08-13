@@ -76,7 +76,7 @@ class CampaignStateMachineTest {
      */
     @Test
     fun `only channels that actually deliver are representable`() {
-        assertEquals(setOf(Channel.EMAIL, Channel.PUSH), Channel.entries.toSet())
+        assertEquals(setOf(Channel.EMAIL, Channel.PUSH, Channel.BANNER), Channel.entries.toSet())
         assertThrows<IllegalArgumentException> { Channel.valueOf("SMS") }
         assertThrows<IllegalArgumentException> { Channel.valueOf("IN_APP") }
     }

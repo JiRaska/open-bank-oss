@@ -14,11 +14,10 @@
 // the drill-down. Same board, motion and age semantics as the lending pipeline — a third visual
 // language on one console would be worse than either (see components/flow/StageBoard).
 //
-// WHAT THIS PAGE HONESTLY CANNOT SHOW
-// The optional summary endpoint supplies only enrolment and delivery. It does not supply in-app
-// engagement or a business conversion, so this page calls the aggregate a *delivery pulse*, never
-// performance. Inventing the rest of a CDP funnel would be worse than saying exactly where evidence
-// ends; the detail still owns the event-level journey.
+// EVIDENCE SEMANTICS
+// Campaign-service supplies enrolment and notification handoff. Analytics independently supplies
+// server-attributed app observations. The UI keeps those stages separate and renders unavailable or
+// not-observed explicitly; neither state is a numeric zero and neither handoff nor click is delivery.
 //
 // Read-only by design (#2895). Authoring is ADR-0221: `submit` → `activate`-by-a-DIFFERENT-approver
 // is a two-people-at-a-screen flow, and exposing half of it as buttons would lose the point of the
@@ -56,6 +55,16 @@ interface CampaignSummary {
   sent: number
   suppressed: number
   failed: number
+  outcomes?: { outcome: string; count: number }[]
+}
+
+interface CampaignEngagement {
+  campaignId: string
+  impressions: number
+  clicks: number
+  dismissals: number
+  firstObservedAt: string
+  lastObservedAt: string
 }
 
 interface Campaign {
@@ -94,6 +103,8 @@ export default function CampaignsPage() {
   const { t, language } = useLanguage()
   const [items, setItems] = useState<Campaign[]>([])
   const [summary, setSummary] = useState<Record<string, CampaignSummary> | null>(null)
+  const [engagement, setEngagement] = useState<Record<string, CampaignEngagement>>({})
+  const [engagementState, setEngagementState] = useState<'ok' | 'unavailable'>('unavailable')
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -102,7 +113,12 @@ export default function CampaignsPage() {
   useEffect(() => {
     fetch('/api/campaigns')
       .then(r => r.json())
-      .then((d: { items: Campaign[]; state: string; summary?: CampaignSummary[] | null }) => {
+      .then((d: {
+        items: Campaign[]
+        state: string
+        summary?: CampaignSummary[] | null
+        engagement?: { state: 'ok' | 'unavailable'; items: CampaignEngagement[] }
+      }) => {
         if (d.state !== 'ok') {
           setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable')
           return
@@ -110,6 +126,12 @@ export default function CampaignsPage() {
         setItems(d.items ?? [])
         setSummary(
           Array.isArray(d.summary) ? Object.fromEntries(d.summary.map(x => [x.campaignId, x])) : null,
+        )
+        setEngagementState(d.engagement?.state ?? 'unavailable')
+        setEngagement(
+          Array.isArray(d.engagement?.items)
+            ? Object.fromEntries(d.engagement.items.map(x => [x.campaignId, x]))
+            : {},
         )
       })
       .catch(() => setUnavailable('unreachable'))
@@ -165,6 +187,28 @@ export default function CampaignsPage() {
       }),
       { enrolled: 0, sent: 0, suppressed: 0 },
     )
+  }, [summary])
+
+  const engagementPulse = useMemo(() => {
+    if (engagementState !== 'ok') return null
+    const values = Object.values(engagement)
+    if (values.length === 0) return null
+    return values.reduce(
+      (total, item) => ({
+        impressions: total.impressions + item.impressions,
+        clicks: total.clicks + item.clicks,
+        dismissals: total.dismissals + item.dismissals,
+      }),
+      { impressions: 0, clicks: 0, dismissals: 0 },
+    )
+  }, [engagement, engagementState])
+
+  const authoritativeConversions = useMemo(() => {
+    if (!summary) return null
+    const observed = Object.values(summary)
+      .flatMap(item => item.outcomes ?? [])
+      .filter(item => item.outcome === 'CONVERTED')
+    return observed.length > 0 ? observed.reduce((total, item) => total + item.count, 0) : null
   }, [summary])
 
   /** This is a campaign-operation rate, not customer delivery or conversion. Campaign-service
@@ -258,7 +302,8 @@ export default function CampaignsPage() {
                 </div>
                 <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
                 <div className="campaign-flow-node" data-state="learn">
-                  <Eye size={15} /><span>{t('Důkaz', 'Evidence')}</span><strong>{deliveryPulse ? t('živě', 'live') : '—'}</strong>
+                  <Eye size={15} /><span>{t('Důkaz', 'Evidence')}</span>
+                  <strong>{engagementState === 'unavailable' ? t('neznámé', 'unknown') : engagementPulse ? t('živě', 'live') : t('čeká', 'waiting')}</strong>
                 </div>
               </div>
             </div>
@@ -293,7 +338,7 @@ export default function CampaignsPage() {
                 <GitBranch size={15} aria-hidden="true" />
                 <div>
                   <strong>{handoffRate === null ? t('Čeká na provozní data', 'Waiting for operating data') : `${handoffRate} % ${t('předáno do kanálu', 'handed to channel')}`}</strong>
-                  <span>{t('Je to provozní signál, ne potvrzené doručení, engagement ani konverze.', 'This is an operating signal, not confirmed delivery, engagement or conversion.')}</span>
+                  <span>{t('Je to pouze handoff do kanálu. Pozorované reakce aplikace jsou odděleně níže.', 'This is channel handoff only. Observed app response is reported separately below.')}</span>
                 </div>
               </div>
             </div>
@@ -343,7 +388,40 @@ export default function CampaignsPage() {
               ) : (
                 <p className="campaign-pulse-empty">{t('Nasazená služba zatím neposílá souhrn doručení. Nuly by byly zavádějící.', 'The deployed service does not yet return a delivery aggregate. Zeros would mislead.')}</p>
               )}
-              <p className="campaign-pulse-footnote">{t('Nejde o konverzi ani engagement — tyto signály zatím v přehledu nemáme.', 'This is not conversion or engagement — those signals are not in this overview yet.')}</p>
+              <p className="campaign-pulse-footnote">{t('Tento panel končí handoffem do kanálu; níže jsou samostatně pozorované reakce aplikace.', 'This panel stops at channel handoff; observed app response is separate below.')}</p>
+              <div
+                data-testid="campaign-engagement-pulse"
+                style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}
+              >
+                <div className="campaign-desk-heading">
+                  <div>
+                    <p>{t('Reakce v aplikaci', 'App response')}</p>
+                    <h2>{t('Pozorovaný engagement', 'Observed engagement')}</h2>
+                  </div>
+                  <span className={engagementPulse ? 'campaign-pulse-live' : 'campaign-pulse-muted'}>
+                    {engagementState === 'unavailable'
+                      ? t('Neznámé', 'Unknown')
+                      : engagementPulse
+                        ? t('Živě', 'Live')
+                        : t('Zatím nepozorováno', 'Not yet observed')}
+                  </span>
+                </div>
+                {engagementPulse ? (
+                  <div className="campaign-pulse-numbers" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                    <div><strong>{engagementPulse.impressions.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('zobrazení', 'impressions')}</span></div>
+                    <div><strong>{engagementPulse.clicks.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('kliknutí', 'clicks')}</span></div>
+                    <div><strong>{engagementPulse.dismissals.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('odmítnutí', 'dismissals')}</span></div>
+                    <div><strong>{authoritativeConversions === null ? '—' : authoritativeConversions.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('produktové konverze', 'product-event conversions')}</span></div>
+                  </div>
+                ) : (
+                  <p className="campaign-pulse-empty">
+                    {engagementState === 'unavailable'
+                      ? t('Analytická projekce právě není čitelná. Stav je neznámý, nikoli nula.', 'The analytics projection is not readable right now. The state is unknown, not zero.')
+                      : t('Pro kampaně zatím nebyla pozorována žádná serverově přiřazená reakce.', 'No server-attributed app response has been observed for these campaigns yet.')}
+                  </p>
+                )}
+                <p className="campaign-pulse-footnote">{t('Zobrazení, kliknutí a odmítnutí jsou akce aplikace. Produktová konverze přichází z autoritativní account/card události, nikdy z telefonu ani kliku.', 'Impressions, clicks and dismissals are app actions. Product conversion comes from an authoritative account/card event, never from the phone or a click.')}</p>
+              </div>
             </div>
           </section>
 
@@ -411,6 +489,7 @@ export default function CampaignsPage() {
                     {summary && <th>{t('Zařazeno', 'Enrolled')}</th>}
                     {summary && <th>{t('Doručeno', 'Sent')}</th>}
                     {summary && <th>{t('Potlačeno', 'Suppressed')}</th>}
+                    <th>{t('Reakce v aplikaci', 'App response')}</th>
                     <th>{t('Vytvořil', 'Created by')}</th>
                     <th>{t('Schválil', 'Approved by')}</th>
                     <th>{t('Vytvořeno', 'Created')}</th>
@@ -447,6 +526,16 @@ export default function CampaignsPage() {
                           {summary[c.id]?.suppressed ?? 0}
                         </td>
                       )}
+                      <td className="text-xs" data-testid={`campaign-engagement-${c.id}`}>
+                        {engagementState === 'unavailable'
+                          ? t('Neznámé', 'Unknown')
+                          : engagement[c.id]
+                            ? t(
+                                `${engagement[c.id].impressions} zobrazení · ${engagement[c.id].clicks} kliknutí`,
+                                `${engagement[c.id].impressions} impressions · ${engagement[c.id].clicks} clicks`,
+                              )
+                            : t('Zatím nepozorováno', 'Not yet observed')}
+                      </td>
                       <td className="text-xs">{c.createdBy}</td>
                       {/* The checker, shown next to the maker on purpose: the maker/checker pair is
                           the audit-relevant fact about an ACTIVE campaign, not a detail. */}

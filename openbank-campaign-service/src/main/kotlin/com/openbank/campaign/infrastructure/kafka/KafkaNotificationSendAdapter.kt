@@ -5,11 +5,17 @@
 package com.openbank.campaign.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.campaign.application.port.out.BannerPlacementPort
+import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.NotificationSendPort
 import com.openbank.campaign.application.port.out.NotificationSendRequest
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.smallrye.reactive.messaging.MutinyEmitter
+import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
+import org.eclipse.microprofile.reactive.messaging.Message
 
 /**
  * ADR-0200 D3: delivery goes through notification-service, never direct. The payload shape mirrors
@@ -51,5 +57,35 @@ class KafkaNotificationSendAdapter(
         request.interactionRef?.let { fields["interactionRef"] = it.toString() }
         val payload = mapper.writeValueAsString(fields)
         emitter.send(payload).toCompletableFuture().join()
+    }
+}
+
+/**
+ * A banner is a first-party placement command, not a notification request. Its own topic prevents
+ * notification-service receiving a channel it cannot render.
+ */
+@ApplicationScoped
+class KafkaBannerPlacementAdapter(
+    @Channel("campaign-banner-placements-out") private val emitter: MutinyEmitter<String>,
+    private val mapper: ObjectMapper,
+) : BannerPlacementPort {
+    override suspend fun place(request: BannerPlacementRequest) {
+        val payload = mapper.writeValueAsString(
+            linkedMapOf(
+                "interactionRef" to request.interactionRef.toString(),
+                "partyId" to request.partyId.toString(),
+                "campaignId" to request.campaignId.toString(),
+                "stepOrder" to request.stepOrder,
+                "template" to request.template,
+                "variables" to request.variables,
+                "deepLink" to request.deepLink,
+                "inAppSurface" to request.inAppSurface.name,
+            ),
+        )
+        // The compacted placement topic retains the current assignment for this send interaction.
+        val metadata = OutgoingKafkaRecordMetadata.builder<String>()
+            .withKey(request.interactionRef.toString())
+            .build()
+        emitter.sendMessage(Message.of(payload).addMetadata(metadata)).awaitSuspending()
     }
 }
