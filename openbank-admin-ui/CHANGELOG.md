@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.123.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.122.0...admin-ui-v0.123.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** explain live launch guardrails ([#4735](https://github.com/JiRaska/open-bank-oss/issues/4735)) ([0e70531](https://github.com/JiRaska/open-bank-oss/commit/0e7053135e57150016034eb6392f3fd7144d1b7b))
+
 ## [0.122.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.121.0...admin-ui-v0.122.0) (2026-08-13)
 
 

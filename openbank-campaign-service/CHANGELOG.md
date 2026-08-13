@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/v0.27.0...v0.28.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** explain live launch guardrails ([#4735](https://github.com/JiRaska/open-bank-oss/issues/4735)) ([0e70531](https://github.com/JiRaska/open-bank-oss/commit/0e7053135e57150016034eb6392f3fd7144d1b7b))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/v0.26.0...v0.27.0) (2026-08-13)
 
 
