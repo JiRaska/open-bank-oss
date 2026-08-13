@@ -7,11 +7,12 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, RefreshCw, Bot, Lock, Users, FileText, Clock } from 'lucide-react'
+import { ArrowLeft, RefreshCw, Bot, Lock, Users, FileText, Clock, Sparkles, Hand } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 
 // ── Types (mirror /api/iaops/agents/[agentId]) ─────────────────────────────
 interface Schedule { daily: string | null; reactive: string | null }
@@ -167,6 +168,8 @@ function AgentDetailContent() {
     return <DataUnavailable kind={unavailable.kind} service={agentId} feature={t('agent charter', 'agent charter')} lang={language} />
   }
 
+  const persona = getAgentPersona(agentId, language)
+
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1100px', animation: 'fadeIn 0.2s ease-out' }}>
       <div style={{ marginBottom: '20px' }}>
@@ -190,17 +193,17 @@ function AgentDetailContent() {
       ) : data ? (
         <>
           {/* Header */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '20px', flexWrap: 'wrap' }}>
-            <div style={{ width: '44px', height: '44px', borderRadius: '50%', background: '#ede9fe',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6366f1', flexShrink: 0 }}>
-              <Bot size={20} />
-            </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '18px', marginBottom: '20px', flexWrap: 'wrap' }}>
+            <AgentPortrait agentId={agentId} />
             <div style={{ flex: 1, minWidth: '200px' }}>
-              <h1 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em', fontFamily: 'monospace' }}>
-                {data.id}
+              <h1 style={{ fontSize: '25px', fontWeight: 850, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.03em' }}>
+                {persona.name}
               </h1>
-              <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                {(data.charter?.plane ?? data.narrative?.plane ?? '—')} · {data.narrative?.adr ?? '—'}
+              <p style={{ fontSize: '13px', fontWeight: 750, color: persona.accent, margin: '1px 0 3px' }}>
+                {persona.role}
+              </p>
+              <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: 0, fontFamily: 'monospace' }}>
+                {data.id} · {(data.charter?.plane ?? data.narrative?.plane ?? '—')} · {data.narrative?.adr ?? '—'}
               </p>
             </div>
             {data.proposals.pendingCount > 0 && (
@@ -217,6 +220,42 @@ function AgentDetailContent() {
               {t('agents.yaml nebylo v image nalezeno — zobrazuje se jen narativní charter.', 'agents.yaml was not found in the image — showing the narrative charter only.')}
             </div>
           )}
+
+          <Card>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '18px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: persona.accent, marginBottom: '7px' }}>
+                  <Sparkles size={14} />
+                  <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    {t('Co dělá', 'What this colleague does')}
+                  </span>
+                </div>
+                <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>{persona.purpose}</p>
+              </div>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '7px', color: persona.accent, marginBottom: '7px' }}>
+                  <Hand size={14} />
+                  <span style={{ fontSize: '11px', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                    {t('Proč na tom záleží', 'Why it matters')}
+                  </span>
+                </div>
+                <p style={{ fontSize: '13px', color: 'var(--text-primary)', lineHeight: 1.6, margin: 0 }}>{persona.value}</p>
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: '16px', paddingTop: '14px' }}>
+              <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
+                {t('Schopnosti lidskou řečí', 'Skills in plain language')}
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                {persona.talents.map(talent => (
+                  <span key={talent} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '7px 10px', borderRadius: '9px',
+                    background: `${persona.accent}0d`, border: `1px solid ${persona.accent}25`, color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 700 }}>
+                    <Sparkles size={11} style={{ color: persona.accent }} /> {talent}
+                  </span>
+                ))}
+              </div>
+            </div>
+          </Card>
 
           {agentId === 'case-coordinator' && (
             <Card>
