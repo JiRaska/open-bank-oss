@@ -4,6 +4,7 @@
 import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import { AgentBodyAnalysis, AgentMeshMap } from '@/components/agent/AgentDiagnostics'
+import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import {
   deriveAgentDiagnostics,
   deriveAgentMesh,
@@ -131,5 +132,15 @@ describe('agent operating diagnostics', () => {
     expect(screen.getByText(/Actual runtime admission is controlled by the coordinator allowlist/)).toBeInTheDocument()
     expect(screen.getByText('Declared classes (not runtime state)')).toBeInTheDocument()
     expect(screen.queryByText(/connected specialists/i)).not.toBeInTheDocument()
+  })
+
+  it('explains the mesh on the AIOps overview without presenting it as live topology', () => {
+    render(<AgentMeshExplainer language="en" />)
+
+    expect(screen.getByRole('heading', { name: 'What is the AI mesh?' })).toBeInTheDocument()
+    expect(screen.getByRole('list', { name: 'How the AI mesh collaborates' })).toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(4)
+    expect(screen.getByText(/not a live view of connected agents/i)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Browse case threads/ })).toHaveAttribute('href', '/iaops/cases')
   })
 })

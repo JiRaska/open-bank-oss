@@ -19,6 +19,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
+import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
 import styles from './IAOps.module.css'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
@@ -251,6 +252,8 @@ function IAOpsContent() {
           </button>
         </div>
       </div>
+
+      <AgentMeshExplainer language={language} />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
