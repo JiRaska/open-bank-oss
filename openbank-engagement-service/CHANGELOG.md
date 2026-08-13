@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.5.0...engagement-service-v0.6.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.4.1...engagement-service-v0.5.0) (2026-08-09)
 
 
