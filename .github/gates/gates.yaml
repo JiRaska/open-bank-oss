@@ -2051,6 +2051,7 @@ gates:
   # applied it, CI green — until a warehouse is rebuilt without it. V4__screen_feedback_context.sql
   # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions.
   - id: clickhouse-ddl-configmap-parity
+    min_subjects: 15   # 22 objects today (V1-V5 + the ConfigMap's copies, 2026-08-13)
     name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
     group: data
     mode: enforced

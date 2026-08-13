@@ -36,6 +36,9 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import gatelib  # import after the path insert — checkers run as scripts from the repo root
+
 SQL_GLOB = "openbank-analytics-sink/src/main/resources/clickhouse/V*.sql"
 CONFIGMAP = "openbank-infra/gitops/components/analytics/clickhouse-init-configmap.yaml"
 
@@ -54,7 +57,9 @@ def objects(text: str) -> set[str]:
     return {m.lower() for m in CREATE_RE.findall(live)}
 
 
-def check(root: Path) -> list[str]:
+def check(root: Path) -> tuple[list[str], int]:
+    """Returns (errors, objects examined). The count is the gate's subject floor: a broken glob or a
+    regex that stops matching leaves the verdict clean, and only the count can say so."""
     errors: list[str] = []
     sql_files = sorted(root.glob(SQL_GLOB))
     cm_path = root / CONFIGMAP
@@ -62,13 +67,13 @@ def check(root: Path) -> list[str]:
     # A probe that finds no subject must say so, not pass. Both inputs are required to exist: this
     # gate reporting OK because a path moved is the failure mode it is meant to prevent elsewhere.
     if not sql_files:
-        return [f"no ClickHouse DDL found at {SQL_GLOB} — the gate cannot have checked anything"]
+        return ([f"no ClickHouse DDL found at {SQL_GLOB} — the gate cannot have checked anything"], 0)
     if not cm_path.is_file():
-        return [f"{CONFIGMAP} not found — the gate cannot have checked anything"]
+        return ([f"{CONFIGMAP} not found — the gate cannot have checked anything"], 0)
 
     cm_objects = objects(cm_path.read_text())
     if not cm_objects:
-        return [f"{CONFIGMAP} declares no openbank_analytics objects — parse or path drift"]
+        return ([f"{CONFIGMAP} declares no openbank_analytics objects — parse or path drift"], 0)
 
     seen: dict[str, str] = {}
     for f in sql_files:
@@ -86,7 +91,7 @@ def check(root: Path) -> list[str]:
             f"resource creates — DDL with no source of record"
         )
 
-    return errors
+    return (errors, len(set(seen) | cm_objects))
 
 
 SELF_TEST_CM = """apiVersion: v1
@@ -112,7 +117,7 @@ def self_test() -> int:
         )
 
         # known-negative: the sets agree.
-        errs = check(root)
+        errs, _ = check(root)
         if errs:
             print(f"SELF-TEST FAIL: clean tree flagged: {errs}")
             ok = False
@@ -122,7 +127,7 @@ def self_test() -> int:
             "-- CREATE VIEW openbank_analytics.commented_out AS SELECT 1;\n"
             "CREATE OR REPLACE VIEW openbank_analytics.silver_party_accounts AS SELECT 1;\n"
         )
-        errs = check(root)
+        errs, _ = check(root)
         if not any("silver_party_accounts" in e for e in errs):
             print("SELF-TEST FAIL: a resource object missing from the ConfigMap was not flagged")
             ok = False
@@ -141,7 +146,7 @@ def self_test() -> int:
                 "kind: ConfigMap",
             )
         )
-        errs = check(root)
+        errs, _ = check(root)
         if not any("orphan_view" in e for e in errs):
             print("SELF-TEST FAIL: a ConfigMap object with no resource was not flagged")
             ok = False
@@ -149,7 +154,7 @@ def self_test() -> int:
         # known-positive C: an absent subject must fail, never read as clean.
         (sqldir / "V1__a.sql").unlink()
         (sqldir / "V2__b.sql").unlink()
-        if not check(root):
+        if not check(root)[0]:
             print("SELF-TEST FAIL: an empty subject set reported clean")
             ok = False
 
@@ -166,7 +171,10 @@ def main() -> int:
     if args.self_test:
         return self_test()
 
-    errors = check(Path(args.root))
+    errors, examined = check(Path(args.root))
+    # Printed on BOTH paths: a gate that found its corpus and then failed on it must not also read
+    # as having lost it.
+    gatelib.subjects(examined, "openbank_analytics objects across the DDL resources + ConfigMap")
     for e in errors:
         print(f"::error::{e}")
     if errors:
