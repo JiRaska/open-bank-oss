@@ -4,7 +4,7 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SessionProvider } from 'next-auth/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
@@ -239,6 +239,28 @@ describe('campaign studio', () => {
     await waitFor(() => expect(screen.getByText('Submit for approval')).toBeTruthy(), { timeout: 8000 })
     // The whole point of four eyes: the author never sees the button that would let them skip it.
     expect(screen.queryByText('Approve and activate')).toBeNull()
+  }, 15000)
+
+  it('turns server-attributed app attention into a per-surface campaign funnel', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 120 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'CLICK', count: 18 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'DISMISS', count: 7 },
+        ],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-funnel')).toBeTruthy(), { timeout: 8000 })
+    const funnel = within(screen.getByTestId('campaign-attention-funnel'))
+    expect(funnel.getByText('Home banner')).toBeTruthy()
+    expect(funnel.getByText('120')).toBeTruthy()
+    expect(funnel.getByText('15.0 %')).toBeTruthy()
   }, 15000)
 
   it('submits an opted-in consent fallback as part of the step definition', async () => {
