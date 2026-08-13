@@ -329,7 +329,6 @@ def main():
 # self-corroboration trap as widening a known-good set with the layer it is checking).
 DEBT = {
     "accounting-clock-gate": DEBT_MARKER,
-    "admin-ui-version-sync-guard": DEBT_MARKER,
     "adr-registry-integrity-check": DEBT_MARKER,
     "advisory-gate-registration": DEBT_MARKER,
     "agent-charter-registry-parity": DEBT_MARKER,
@@ -354,18 +353,15 @@ DEBT = {
     "mcp-charter-data-scope-binding": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
     "no-dead-code-service-principal-rego-rule": DEBT_MARKER,
-    "no-service-local-exceptionmapper-collision-with-libs-runtime": DEBT_MARKER,
     "openapi-route-conformance": DEBT_MARKER,
     "openapi-server-port": DEBT_MARKER,
     "operator-write-naming": DEBT_MARKER,
     "prompt-registry-integrity": DEBT_MARKER,
     "psd2-anonymous-grant-stays-behind-eidas-mtls": DEBT_MARKER,
-    "quarkus-application-version-override-guard": DEBT_MARKER,
     "release-scope-mismatch-gate": DEBT_MARKER,
     "rolesallowed-realm-parity": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
-    "test-runblocking-unit-guard": DEBT_MARKER,
     "threat-model-coverage": DEBT_MARKER,
 }
 

@@ -677,6 +677,8 @@ gates:
     name: "admin-ui version sync guard (version.txt == package.json, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-admin-ui-version-sync.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-admin-ui-version-sync.sh .
 
@@ -831,6 +833,8 @@ gates:
     name: "quarkus.application.version override guard (release_invariant, enforced)"
     group: supplychain
     mode: enforced
+    selftest: bash .github/scripts/check-app-version-override.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-app-version-override.sh .
 
@@ -1600,6 +1604,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 500   # 1184 test sources today (2026-08-09)
+    selftest: bash .github/scripts/check-test-runblocking-unit.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-test-runblocking-unit.sh .
 
@@ -1621,6 +1627,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 900   # 1889 service source files today (2026-08-09)
+    selftest: bash .github/scripts/check-exception-mapper-collision.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-exception-mapper-collision.sh .
 
