@@ -15,12 +15,12 @@ export interface AgentDiagnostic {
 export interface AgentMeshSummary {
   coordinatorId: string | null
   selectedCapabilities: string[]
-  enabledParticipantIds: string[]
-  caseClasses: string[]
+  charteredParticipantIds: string[]
+  declaredCaseClasses: string[]
   totalAgents: number
   synthesisEnabled: boolean
   humanGateEnabled: boolean
-  state: 'foundation' | 'connected'
+  state: 'foundation' | 'chartered'
 }
 
 interface Measure {
@@ -64,11 +64,13 @@ export function deriveAgentMesh(agent: AgentCharter, registry: AgentCharterRegis
   return {
     coordinatorId: coordinator?.id ?? null,
     selectedCapabilities: agent.caseCapabilities,
-    enabledParticipantIds: participants.map(candidate => candidate.id),
-    caseClasses: registry.caseClasses,
+    charteredParticipantIds: participants.map(candidate => candidate.id),
+    declaredCaseClasses: registry.caseClasses,
     totalAgents: registry.agents.length,
     synthesisEnabled: coordinator?.caseCapabilities.includes('case.synthesize') ?? false,
     humanGateEnabled: (coordinator?.requiresHuman.length ?? 0) > 0,
-    state: participants.length > 0 ? 'connected' : 'foundation',
+    // agents.yaml proves charter intent only. Runtime admission remains separately enforced by
+    // CaseCoordinatorConfig.case().swarmAgents(), which this admin BFF cannot observe.
+    state: participants.length > 0 ? 'chartered' : 'foundation',
   }
 }

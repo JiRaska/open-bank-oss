@@ -211,9 +211,12 @@
 
 .meshFlow {
   display: grid;
-  grid-template-columns: minmax(125px, 1fr) 28px minmax(125px, 1fr) 28px minmax(125px, 1fr) 28px minmax(125px, 1fr) 28px minmax(125px, 1fr);
+  grid-template-columns: repeat(5, minmax(125px, 1fr));
   align-items: stretch;
-  gap: 5px;
+  gap: 38px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .meshNode {
@@ -228,6 +231,16 @@
   background: var(--surface);
   font-size: 10px;
   line-height: 1.45;
+}
+
+.meshNode:not(:last-child)::after {
+  content: '→';
+  position: absolute;
+  top: 50%;
+  right: -29px;
+  color: #94a3b8;
+  font-size: 22px;
+  transform: translateY(-50%);
 }
 
 .meshNode[data-status="governed"] { border-color: #99f6e4; background: linear-gradient(145deg, var(--surface), #f0fdfa); }
@@ -252,8 +265,6 @@
 
 .meshNode[data-status="planned"] .meshStatus { color: #64748b; }
 .meshNode[data-status="human"] .meshStatus { color: #92400e; }
-.meshArrow { align-self: center; width: 22px; color: #94a3b8; }
-
 .meshFooter {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) auto auto;
@@ -280,9 +291,9 @@
   text-decoration: none;
 }
 
-@media (max-width: 980px) {
+@media (max-width: 1200px) {
   .meshFlow { grid-template-columns: 1fr; }
-  .meshArrow { justify-self: center; transform: rotate(90deg); }
+  .meshNode:not(:last-child)::after { content: '↓'; top: auto; right: 50%; bottom: -32px; transform: translateX(50%); }
   .meshNode { min-height: 100px; }
   .meshFooter { grid-template-columns: 1fr; }
 }

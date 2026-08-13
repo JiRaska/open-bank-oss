@@ -77,7 +77,7 @@ describe('agent operating diagnostics', () => {
     const foundation = deriveAgentMesh(selected, registry([selected, coordinator]))
     expect(foundation).toMatchObject({
       coordinatorId: 'case-coordinator',
-      enabledParticipantIds: [],
+      charteredParticipantIds: [],
       state: 'foundation',
       synthesisEnabled: true,
       humanGateEnabled: true,
@@ -85,8 +85,8 @@ describe('agent operating diagnostics', () => {
 
     const participant = charter('rca-investigator', { caseCapabilities: ['case.join', 'case.contribute'] })
     expect(deriveAgentMesh(selected, registry([selected, coordinator, participant]))).toMatchObject({
-      enabledParticipantIds: ['rca-investigator'],
-      state: 'connected',
+      charteredParticipantIds: ['rca-investigator'],
+      state: 'chartered',
     })
   })
 
@@ -112,5 +112,24 @@ describe('agent operating diagnostics', () => {
     expect(screen.getByText(/0 of 2: capability not granted yet/)).toBeInTheDocument()
     expect(screen.getByText(/multi-agent mesh activates only after specialists receive/)).toBeInTheDocument()
     expect(screen.getByRole('link', { name: /Open live case threads/ })).toHaveAttribute('href', '/iaops/cases')
+    expect(screen.getByRole('list', { name: /Flow from signal through coordinator/ })).toBeInTheDocument()
+    expect(screen.getAllByRole('listitem')).toHaveLength(5)
+  })
+
+  it('does not present chartered participants or case classes as runtime-enabled', () => {
+    const selected = charter('finops-agent')
+    const coordinator = charter('case-coordinator', {
+      caseCapabilities: ['case.open', 'case.coordinate', 'case.synthesize'],
+      requiresHuman: ['every: proposal'],
+    })
+    const participant = charter('rca-investigator', { caseCapabilities: ['case.join'] })
+    const mesh = deriveAgentMesh(selected, registry([selected, coordinator, participant]))
+
+    render(<AgentMeshMap agentId="finops-agent" mesh={mesh} language="en" />)
+
+    expect(screen.getByText('1 chartered specialist')).toBeInTheDocument()
+    expect(screen.getByText(/Actual runtime admission is controlled by the coordinator allowlist/)).toBeInTheDocument()
+    expect(screen.getByText('Declared classes (not runtime state)')).toBeInTheDocument()
+    expect(screen.queryByText(/connected specialists/i)).not.toBeInTheDocument()
   })
 })

@@ -142,12 +142,12 @@ function MeshNode({ icon: Icon, title, detail, status, language }: {
     human: language === 'cs' ? 'lidská brána' : 'human gate',
   }[status]
   return (
-    <div className={styles.meshNode} data-status={status}>
+    <li className={styles.meshNode} data-status={status}>
       <span className={styles.meshIcon}><Icon size={18} /></span>
       <span className={styles.meshStatus}>{statusLabel}</span>
       <strong>{title}</strong>
       <span>{detail}</span>
-    </div>
+    </li>
   )
 }
 
@@ -160,7 +160,7 @@ export function AgentMeshMap({ agentId, mesh, language }: {
   const selected = getAgentPersona(agentId, language)
   const coordinator = mesh.coordinatorId ? getAgentPersona(mesh.coordinatorId, language) : null
   const canOpen = mesh.selectedCapabilities.includes('case.open')
-  const participants = mesh.enabledParticipantIds.length
+  const participants = mesh.charteredParticipantIds.length
 
   return (
     <section className={styles.mesh} aria-labelledby="agent-mesh-title">
@@ -169,43 +169,42 @@ export function AgentMeshMap({ agentId, mesh, language }: {
           <span className={styles.eyebrow}><Network size={13} /> {t('Spolupráce agentů', 'Agent collaboration')}</span>
           <h2 id="agent-mesh-title">{t('AI mesh — jak má tým spolupracovat', 'AI mesh — how the team is designed to collaborate')}</h2>
           <p>{t(
-            'Jeden dlouho běžící Temporal case drží kontext, rozpočet i stop podmínku. Agenti přidávají důkazy, koordinátor skládá jeden návrh a člověk rozhoduje.',
-            'One durable Temporal case holds context, budget and stop conditions. Agents add evidence, the coordinator produces one proposal, and a human decides.',
+            'Jeden dlouho běžící Temporal case drží kontext, rozpočet i stop podmínku. Diagram ukazuje charterovaný design, ne živou runtime topologii.',
+            'One durable Temporal case holds context, budget and stop conditions. This diagram shows chartered design, not live runtime topology.',
           )}</p>
         </div>
-        <span className={mesh.state === 'connected' ? styles.meshLive : styles.meshFoundation}>
-          {mesh.state === 'connected'
-            ? t(`${participants} připojených specialistů`, `${participants} connected specialists`)
+        <span className={mesh.state === 'chartered' ? styles.meshLive : styles.meshFoundation}>
+          {mesh.state === 'chartered'
+            ? t(
+                participants === 1 ? '1 specialista v charteru' : `${participants} specialistů v charteru`,
+                participants === 1 ? '1 chartered specialist' : `${participants} chartered specialists`,
+              )
             : t('Dnes: základ mesh', 'Today: mesh foundation')}
         </span>
       </div>
 
-      <div className={styles.meshFlow} role="img" aria-label={t(
+      <ol className={styles.meshFlow} aria-label={t(
         'Tok od podnětu přes koordinátora a specialisty k návrhu a lidskému rozhodnutí',
         'Flow from signal through coordinator and specialists to proposal and human decision',
       )}>
         <MeshNode icon={Sparkles} title={t('Podnět nebo nález', 'Signal or finding')}
           detail={canOpen ? `${selected.name} · case.open` : t(`${selected.name} zatím nemá case.open`, `${selected.name} does not yet hold case.open`)}
           status={canOpen ? 'governed' : 'planned'} language={language} />
-        <ArrowRight className={styles.meshArrow} aria-hidden="true" />
         <MeshNode icon={Network} title={coordinator?.name ?? t('Koordinátor', 'Coordinator')}
           detail={t('Hlídá rozpočet, deadline a konvergenci', 'Owns budget, deadline and convergence')}
           status={mesh.coordinatorId ? 'governed' : 'planned'} language={language} />
-        <ArrowRight className={styles.meshArrow} aria-hidden="true" />
         <MeshNode icon={Users} title={t('Pozvaní specialisté', 'Invited specialists')}
           detail={participants > 0
-            ? t(`${participants} agentů smí join/contribute`, `${participants} agents may join/contribute`)
+            ? t(`${participants} agentů deklaruje join/contribute; runtime allowlist je zvlášť`, `${participants} agents declare join/contribute; runtime allowlist is separate`)
             : t(`0 z ${mesh.totalAgents}: capability zatím nepřidělena`, `0 of ${mesh.totalAgents}: capability not granted yet`)}
           status={participants > 0 ? 'governed' : 'planned'} language={language} />
-        <ArrowRight className={styles.meshArrow} aria-hidden="true" />
         <MeshNode icon={GitMerge} title={t('Jeden společný návrh', 'One shared proposal')}
           detail={t('Citace důkazů, dissent zůstává viditelný', 'Evidence is cited and dissent stays visible')}
           status={mesh.synthesisEnabled ? 'governed' : 'planned'} language={language} />
-        <ArrowRight className={styles.meshArrow} aria-hidden="true" />
         <MeshNode icon={Hand} title={t('Člověk rozhodne', 'Human decides')}
           detail={t('Mesh nikdy nezapisuje přímo do business služby', 'The mesh never writes directly to a business service')}
           status={mesh.humanGateEnabled ? 'human' : 'planned'} language={language} />
-      </div>
+      </ol>
 
       <div className={styles.meshFooter}>
         <div className={styles.meshTruth}>
@@ -215,11 +214,14 @@ export function AgentMeshMap({ agentId, mesh, language }: {
                 'Pravdivý stav: koordinace a syntéza jsou charterované, ale multi-agentní mesh se aktivuje až po přidání case.join / case.contribute konkrétním specialistům.',
                 'Honest status: coordination and synthesis are chartered, but the multi-agent mesh activates only after specialists receive case.join / case.contribute.',
               )
-            : t('Připojení specialisté jsou odvozeni přímo z case capabilities v agents.yaml.', 'Connected specialists are derived directly from case capabilities in agents.yaml.')}</span>
+            : t(
+                'Charterovaný stav: specialisté deklarují case.join / case.contribute. Skutečné runtime přijetí řídí samostatný allowlist case-coordinatoru a tato stránka ho netvrdí.',
+                'Chartered status: specialists declare case.join / case.contribute. Actual runtime admission is controlled by the coordinator allowlist and is not claimed by this page.',
+              )}</span>
         </div>
         <div className={styles.caseClasses}>
-          <span>{t('Typy případů', 'Case classes')}</span>
-          {mesh.caseClasses.map(caseClass => <code key={caseClass}>{caseClass}</code>)}
+          <span>{t('Deklarované třídy (ne runtime stav)', 'Declared classes (not runtime state)')}</span>
+          {mesh.declaredCaseClasses.map(caseClass => <code key={caseClass}>{caseClass}</code>)}
         </div>
         <Link href="/iaops/cases" className={styles.meshLink}>
           {t('Otevřít živá case vlákna', 'Open live case threads')} <ArrowRight size={13} />
