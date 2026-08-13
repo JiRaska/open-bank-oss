@@ -49,6 +49,9 @@ test('authors a recurring campaign from the service cadence catalogue', async ({
   await page.locator('#c-name').fill('Recurring welcome')
   await page.locator('#c-goal').fill('Engage new customers')
   await page.locator('[data-segment="actives@1"]').click()
+  // Scheduling is channel-agnostic; keep this regression on e-mail so it still proves the full
+  // template payload while the product's default remains app-first PUSH.
+  await page.locator('[data-channel-pick="EMAIL"]').click()
   await page.locator('#var-0-offerTitle').fill('Welcome')
   await page.locator('#var-0-offerText').fill('Thanks for joining.')
   await page.locator('#var-0-ctaText').fill('Explore')
