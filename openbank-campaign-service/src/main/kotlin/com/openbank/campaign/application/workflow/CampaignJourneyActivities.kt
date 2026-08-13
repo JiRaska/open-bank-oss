@@ -12,6 +12,8 @@ import io.temporal.activity.ActivityInterface
 import java.util.UUID
 
 @ActivityInterface
+// Temporal requires one stable activity contract; splitting it would distribute replay compatibility.
+@Suppress("TooManyFunctions")
 interface CampaignJourneyActivities {
     fun loadDefinition(campaignId: UUID): JourneyDefinition
     fun controlState(campaignId: UUID, partyId: UUID): JourneyControlState
