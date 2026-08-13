@@ -47,6 +47,8 @@ class CustomerEdgeResourceTest {
         objectMapper = ObjectMapper()
         accountServiceUrl = "http://account"
         balanceServiceUrl = "http://balance"
+        engagementServiceUrl = "http://engagement"
+        campaignServiceUrl = "http://campaign"
     }
 
     private fun accountJson(accountId: UUID, ownerParty: UUID) =
@@ -250,6 +252,80 @@ class CustomerEdgeResourceTest {
         // forwarding a corrupt payload upstream.
         assertThat(CustomerEdgeResource.injectField(mapper, "not json", "partyId", "x")).isNull()
         assertThat(CustomerEdgeResource.injectField(mapper, """["a","b"]""", "partyId", "x")).isNull()
+    }
+
+    // ── in-app engagement surfaces ────────────────────────────────────────────────────────────
+
+    @Test
+    fun `recordSurfaceEvent overwrites a spoofed party id with the JWT party`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val body = slot<String>()
+        every {
+            upstream.post(match { it.endsWith("/api/v1/surfaces/events") }, caller.toString(), capture(body), any())
+        } returns
+            Response.status(Response.Status.ACCEPTED).build()
+
+        val response = resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"partyId":"${UUID.randomUUID()}","contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK"}""",
+        )
+
+        assertThat(response.status).isEqualTo(Response.Status.ACCEPTED.statusCode)
+        assertThat(mapper.readTree(body.captured).path("partyId").asText()).isEqualTo(caller.toString())
+        assertThat(mapper.readTree(body.captured).path("contentId").asText()).isEqualTo("SAVINGS_RATE_BANNER")
+    }
+
+    @Test
+    fun `recordSurfaceEvent validates an opaque interaction reference for the caller before forwarding`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every {
+            upstream.get(
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef",
+                caller.toString(),
+            )
+        } returns Response.noContent().build()
+        every { upstream.post(any(), caller.toString(), any(), any()) } returns Response.status(202).build()
+
+        val response = resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
+        )
+
+        assertThat(response.status).isEqualTo(202)
+        verify(exactly = 1) {
+            upstream.get(
+                "http://campaign/api/v1/campaigns/interactions/$interactionRef",
+                caller.toString(),
+            )
+        }
+        verify(exactly = 1) { upstream.post(any(), caller.toString(), any(), any()) }
+    }
+
+    @Test
+    fun `recordSurfaceEvent rejects another party interaction reference without forwarding`() {
+        val caller = UUID.randomUUID()
+        val interactionRef = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get(any(), caller.toString()) } returns Response.status(404).build()
+
+        val response = resourceFor(upstream, caller).recordSurfaceEvent(
+            """{"contentId":"SAVINGS_RATE_BANNER","slot":"HOME_BANNER","type":"CLICK","interactionRef":"$interactionRef"}""",
+        )
+
+        assertThat(response.status).isEqualTo(400)
+        verify(exactly = 0) { upstream.post(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `getSurface rejects a non-catalogue slot before it calls the upstream`() {
+        val caller = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+
+        val response = resourceFor(upstream, caller).getSurface("../../not-a-slot")
+
+        assertThat(response.status).isEqualTo(Response.Status.BAD_REQUEST.statusCode)
+        verify(exactly = 0) { upstream.get(any(), any()) }
     }
 
     // ── statement render: currency + format allow-lists (deny-by-default) ────────

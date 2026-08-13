@@ -16,7 +16,8 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
-import { loadAgentCharter } from '@/lib/governance/agentCharters'
+import { loadAgentCharters } from '@/lib/governance/agentCharters'
+import { deriveAgentDiagnostics, deriveAgentMesh } from '@/lib/governance/agentDiagnostics'
 import { loadAgentCharterDoc } from '@/lib/governance/docs'
 
 export const dynamic = 'force-dynamic'
@@ -69,11 +70,12 @@ async function fetchProposals(agentId: string): Promise<{ available: boolean; pr
 
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ agentId: string }> }) {
   const { agentId } = await ctx.params
-  const [charter, doc, proposalData] = await Promise.all([
-    loadAgentCharter(agentId),
+  const [registry, doc, proposalData] = await Promise.all([
+    loadAgentCharters(),
     loadAgentCharterDoc(agentId),
     fetchProposals(agentId),
   ])
+  const charter = registry.agents.find(agent => agent.id === agentId) ?? null
 
   if (!charter && !doc) {
     return NextResponse.json({ error: 'unknown_agent' }, { status: 404 })
@@ -82,6 +84,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ agentId: s
   return NextResponse.json({
     id: agentId,
     charter,
+    diagnostics: charter ? deriveAgentDiagnostics(charter, registry.agents) : [],
+    mesh: charter ? deriveAgentMesh(charter, registry) : null,
     narrative: doc ? { title: doc.title, adr: doc.adr, plane: doc.plane, body: doc.body } : null,
     proposals: {
       available: proposalData.available,

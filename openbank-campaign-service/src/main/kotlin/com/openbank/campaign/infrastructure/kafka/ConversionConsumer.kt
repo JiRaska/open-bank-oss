@@ -7,8 +7,11 @@ package com.openbank.campaign.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
+import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.domain.model.ConversionCatalog
+import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
 import com.openbank.libs.domain.identifiers.Ids
@@ -44,6 +47,7 @@ class ConversionConsumer(
     private val enrolments: EnrolmentRepository,
     private val campaigns: CampaignRepository,
     private val sendLog: SendLogRepository,
+    private val journeys: JourneySignaller,
     private val mapper: ObjectMapper,
 ) {
     private val log = Logger.getLogger(ConversionConsumer::class.java)
@@ -82,47 +86,82 @@ class ConversionConsumer(
                 ?.takeIf { it.isAfter(Instant.EPOCH) }
                 ?: Instant.now()
 
-            enrolments.listByParty(partyId).forEach { enrolment ->
-                recordIfConverted(enrolment.campaignId, enrolment.currentStep, partyId, candidates, occurredAt)
-            }
+            recordAttributedConversion(partyId, candidates, occurredAt)
         } finally {
             message.ack()
         }
     }
 
     @Suppress("ReturnCount")
-    private suspend fun recordIfConverted(
-        campaignId: UUID,
-        stepOrder: Int,
+    private suspend fun recordAttributedConversion(
         partyId: UUID,
         candidates: Map<String, ConversionCatalog.Rule>,
         occurredAt: Instant,
     ) {
-        val campaign = campaigns.findById(campaignId) ?: return
-        val rule = campaign.conversionRule?.let { candidates[it] } ?: return
+        val eligible = mutableListOf<AttributionCandidate>()
+        for (enrolment in enrolments.listByParty(partyId)) {
+            attributionCandidate(enrolment, candidates, occurredAt)
+                ?.let(eligible::add)
+        }
 
-        val context = sendLog.conversionContextFor(campaignId, partyId)
-        // A campaign gets credit only from the moment it actually said something. Measuring from
-        // enrolment would credit a campaign for a decision made while it sat behind a delay or a
-        // quiet-hours suppression, having contributed nothing.
-        val firstSend = context.firstSentAt ?: return
-        if (occurredAt.isBefore(firstSend)) return
-        if (occurredAt.isAfter(firstSend.plus(rule.attributionWindow))) return
-        if (context.alreadyConverted) return
+        // One product outcome gets one owner: deterministic last-touch among eligible campaigns.
+        // The old loop credited every overlapping campaign, so a single account opening inflated
+        // conversion totals across the portfolio. Keep an already-converted winner in the ranking:
+        // on Kafka redelivery we must return, not shift the same event to the second-place campaign.
+        val winner = eligible.maxWithOrNull(
+            compareBy<AttributionCandidate> { it.firstSentAt }.thenBy { it.campaignId },
+        ) ?: return
+        if (winner.alreadyConverted) return
 
         sendLog.record(
             SendRecord(
                 // Ids.newId() is UUIDv7 (ADR-0106): a send-log row is durable and indexed, so a
                 // time-ordered id keeps the primary key from scattering writes across the B-tree.
                 id = Ids.newId(),
-                campaignId = campaignId,
+                campaignId = winner.campaignId,
                 partyId = partyId,
-                stepOrder = stepOrder,
+                stepOrder = winner.stepOrder,
                 outcome = SendOutcome.CONVERTED,
                 occurredAt = occurredAt,
             ),
         )
-        log.infof("Conversion recorded: campaign=%s party=%s rule=%s", campaignId, partyId, campaign.conversionRule)
+        // The durable row above is the correctness fallback read before every later step. The signal
+        // interrupts a long Temporal delay immediately so the customer is not persuaded after acting.
+        // A holdout deliberately has no workflow to interrupt. Recording its observed product
+        // outcome is precisely the point of keeping it enrolled in the experiment.
+        if (winner.cohort == ExperimentCohort.TREATMENT) {
+            journeys.signalGoalReached(winner.campaignId, partyId)
+        }
+        log.infof("Conversion recorded: campaign=%s party=%s", winner.campaignId, partyId)
+    }
+
+    @Suppress("ReturnCount")
+    private suspend fun attributionCandidate(
+        enrolment: Enrolment,
+        candidates: Map<String, ConversionCatalog.Rule>,
+        occurredAt: Instant,
+    ): AttributionCandidate? {
+        val campaign = campaigns.findById(enrolment.campaignId) ?: return null
+        val rule = campaign.conversionRule?.let { candidates[it] } ?: return null
+        val context = sendLog.conversionContextFor(campaign.id, enrolment.partyId)
+        // Treatment attribution starts only after a real send. A holdout has no send by design;
+        // its equivalent start is its immutable enrolment assignment, not an invented handoff.
+        val attributionStart = when (enrolment.experimentCohort) {
+            ExperimentCohort.TREATMENT -> context.firstSentAt ?: return null
+            ExperimentCohort.HOLDOUT -> enrolment.startedAt
+        }
+        if (occurredAt.isBefore(attributionStart) ||
+            occurredAt.isAfter(attributionStart.plus(rule.attributionWindow))
+        ) {
+            return null
+        }
+        return AttributionCandidate(
+            campaign.id,
+            enrolment.currentStep,
+            attributionStart,
+            context.alreadyConverted,
+            enrolment.experimentCohort,
+        )
     }
 
     /** The outbox `ce-type` header, when the record carries Kafka metadata at all. */
@@ -135,3 +174,11 @@ class ConversionConsumer(
             ?.toString(Charsets.UTF_8)
             ?.takeIf { it.isNotBlank() }
 }
+
+private data class AttributionCandidate(
+    val campaignId: UUID,
+    val stepOrder: Int,
+    val firstSentAt: Instant,
+    val alreadyConverted: Boolean,
+    val cohort: ExperimentCohort,
+)

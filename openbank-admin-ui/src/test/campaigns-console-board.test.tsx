@@ -81,12 +81,12 @@ describe('campaigns console', () => {
     campaign('CLOSED', 900, 4),
   ]
 
-  function mockFetch(items = ITEMS, state = 'ok') {
+  function mockFetch(items = ITEMS, state = 'ok', summary?: unknown[]) {
     return vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       const json = (b: unknown) => new Response(JSON.stringify(b), { status: 200, headers: { 'content-type': 'application/json' } })
       if (url.includes('/api/auth/session')) return new Response('null', { status: 200, headers: { 'content-type': 'application/json' } })
-      if (url.includes('/api/campaigns')) return json({ items, state })
+      if (url.includes('/api/campaigns')) return json({ items, state, ...(summary ? { summary } : {}) })
       return json({})
     })
   }
@@ -132,8 +132,32 @@ describe('campaigns console', () => {
     fireEvent.click(screen.getByTestId('stage-ACTIVE'))
 
     await waitFor(() => expect(screen.getByTestId('clear-state')).toBeTruthy())
-    expect(screen.queryByText('Campaign DRAFT 1')).toBeNull()
-    expect(screen.getByText('Campaign ACTIVE 3')).toBeTruthy()
+    // The decision desk deliberately keeps the most important next action visible above the
+    // filtered inventory. The assertion belongs to the table, which is the surface the stage filter
+    // controls; a global text query would now reject the useful priority card as though it were a
+    // leaked table row.
+    const table = document.querySelector('table')!
+    expect(table.textContent).not.toContain('Campaign DRAFT 1')
+    expect(table.textContent).toContain('Campaign ACTIVE 3')
+  })
+
+  it('puts the next marketing decisions first and names delivery evidence without inventing conversion', async () => {
+    vi.stubGlobal('fetch', mockFetch(ITEMS, 'ok', [{
+      campaignId: 'ACTIVE-3', enrolled: 1240, sent: 1110, suppressed: 96, failed: 34,
+    }]))
+    render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
+
+    await waitFor(() => expect(screen.getByTestId('campaign-decision-desk')).toBeTruthy())
+    // The control room gives the operator the complete lifecycle before they drill into the
+    // decision queue. It names operating evidence, but explicitly refuses to call it engagement.
+    expect(screen.getByTestId('campaign-control-room').textContent).toMatch(/Brief.*Review.*Live journey.*Evidence/)
+    expect(screen.getByTestId('campaign-evidence-strip').textContent).toMatch(/operating signal, not confirmed delivery, engagement or conversion/)
+    const decisions = Array.from(document.querySelectorAll('[data-decision-campaign]'))
+      .map(node => node.getAttribute('data-decision-campaign'))
+    // Approval is a more urgent human decision than an unfinished draft or a live campaign.
+    expect(decisions[0]).toBe('PENDING_APPROVAL-2')
+    expect(screen.getByTestId('campaign-delivery-pulse').textContent).toMatch(/1,240|1 240/)
+    expect(screen.getByTestId('campaign-delivery-pulse').textContent).toMatch(/not conversion or engagement/)
   })
 
 })

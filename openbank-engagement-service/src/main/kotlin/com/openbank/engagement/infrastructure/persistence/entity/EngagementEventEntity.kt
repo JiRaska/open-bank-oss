@@ -38,12 +38,17 @@ class EngagementEventEntity : PanacheEntityBase() {
     @Column(nullable = false)
     lateinit var occurredAt: Instant
 
+    /** Nullable so pre-attribution app events remain explicitly unattributed, never fabricated. */
+    @Column
+    var interactionRef: UUID? = null
+
     fun toDomain(): EngagementEvent = EngagementEvent(
         partyId = partyId,
         contentId = contentId,
         slot = SurfaceSlot.valueOf(slot),
         type = EngagementEventType.valueOf(type),
         occurredAt = occurredAt,
+        interactionRef = interactionRef,
     )
 
     companion object {
@@ -55,6 +60,7 @@ class EngagementEventEntity : PanacheEntityBase() {
             entity.slot = event.slot.name
             entity.type = event.type.name
             entity.occurredAt = event.occurredAt
+            entity.interactionRef = event.interactionRef
             return entity
         }
     }

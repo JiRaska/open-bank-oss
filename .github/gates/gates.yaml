@@ -643,6 +643,8 @@ gates:
     name: "release-registration consistency (rule 3, ADR-0029)"
     group: supplychain
     mode: enforced
+    selftest: python3 openbank-infra/scripts/check-release-registration.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-release-registration.py
 
@@ -1665,6 +1667,8 @@ gates:
     group: kotlin
     mode: enforced
     min_subjects: 16   # 33 dispatch-gated services today (2026-08-09)
+    selftest: bash .github/scripts/check-outbox-dispatch-enabled.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-outbox-dispatch-enabled.sh .
 
@@ -1992,6 +1996,8 @@ gates:
     name: "openapi-server-port — spec dev port vs quarkus.http.port (enforced)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-openapi-server-port.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-openapi-server-port.py --enforce
 
@@ -2044,6 +2050,23 @@ gates:
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
 
+  # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
+  # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
+  # ConfigMap a FRESH cluster boots from. Nothing reconciles the two, and a migration that reaches
+  # only the resources is invisible — file in git, object present in the sandbox because someone
+  # applied it, CI green — until a warehouse is rebuilt without it. V4__screen_feedback_context.sql
+  # sat that way from 2026-07 until #4511. Compares created OBJECTS, not text, in both directions.
+  - id: clickhouse-ddl-configmap-parity
+    min_subjects: 15   # 22 objects today (V1-V5 + the ConfigMap's copies, 2026-08-13)
+    name: "ClickHouse DDL reaches a fresh cluster (issue #4511, enforced)"
+    group: data
+    mode: enforced
+    selftest: |
+      python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-clickhouse-ddl-in-configmap.py --root .
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
@@ -2071,6 +2094,8 @@ gates:
     name: "duplicate YAML key guard (application.yaml, #1170/#1193, enforced)"
     group: data
     mode: enforced
+    selftest: bash .github/scripts/check-duplicate-yaml-keys.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-duplicate-yaml-keys.sh . --enforce
 
@@ -2095,6 +2120,8 @@ gates:
     group: data
     mode: advisory
     verified: "2026-08-09 — fleet still not clean per #686; no target date set for --enforce yet"
+    selftest: bash .github/scripts/check-dotted-mp-messaging-keys.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
@@ -2124,10 +2151,13 @@ gates:
   # versioned event (-vN topic, ADR-0006), never an in-place edit.
   # ADVISORY until the rules.yaml schema-compat gate graduates
   # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
-  # ADR-0006 ratchet (#1916). Measured: 36 producer topics, 71 eventType literals, ZERO .avsc,
-  # zero asyncapi.yaml, no openbank-contracts/ directory. The Apicurio registry the ADR calls for
-  # is deployed and running — the runtime half exists, the contract half does not, and every Kafka
-  # event on this platform is raw unversioned JSON.
+  # ADR-0006 ratchet (#1916). Measured at introduction: 36 producer topics, 71 eventType literals,
+  # ZERO .avsc, zero asyncapi.yaml, no openbank-contracts/ directory. Since then two contracts have
+  # been written (delegation, notification) and the tree now measures 38 producer pairs across 32
+  # services / 36 distinct topics, 2 contracted and 36 grandfathered. The .avsc count is still ZERO
+  # and no topic has a registered schema: the Apicurio registry the ADR calls for is deployed and
+  # running, so the runtime half exists and the contract half does not, and every Kafka event on
+  # this platform is still raw unversioned JSON.
   #
   # Distinct from `schema-compat-gate` above, which checks that an event class does not change
   # incompatibly. Nothing checked whether an event has a declared contract at all.
@@ -2144,6 +2174,35 @@ gates:
     mode: enforced
     run: |
       python3 .github/scripts/check-event-contract-coverage.py
+
+  # ADR-0006, the layer the ratchet above cannot reach (#1916). The ratchet asserts a contract FILE
+  # exists for a producing service; nothing asserted the file describes the code. Measured when this
+  # was added: 38 producer pairs across 32 services, 36 distinct topics, 2 with an AsyncAPI contract
+  # and 36 grandfathered — and ZERO topics with a schema registered in the Apicurio registry, so a
+  # producer that violates its own contract fails in no environment at runtime either. Until
+  # registry enforcement lands, the contract is the ONLY description of the wire format a consumer
+  # author can read, which is why an undetectably wrong one is worse than an absent one.
+  #
+  # Checks three agreements, each in BOTH directions: channel addresses vs the topics the service
+  # actually produces, message names vs the event-type literals declared in its src/main, and
+  # payload properties vs the producing data class's primary-constructor properties. Names only —
+  # types are deliberately out of scope (a Kotlin type maps to a JSON Schema type through Jackson,
+  # and modelling that badly is worse than not modelling it); schema-compat-gate below owns types,
+  # where it compares like against like across the PR base.
+  #
+  # ENFORCED with no baseline, because it has no debt to record: both contracts in the tree agree
+  # with their code today. An advisory over a claim that is checkable against reality is the
+  # ADR-0071 contradiction — there is no judgement left to exercise.
+  - id: event-contract-code-agreement
+    name: "event contract vs code agreement (ADR-0006, enforced)"
+    group: data
+    mode: enforced
+    min_subjects: 2
+    selftest: |
+      python3 .github/scripts/check-event-contract-code-agreement.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-event-contract-code-agreement.py
 
   - id: schema-compat-gate
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
@@ -2306,6 +2365,8 @@ gates:
     name: "no dead-code SERVICE-principal rego rule (enforced)"
     group: security
     mode: enforced
+    selftest: bash .github/scripts/check-no-service-principal-type.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-no-service-principal-type.sh .
 

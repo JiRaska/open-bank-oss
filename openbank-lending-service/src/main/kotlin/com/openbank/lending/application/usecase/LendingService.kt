@@ -545,8 +545,11 @@ class LendingService(
                             LendingOutboxMessage(
                                 aggregateId = saved.id.value,
                                 eventType = "loan.disbursed",
+                                // #3914: occurredAt is the loan's own `disbursedAt` — the instant the disbursement
+                                // happened on the aggregate — not the serialisation instant.
                                 payload = """{"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
-                                    """"principal":"${saved.principal}"}""",
+                                    """"principal":"${saved.principal}",""" +
+                                    """"occurredAt":"${saved.disbursedAt.toInstant()}"}""",
                             ),
                         )
                     }
@@ -670,8 +673,11 @@ class LendingService(
                     LendingOutboxMessage(
                         aggregateId = installment.loanId.value,
                         eventType = "loan.interest_accrued",
+                        // #3914: occurredAt is `accruedAt`, the very instant stamped on the installment by
+                        // markAccrued above — the recognition event itself, not the emit.
                         payload = """{"loanId":"${installment.loanId.value}","installment":${installment.number},""" +
-                            """"interest":"${installment.interest}","dueDate":"${installment.dueDate}"}""",
+                            """"interest":"${installment.interest}","dueDate":"${installment.dueDate}",""" +
+                            """"occurredAt":"${accruedAt.toInstant()}"}""",
                     ),
                 )
             }
@@ -711,10 +717,16 @@ class LendingService(
                             .flatMap { derecognizeAccruedInterest(loan, schedule) }
                             .flatMap { loans.update(loan.copy(status = LoanStatus.WRITTEN_OFF)) }
                             .flatMap { written ->
+                                // #3914: Loan carries no writtenOffAt column, so the derecognition instant is read
+                                // from the clock at the point the write-off completes — the house convention
+                                // already used by TerminationService and OriginationDecisionService. Emitted
+                                // once into a local so payload and any future reuse cannot disagree.
+                                val writtenOffAt = clock.instant()
                                 val wPayload = """{"loanId":"${written.id.value}",""" +
                                     """"partyId":"${written.partyId}",""" +
                                     """"writtenOff":"$outstanding",""" +
-                                    """"writtenOffBy":"${request.writtenOffBy}"}"""
+                                    """"writtenOffBy":"${request.writtenOffBy}",""" +
+                                    """"occurredAt":"$writtenOffAt"}"""
                                 events.emit(
                                     LendingOutboxMessage(
                                         aggregateId = written.id.value,
@@ -961,11 +973,14 @@ class LendingService(
                     LendingOutboxMessage(
                         aggregateId = updated.id.value,
                         eventType = "loan.rescheduled",
+                        // #3914: no rescheduledAt column on Loan; clock at the completed reschedule, same
+                        // house convention as write-off above.
                         payload = """{"loanId":"${updated.id.value}","partyId":"${updated.partyId}",""" +
                             """"newPrincipal":"$newPrincipal",""" +
                             """"newNominalAnnualRate":"${request.newNominalAnnualRate}",""" +
                             """"newTermPeriods":${request.newTermPeriods},""" +
-                            """"principalForgiveness":"${request.principalForgiveness}"}""",
+                            """"principalForgiveness":"${request.principalForgiveness}",""" +
+                            """"occurredAt":"${clock.instant()}"}""",
                     ),
                 ).map { updated }
             }
@@ -1133,6 +1148,12 @@ class LendingService(
             }
         }
 
+    /**
+     * #3914: both events emitted here carry `occurredAt` = `record.createdAt`, the instant THIS
+     * provisioning cycle ran, which is when the stage transition and the ECL delta were determined.
+     * The `asOf` field next to it is the accounting DATE and is a different fact. Without
+     * `occurredAt`, AuditConsumer records its own ingest time as the business time.
+     */
     private fun postProvisioningDelta(loan: Loan, period: String, snapshot: ProvisioningSnapshot): Uni<Boolean> =
         provisioning.findLatestBefore(loan.id, period).flatMap { prior ->
             val priorEcl = prior?.expectedCreditLoss ?: Money.zero(snapshot.expectedCreditLoss.currency.code)
@@ -1166,7 +1187,7 @@ class LendingService(
                         payload = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
                             """"previousStage":"${prior!!.stage}","newStage":"${snapshot.stage}",""" +
                             """"daysPastDue":${snapshot.daysPastDue},"period":"$period",""" +
-                            """"asOf":"${snapshot.asOf}"}""",
+                            """"asOf":"${snapshot.asOf}","occurredAt":"${record.createdAt.toInstant()}"}""",
                     ),
                 )
             } else {
@@ -1195,7 +1216,7 @@ class LendingService(
                                     payload = """{"loanId":"${loan.id.value}","period":"$period",""" +
                                         """"stage":"${snapshot.stage}",""" +
                                         """"expectedCreditLoss":"${snapshot.expectedCreditLoss}",""" +
-                                        """"delta":"$delta"}""",
+                                        """"delta":"$delta","occurredAt":"${record.createdAt.toInstant()}"}""",
                                 ),
                             )
                         }

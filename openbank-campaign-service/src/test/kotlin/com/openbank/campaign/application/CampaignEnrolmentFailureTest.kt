@@ -18,6 +18,8 @@ import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.EnrolmentState
+import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
@@ -86,16 +88,25 @@ class CampaignEnrolmentFailureTest {
     private class FlakyJourneys(private val failFor: Set<UUID>) : JourneySignaller {
         val started = mutableListOf<UUID>()
         override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignClosed(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
         override fun startJourney(campaignId: UUID, partyId: UUID) {
             check(partyId !in failFor) { "Namespace default is not found" }
             started += partyId
         }
     }
 
-    private fun service(enrolments: EnrolmentRepository, journeys: JourneySignaller) = CampaignService(
+    private fun service(
+        enrolments: EnrolmentRepository,
+        journeys: JourneySignaller,
+        selectedCampaign: Campaign = campaign,
+        audience: List<UUID> = parties,
+    ) = CampaignService(
         campaigns = object : CampaignRepository {
-            override suspend fun findById(id: UUID): Campaign? = campaign.takeIf { it.id == id }
-            override suspend fun list(): List<Campaign> = listOf(campaign)
+            override suspend fun findById(id: UUID): Campaign? = selectedCampaign.takeIf { it.id == id }
+            override suspend fun list(): List<Campaign> = listOf(selectedCampaign)
             override suspend fun save(campaign: Campaign): Campaign = campaign
             override suspend fun findActiveByTrigger(trigger: String): List<Campaign> = emptyList()
         },
@@ -106,7 +117,7 @@ class CampaignEnrolmentFailureTest {
             override suspend fun list(): List<Segment> = listOf(segment)
         },
         segmentEvaluation = object : SegmentEvaluationPort {
-            override suspend fun evaluate(segment: Segment): List<UUID> = parties
+            override suspend fun evaluate(segment: Segment): List<UUID> = audience
             override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
         },
         journeys = journeys,
@@ -160,4 +171,35 @@ class CampaignEnrolmentFailureTest {
             .containsExactly(parties[1], parties[2])
         assertThat(outcome).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
     }
+
+    @Test
+    fun `holdout stores a no-contact assignment while treatment starts the journey`(): Unit = runBlocking {
+        val holdoutParty = partyIn(ExperimentCohort.HOLDOUT)
+        val treatmentParty = partyIn(ExperimentCohort.TREATMENT)
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val experimental = campaign.copy(conversionRule = "ACCOUNT_OPENED", holdoutPercent = 50)
+
+        val outcome = service(
+            enrolments,
+            journeys,
+            experimental,
+            listOf(holdoutParty, treatmentParty),
+        ).enrol(campaignId)
+
+        assertThat(outcome).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 0))
+        assertThat(journeys.started)
+            .describedAs("a holdout must have no workflow that could later send it a campaign message")
+            .containsExactly(treatmentParty)
+        val holdout = enrolments.saved.single { it.partyId == holdoutParty }
+        assertThat(holdout.state).isEqualTo(EnrolmentState.HOLDOUT)
+        assertThat(holdout.experimentCohort).isEqualTo(ExperimentCohort.HOLDOUT)
+        assertThat(holdout.completedAt).isNotNull()
+        assertThat(enrolments.saved.single { it.partyId == treatmentParty }.experimentCohort)
+            .isEqualTo(ExperimentCohort.TREATMENT)
+    }
+
+    private fun partyIn(cohort: ExperimentCohort): UUID = generateSequence(1L) { it + 1 }
+        .map { UUID(0, it) }
+        .first { ExperimentCohort.assign(campaignId, it, 50) == cohort }
 }

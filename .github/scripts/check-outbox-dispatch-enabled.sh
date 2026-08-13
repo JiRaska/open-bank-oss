@@ -43,6 +43,94 @@
 # origin/main), so this is a regression guard, not a fleet-sweep-in-waiting.
 # Usage: check-outbox-dispatch-enabled.sh [root]   (default root: .)
 set -euo pipefail
+# --- self-test ------------------------------------------------------------------------
+# `openbank.outbox.dispatch-enabled` DEFAULTS TO FALSE. A service with an outbox entity that
+# does not set it true never dispatches an event — with no error, and `attempt_count` stays 0
+# forever. Nothing else observes that: the pod is healthy, the rows are written, and the
+# absence is the quiet path. This guard is the only thing standing between that default and
+# production, and it shipped with no falsification of its own.
+#
+# The fixtures are a real directory tree run through the REAL script (it already takes a root
+# argument), not a re-implementation of its awk. They are named `openbank-*` because that is
+# the module glob: the first draft used plain names, nothing matched, zero subjects were
+# checked and every must-fail case exited 0 — a self-test passing because it never reached
+# its subject.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d)
+  trap 'rm -rf "$td"' EXIT
+  fails=0
+
+  mk() { # mk <name> <dispatcher?> <application.yaml body|NONE> <version.txt?>
+    local n="$1" disp="$2" body="$3" ver="$4"
+    mkdir -p "$td/$n/src/main/kotlin" "$td/$n/src/main/resources"
+    [ "$ver" = "yes" ] && echo "1.0.0" > "$td/$n/version.txt"
+    [ "$disp" = "yes" ] && printf 'class FooOutboxDispatcher : AbstractOutboxDispatcher()\n' \
+      > "$td/$n/src/main/kotlin/FooOutboxDispatcher.kt"
+    [ "$body" != "NONE" ] && printf '%b' "$body" > "$td/$n/src/main/resources/application.yaml"
+    return 0
+  }
+  run_one() { # isolate a single fixture so one case cannot mask another
+    local keep="$1" out rc
+    local box; box=$(mktemp -d)
+    cp -R "$td/$keep" "$box/$keep"
+    out=$(bash "$0" "$box" 2>&1); rc=$?
+    rm -rf "$box"
+    printf '%s\n' "$out"
+    return $rc
+  }
+  expect() { # expect <label> <fixture> <want-rc> [want-substring]
+    local label="$1" fx="$2" want="$3" sub="${4:-}" out rc
+    out=$(run_one "$fx"); rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: $label — expected rc=$want, got rc=$rc" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong: no '$sub' in: $out" >&2; fails=$((fails+1))
+    fi
+  }
+
+  ENABLED='openbank:\n  outbox:\n    dispatch-enabled: true\n'
+  DISABLED='openbank:\n  outbox:\n    dispatch-enabled: false\n'
+  ABSENT='openbank:\n  outbox:\n    poll-interval: 5s\n'
+  ENVDEF='openbank:\n  outbox:\n    dispatch-enabled: "${OB_DISPATCH:true}"\n'
+  ENVNODEF='openbank:\n  outbox:\n    dispatch-enabled: "${OB_DISPATCH}"\n'
+  ELSEWHERE='quarkus:\n  outbox:\n    dispatch-enabled: true\n'
+
+  mk openbank-ok-true       yes "$ENABLED"   yes
+  mk openbank-bad-false     yes "$DISABLED"  yes
+  mk openbank-bad-absent    yes "$ABSENT"    yes
+  mk openbank-ok-envdefault yes "$ENVDEF"    yes
+  mk openbank-bad-envnodef  yes "$ENVNODEF"  yes
+  mk openbank-bad-noyaml    yes NONE         yes
+  mk openbank-no-dispatcher no  "$DISABLED"  yes
+  mk openbank-bad-wrongkey  yes "$ELSEWHERE" yes
+
+  # The only shape that may pass. Without it, a script that failed everything would look fine.
+  expect "dispatch-enabled: true is clean"              openbank-ok-true       0
+  # THE DEFECT: shipped false, dispatches nothing, says nothing.
+  expect "dispatch-enabled: false is caught"            openbank-bad-false     1 "not true"
+  # The same outage with no key at all — the DEFAULT, and the likeliest way to arrive here.
+  expect "an absent dispatch-enabled is caught"         openbank-bad-absent    1 "MISSING"
+  # SmallRye env-var-with-default must resolve to its default, or every deployed service reads
+  # as broken and the gate gets switched off.
+  expect "an env var defaulting to true is clean"       openbank-ok-envdefault 0
+  # ...but an env var with NO default is not knowable from this repo, and must not be guessed.
+  expect "an env var with no default is refused"        openbank-bad-envnodef  1
+  # A gated dispatcher with no application.yaml cannot be verified — unverifiable is not clean.
+  expect "a missing application.yaml is caught"         openbank-bad-noyaml    1 "cannot verify"
+  # SCOPE: a service with no gated dispatcher is not this gate's business.
+  expect "a service with no dispatcher is skipped"      openbank-no-dispatcher 0
+  # The key must be read under openbank.outbox specifically — the same leaf name under another
+  # parent is a different property and must NOT satisfy the check.
+  expect "the key under a DIFFERENT parent does not count" openbank-bad-wrongkey 1 "MISSING"
+
+  if [ "$fails" -gt 0 ]; then
+    echo "self-test FAILED ($fails case(s))" >&2; exit 1
+  fi
+  echo "self-test ok: outbox dispatch-enabled guard is falsifiable (8 cases)"
+  exit 0
+fi
+
 root="${1:-.}"
 fail=0
 checked=0

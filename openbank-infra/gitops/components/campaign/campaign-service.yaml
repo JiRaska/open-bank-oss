@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-campaign-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e74f4c8fcd208fc2"
+        openbank.tech/policy-checksum: "1c9cf23a7c9fa0a9"
       labels:
         app.kubernetes.io/name: campaign-service
         app.kubernetes.io/part-of: campaign
@@ -48,14 +48,24 @@ spec:
           type: RuntimeDefault
       containers:
         - name: campaign-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-1456f39b
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-512c8315
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8128
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8085
           env:
+            # Keep the existing HTTP port for the admin BFF. The interaction validator gets a
+            # parallel TLS port, so customer-edge does not introduce another plaintext edge.
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/campaign-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/campaign-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary; username is
             # the `openbank` owner, password from the CNPG-generated app secret.
             - name: QUARKUS_DATASOURCE_JDBC_URL
@@ -283,6 +293,10 @@ spec:
           secret:
             secretName: kafka-cluster-ca-truststore
             optional: false
+        - name: campaign-tls
+          secret:
+            secretName: campaign-service-internal-tls
+            optional: false
         - name: opa-tmp
           emptyDir: {}
         - name: opa-bundle
@@ -305,6 +319,9 @@ spec:
     - name: http
       port: 8128
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8085
       targetPort: management

@@ -193,6 +193,18 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
+    /**
+     * The app's server-driven engagement surfaces. This is deliberately separate from
+     * notification-service: an app surface is rendered after the customer opens the app, it is
+     * not an outbound notification pretending to have been delivered (ADR-0220 D1).
+     */
+    @ConfigProperty(name = "openbank.edge.engagement-service-url")
+    lateinit var engagementServiceUrl: String
+
+    /** Campaign validates opaque PUSH interaction references before engagement data is appended. */
+    @ConfigProperty(name = "openbank.edge.campaign-service-url")
+    lateinit var campaignServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.statement-service-url")
     lateinit var statementServiceUrl: String
 
@@ -2596,6 +2608,74 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- In-app engagement surfaces ---
+
+    /**
+     * Resolve one named mobile surface for the authenticated customer. The app receives only a
+     * typed, catalogue-backed payload; it owns presentation, accessibility and local navigation.
+     * The party id is derived from the JWT and injected only at this boundary, never accepted from
+     * the device, so changing a query parameter cannot render another customer's campaign.
+     */
+    @GET
+    @Path("/surfaces/{slot}")
+    @Authorize(action = "customer.engagement.read", resource = "#slot")
+    @Blocking
+    fun getSurface(@PathParam("slot") slot: String): Response {
+        if (slot !in SURFACE_SLOTS) return Response.status(Response.Status.BAD_REQUEST).build()
+        val customer = customer()
+        return upstream.get(
+            "$engagementServiceUrl/api/v1/surfaces/$slot?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * Record what the app actually observed: impression, click or dismissal. The edge overwrites
+     * any supplied partyId with the JWT party id before forwarding, which makes the feedback loop
+     * meaningful without turning it into an IDOR write primitive. Content/slot/type validation is
+     * owned by engagement-service, alongside the catalogue it validates against.
+     *
+     * When the app includes an interactionRef from a PUSH payload, it is validated against the
+     * campaign send log for this JWT party before it can become an attribution datum. A reference
+     * for another party, a non-PUSH send, or an unknown id all receive the same public error — the
+     * endpoint must never disclose which of those cases happened.
+     */
+    @POST
+    @Path("/surfaces/events")
+    @Authorize(action = "customer.engagement.record-event")
+    @Blocking
+    fun recordSurfaceEvent(body: String): Response {
+        val customer = customer()
+        val event = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
+            ?: return badRequest("Malformed engagement event")
+        val interactionRefNode = event.get("interactionRef")
+        if (interactionRefNode != null) {
+            if (!interactionRefNode.isTextual) return badRequest("Invalid interaction reference")
+            val interactionRef = runCatching { UUID.fromString(interactionRefNode.asText()) }.getOrNull()
+                ?: return badRequest("Invalid interaction reference")
+            val validation = upstream.get(
+                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef",
+                customer.partyId.toString(),
+            )
+            if (validation.status != Response.Status.NO_CONTENT.statusCode) {
+                // 400/403/404 are deliberately indistinguishable to the mobile client. Upstream
+                // failure stays a 502 so the client can safely retry instead of discarding an event.
+                return if (validation.status >= UPSTREAM_SERVER_ERROR_MIN) {
+                    Response.status(Response.Status.BAD_GATEWAY).build()
+                } else {
+                    badRequest("Invalid interaction reference")
+                }
+            }
+        }
+        val enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
+            ?: return badRequest("Malformed engagement event")
+        return upstream.post(
+            "$engagementServiceUrl/api/v1/surfaces/events",
+            customer.partyId.toString(),
+            enriched,
+        )
+    }
+
     // --- Theme preferences (ADR-0190) — edge-local, party-keyed, roams the app look ---
 
     /** The caller's stored ThemeSpec, 404 when none. Party is taken from the JWT, never the client. */
@@ -4138,6 +4218,15 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
+        private val SURFACE_SLOTS: Set<String> = setOf(
+            "HOME_BANNER",
+            "HOME_CAROUSEL",
+            "STORIES",
+            "PRODUCT_FEED",
+            "REWARDS_HUB",
+        )
+
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
         /**
@@ -4283,6 +4372,9 @@ class CustomerEdgeResource(
 
         /** Upper bound for upstream error text carried into an audit detail field. */
         private const val AUDIT_DETAIL_MAX_CHARS = 300
+
+        /** HTTP status classes start at this value; named to keep upstream-retry policy legible. */
+        private const val UPSTREAM_SERVER_ERROR_MIN = 500
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
         internal const val SCA_EXEMPTION_OWN_ACCOUNT = "PSD2_RTS_ART15_OWN_ACCOUNT"

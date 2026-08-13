@@ -52,8 +52,8 @@ channels:
       `FraudHoldService.emitHoldChanged` sets `OutboxMessage.aggregateId = partyId`). All hold
       transitions for one party land on one partition and are ordered with respect to each other.
     messages:
-      FraudHoldChanged:
-        $ref: '#/components/messages/FraudHoldChanged'
+      fraud.hold_changed:
+        $ref: '#/components/messages/fraud.hold_changed'
 
 operations:
   publishFraudHoldChanged:
@@ -73,7 +73,7 @@ operations:
       account/payment restrictions — those stay the separate, manual, `ROLE_OPERATOR`-gated
       account-service freeze.
     messages:
-      - $ref: '#/channels/fraudHoldChanged/messages/FraudHoldChanged'
+      - $ref: '#/channels/fraudHoldChanged/messages/fraud.hold_changed'
 
 components:
   messageTraits:
@@ -110,8 +110,8 @@ components:
       enum: [repeated_review, expired]
 
   messages:
-    FraudHoldChanged:
-      name: FraudHoldChanged
+    fraud.hold_changed:
+      name: fraud.hold_changed
       title: A fraud-hold was raised or cleared for a party
       summary: |
         Not a `DomainEvent` envelope — this payload is the exact string template
@@ -151,4 +151,4 @@ components:
           occurredAt:
             type: string
             format: date-time
-            description: `Instant.toString()` — ISO-8601. The moment the transition was decided.
+            description: "`Instant.toString()` — ISO-8601. The moment the transition was decided."

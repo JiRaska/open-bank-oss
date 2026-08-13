@@ -35,10 +35,11 @@ describe('GET /api/iaops/governance', () => {
     vi.mocked(loadAgentCharters).mockResolvedValue({
       available: true,
       defaults: { enforced: 'block', policy_decision: 'deny' },
-      agents: [{ id: 'ui-assistant', plane: 'control', charter: 'chat', owns: [], skills: [], dataRead: [], pii: 'masked', toolsAllow: ['query.ledger.readonly'], toolsDeny: ['money.*'], requiresHuman: ['every: proposal'], tokensPerRun: 100000, runsPerDay: 500, schedule: null }],
+      agents: [{ id: 'ui-assistant', plane: 'control', charter: 'chat', owns: [], skills: [], dataRead: [], pii: 'masked', toolsAllow: ['query.ledger.readonly'], toolsDeny: ['money.*'], requiresHuman: ['every: proposal'], tokensPerRun: 100000, runsPerDay: 500, caseCapabilities: [], schedule: null }],
       toolTiers: { read: ['query.ledger.readonly'] },
       runtime: { orchestration: 'temporal' },
       modelGateway: { gateway: 'litellm' },
+      caseClasses: ['incident-response'],
     })
 
     const { GET } = await import('../app/api/iaops/governance/route')

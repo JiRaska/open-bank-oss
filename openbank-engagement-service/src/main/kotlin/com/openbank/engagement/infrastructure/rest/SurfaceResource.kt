@@ -8,6 +8,7 @@ import com.openbank.engagement.application.usecase.RecordEngagementEventUseCase
 import com.openbank.engagement.application.usecase.ResolveSurfaceUseCase
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
+import com.openbank.engagement.domain.model.SurfaceCatalog
 import com.openbank.engagement.domain.model.SurfaceContent
 import com.openbank.engagement.domain.model.SurfaceSlot
 import com.openbank.libs.authz.Authorize
@@ -64,6 +65,11 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
         val slot = parseSlot(request.slot) ?: return badRequest("unknown slot '${request.slot}'")
         val type = EngagementEventType.entries.find { it.name == request.type }
             ?: return badRequest("unknown event type '${request.type}'")
+        val content = SurfaceCatalog.ALL[request.contentId]
+            ?: return badRequest("unknown content '${request.contentId}'")
+        if (content.slot != slot) {
+            return badRequest("content '${request.contentId}' is not renderable in slot '${request.slot}'")
+        }
         record.record(
             EngagementEvent(
                 partyId = request.partyId,
@@ -71,6 +77,7 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
                 slot = slot,
                 type = type,
                 occurredAt = Instant.now(),
+                interactionRef = request.interactionRef,
             ),
         )
         return Response.status(Response.Status.ACCEPTED).build()
@@ -90,4 +97,11 @@ class SurfaceResource(private val resolve: ResolveSurfaceUseCase, private val re
     )
 }
 
-data class EngagementEventRequest(val partyId: UUID, val contentId: String, val slot: String, val type: String)
+data class EngagementEventRequest(
+    val partyId: UUID,
+    val contentId: String,
+    val slot: String,
+    val type: String,
+    /** Present only after customer-edge verified an opaque PUSH reference for this party. */
+    val interactionRef: UUID? = null,
+)
