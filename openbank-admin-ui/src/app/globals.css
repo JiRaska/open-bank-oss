@@ -563,6 +563,13 @@ main {
 .campaign-attention-heading h2 { color: #17223a; font-size: 1.05rem; font-weight: 800; letter-spacing: -.025em; margin-top: .18rem; }
 .campaign-attention-heading > span { background: #e9f7f6; border: 1px solid #bee9e4; border-radius: 99px; color: #14746f; font-size: .63rem; font-weight: 800; padding: .32rem .55rem; white-space: nowrap; }
 .campaign-attention-intro { color: var(--text-secondary); font-size: .72rem; line-height: 1.45; margin-top: .55rem; max-width: 46rem; }
+.campaign-attention-insight { align-items: flex-start; background: linear-gradient(125deg, #f4f2ff, #f8fbff); border: 1px solid #dcd7ff; border-radius: .85rem; color: #273552; display: flex; gap: .65rem; margin-top: .82rem; padding: .72rem .78rem; }
+.campaign-attention-insight > svg { color: #625bd2; flex: 0 0 auto; height: 1rem; margin-top: .08rem; width: 1rem; }
+.campaign-attention-insight > div { display: grid; gap: .12rem; min-width: 0; }
+.campaign-attention-insight p { color: #6256af; font-size: .6rem; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
+.campaign-attention-insight strong { color: #263250; font-size: .78rem; font-weight: 800; line-height: 1.25; }
+.campaign-attention-insight span { color: #66738a; font-size: .69rem; line-height: 1.4; }
+.campaign-attention-insight small { color: #4c5a75; font-size: .64rem; font-variant-numeric: tabular-nums; margin-top: .12rem; }
 .campaign-attention-empty { background: rgba(255,255,255,.75); border: 1px dashed #cdd8e8; border-radius: .75rem; color: var(--text-secondary); font-size: .73rem; margin-top: .85rem; padding: .72rem .8rem; }
 .campaign-attention-grid { display: grid; gap: .65rem; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); margin-top: .9rem; }
 .campaign-attention-card { background: rgba(255,255,255,.88); border: 1px solid #e1e8f3; border-radius: .85rem; min-width: 0; padding: .8rem; }
