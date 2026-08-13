@@ -34,7 +34,86 @@
 # ---------------------------------------------------------------------------------------
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# DEPLOY_COVERAGE_ROOT lets the self-test point this at a fixture repo. Production never sets
+# it, so the default stays "the repo this script lives in".
+ROOT="${DEPLOY_COVERAGE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+# --- self-test ------------------------------------------------------------------------
+# A service that release-please RELEASES and gitops REFERENCES, but auto-deploy does not
+# build, is a service whose new version never reaches the cluster. Nothing fails: the release
+# PR merges, the tag is cut, the changelog is written, and the running pod keeps serving the
+# old image. The only symptom is a version number that stops moving, which nobody watches.
+#
+# The gate is a three-way set comparison, and every one of the three inputs is parsed out of a
+# different file by a different means — so each can silently come back EMPTY, and an empty
+# input makes the comparison agree.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+
+  mkrepo() { # mkrepo <dir> <released-csv> <all-services-csv> <gitops-csv> [allowlist-csv] [baseline-csv]
+    local d="$1" rel="$2" all="$3" gito="$4" allow="${5:-}" base="${6:-}"
+    mkdir -p "$d/.github/workflows" "$d/.github/scripts" "$d/openbank-infra/gitops"
+    printf '%s\n' "{\"packages\": {$(echo "$rel" | tr ',' '\n' | sed 's/.*/"&": {}/' | paste -sd, -)}}" \
+      > "$d/release-please-config.json"
+    printf "jobs:\n  x:\n    steps:\n      - run: ALL_SERVICES='%s'\n" "$(echo "$all" | tr ',' ' ')" \
+      > "$d/.github/workflows/auto-deploy.yml"
+    : > "$d/openbank-infra/gitops/apps.yaml"
+    for s in $(echo "$gito" | tr ',' ' '); do printf '  image: %s:1.0.0\n' "$s" >> "$d/openbank-infra/gitops/apps.yaml"; done
+    [ -n "$allow" ] && echo "$allow" | tr ',' '\n' > "$d/.github/scripts/deploy-coverage-allowlist.txt"
+    [ -n "$base" ]  && echo "$base"  | tr ',' '\n' > "$d/.github/scripts/deploy-coverage-baseline.txt"
+    return 0
+  }
+  expect() { # expect <label> <dir> <want-rc> [substring]
+    local label="$1" d="$2" want="$3" sub="${4:-}" out rc
+    out=$(DEPLOY_COVERAGE_ROOT="$d" bash "$0" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
+    fi
+  }
+
+  # Released, referenced by gitops, AND built: the only fully covered shape.
+  a="$td/ok"; mkrepo "$a" openbank-a openbank-a openbank-a
+  expect "a released+referenced+built service is clean" "$a" 0
+
+  # THE DEFECT: released and referenced, but auto-deploy never builds it. The release lands
+  # and the cluster keeps the old image.
+  b="$td/gap"; mkrepo "$b" openbank-a openbank-other openbank-a
+  expect "a released service auto-deploy does not build is a violation" "$b" 1
+
+  # A baselined gap is known debt, not a new violation — the ratchet's whole purpose.
+  c="$td/baselined"; mkrepo "$c" openbank-a openbank-other openbank-a "" openbank-a
+  expect "a baselined gap is not a new violation" "$c" 0
+
+  # ...and a baseline entry that is no longer needed must be reported, or the list only ever
+  # grows and becomes permanent by being invisible.
+  d="$td/stale"; mkrepo "$d" openbank-a openbank-a openbank-a "" openbank-a
+  expect "a stale baseline entry is reported" "$d" 1 "no longer violating"
+
+  # An allowlisted service is a declared exception and stays silent.
+  e="$td/allowed"; mkrepo "$e" openbank-a openbank-other openbank-a openbank-a
+  expect "an allowlisted service is skipped" "$e" 0
+
+  # SCOPE: a released service gitops never references is not deployed by this pipeline at all,
+  # so it is not this gate's business.
+  f="$td/nogitops"; mkrepo "$f" openbank-a openbank-other openbank-b
+  expect "a service gitops does not reference is out of scope" "$f" 0
+
+  # A missing input must ABORT, not compare against nothing. An empty ALL_SERVICES would make
+  # every released service look unbuilt; an unreadable config would make none of them checked.
+  g="$td/noworkflow"; mkrepo "$g" openbank-a openbank-a openbank-a; rm "$g/.github/workflows/auto-deploy.yml"
+  expect "a missing workflow aborts rather than comparing" "$g" 2
+  h="$td/noallservices"; mkrepo "$h" openbank-a openbank-a openbank-a
+  printf 'jobs:\n  x:\n    steps:\n      - run: echo nothing\n' > "$h/.github/workflows/auto-deploy.yml"
+  expect "an unreadable ALL_SERVICES aborts" "$h" 2
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: deploy-coverage guard is falsifiable (8 cases)"
+  exit 0
+fi
+
 cd "$ROOT"
 
 WORKFLOW=".github/workflows/auto-deploy.yml"
@@ -60,7 +139,12 @@ while IFS= read -r line; do
 done < <(jq -r '.packages | keys[]' "$RP_CONFIG" | grep '^openbank-' | sort)
 
 # The hand-maintained deploy list.
-ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//")"
+# `|| true` is load-bearing, not defensive noise. Under `set -euo pipefail` a no-match grep
+# exits 1, the pipeline inherits it, and the script DIES HERE — before the explicit check
+# below, which is therefore unreachable. Measured: a workflow with no ALL_SERVICES produced
+# rc=1 and completely EMPTY output, so the gate failed with no diagnosis at all and the error
+# text it carries had never once been printed. Same shape as check-agent-charter-registry.sh.
+ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//" || true)"
 [ -n "$ALL_SERVICES" ] || { echo "ERROR: could not read ALL_SERVICES from ${WORKFLOW}." >&2; exit 2; }
 
 # Components that ArgoCD actually deploys, i.e. something references their image.

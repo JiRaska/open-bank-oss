@@ -329,11 +329,8 @@ def main():
 # self-corroboration trap as widening a known-good set with the layer it is checking).
 DEBT = {
     "adr-registry-integrity-check": DEBT_MARKER,
-    "ai-act-high-risk-inventory-vs-code": DEBT_MARKER,
     "ai-governance-snapshot-drift": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
-    "db-migration-gate": DEBT_MARKER,
-    "deploy-coverage-guard": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
     "gen-network-policies-drift-gate": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
