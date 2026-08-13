@@ -63,7 +63,21 @@ data class Campaign(
         require(holdoutPercent == 0 || conversionRule != null) {
             "a holdout requires a conversionRule to measure its outcome"
         }
+        // A/B assignment is campaign-wide, not a step-level surprise. Letting the first message
+        // have two variants while a later one silently collapses them would turn the result into
+        // an unreviewable mixture of different treatments. Existing campaigns have no B variables
+        // on any step and keep their exact pre-experiment path.
+        val contentExperiment = steps.firstOrNull()?.variantBVariables != null
+        require(steps.all { (it.variantBVariables != null) == contentExperiment }) {
+            "a content experiment must define variant B for every campaign step"
+        }
+        require(!contentExperiment || conversionRule != null) {
+            "a content experiment requires a conversionRule to measure its outcome"
+        }
     }
+
+    /** Both variants exist on every step; a null B map means this is not a content experiment. */
+    val hasContentExperiment: Boolean get() = steps.firstOrNull()?.variantBVariables != null
 
     /** DRAFT → PENDING_APPROVAL → ACTIVE ⇄ PAUSED → CLOSED. Terminal states never leave. */
     fun submit(): Campaign {
@@ -129,6 +143,29 @@ enum class ExperimentCohort {
     }
 }
 
+/**
+ * The durable arm of a content experiment. `A` is the author's original declared values and `B`
+ * is the alternative. Keeping the names neutral avoids declaring a winner before there is data.
+ */
+enum class ContentVariant {
+    A,
+    B,
+    ;
+
+    companion object {
+        /** A stable 50/50 split, independent from the campaign's no-contact holdout split. */
+        fun assign(campaignId: UUID, partyId: UUID): ContentVariant {
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest("content:$campaignId:$partyId".toByteArray(StandardCharsets.UTF_8))
+            val bucket = (ByteBuffer.wrap(digest, 0, Int.SIZE_BYTES).int.toLong() and UNSIGNED_INT_MASK) % BUCKETS
+            return if (bucket < BUCKETS / 2) A else B
+        }
+
+        private const val UNSIGNED_INT_MASK = 0xffff_ffffL
+        private const val BUCKETS = 10_000L
+    }
+}
+
 enum class CampaignState { DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED }
 
 /**
@@ -156,6 +193,22 @@ data class CampaignStep(
      * it took before. See [StepCondition].
      */
     val condition: StepCondition? = null,
+    /**
+     * Alternative declared values for the B arm of a campaign-wide A/B content experiment.
+     * Null preserves the historical single-content step; when present every step must provide it
+     * (enforced by [Campaign]) so one party keeps the same treatment throughout the journey.
+     */
+    val variantBVariables: Map<String, String>? = null,
+    /**
+     * If the primary EMAIL step has no active e-mail marketing consent, retry the same offer as a
+     * PUSH only after its own full contact-policy check succeeds. This is intentionally not a
+     * generic failover: quiet hours, caps and suppression lists are channel-independent policy
+     * decisions and must never be bypassed; an asynchronous mail bounce is also not a safe prompt
+     * to send a second message.
+     */
+    val fallbackToPush: Boolean = false,
+    /** A closed, app-owned destination for a push tap — never author-entered URL text. */
+    val mobileDestination: MobileDestination? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -181,7 +234,62 @@ data class CampaignStep(
         TemplateCatalog.unknownVariables(template, variables).let {
             require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
         }
+        variantBVariables?.let { alternative ->
+            TemplateCatalog.unknownVariables(template, alternative).let {
+                require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
+            }
+        }
+        require(!fallbackToPush || channel == Channel.EMAIL) {
+            "only an EMAIL step can fall back to PUSH"
+        }
+        require(!fallbackToPush || template in TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL) {
+            "template '$template' has no safe PUSH fallback"
+        }
+        require(mobileDestination == null || channel == Channel.PUSH || fallbackToPush) {
+            "a mobile destination requires a PUSH step or an EMAIL step with PUSH fallback"
+        }
     }
+
+    /** Resolves content after the durable enrolment assignment, never randomly at send time. */
+    fun variablesFor(variant: ContentVariant?): Map<String, String> =
+        if (variant == ContentVariant.B) variantBVariables ?: variables else variables
+
+    /** Primary delivery values, kept separate from the fallback's reduced template vocabulary. */
+    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery = CampaignDelivery(
+        channel,
+        template,
+        TemplateCatalog.valuesFor(template, variablesFor(variant)),
+        mobileDestination?.deepLink.takeIf { channel == Channel.PUSH },
+    )
+
+    /** The only supported fallback: a consented app push after EMAIL consent was absent. */
+    fun pushFallback(variant: ContentVariant?): CampaignDelivery? = TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[template]
+        ?.takeIf { fallbackToPush }
+        ?.let { pushTemplate ->
+            CampaignDelivery(
+                Channel.PUSH,
+                pushTemplate,
+                TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
+                mobileDestination?.deepLink,
+            )
+        }
+}
+
+/** A resolved per-attempt delivery, including the channel that will be recorded for audit. */
+data class CampaignDelivery(
+    val channel: Channel,
+    val template: String,
+    val variables: Map<String, String>,
+    val deepLink: String? = null,
+)
+
+/** The only destinations the mobile app contract recognises for campaign pushes. */
+enum class MobileDestination(val deepLink: String) {
+    HOME("openbank://home"),
+    SAVINGS("openbank://savings"),
+    CARDS("openbank://cards"),
+    PAYMENTS("openbank://payments"),
+    PRODUCT_HUB("openbank://products"),
 }
 
 /**

@@ -6,6 +6,7 @@ package com.openbank.campaign.application.port.out
 
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.ExperimentCohort
@@ -50,6 +51,13 @@ data class ExperimentCohortMetrics(val cohort: ExperimentCohort, val assigned: L
  */
 interface CampaignExperimentRepository {
     suspend fun metrics(campaignId: UUID): List<ExperimentCohortMetrics>
+}
+
+/** Counts remain in SQL so an A/B read stays bounded for a campaign with millions of enrolments. */
+data class ContentVariantMetrics(val variant: ContentVariant, val assigned: Long, val converted: Long)
+
+interface CampaignContentExperimentRepository {
+    suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics>
 }
 
 /** A single cell of the per-step funnel: how many sends of [outcome] step [stepOrder] produced. */
@@ -171,23 +179,22 @@ interface ConsentCheckPort {
     suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean
 }
 
+/** One immutable request from campaign orchestration to notification-service. */
+data class NotificationSendRequest(
+    val partyId: UUID,
+    val channel: Channel,
+    val template: String,
+    val recipient: String,
+    val variables: Map<String, String>,
+    /** Send-log row id; campaign needs this mandatory to join a delivery outcome back. */
+    val correlationId: UUID,
+    /** Closed mobile-app route, present only on a PUSH delivery. */
+    val deepLink: String? = null,
+)
+
 /** ADR-0200 D3: delivery goes through notification-service, never direct. */
 interface NotificationSendPort {
-    /**
-     * [correlationId] is the send-log row id this request belongs to (ADR-0239 D1).
-     *
-     * Required, not optional: the whole reason the campaign publishes here is to hear back what
-     * became of the message, and a nullable parameter is one a caller forgets. The receiving
-     * contract keeps it optional for producers that genuinely do not care — this one does.
-     */
-    suspend fun requestSend(
-        partyId: UUID,
-        channel: Channel,
-        template: String,
-        recipient: String,
-        variables: Map<String, String>,
-        correlationId: UUID,
-    )
+    suspend fun requestSend(request: NotificationSendRequest)
 }
 
 /** ADR-0200 D2 push: signals a live journey that consent was revoked for its party. */

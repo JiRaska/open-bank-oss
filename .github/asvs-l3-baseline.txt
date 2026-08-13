@@ -254,6 +254,11 @@ V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:99: plaintext http:
 # it does not add one. Retires with the fleet-wide mTLS work alongside the other 215 lines here.
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:178: plaintext http:// env value http://delegation-service.delegation.svc:8126
 
+# customer-edge -> engagement-service (#4475). This makes the existing in-cluster HTTP
+# transport explicit so the generated NetworkPolicy can admit the real campaign-surface call;
+# it retires with the same fleet-wide mesh-mTLS work as the existing customer-edge entries.
+V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:230: plaintext http:// env value http://engagement-service.engagement.svc:8153
+
 # fraud -> account-service (ADR-0220 D3.5, issue #2749). Genuinely a NEW plaintext edge, declared
 # as such: fraud-service's first-ever outbound rest-client (AccountServiceClient, partyId lookup
 # for the fraud-hold signal) reaches account-service the only way any of the 200+ other callers in

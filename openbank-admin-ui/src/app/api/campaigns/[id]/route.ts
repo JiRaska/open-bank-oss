@@ -96,6 +96,26 @@ async function readExperiment(headers: HeadersInit, id: string): Promise<Part> {
   }
 }
 
+/** A 409 is the honest absent A/B configuration, distinct from a degraded campaign-service. */
+async function readContentExperiment(headers: HeadersInit, id: string): Promise<Part> {
+  try {
+    const res = await fetch(
+      serverSvcUrl('campaign-service', 'campaign', 8128, `/api/v1/campaigns/${encodeURIComponent(id)}/content-experiment`),
+      { headers, signal: AbortSignal.timeout(4000), cache: 'no-store' },
+    )
+    if (res.status === 409) return { data: null, state: 'not_configured' }
+    if (!res.ok) {
+      return {
+        data: null,
+        state: res.status === 401 || res.status === 403 ? 'unauthorized' : res.status === 404 ? 'not_deployed' : 'unreachable',
+      }
+    }
+    return { data: await res.json(), state: 'ok' }
+  } catch {
+    return { data: null, state: 'unreachable' }
+  }
+}
+
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   const session = await auth()
   if (!session?.user?.accessToken) {
@@ -126,6 +146,20 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     readExperiment(headers, id),
   ])
 
+  // Stable catalogue keys belong on the campaign record. Resolve the human label only for a
+  // configured entry source, so an ordinary detail page does not pay two calls to explain nulls.
+  const entry = campaign.data as {
+    schedule?: unknown
+    trigger?: unknown
+    steps?: Array<{ variantBVariables?: unknown }>
+  } | null
+  const hasContentExperiment = entry?.steps?.some(step => step.variantBVariables != null) ?? false
+  const [cadences, triggers, contentExperiment] = await Promise.all([
+    entry?.schedule ? read(headers, '/api/v1/campaigns/cadences', []) : Promise.resolve({ data: [], state: 'ok' as PartState }),
+    entry?.trigger ? read(headers, '/api/v1/campaigns/triggers', []) : Promise.resolve({ data: [], state: 'ok' as PartState }),
+    hasContentExperiment ? readContentExperiment(headers, id) : Promise.resolve({ data: null, state: 'not_configured' as PartState }),
+  ])
+
   // Names for every party on this screen, resolved once and deduplicated. Done here rather than in
   // the component so the client never fans out one request per row, and so an unresolved name
   // degrades to the id instead of blanking the screen (lib/campaigns/party-names).
@@ -147,6 +181,8 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     sendSummary: sendSummary.data,
     journey: journey.data,
     experiment: experiment.data,
+    contentExperiment: contentExperiment.data,
+    entryCatalogues: { cadences: cadences.data, triggers: triggers.data },
     // Per-part state travels to the client: the send log is the part most likely to be
     // restricted, and an empty send log rendered as "nothing was suppressed" would be the
     // exact misreading this screen exists to prevent.
@@ -157,6 +193,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       sendSummary: sendSummary.state,
       journey: journey.state,
       experiment: experiment.state,
+      contentExperiment: contentExperiment.state,
+      cadences: cadences.state,
+      triggers: triggers.state,
     },
   })
 }

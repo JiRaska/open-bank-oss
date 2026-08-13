@@ -482,6 +482,91 @@ class CampaignRestContractIT {
         }
     }
 
+    /** Studio reads these labels from the service instead of duplicating an executable event list. */
+    @Test
+    fun `the trigger catalogue is served with its operator-facing meaning`() {
+        When {
+            get("/api/v1/campaigns/triggers")
+        } Then {
+            statusCode(200)
+            body("trigger", org.hamcrest.Matchers.hasItem("ACCOUNT_OPENED"))
+            body(
+                "find { it.trigger == 'ACCOUNT_OPENED' }.humanForm",
+                org.hamcrest.Matchers.equalTo("when an account is opened"),
+            )
+        }
+    }
+
+    /** A/B content survives HTTP and has a measured endpoint even before either arm has enrolled. */
+    @Test
+    fun `a content experiment keeps both declared arms and exposes its empty measurement`() {
+        val body = """
+            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip",
+             "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
+                       "variantBVariables":{"offerTitle":"B","offerText":"B copy","ctaText":"Try"},
+                       "fallbackToPush":true,
+                       "delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].variantBVariables.offerTitle", org.hamcrest.Matchers.equalTo("B"))
+            body("steps[0].fallbackToPush", org.hamcrest.Matchers.equalTo(true))
+        }
+        When {
+            get("/api/v1/campaigns/$id/content-experiment")
+        } Then {
+            statusCode(200)
+            body("a.assigned", org.hamcrest.Matchers.equalTo(0))
+            body("b.assigned", org.hamcrest.Matchers.equalTo(0))
+            body("decision.state", org.hamcrest.Matchers.equalTo("COLLECTING_DATA"))
+        }
+    }
+
+    @Test
+    fun `a mobile-first push step keeps its closed app destination over the HTTP contract`() {
+        val body = """
+            {"name":"push-${UUID.randomUUID()}","goal":"savings activation",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
+                       "variables":{"offerTitle":"Savings"},"mobileDestination":"SAVINGS","delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+            body("steps[0].mobileDestination", org.hamcrest.Matchers.equalTo("SAVINGS"))
+        }
+    }
+
     @Test
     fun `the segment catalogue is served over HTTP with its rules in words`() {
         When {

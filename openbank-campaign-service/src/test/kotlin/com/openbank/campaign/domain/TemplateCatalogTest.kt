@@ -6,6 +6,7 @@ package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.TemplateCatalog
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -101,6 +102,20 @@ class CampaignStepChannelTest {
     }
 
     @Test
+    fun `a push step resolves an allow-listed app destination rather than an author URL`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_PUSH",
+            channel = Channel.PUSH,
+            variables = mapOf("offerTitle" to "Savings"),
+            delaySeconds = 0,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals("openbank://savings", step.primaryDelivery(null).deepLink)
+    }
+
+    @Test
     fun `an email template on a push step is refused`() {
         val e = assertThrows<IllegalArgumentException> {
             CampaignStep(
@@ -147,5 +162,34 @@ class CampaignStepChannelTest {
     fun `the catalogue offers exactly the templates a channel can render`() {
         assertEquals(setOf("MARKETING_PRODUCT_OFFER"), TemplateCatalog.forChannel(Channel.EMAIL))
         assertEquals(setOf("MARKETING_PRODUCT_OFFER_PUSH"), TemplateCatalog.forChannel(Channel.PUSH))
+    }
+
+    @Test
+    fun `an email step can safely reduce to its push fallback without carrying email body copy`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Email body", "ctaText" to "Open"),
+            delaySeconds = 0,
+            fallbackToPush = true,
+        )
+
+        assertEquals(Channel.PUSH, step.pushFallback(null)?.channel)
+        assertEquals(mapOf("offerTitle" to "Savings"), step.pushFallback(null)?.variables)
+    }
+
+    @Test
+    fun `a push step cannot declare another push fallback`() {
+        assertThrows<IllegalArgumentException> {
+            CampaignStep(
+                order = 1,
+                template = "MARKETING_PRODUCT_OFFER_PUSH",
+                channel = Channel.PUSH,
+                variables = mapOf("offerTitle" to "Savings"),
+                delaySeconds = 0,
+                fallbackToPush = true,
+            )
+        }
     }
 }
