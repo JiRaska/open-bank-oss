@@ -419,6 +419,8 @@ gates:
     name: "service runbook drift (issue #2255, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 openbank-infra/scripts/generate-service-runbooks.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/generate-service-runbooks.py --force
       git add -A --intent-to-add docs/runbooks/
@@ -1175,6 +1177,8 @@ gates:
     name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
     group: registry
     mode: enforced
+    selftest: bash .github/scripts/check-eu-ai-act.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-eu-ai-act.sh
 
