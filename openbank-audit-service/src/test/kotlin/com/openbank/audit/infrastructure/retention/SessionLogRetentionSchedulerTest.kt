@@ -137,5 +137,6 @@ class SessionLogRetentionSchedulerTest {
             retentionDays = retentionDays,
             dryRun = dryRun,
             enabled = enabled,
+            domainMetrics = mockk(relaxed = true),
         )
 }
