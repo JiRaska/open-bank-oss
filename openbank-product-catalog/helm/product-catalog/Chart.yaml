@@ -1,0 +1,6 @@
+apiVersion: v2
+name: product-catalog
+description: Industry-neutral governed product catalog with opt-in trusted packs
+type: application
+version: 0.1.0
+appVersion: "0.11.4"

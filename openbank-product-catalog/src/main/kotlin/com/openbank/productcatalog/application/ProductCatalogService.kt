@@ -48,17 +48,17 @@ class ProductCatalogService(private val repo: ProductRepository, private val clo
 
     suspend fun findByCode(code: String): Product? = repo.findByCode(code)
 
-    suspend fun create(req: ProductRequest): Product {
+    suspend fun create(req: ProductRequest, actorId: String): Product {
         if (repo.findByCode(req.code) != null) {
             throw DuplicateProductCodeException("Product with code '${req.code}' already exists")
         }
         val product = req.toDomain(clock)
         ProductValidation.requireValid(product)
         validateFeeWaivers(product, log)
-        return repo.save(product)
+        return repo.save(product, actorId = actorId)
     }
 
-    suspend fun update(id: String, req: ProductRequest): Product {
+    suspend fun update(id: String, req: ProductRequest, actorId: String): Product {
         val existing = findById(id) ?: throw ProductNotFoundException("Product $id not found")
         require(req.code == existing.code) { "code is immutable and must remain '${existing.code}'" }
         require(req.status == null || req.status == existing.status.name) {
@@ -78,24 +78,24 @@ class ProductCatalogService(private val repo: ProductRepository, private val clo
         val updated = req.applyTo(existing, clock)
         ProductValidation.requireValid(updated)
         validateFeeWaivers(updated, log)
-        return repo.update(updated)
+        return repo.update(updated, actorId)
     }
 
-    suspend fun activate(id: String, expectedRevision: Long? = null): Product {
+    suspend fun activate(id: String, expectedRevision: Long? = null, actorId: String): Product {
         val p = findById(id) ?: throw ProductNotFoundException("Product $id not found")
         requireRevision(p, expectedRevision)
         val activated = p.activate(Instant.now(clock))
         if (activated === p) return p
         ProductValidation.requireValid(activated)
         validateFeeWaivers(activated, log)
-        return repo.update(activated)
+        return repo.update(activated, actorId)
     }
 
-    suspend fun deactivate(id: String, expectedRevision: Long? = null): Product {
+    suspend fun deactivate(id: String, expectedRevision: Long? = null, actorId: String): Product {
         val p = findById(id) ?: throw ProductNotFoundException("Product $id not found")
         requireRevision(p, expectedRevision)
         val deactivated = p.deactivate(Instant.now(clock))
-        return if (deactivated === p) p else repo.update(deactivated)
+        return if (deactivated === p) p else repo.update(deactivated, actorId)
     }
 
     private fun requireRevision(product: Product, expectedRevision: Long?) {
@@ -313,7 +313,7 @@ class ProductNotFoundException(message: String) : RuntimeException(message)
 // (log forging, CWE-117).
 private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
 
-private fun validateFeeWaivers(product: Product, log: Logger) {
+internal fun validateFeeWaivers(product: Product, log: Logger) {
     product.fees.filter { it.waivable }.forEach { fee ->
         require(!fee.waiveCondition.isNullOrBlank()) {
             "Fee '${fee.name}' is marked waivable but has no waiver condition"

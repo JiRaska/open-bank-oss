@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.rest
 
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import com.openbank.productcatalog.application.CatalogNotFoundException
@@ -19,110 +20,84 @@ import com.openbank.productcatalog.domain.catalog.OfferingRelationship
 import com.openbank.productcatalog.domain.catalog.PriceCadence
 import com.openbank.productcatalog.domain.catalog.PriceComponent
 import com.openbank.productcatalog.domain.catalog.PriceKind
+import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
 import com.openbank.productcatalog.domain.catalog.RelationshipKind
 import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.SchemaRef
 import com.openbank.productcatalog.domain.catalog.TaxTreatment
+import com.openbank.productcatalog.generated.api.CatalogV2Api
+import com.openbank.productcatalog.generated.model.OfferingRequest
+import com.openbank.productcatalog.generated.model.PublishRequest
+import com.openbank.productcatalog.generated.model.RevisionRequest
+import com.openbank.productcatalog.generated.model.SpecificationRequest
+import com.openbank.productcatalog.generated.model.ValidateCatalogRequest
 import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
-import io.quarkus.security.Authenticated
+import com.openbank.productcatalog.infrastructure.catalog.CatalogSchemaProfile
+import com.openbank.productcatalog.infrastructure.security.CatalogRoles
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.ws.rs.Consumes
-import jakarta.ws.rs.GET
-import jakarta.ws.rs.HeaderParam
-import jakarta.ws.rs.POST
-import jakarta.ws.rs.PUT
-import jakarta.ws.rs.Path
-import jakarta.ws.rs.PathParam
-import jakarta.ws.rs.Produces
-import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.EntityTag
-import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
+import com.openbank.productcatalog.generated.model.CatalogSchema as GeneratedCatalogSchema
+import com.openbank.productcatalog.generated.model.MarketContext as GeneratedMarketContext
+import com.openbank.productcatalog.generated.model.Offering as GeneratedOffering
+import com.openbank.productcatalog.generated.model.ProductRevision as GeneratedProductRevision
+import com.openbank.productcatalog.generated.model.RevisionContent as GeneratedRevisionContent
+import com.openbank.productcatalog.generated.model.SchemaRef as GeneratedSchemaRef
+import com.openbank.productcatalog.generated.model.SchemaViolation as GeneratedSchemaViolation
+import com.openbank.productcatalog.generated.model.Specification as GeneratedSpecification
+import com.openbank.productcatalog.generated.model.ValidateCatalogResponse as GeneratedValidateCatalogResponse
 
 data class SchemaRefDto(val id: String, val version: Int)
-data class SpecificationRequest(val code: String, val schemaRef: SchemaRefDto)
-data class OfferingRequest(val specificationId: UUID, val code: String, val market: MarketContext = MarketContext())
-data class PriceRequest(
-    val code: String,
-    val kind: PriceKind,
-    val value: String,
-    val currency: String? = null,
-    val unit: String,
-    val cadence: PriceCadence,
-    val taxTreatment: TaxTreatment = TaxTreatment.UNSPECIFIED,
-    val effectiveFrom: Instant? = null,
-    val effectiveTo: Instant? = null,
-)
-data class EligibilityRequest(
-    val field: String,
-    val operator: EligibilityOperator,
-    val expected: JsonNode,
-    val explanation: Map<String, String>,
-)
-data class RelationshipRequest(val kind: RelationshipKind, val targetOfferingId: UUID)
-data class RevisionRequest(
-    val name: Map<String, String>,
-    val description: Map<String, String>? = null,
-    val attributes: JsonNode,
-    val prices: List<PriceRequest> = emptyList(),
-    val eligibility: List<EligibilityRequest> = emptyList(),
-    val relationships: List<RelationshipRequest> = emptyList(),
-    val documentCodes: List<String> = emptyList(),
-    val effectiveFrom: Instant? = null,
-    val effectiveTo: Instant? = null,
-)
-data class PublishRequest(val reason: String)
-data class ValidateRequest(val attributes: JsonNode)
 
 @Suppress("TooManyFunctions")
 @ApplicationScoped
-@Path("/api/v2")
-@Produces(MediaType.APPLICATION_JSON)
-@Consumes(MediaType.APPLICATION_JSON)
 class GenericCatalogResource(
     private val service: GenericCatalogService,
     private val catalogJson: CatalogJson,
+    private val mapper: ObjectMapper,
+    private val schemaProfile: CatalogSchemaProfile,
     private val identity: SecurityIdentity,
     private val clock: Clock,
-) {
-    @GET
-    @Path("/product-types")
-    @Authenticated
+) : CatalogV2Api {
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read")
-    suspend fun listTypes(): List<Map<String, Any>> = service.listSchemas().map(::schemaResponse)
+    override suspend fun listProductTypesV2(): Response =
+        Response.ok(service.listSchemas().map(::schemaResponse)).build()
 
-    @GET
-    @Path("/product-types/{id}/versions/{version}")
-    @Authenticated
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#id")
-    suspend fun getType(@PathParam("id") id: String, @PathParam("version") version: Int): Map<String, Any> =
-        schemaResponse(service.findSchema(SchemaRef(id, version)))
+    override suspend fun getProductTypeVersionV2(id: String, version: Int): Response =
+        Response.ok(schemaResponse(service.findSchema(SchemaRef(id, version)))).build()
 
-    @POST
-    @Path("/product-types/{id}/versions/{version}/validate")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
     @Authorize(action = "catalog.author", resource = "#id")
-    suspend fun validate(
-        @PathParam("id") id: String,
-        @PathParam("version") version: Int,
-        request: ValidateRequest,
+    override suspend fun validateProductAttributesV2(
+        id: String,
+        version: Int,
+        request: ValidateCatalogRequest,
     ): Response {
-        val violations = service.validate(SchemaRef(id, version), request.attributes)
-        return Response.ok(mapOf("valid" to violations.isEmpty(), "violations" to violations)).build()
+        val attributes = mapper.valueToTree<JsonNode>(request.attributes)
+        schemaProfile.requireValidInstance(attributes)
+        val violations = service.validate(SchemaRef(id, version), attributes)
+        return Response.ok(
+            GeneratedValidateCatalogResponse(
+                violations.isEmpty(),
+                violations.map { GeneratedSchemaViolation(it.instancePath, it.schemaPath, it.keyword, it.message) },
+            ),
+        ).build()
     }
 
-    @POST
-    @Path("/specifications")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
     @Authorize(action = "catalog.author")
-    suspend fun createSpecification(request: SpecificationRequest): Response {
+    override suspend fun createSpecificationV2(request: SpecificationRequest): Response {
         val now = Instant.now(clock)
         val created = service.createSpecification(
             ProductSpecification(
@@ -138,46 +113,49 @@ class GenericCatalogResource(
             .build()
     }
 
-    @GET
-    @Path("/specifications/{id}")
-    @Authenticated
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
+    @Authorize(action = "catalog.read")
+    override suspend fun listSpecificationsV2(): Response =
+        Response.ok(service.listSpecifications().map(::specificationResponse)).build()
+
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#id")
-    suspend fun getSpecification(@PathParam("id") id: UUID): Response {
+    override suspend fun getSpecificationV2(id: UUID): Response {
         val found = service.findSpecification(id)
         return Response.ok(specificationResponse(found)).tag(EntityTag(found.revision.toString())).build()
     }
 
-    @POST
-    @Path("/offerings")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
     @Authorize(action = "catalog.author")
-    suspend fun createOffering(request: OfferingRequest): Response {
-        val created = service.createOffering(request.specificationId, request.code, request.market, actor())
+    override suspend fun createOfferingV2(request: OfferingRequest): Response {
+        val created = service.createOffering(request.specificationId, request.code, request.market.toDomain(), actor())
         return Response.status(Response.Status.CREATED)
             .tag(EntityTag(created.revision.toString()))
-            .entity(created)
+            .entity(offeringResponse(created))
             .build()
     }
 
-    @GET
-    @Path("/offerings/{id}")
-    @Authenticated
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
+    @Authorize(action = "catalog.read")
+    override suspend fun listOfferingsV2(specificationId: UUID?): Response =
+        Response.ok(service.listOfferings(specificationId).map(::offeringResponse)).build()
+
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#id")
-    suspend fun getOffering(@PathParam("id") id: UUID): Response {
+    override suspend fun getOfferingV2(id: UUID): Response {
         val found = service.findOffering(id)
-        return Response.ok(found).tag(EntityTag(found.revision.toString())).build()
+        return Response.ok(offeringResponse(found)).tag(EntityTag(found.revision.toString())).build()
     }
 
-    @POST
-    @Path("/offerings/{id}/revisions")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
     @Authorize(action = "catalog.author", resource = "#id")
-    suspend fun createRevision(@PathParam("id") id: UUID, request: RevisionRequest): Response {
+    override suspend fun createOfferingRevisionV2(id: UUID, request: RevisionRequest): Response {
         val created = service.createDraft(
             id,
+            SchemaRef(request.schemaRef.id, request.schemaRef.version),
             request.toContent(),
-            request.effectiveFrom,
-            request.effectiveTo,
+            request.effectiveFrom?.toInstant(),
+            request.effectiveTo?.toInstant(),
             actor(),
         )
         return Response.status(Response.Status.CREATED)
@@ -186,49 +164,51 @@ class GenericCatalogResource(
             .build()
     }
 
-    @GET
-    @Path("/offerings/{offeringId}/revisions/{revisionId}")
-    @Authenticated
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
+    @Authorize(action = "catalog.read", resource = "#id")
+    override suspend fun listOfferingRevisionsV2(id: UUID): Response =
+        Response.ok(service.listRevisions(id).map(::revisionResponse)).build()
+
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#offeringId")
-    suspend fun getRevision(
-        @PathParam("offeringId") offeringId: UUID,
-        @PathParam("revisionId") revisionId: UUID,
-    ): Response {
+    override suspend fun getOfferingRevisionV2(offeringId: UUID, revisionId: UUID): Response {
         val found = service.findRevision(revisionId)
         requireRevisionOwner(found, offeringId)
         return Response.ok(revisionResponse(found)).tag(EntityTag(found.revision.toString())).build()
     }
 
-    @PUT
-    @Path("/offerings/{offeringId}/revisions/{revisionId}")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.AUTHOR)
     @Authorize(action = "catalog.author", resource = "#offeringId")
-    suspend fun updateRevision(
-        @PathParam("offeringId") offeringId: UUID,
-        @PathParam("revisionId") revisionId: UUID,
-        @HeaderParam("If-Match") ifMatch: String?,
+    override suspend fun replaceOfferingRevisionV2(
+        ifMatch: String,
+        offeringId: UUID,
+        revisionId: UUID,
         request: RevisionRequest,
     ): Response {
-        requireRevisionOwner(service.findRevision(revisionId), offeringId)
+        val existing = service.findRevision(revisionId)
+        requireRevisionOwner(existing, offeringId)
+        require(
+            request.schemaRef.id == existing.schemaRef.id && request.schemaRef.version == existing.schemaRef.version,
+        ) {
+            "schemaRef is immutable within a revision; create a new revision to advance its schema"
+        }
         val updated = service.updateDraft(
             revisionId,
             requiredRevision(ifMatch),
             request.toContent(),
-            request.effectiveFrom,
-            request.effectiveTo,
+            request.effectiveFrom?.toInstant(),
+            request.effectiveTo?.toInstant(),
             actor(),
         )
         return Response.ok(revisionResponse(updated)).tag(EntityTag(updated.revision.toString())).build()
     }
 
-    @POST
-    @Path("/offerings/{offeringId}/revisions/{revisionId}/publish")
-    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.PUBLISH)
     @Authorize(action = "catalog.publish", resource = "#offeringId")
-    suspend fun publish(
-        @PathParam("offeringId") offeringId: UUID,
-        @PathParam("revisionId") revisionId: UUID,
-        @HeaderParam("If-Match") ifMatch: String?,
+    override suspend fun publishOfferingRevisionV2(
+        offeringId: UUID,
+        revisionId: UUID,
+        ifMatch: String,
         request: PublishRequest,
     ): Response {
         requireRevisionOwner(service.findRevision(revisionId), offeringId)
@@ -236,73 +216,151 @@ class GenericCatalogResource(
         return Response.ok(revisionResponse(published)).tag(EntityTag(published.revision.toString())).build()
     }
 
-    @GET
-    @Path("/products/{offeringId}")
-    @Authenticated
+    @RolesAllowed(Roles.OPERATOR, Roles.ADMIN, CatalogRoles.READ)
     @Authorize(action = "catalog.read", resource = "#offeringId")
-    suspend fun getPublished(
-        @PathParam("offeringId") offeringId: UUID,
-        @QueryParam("effectiveAt") effectiveAt: Instant?,
-    ): Map<String, Any?> = revisionResponse(
-        service.findPublished(offeringId, effectiveAt ?: Instant.now(clock)),
+    override suspend fun getPublishedProductV2(offeringId: UUID, effectiveAt: java.time.OffsetDateTime?): Response =
+        Response.ok(
+            revisionResponse(service.findPublished(offeringId, effectiveAt?.toInstant() ?: Instant.now(clock))),
+        ).build()
+
+    @Suppress("LongMethod")
+    private fun RevisionRequest.toContent(): RevisionContent {
+        require(name.isNotEmpty() && name.size <= MAX_LOCALIZED_VALUES) {
+            "name must contain between 1 and $MAX_LOCALIZED_VALUES localized values"
+        }
+        require(description == null || description.size <= MAX_LOCALIZED_VALUES) {
+            "description must contain at most $MAX_LOCALIZED_VALUES localized values"
+        }
+        (name.values + description.orEmpty().values).forEach {
+            require(it.length <= MAX_LOCALIZED_TEXT_LENGTH) {
+                "localized text must contain at most $MAX_LOCALIZED_TEXT_LENGTH characters"
+            }
+        }
+        val prices = prices.orEmpty()
+        val eligibility = eligibility.orEmpty()
+        val relationships = relationships.orEmpty()
+        val documentCodes = documentCodes.orEmpty()
+        require(prices.size <= MAX_COMPONENTS) { "a revision may contain at most $MAX_COMPONENTS prices" }
+        require(eligibility.size <= MAX_COMPONENTS) {
+            "a revision may contain at most $MAX_COMPONENTS eligibility rules"
+        }
+        require(relationships.size <= MAX_COMPONENTS) {
+            "a revision may contain at most $MAX_COMPONENTS relationships"
+        }
+        require(documentCodes.size <= MAX_COMPONENTS) {
+            "a revision may contain at most $MAX_COMPONENTS document codes"
+        }
+        documentCodes.forEach {
+            require(it.isNotBlank() && it.length <= MAX_CODE_LENGTH) {
+                "document codes must be non-blank and at most $MAX_CODE_LENGTH characters"
+            }
+        }
+        val attributesNode = mapper.valueToTree<JsonNode>(attributes)
+        schemaProfile.requireValidInstance(attributesNode)
+        eligibility.forEach { schemaProfile.requireValidInstance(mapper.valueToTree(it.expected)) }
+        eligibility.flatMap { it.explanation.values }.forEach {
+            require(it.length <= MAX_LOCALIZED_TEXT_LENGTH) {
+                "eligibility explanation must contain at most $MAX_LOCALIZED_TEXT_LENGTH characters"
+            }
+        }
+        eligibility.forEach {
+            require(it.explanation.isNotEmpty() && it.explanation.size <= MAX_LOCALIZED_VALUES) {
+                "eligibility explanation must contain between 1 and $MAX_LOCALIZED_VALUES localized values"
+            }
+        }
+        return RevisionContent(
+            name = LocalizedText(name),
+            description = description?.let(::LocalizedText),
+            attributes = catalogJson.toObject(attributesNode),
+            prices = prices.map {
+                require(DECIMAL_TEXT.matches(it.value)) {
+                    "price value must be a canonical decimal string with at most 20 integer and 18 fractional digits"
+                }
+                PriceComponent(
+                    it.code,
+                    PriceKind.valueOf(it.kind.value),
+                    it.value.toBigDecimal(),
+                    it.currency,
+                    it.unit,
+                    PriceCadence.valueOf(it.cadence.value),
+                    it.taxTreatment?.value?.let(TaxTreatment::valueOf) ?: TaxTreatment.UNSPECIFIED,
+                    it.effectiveFrom?.toInstant(),
+                    it.effectiveTo?.toInstant(),
+                )
+            },
+            eligibility = eligibility.map {
+                EligibilityRule(
+                    it.field,
+                    EligibilityOperator.valueOf(it.operator.value),
+                    catalogJson.toValue(mapper.valueToTree(it.expected)),
+                    LocalizedText(it.explanation),
+                )
+            },
+            relationships = relationships.map {
+                OfferingRelationship(RelationshipKind.valueOf(it.kind.value), it.targetOfferingId)
+            },
+            documentCodes = documentCodes.toList(),
+        )
+    }
+
+    private fun GeneratedMarketContext?.toDomain() = MarketContext(
+        brands = this?.brands.orEmpty(),
+        countries = this?.countries.orEmpty(),
+        channels = this?.channels.orEmpty(),
+        segments = this?.segments.orEmpty(),
+        locales = this?.locales.orEmpty(),
     )
 
-    private fun RevisionRequest.toContent() = RevisionContent(
-        name = LocalizedText(name),
-        description = description?.let(::LocalizedText),
-        attributes = catalogJson.toObject(attributes),
-        prices = prices.map {
-            PriceComponent(
-                it.code,
-                it.kind,
-                it.value.toBigDecimal(),
-                it.currency,
-                it.unit,
-                it.cadence,
-                it.taxTreatment,
-                it.effectiveFrom,
-                it.effectiveTo,
-            )
-        },
-        eligibility = eligibility.map {
-            EligibilityRule(it.field, it.operator, catalogJson.toValue(it.expected), LocalizedText(it.explanation))
-        },
-        relationships = relationships.map { OfferingRelationship(it.kind, it.targetOfferingId) },
-        documentCodes = documentCodes,
+    private fun schemaResponse(schema: CatalogSchema) = GeneratedCatalogSchema(
+        id = schema.ref.id,
+        version = schema.ref.version,
+        document = mapper.convertValue(catalogJson.toNode(schema.document), Map::class.java)
+            .entries.associate { it.key.toString() to it.value as Any },
+        sha256 = schema.sha256,
+        registeredAt = schema.registeredAt.atOffset(ZoneOffset.UTC),
     )
 
-    private fun schemaResponse(schema: CatalogSchema): Map<String, Any> = mapOf(
-        "id" to schema.ref.id,
-        "version" to schema.ref.version,
-        "document" to catalogJson.toNode(schema.document),
-        "sha256" to schema.sha256,
-        "registeredAt" to schema.registeredAt,
+    private fun specificationResponse(specification: ProductSpecification) = GeneratedSpecification(
+        id = specification.id,
+        code = specification.code,
+        schemaRef = GeneratedSchemaRef(specification.schemaRef.id, specification.schemaRef.version),
+        createdAt = specification.createdAt.atOffset(ZoneOffset.UTC),
+        revision = specification.revision,
     )
 
-    private fun specificationResponse(specification: ProductSpecification): Map<String, Any?> = mapOf(
-        "id" to specification.id,
-        "code" to specification.code,
-        "schemaRef" to specification.schemaRef,
-        "createdAt" to specification.createdAt,
-        "revision" to specification.revision,
+    private fun offeringResponse(offering: ProductOffering) = GeneratedOffering(
+        id = offering.id,
+        specificationId = offering.specificationId,
+        code = offering.code,
+        market = GeneratedMarketContext(
+            brands = offering.market.brands,
+            countries = offering.market.countries,
+            channels = offering.market.channels,
+            segments = offering.market.segments,
+            locales = offering.market.locales,
+        ),
+        revision = offering.revision,
     )
 
-    private fun revisionResponse(revision: ProductRevision): Map<String, Any?> = mapOf(
-        "id" to revision.id,
-        "offeringId" to revision.offeringId,
-        "number" to revision.number,
-        "schemaRef" to revision.schemaRef,
-        "state" to revision.state,
-        "content" to catalogJson.toContentNode(revision.content),
-        "effectiveFrom" to revision.effectiveFrom,
-        "effectiveTo" to revision.effectiveTo,
-        "makerId" to revision.makerId,
-        "checkerId" to revision.checkerId,
-        "reason" to revision.reason,
-        "contentHash" to revision.contentHash,
-        "createdAt" to revision.createdAt,
-        "updatedAt" to revision.updatedAt,
-        "revision" to revision.revision,
+    private fun revisionResponse(revision: ProductRevision) = GeneratedProductRevision(
+        id = revision.id,
+        offeringId = revision.offeringId,
+        number = revision.number,
+        schemaRef = GeneratedSchemaRef(revision.schemaRef.id, revision.schemaRef.version),
+        state = GeneratedProductRevision.State.valueOf(revision.state.name),
+        content = mapper.treeToValue(
+            catalogJson.toContentNode(revision.content),
+            GeneratedRevisionContent::class.java,
+        ),
+        effectiveFrom = revision.effectiveFrom?.atOffset(ZoneOffset.UTC),
+        effectiveTo = revision.effectiveTo?.atOffset(ZoneOffset.UTC),
+        makerId = revision.makerId,
+        checkerId = revision.checkerId,
+        reason = revision.reason,
+        contentHash = revision.contentHash,
+        createdAt = revision.createdAt.atOffset(ZoneOffset.UTC),
+        updatedAt = revision.updatedAt.atOffset(ZoneOffset.UTC),
+        revision = revision.revision,
     )
 
     private fun requiredRevision(ifMatch: String?): Long {
@@ -321,5 +379,10 @@ class GenericCatalogResource(
 
     private companion object {
         val STRONG_ETAG = Regex("\\\"([0-9]+)\\\"")
+        val DECIMAL_TEXT = Regex("^(0|[1-9][0-9]{0,19})(\\.[0-9]{1,18})?$")
+        const val MAX_LOCALIZED_VALUES = 32
+        const val MAX_LOCALIZED_TEXT_LENGTH = 4_096
+        const val MAX_COMPONENTS = 256
+        const val MAX_CODE_LENGTH = 128
     }
 }

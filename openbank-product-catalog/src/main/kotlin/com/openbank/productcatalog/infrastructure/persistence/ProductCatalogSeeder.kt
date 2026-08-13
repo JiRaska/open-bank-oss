@@ -17,6 +17,7 @@ import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.interceptor.Interceptor
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
 import java.util.UUID
@@ -31,7 +32,12 @@ import java.util.UUID
  * reactive Panache synchronously at startup), so it completes before the service serves traffic.
  */
 @ApplicationScoped
-class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val mapper: ObjectMapper) {
+class ProductCatalogSeeder(
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: ObjectMapper,
+    @ConfigProperty(name = "openbank.catalog.bank-v1-compatibility-enabled", defaultValue = "true")
+    private val bankCompatibilityEnabled: Boolean,
+) {
     private val log = Logger.getLogger(ProductCatalogSeeder::class.java)
 
     // The broad catch is deliberate: subscribeAndAwait wraps the reactive failure in an opaque
@@ -39,6 +45,7 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
     // that is NOT a lost seed race — a genuine DB fault must still fail the boot.
     @Suppress("TooGenericExceptionCaught", "UnusedParameter")
     fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION) ev: StartupEvent) {
+        if (!bankCompatibilityEnabled) return
         val inserted = try {
             seed()
         } catch (e: RuntimeException) {

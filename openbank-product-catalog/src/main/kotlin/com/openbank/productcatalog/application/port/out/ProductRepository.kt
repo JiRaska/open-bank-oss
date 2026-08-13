@@ -31,9 +31,9 @@ interface ProductRepository {
      * Persist a new product. [legacyCode] is the `prod-NNN` alias for seeded catalogue products
      * (null for API-created ones, which have no legacy alias).
      */
-    suspend fun save(product: Product, legacyCode: String? = null): Product
+    suspend fun save(product: Product, legacyCode: String? = null, actorId: String): Product
 
-    suspend fun update(product: Product): Product
+    suspend fun update(product: Product, actorId: String): Product
 
     /** Row count — used to seed the catalogue only on an empty store (idempotent first-boot seed). */
     suspend fun count(): Long

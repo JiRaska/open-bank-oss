@@ -41,6 +41,34 @@ class CatalogSchemaProfileTest {
             .hasMessageContaining("nesting")
     }
 
+    @Test
+    fun `requires closed objects for type unions and implicit object applicators`() {
+        val objectUnion =
+            """{"${'$'}schema":"${CatalogSchemaProfile.DIALECT}","type":["object","null"]}"""
+        val implicitObject =
+            """{"${'$'}schema":"${CatalogSchemaProfile.DIALECT}","properties":{"name":{"type":"string"}}}"""
+
+        listOf(objectUnion, implicitObject).forEach { candidate ->
+            assertThatThrownBy { profile.requireValid(mapper.readTree(candidate)) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("additionalProperties")
+        }
+    }
+
+    @Test
+    fun `requires objects introduced inside conditional branches to be closed`() {
+        val openNestedObject =
+            """{"${'$'}schema":"${CatalogSchemaProfile.DIALECT}","type":"object","additionalProperties":false,""" +
+                """"properties":{"kind":{"type":"string"},"details":{"type":"object",""" +
+                """"additionalProperties":false}},""" +
+                """"if":{"properties":{"kind":{"const":"FIXED"}}},"then":{"properties":{"details":{"type":"object",""" +
+                """"properties":{"amount":{"type":"string"}}}}}}"""
+
+        assertThatThrownBy { profile.requireValid(mapper.readTree(openNestedObject)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("additionalProperties")
+    }
+
     private fun schema(property: String): String =
         """{"${'$'}schema":"${CatalogSchemaProfile.DIALECT}","type":"object","additionalProperties":false,""" +
             """"properties":{"name":{$property}}}"""

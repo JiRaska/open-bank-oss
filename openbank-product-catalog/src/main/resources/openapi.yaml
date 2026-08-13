@@ -32,6 +32,10 @@ tags:
     description: Market context and immutable authoring revisions
   - name: Published Catalog
     description: Effective-dated published projections
+  - name: Catalog Events
+    description: Durable pull cursor for standalone change delivery
+  - name: Catalog V2
+    description: Generated runtime contract for the governed generic catalog
 security:
   - bearerAuth: []
 paths:
@@ -40,6 +44,7 @@ paths:
       tags: [Products]
       summary: List products
       operationId: listProducts
+      deprecated: true
       parameters:
         - { name: type, in: query, required: false, schema: { type: string } }
         - { name: status, in: query, required: false, schema: { type: string } }
@@ -56,6 +61,7 @@ paths:
       tags: [Products]
       summary: Create a product
       operationId: createProduct
+      deprecated: true
       requestBody:
         required: true
         content:
@@ -83,6 +89,7 @@ paths:
       tags: [Products]
       summary: Get a product by id
       operationId: getProduct
+      deprecated: true
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -104,6 +111,7 @@ paths:
       tags: [Products]
       summary: Update a product
       operationId: updateProduct
+      deprecated: true
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -145,6 +153,7 @@ paths:
       tags: [Products]
       summary: Get a product by its semantic code or prod-NNN legacy alias (ADR-0105)
       operationId: getProductByCode
+      deprecated: true
       parameters:
         - { name: code, in: path, required: true, schema: { type: string } }
       responses:
@@ -167,6 +176,7 @@ paths:
       tags: [Products]
       summary: Activate a product
       operationId: activateProduct
+      deprecated: true
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -205,6 +215,7 @@ paths:
       tags: [Products]
       summary: Deactivate a product
       operationId: deactivateProduct
+      deprecated: true
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { $ref: '#/components/parameters/IfMatch' }
@@ -243,6 +254,7 @@ paths:
       tags: [Products]
       summary: Fees for a single product
       operationId: getProductFees
+      deprecated: true
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -267,6 +279,7 @@ paths:
         its owning product identity and a derived display code so the UI never hardcodes
         pricing; the code is derived from mutable fee metadata and is not an identity.
       operationId: listFees
+      deprecated: true
       parameters:
         - { name: type, in: query, required: false, schema: { type: string } }
         - { name: currency, in: query, required: false, schema: { type: string } }
@@ -281,7 +294,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/product-types:
     get:
-      tags: [Product Types]
+      tags: [Catalog V2]
       summary: List trusted product type schemas
       operationId: listProductTypesV2
       responses:
@@ -294,7 +307,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/product-types/{id}/versions/{version}:
     get:
-      tags: [Product Types]
+      tags: [Catalog V2]
       summary: Get an exact immutable product type schema
       operationId: getProductTypeVersionV2
       parameters:
@@ -311,7 +324,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/product-types/{id}/versions/{version}/validate:
     post:
-      tags: [Product Types]
+      tags: [Catalog V2]
       summary: Validate attributes without storing them
       operationId: validateProductAttributesV2
       parameters:
@@ -333,8 +346,20 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/specifications:
+    get:
+      tags: [Catalog V2]
+      summary: List canonical product identities
+      operationId: listSpecificationsV2
+      responses:
+        '200':
+          description: Specifications ordered by code
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Specification' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
-      tags: [Specifications]
+      tags: [Catalog V2]
       summary: Create a canonical product identity
       operationId: createSpecificationV2
       requestBody:
@@ -357,7 +382,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/specifications/{id}:
     get:
-      tags: [Specifications]
+      tags: [Catalog V2]
       summary: Get a canonical product identity
       operationId: getSpecificationV2
       parameters:
@@ -374,8 +399,23 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/offerings:
+    get:
+      tags: [Catalog V2]
+      summary: List market-specific offerings
+      operationId: listOfferingsV2
+      parameters:
+        - { name: specificationId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Offerings ordered by code
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Offering' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
-      tags: [Offerings]
+      tags: [Catalog V2]
       summary: Create a market-specific offering
       operationId: createOfferingV2
       requestBody:
@@ -398,7 +438,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/offerings/{id}:
     get:
-      tags: [Offerings]
+      tags: [Catalog V2]
       summary: Get an offering
       operationId: getOfferingV2
       parameters:
@@ -415,8 +455,23 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/offerings/{id}/revisions:
+    get:
+      tags: [Catalog V2]
+      summary: List immutable revision history for one offering
+      operationId: listOfferingRevisionsV2
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Revisions ordered newest first
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ProductRevision' } }
+        '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
     post:
-      tags: [Offerings]
+      tags: [Catalog V2]
       summary: Author the next draft revision
       operationId: createOfferingRevisionV2
       parameters:
@@ -445,7 +500,7 @@ paths:
       - { name: offeringId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: revisionId, in: path, required: true, schema: { type: string, format: uuid } }
     get:
-      tags: [Offerings]
+      tags: [Catalog V2]
       summary: Get an authored revision
       operationId: getOfferingRevisionV2
       responses:
@@ -460,7 +515,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
     put:
-      tags: [Offerings]
+      tags: [Catalog V2]
       summary: Fully replace a draft revision
       operationId: replaceOfferingRevisionV2
       parameters:
@@ -488,7 +543,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/offerings/{offeringId}/revisions/{revisionId}/publish:
     post:
-      tags: [Offerings]
+      tags: [Catalog V2]
       summary: Publish with a different authenticated checker
       operationId: publishOfferingRevisionV2
       parameters:
@@ -518,7 +573,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
   /api/v2/products/{offeringId}:
     get:
-      tags: [Published Catalog]
+      tags: [Catalog V2]
       summary: Resolve one offering's effective published product projection
       operationId: getPublishedProductV2
       parameters:
@@ -532,6 +587,29 @@ paths:
               schema: { $ref: '#/components/schemas/ProductRevision' }
         '400': { $ref: '#/components/responses/BadRequest' }
         '404': { $ref: '#/components/responses/CatalogNotFound' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v2/events:
+    get:
+      tags: [Catalog Events]
+      summary: Read durable catalog changes after a cursor
+      operationId: listCatalogEvents
+      parameters:
+        - name: after
+          in: query
+          required: false
+          schema: { type: string }
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '200':
+          description: Ordered event page; persist nextCursor only after processing every item
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CatalogEventPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 components:
@@ -617,7 +695,7 @@ components:
       properties:
         traceId: { type: string }
         status: { type: integer }
-        code: { type: string }
+        code: { type: string, minLength: 1, maxLength: 64 }
         message: { type: string }
         timestamp: { type: string, format: date-time }
       required: [traceId, status, code, message, timestamp]
@@ -685,7 +763,7 @@ components:
       additionalProperties: false
       properties:
         id: { type: string, format: uuid }
-        code: { type: string }
+        code: { type: string, minLength: 1, maxLength: 64 }
         schemaRef: { $ref: '#/components/schemas/SchemaRef' }
         createdAt: { type: string, format: date-time }
         revision: { type: integer, format: int64, minimum: 0 }
@@ -721,31 +799,34 @@ components:
       type: object
       additionalProperties: false
       properties:
-        code: { type: string }
+        code: { type: string, minLength: 1, maxLength: 64 }
         kind: { type: string, enum: [AMOUNT, RATE] }
         value:
           type: string
-          pattern: '^(0|[1-9][0-9]*)(\.[0-9]+)?$'
+          pattern: '^(0|[1-9][0-9]{0,19})(\.[0-9]{1,18})?$'
           description: Exact decimal string; v2 never exposes monetary or rate values as binary floating point.
         currency: { type: [string, 'null'], pattern: '^[A-Z]{3}$' }
-        unit: { type: string }
+        unit: { type: string, minLength: 1, maxLength: 64 }
         cadence: { type: string, enum: [ONCE, DAILY, MONTHLY, QUARTERLY, ANNUALLY, USAGE] }
         taxTreatment: { type: string, enum: [INCLUSIVE, EXCLUSIVE, EXEMPT, UNSPECIFIED] }
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo: { type: [string, 'null'], format: date-time }
       required: [code, kind, value, unit, cadence]
+    EligibilityOperator:
+      type: string
+      enum: [EQUALS, NOT_EQUALS, IN, GREATER_THAN, GREATER_OR_EQUAL, LESS_THAN, LESS_OR_EQUAL]
     EligibilityRule:
       type: object
       additionalProperties: false
       properties:
         field: { type: string }
-        operator:
-          type: string
-          enum: [EQUALS, NOT_EQUALS, IN, GREATER_THAN, GREATER_OR_EQUAL, LESS_THAN, LESS_OR_EQUAL]
+        operator: { $ref: '#/components/schemas/EligibilityOperator' }
         expected: {}
         explanation:
           type: object
-          additionalProperties: { type: string }
+          minProperties: 1
+          maxProperties: 32
+          additionalProperties: { type: string, minLength: 1, maxLength: 4096 }
       required: [field, operator, expected, explanation]
     OfferingRelationship:
       type: object
@@ -758,31 +839,38 @@ components:
       type: object
       additionalProperties: false
       properties:
+        schemaRef: { $ref: '#/components/schemas/SchemaRef' }
         name:
           type: object
           minProperties: 1
-          additionalProperties: { type: string, minLength: 1 }
+          maxProperties: 32
+          additionalProperties: { type: string, minLength: 1, maxLength: 4096 }
         description:
           type: [object, 'null']
           minProperties: 1
-          additionalProperties: { type: string, minLength: 1 }
+          maxProperties: 32
+          additionalProperties: { type: string, minLength: 1, maxLength: 4096 }
         attributes: { type: object, additionalProperties: true }
         prices:
           type: array
+          maxItems: 256
           items: { $ref: '#/components/schemas/PriceComponent' }
         eligibility:
           type: array
+          maxItems: 256
           items: { $ref: '#/components/schemas/EligibilityRule' }
         relationships:
           type: array
+          maxItems: 256
           items: { $ref: '#/components/schemas/OfferingRelationship' }
         documentCodes:
           type: array
+          maxItems: 256
           uniqueItems: true
-          items: { type: string, minLength: 1 }
+          items: { type: string, minLength: 1, maxLength: 128 }
         effectiveFrom: { type: [string, 'null'], format: date-time }
         effectiveTo: { type: [string, 'null'], format: date-time }
-      required: [name, attributes]
+      required: [schemaRef, name, attributes]
     RevisionContent:
       type: object
       additionalProperties: false
@@ -790,25 +878,31 @@ components:
         name:
           type: object
           minProperties: 1
-          additionalProperties: { type: string, minLength: 1 }
+          maxProperties: 32
+          additionalProperties: { type: string, minLength: 1, maxLength: 4096 }
         description:
           type: [object, 'null']
           minProperties: 1
-          additionalProperties: { type: string, minLength: 1 }
+          maxProperties: 32
+          additionalProperties: { type: string, minLength: 1, maxLength: 4096 }
         attributes: { type: object, additionalProperties: true }
         prices:
           type: array
+          maxItems: 256
           items: { $ref: '#/components/schemas/PriceComponent' }
         eligibility:
           type: array
+          maxItems: 256
           items: { $ref: '#/components/schemas/EligibilityRule' }
         relationships:
           type: array
+          maxItems: 256
           items: { $ref: '#/components/schemas/OfferingRelationship' }
         documentCodes:
           type: array
+          maxItems: 256
           uniqueItems: true
-          items: { type: string, minLength: 1 }
+          items: { type: string, minLength: 1, maxLength: 128 }
       required: [name, attributes, prices, eligibility, relationships, documentCodes]
     ProductRevision:
       type: object
@@ -840,6 +934,26 @@ components:
         - createdAt
         - updatedAt
         - revision
+    CatalogEvent:
+      type: object
+      additionalProperties: false
+      properties:
+        id: { type: string, format: uuid }
+        aggregateType: { type: string }
+        aggregateId: { type: string, format: uuid }
+        eventType: { type: string }
+        schemaVersion: { type: integer, minimum: 1 }
+        occurredAt: { type: string, format: date-time }
+        headers: { type: object, additionalProperties: true }
+        payload: { type: object, additionalProperties: true }
+      required: [id, aggregateType, aggregateId, eventType, schemaVersion, occurredAt, headers, payload]
+    CatalogEventPage:
+      type: object
+      additionalProperties: false
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CatalogEvent' } }
+        nextCursor: { type: [string, 'null'] }
+      required: [items]
     PublishRequest:
       type: object
       additionalProperties: false

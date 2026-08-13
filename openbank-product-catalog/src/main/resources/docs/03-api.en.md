@@ -10,10 +10,17 @@
 The newest served major of `openapi.yaml:info.version` equals `openbank.api.version` and `/api/v2`.
 The same contract preserves `/api/v1`; the response filter reports the major of the actual request
 path. The release version (`version.txt`) is a separate axis ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+OpenAPI Generator 7.24.0 produces the coroutine JAX-RS v2 resource interfaces during compilation;
+the runtime resources implement those interfaces. Product Studio generates its operation-typed
+TypeScript client from the same contract before build, type-check and contract tests.
 
 ## Authentication
 
-The service is an OIDC resource server. Reads require an authenticated bearer token; create/update/lifecycle mutations require `ROLE_OPERATOR` or `ROLE_ADMIN`. `@Authorize` adds the policy action, but OPA is advisory until the bank deployment enables an enforcing profile. Browser traffic still goes through the authenticated BFF (ADR-0056).
+The service is an OIDC resource server. Reads require an authenticated bearer token. OpenBank
+deployments may use `ROLE_OPERATOR` / `ROLE_ADMIN`; provider-neutral deployments map configurable
+OAuth scopes (defaults `catalog:read`, `catalog:author`, `catalog:publish`) to the same core
+permissions. The service itself enforces maker != checker; OPA is defense in depth. Browser traffic
+still goes through the authenticated BFF (ADR-0056).
 
 CORS origins are restricted to the configured admin UI origins and expose `ETag`; `If-Match` is allowed for optimistic writes.
 
@@ -50,12 +57,14 @@ a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 | GET | `/api/v2/product-types` | List immutable trusted schemas |
 | GET | `/api/v2/product-types/{id}/versions/{version}` | Get one exact schema |
 | POST | `/api/v2/product-types/{id}/versions/{version}/validate` | Validate attributes with ordered violations |
-| POST / GET | `/api/v2/specifications[/{id}]` | Create/read canonical product identity |
-| POST / GET | `/api/v2/offerings[/{id}]` | Create/read a market context |
+| POST / GET | `/api/v2/specifications[/{id}]` | Create/list/read canonical product identity |
+| POST / GET | `/api/v2/offerings[/{id}]` | Create/list/read a market context |
 | POST | `/api/v2/offerings/{id}/revisions` | Author a DRAFT revision |
+| GET | `/api/v2/offerings/{id}/revisions` | List immutable revision history |
 | GET / PUT | `/api/v2/offerings/{id}/revisions/{revisionId}` | Read/update a draft; PUT requires `If-Match` |
 | POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish` | Four-eyes publish with reason and `If-Match` |
 | GET | `/api/v2/products/{offeringId}?effectiveAt=` | Resolve published effective content for one deterministic offering |
+| GET | `/api/v2/events?after=&limit=` | Poll ordered durable change envelopes with an opaque cursor |
 
 ### Example — create a product
 

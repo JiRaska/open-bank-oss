@@ -65,6 +65,10 @@ Každá přijatá změna v2 zapisuje doménový stav, audit a transportně neutr
 
 - **openbank-libs** — sdílené runtime instalatérství (BuildInfo / `ServiceInfoResource`, DocsResource pro Docs-as-Service, filtr API verze).
 - **PostgreSQL** — reaktivní Panache + reaktivní PG klient pro aplikační cestu, JDBC pro Flyway (ADR-0009 / ADR-0105 P1); viz [04 — Data](./04-data.md).
+
+Katalog se dodává také samostatně jako atestovaný OCI image, zabezpečený Helm chart a Docker Compose
+quickstart. Standalone režim vyžaduje pouze PostgreSQL a standardní OIDC issuer; žádný oborový pack
+se nezapne bez výslovné volby provozovatele. Viz `standalone/README.md` v modulu služby.
 - **Keycloak** — čistý OIDC resource server (`quarkus-oidc`, realm `openbank`): validuje bearer tokeny proti JWKS realmu a žádné nevydává, takže nepotřebuje client secret.
 - **Žádná runtime závislost** na Kafce ani Redisu; v2 ukládá událostní obálky do PostgreSQL outboxu pro pozdější transportní adaptér.
 

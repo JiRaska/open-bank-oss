@@ -3,6 +3,8 @@ quarkus:
     name: openbank-product-catalog
   http:
     port: 8104
+    limits:
+      max-body-size: 2M
     cors:
       ~: true
       origins: "http://localhost:3000,http://openbank-admin-ui:3000"
@@ -81,12 +83,27 @@ openbank:
     # Current OpenBank deployment enables both reference packs. Standalone charts override this to
     # an empty value and let the operator opt in explicitly.
     packs: ${OPENBANK_CATALOG_PACKS:banking,insurance}
+    bank-v1-compatibility-enabled: ${OPENBANK_CATALOG_BANK_V1_COMPATIBILITY_ENABLED:true}
+    security:
+      scope-claim: ${CATALOG_SCOPE_CLAIM:scope}
+      read-scope: ${CATALOG_READ_SCOPE:catalog:read}
+      author-scope: ${CATALOG_AUTHOR_SCOPE:catalog:author}
+      publish-scope: ${CATALOG_PUBLISH_SCOPE:catalog:publish}
   api:
     # API-contract major, independent of version.txt (ADR-0048); newest served contract is /api/v2.
     version: "2"
+    deprecated-paths:
+      - /api/v1/products
+      - /api/v1/fees
+    successor-links:
+      - /api/v1/products=>/api/v2/offerings
+      - /api/v1/fees=>/api/v2/offerings
+    sunset-date: "Wed, 10 Feb 2027 00:00:00 GMT"
 
 "%test":
   quarkus:
+    scheduler:
+      enabled: false
     management:
       enabled: false
     # No Keycloak on the test stack — disable the resource server so @QuarkusTest boots, and let
@@ -94,5 +111,29 @@ openbank:
     oidc:
       enabled: false
   # OPA sidecar is absent in CI — keep @Authorize advisory so the reads proceed under test.
+  authz:
+    enforce: "false"
+
+# Portable distribution: fail closed unless its operator supplies PostgreSQL and a standards-based
+# OIDC issuer. No industry pack is installed implicitly; a bank, insurer, or other regulated firm
+# selects only the trusted packs it needs. Core maker/checker enforcement never depends on OPA.
+"%standalone":
+  quarkus:
+    datasource:
+      username: ${POSTGRES_USER}
+      password: ${POSTGRES_PASSWORD}
+      reactive:
+        url: ${REACTIVE_URL}
+      jdbc:
+        url: ${JDBC_URL}
+    oidc:
+      auth-server-url: ${OIDC_ISSUER}
+      tls:
+        verification: required
+  openbank:
+    catalog:
+      packs: ${OPENBANK_CATALOG_PACKS:}
+      bank-v1-compatibility-enabled: ${OPENBANK_BANK_V1_COMPATIBILITY_ENABLED:false}
+      require-https-issuer: true
   authz:
     enforce: "false"

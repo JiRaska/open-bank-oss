@@ -4,7 +4,11 @@
 
 package com.openbank.productcatalog
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.libs.testing.containers.PostgresTestResource
+import com.openbank.productcatalog.infrastructure.catalog.CatalogJson
+import com.openbank.productcatalog.infrastructure.catalog.CatalogSchemaProfile
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -27,6 +31,7 @@ import java.util.concurrent.Callable
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import javax.sql.DataSource
 
 @QuarkusTest
@@ -35,9 +40,16 @@ import javax.sql.DataSource
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
 )
 @TestSecurity(user = "test-operator", roles = ["ROLE_OPERATOR"])
+@Suppress("LargeClass")
 class CatalogPlatformResourceTest {
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var mapper: ObjectMapper
+
+    @Inject
+    lateinit var catalogJson: CatalogJson
 
     @Test
     fun validatesTrustedIndustryPacks() {
@@ -61,7 +73,10 @@ class CatalogPlatformResourceTest {
     fun publishesWithFourEyesAtomicallyAndExactly() {
         val specificationId = createSpecification("INS_TERM_LIFE_E2E")
         val offeringId = createOffering(specificationId, "INS_TERM_LIFE_E2E_CZ")
+        val targetOfferingId = createOffering(specificationId, "INS_TERM_LIFE_TARGET_CZ")
         val revisionId = createRevision(offeringId, "Reference term life")
+        insertDraftRelationship(revisionId, targetOfferingId)
+        val relocationDraftId = createRevision(targetOfferingId, "Relocation target")
         val publishPath = "/api/v2/offerings/$offeringId/revisions/$revisionId/publish"
 
         Given {
@@ -96,7 +111,149 @@ class CatalogPlatformResourceTest {
         assertThat(rowCount("catalog_audit", revisionId)).isEqualTo(2)
         assertThat(rowCount("catalog_outbox", revisionId)).isEqualTo(2)
         assertThat(validEventEnvelopeCount(revisionId)).isEqualTo(2)
-        assertPublishedSnapshotIsDatabaseImmutable(revisionId)
+        assertEventCursorAdvancesWithoutDuplicates()
+        assertPublishedSnapshotIsDatabaseImmutable(revisionId, targetOfferingId, relocationDraftId)
+    }
+
+    @Test
+    fun rejectsOversizedDeepAndOutOfRangeRevisionInputsBeforePersistence() {
+        val specificationId = createSpecification("INS_TERM_LIFE_LIMITS")
+        val offeringId = createOffering(specificationId, "INS_TERM_LIFE_LIMITS_CZ")
+        val endpoint = "/api/v2/offerings/$offeringId/revisions"
+
+        val deep = mapper.readTree(revisionPayload("Deep input")) as ObjectNode
+        var nested = deep.with("attributes")
+        repeat(CatalogSchemaProfile.MAX_NESTING_DEPTH + 1) { nested = nested.putObject("level") }
+        given().contentType("application/json").body(mapper.writeValueAsString(deep)).post(endpoint).then()
+            .statusCode(400)
+
+        val oversized = mapper.readTree(revisionPayload("Large input")) as ObjectNode
+        oversized.with("attributes").put("blob", "x".repeat(CatalogSchemaProfile.MAX_INSTANCE_BYTES + 1))
+        given().contentType("application/json").body(mapper.writeValueAsString(oversized)).post(endpoint).then()
+            .statusCode(400)
+
+        val excessiveDecimal = mapper.readTree(revisionPayload("Decimal overflow")) as ObjectNode
+        (excessiveDecimal.withArray("prices")[0] as ObjectNode).put("value", "100000000000000000000.00")
+        given().contentType("application/json").body(mapper.writeValueAsString(excessiveDecimal)).post(endpoint).then()
+            .statusCode(400)
+
+        assertThat(aggregateCount("catalog_revisions", "offering_id", offeringId)).isZero()
+    }
+
+    @Test
+    fun advancesSchemaVersionOnlyOnANewPinnedRevision() {
+        installInsuranceSchemaVersion(2)
+        val specificationId = createSpecification("INS_TERM_LIFE_SCHEMA_ADVANCE")
+        val offeringId = createOffering(specificationId, "INS_TERM_LIFE_SCHEMA_ADVANCE_CZ")
+        val first = createRevision(offeringId, "Schema version one")
+        val second = createRevision(offeringId, "Schema version two", schemaVersion = 2)
+
+        val mismatchedUpdate = mapper.readTree(revisionPayload("Wrong in-place schema", schemaVersion = 2))
+        given().contentType("application/json").header("If-Match", "\"0\"")
+            .body(mapper.writeValueAsString(mismatchedUpdate))
+            .put("/api/v2/offerings/$offeringId/revisions/$first").then()
+            .statusCode(400)
+
+        given().get("/api/v2/offerings/$offeringId/revisions/$first").then()
+            .statusCode(200)
+            .body("schemaRef.version", equalTo(1))
+        given().get("/api/v2/offerings/$offeringId/revisions/$second").then()
+            .statusCode(200)
+            .body("schemaRef.version", equalTo(2))
+    }
+
+    @Test
+    fun listsProductStudioAggregatesWithoutCrossOfferingRevisionLeakage() {
+        val specificationId = createSpecification("INS_PRODUCT_STUDIO_LIST")
+        val firstOfferingId = createOffering(specificationId, "INS_PRODUCT_STUDIO_LIST_CZ")
+        val secondOfferingId = createOffering(specificationId, "INS_PRODUCT_STUDIO_LIST_DE")
+        val firstRevisionId = createRevision(firstOfferingId, "Czech draft")
+        createRevision(secondOfferingId, "German draft")
+
+        val specificationIds = given().get("/api/v2/specifications").then().statusCode(200)
+            .extract().jsonPath().getList("id", String::class.java)
+        val offeringIds = given().get("/api/v2/offerings").then().statusCode(200)
+            .extract().jsonPath().getList("id", String::class.java)
+        val revisionIds = given().get("/api/v2/offerings/$firstOfferingId/revisions").then()
+            .statusCode(200).extract().jsonPath().getList("id", String::class.java)
+
+        assertThat(specificationIds).contains(specificationId.toString())
+        assertThat(offeringIds).contains(firstOfferingId.toString(), secondOfferingId.toString())
+        assertThat(revisionIds).containsExactly(firstRevisionId.toString())
+    }
+
+    @Test
+    fun acceptsOutboxWritesFromThePreviousV2BinaryDuringRollingDeployment() {
+        val eventId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO catalog_outbox " +
+                    "(id, aggregate_type, aggregate_id, event_type, schema_version, occurred_at, payload) " +
+                    "VALUES (?, 'REVISION', ?, 'test.previous_v2_writer', 1, now(), CAST(? AS jsonb))",
+            ).use { statement ->
+                statement.setObject(1, eventId)
+                statement.setObject(2, UUID.randomUUID())
+                statement.setString(3, "{\"source\":\"previous-v2-binary\"}")
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+        assertThat(previousWriterEventCount(eventId)).isEqualTo(1)
+    }
+
+    @Test
+    fun serializesDraftChildInsertionBeforeConcurrentPublication() {
+        val specificationId = createSpecification("INS_CHILD_PUBLISH_SERIALIZATION")
+        val offeringId = createOffering(specificationId, "INS_CHILD_PUBLISH_SERIALIZATION_CZ")
+        val revisionId = createRevision(offeringId, "Concurrent child lock")
+        val childInserted = CountDownLatch(1)
+        val releaseChildTransaction = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val childCommit = executor.submit(
+                Callable {
+                    dataSource.connection.use { connection ->
+                        connection.autoCommit = false
+                        connection.prepareStatement(
+                            "INSERT INTO catalog_price_components " +
+                                "(id, revision_id, code, kind, value, unit, cadence, tax_treatment) " +
+                                "VALUES (?, ?, 'CONCURRENT', 'RATE', 1, 'annual-rate', 'ANNUALLY', 'UNSPECIFIED')",
+                        ).use { statement ->
+                            statement.setObject(1, UUID.randomUUID())
+                            statement.setObject(2, revisionId)
+                            assertThat(statement.executeUpdate()).isEqualTo(1)
+                        }
+                        childInserted.countDown()
+                        check(releaseChildTransaction.await(5, TimeUnit.SECONDS))
+                        connection.commit()
+                    }
+                    true
+                },
+            )
+            check(childInserted.await(5, TimeUnit.SECONDS))
+            val publication = executor.submit(
+                Callable {
+                    dataSource.connection.use { connection ->
+                        connection.prepareStatement(
+                            "UPDATE catalog_revisions SET state = 'PUBLISHED', effective_from = now(), " +
+                                "checker_id = 'concurrent-checker', reason = 'concurrency proof', " +
+                                "content_hash = repeat('c', 64) WHERE id = ?",
+                        ).use { statement ->
+                            statement.setObject(1, revisionId)
+                            statement.executeUpdate()
+                        }
+                    }
+                },
+            )
+
+            assertThatThrownBy { publication.get(250, TimeUnit.MILLISECONDS) }
+                .isInstanceOf(TimeoutException::class.java)
+            releaseChildTransaction.countDown()
+            assertThat(childCommit.get(5, TimeUnit.SECONDS)).isTrue()
+            assertThat(publication.get(5, TimeUnit.SECONDS)).isEqualTo(1)
+        } finally {
+            releaseChildTransaction.countDown()
+            executor.shutdownNow()
+        }
     }
 
     private fun publishAndAssertProjection(publishPath: String, offeringId: UUID, beforePublication: Instant) {
@@ -288,11 +445,11 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun createRevision(offeringId: UUID, name: String): UUID = UUID.fromString(
+    private fun createRevision(offeringId: UUID, name: String, schemaVersion: Int = 1): UUID = UUID.fromString(
         (
             Given {
                 contentType("application/json")
-                body(revisionPayload(name))
+                body(revisionPayload(name, schemaVersion))
             } When {
                 post("/api/v2/offerings/$offeringId/revisions")
             } Then {
@@ -303,8 +460,9 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun revisionPayload(name: String): String =
-        """{"name":{"en":"$name"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{""" +
+    private fun revisionPayload(name: String, schemaVersion: Int = 1): String =
+        """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion},""" +
+            """"name":{"en":"$name"},"attributes":$INSURANCE_ATTRIBUTES,"prices":[{""" +
             """"code":"PREMIUM","kind":"AMOUNT","value":"$EXACT_PRICE","currency":"EUR","unit":"policy",""" +
             """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}]}"""
 
@@ -330,7 +488,25 @@ class CatalogPlatformResourceTest {
         }
     }
 
-    private fun assertPublishedSnapshotIsDatabaseImmutable(revisionId: UUID) {
+    private fun insertDraftRelationship(revisionId: UUID, targetOfferingId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "INSERT INTO catalog_relationships (id, revision_id, target_offering_id, kind) " +
+                    "VALUES (?, ?, ?, 'RELATED')",
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, revisionId)
+                statement.setObject(3, targetOfferingId)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+    }
+
+    private fun assertPublishedSnapshotIsDatabaseImmutable(
+        revisionId: UUID,
+        targetOfferingId: UUID,
+        relocationDraftId: UUID,
+    ) {
         assertThatThrownBy {
             dataSource.connection.use { connection ->
                 connection.prepareStatement(
@@ -342,6 +518,125 @@ class CatalogPlatformResourceTest {
                 }
             }
         }.hasMessageContaining("is immutable")
+
+        assertImmutableChild(
+            "INSERT INTO catalog_price_components " +
+                "(id, revision_id, code, kind, value, unit, cadence, tax_treatment) " +
+                "VALUES (?, ?, 'LATE_PRICE', 'RATE', 1, 'annual-rate', 'ANNUALLY', 'UNSPECIFIED')",
+            revisionId,
+        )
+        assertImmutableChild(
+            "UPDATE catalog_price_components SET value = 2 WHERE revision_id = ? AND code = 'PREMIUM'",
+            revisionId,
+            idFirst = true,
+        )
+        assertImmutableChild(
+            "DELETE FROM catalog_price_components WHERE revision_id = ? AND code = 'PREMIUM'",
+            revisionId,
+            idFirst = true,
+        )
+        assertImmutableRelocation("catalog_price_components", revisionId, relocationDraftId)
+        assertImmutableRelationshipInsert(revisionId, targetOfferingId)
+        assertImmutableChild(
+            "UPDATE catalog_relationships SET kind = 'REPLACEMENT' WHERE revision_id = ?",
+            revisionId,
+            idFirst = true,
+        )
+        assertImmutableChild(
+            "DELETE FROM catalog_relationships WHERE revision_id = ?",
+            revisionId,
+            idFirst = true,
+        )
+        assertImmutableRelocation("catalog_relationships", revisionId, relocationDraftId)
+    }
+
+    private fun assertImmutableRelocation(table: String, revisionId: UUID, draftRevisionId: UUID) {
+        assertThatThrownBy {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "UPDATE $table SET revision_id = ? WHERE revision_id = ?",
+                ).use { statement ->
+                    statement.setObject(1, draftRevisionId)
+                    statement.setObject(2, revisionId)
+                    statement.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("child is immutable")
+    }
+
+    private fun assertImmutableChild(sql: String, revisionId: UUID, idFirst: Boolean = false) {
+        assertThatThrownBy {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(sql).use { statement ->
+                    if (idFirst) {
+                        statement.setObject(1, revisionId)
+                    } else {
+                        statement.setObject(1, UUID.randomUUID())
+                        statement.setObject(2, revisionId)
+                    }
+                    statement.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("child is immutable")
+    }
+
+    private fun assertImmutableRelationshipInsert(revisionId: UUID, targetOfferingId: UUID) {
+        assertThatThrownBy {
+            dataSource.connection.use { connection ->
+                connection.prepareStatement(
+                    "INSERT INTO catalog_relationships (id, revision_id, target_offering_id, kind) " +
+                        "VALUES (?, ?, ?, 'REPLACEMENT')",
+                ).use { statement ->
+                    statement.setObject(1, UUID.randomUUID())
+                    statement.setObject(2, revisionId)
+                    statement.setObject(3, targetOfferingId)
+                    statement.executeUpdate()
+                }
+            }
+        }.hasMessageContaining("child is immutable")
+    }
+
+    private fun assertEventCursorAdvancesWithoutDuplicates() {
+        val firstPage = given().queryParam("limit", 1).get("/api/v2/events").then()
+            .statusCode(200)
+            .extract()
+        val firstId = firstPage.jsonPath().getString("items[0].id")
+        val cursor = firstPage.jsonPath().getString("nextCursor")
+        assertThat(cursor).isNotBlank()
+
+        val followingIds = given().queryParam("after", cursor).queryParam("limit", 500)
+            .get("/api/v2/events").then().statusCode(200)
+            .extract().jsonPath().getList("items.id", String::class.java)
+        assertThat(followingIds).doesNotContain(firstId)
+        given().queryParam("after", "not-a-cursor").get("/api/v2/events").then().statusCode(400)
+    }
+
+    private fun installInsuranceSchemaVersion(version: Int) {
+        dataSource.connection.use { connection ->
+            val document = connection.prepareStatement(
+                "SELECT document FROM catalog_schemas " +
+                    "WHERE schema_id = 'org.openbank.insurance.term-life' AND schema_version = 1",
+            ).use { statement ->
+                statement.executeQuery().use { rows ->
+                    check(rows.next())
+                    (mapper.readTree(rows.getString(1)) as ObjectNode).also {
+                        it.put("\$id", "urn:catalog-schema:org.openbank.insurance.term-life:$version")
+                    }
+                }
+            }
+            connection.prepareStatement(
+                "INSERT INTO catalog_schemas " +
+                    "(key, schema_id, schema_version, document, sha256, registered_at) " +
+                    "VALUES (?, 'org.openbank.insurance.term-life', ?, CAST(? AS jsonb), ?, now()) " +
+                    "ON CONFLICT DO NOTHING",
+            ).use { statement ->
+                statement.setString(1, "org.openbank.insurance.term-life:$version")
+                statement.setInt(2, version)
+                statement.setString(3, mapper.writeValueAsString(document))
+                statement.setString(4, catalogJson.sha256(document))
+                statement.executeUpdate()
+            }
+        }
     }
 
     private fun installFailingOutboxTrigger() {
@@ -393,6 +688,19 @@ class CatalogPlatformResourceTest {
     private fun eventCount(eventType: String): Long = dataSource.connection.use { connection ->
         connection.prepareStatement("SELECT COUNT(*) FROM catalog_outbox WHERE event_type = ?").use { statement ->
             statement.setString(1, eventType)
+            statement.executeQuery().use { rows ->
+                check(rows.next())
+                rows.getLong(1)
+            }
+        }
+    }
+
+    private fun previousWriterEventCount(eventId: UUID): Long = dataSource.connection.use { connection ->
+        connection.prepareStatement(
+            "SELECT COUNT(*) FROM catalog_outbox " +
+                "WHERE id = ? AND headers = '{}'::jsonb AND created_at IS NOT NULL",
+        ).use { statement ->
+            statement.setObject(1, eventId)
             statement.executeQuery().use { rows ->
                 check(rows.next())
                 rows.getLong(1)

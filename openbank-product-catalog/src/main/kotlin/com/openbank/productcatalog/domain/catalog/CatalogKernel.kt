@@ -90,15 +90,29 @@ data class PriceComponent(
     val effectiveTo: Instant? = null,
 ) {
     init {
-        require(code.isNotBlank()) { "price code must not be blank" }
+        require(code.isNotBlank() && code.length <= MAX_PRICE_TEXT_LENGTH) {
+            "price code must contain between 1 and $MAX_PRICE_TEXT_LENGTH characters"
+        }
         require(value >= BigDecimal.ZERO) { "price value must not be negative" }
+        val integerDigits = (value.precision() - value.scale()).coerceAtLeast(0)
+        require(integerDigits <= MAX_PRICE_INTEGER_DIGITS && value.scale().coerceAtLeast(0) <= MAX_PRICE_SCALE) {
+            "price value exceeds NUMERIC(38,18) precision"
+        }
         require(kind != PriceKind.AMOUNT || currency?.matches(Regex("^[A-Z]{3}$")) == true) {
             "amount price requires an uppercase ISO currency code"
         }
-        require(unit.isNotBlank()) { "price unit must not be blank" }
+        require(unit.isNotBlank() && unit.length <= MAX_PRICE_TEXT_LENGTH) {
+            "price unit must contain between 1 and $MAX_PRICE_TEXT_LENGTH characters"
+        }
         require(effectiveFrom == null || effectiveTo == null || effectiveTo.isAfter(effectiveFrom)) {
             "price effectiveTo must be after effectiveFrom"
         }
+    }
+
+    private companion object {
+        const val MAX_PRICE_INTEGER_DIGITS = 20
+        const val MAX_PRICE_SCALE = 18
+        const val MAX_PRICE_TEXT_LENGTH = 64
     }
 }
 

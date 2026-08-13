@@ -9,9 +9,17 @@
 
 Major nejnovějšího kontraktu z `openapi.yaml:info.version` se rovná `openbank.api.version` a URL `/api/v2` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). Stejný dokument zachovává kompatibilní `/api/v1`; response filtr odvozuje `X-API-Version` ze skutečné cesty. Release verze (`version.txt`) je samostatná osa.
 
+OpenAPI Generator 7.24.0 při kompilaci vytváří coroutine JAX-RS resource rozhraní pro v2 a runtime
+resources je přímo implementují. Product Studio před buildem, type-checkem a kontraktačními testy
+generuje operation-typed TypeScript klienta ze stejného kontraktu.
+
 ## Autentizace
 
-Služba je OIDC resource server. Čtení vyžaduje autentizovaný bearer token; create/update/lifecycle mutace vyžadují `ROLE_OPERATOR` nebo `ROLE_ADMIN`. `@Authorize` přidává policy action, ale OPA je advisory, dokud bankovní deployment nezapne vynucující profil. Prohlížeč stále používá autentizovaný BFF (ADR-0056).
+Služba je OIDC resource server. Čtení vyžaduje autentizovaný bearer token. OpenBank deployment může
+používat `ROLE_OPERATOR` / `ROLE_ADMIN`; provider-neutral instalace mapuje konfigurovatelné OAuth
+scopes (výchozí `catalog:read`, `catalog:author`, `catalog:publish`) na stejné core oprávnění.
+Maker != checker vždy vynucuje samotná služba, OPA je defense in depth. Prohlížeč stále používá
+autentizovaný BFF (ADR-0056).
 
 CORS omezuje origins na nakonfigurované admin UI, zpřístupňuje `ETag` a povoluje `If-Match` pro optimistické zápisy.
 
@@ -41,7 +49,7 @@ Mechanismus `Idempotency-Key` není implementován. Create chrání unikátní `
 
 ### Generický katalog v2
 
-V2 odděluje důvěryhodné typy/schémata, kanonické specifikace, tržní nabídky, autorské revize a publikované čtení. Základní povrch tvoří `/api/v2/types`, `/api/v2/specifications`, `/api/v2/offerings`, `/api/v2/offerings/{id}/revisions` a `/api/v2/products/{offeringId}`. Čtení je v tomto řezu záměrně deterministické pro jednu nabídku; výběr podle trhu přijde až s explicitními pravidly specificity. Oborová data jsou pouze v `attributes` a vždy odkazují přesnou dvojici typu a verze schématu.
+V2 odděluje důvěryhodné typy/schémata, kanonické specifikace, tržní nabídky, autorské revize a publikované čtení. Základní povrch tvoří `/api/v2/product-types`, `/api/v2/specifications`, `/api/v2/offerings`, `/api/v2/offerings/{id}/revisions`, `/api/v2/products/{offeringId}` a trvalý kurzor `/api/v2/events`. Kolekce specifikací, nabídek a revizí lze vypsat pro Product Studio. Čtení je záměrně deterministické pro jednu nabídku; výběr podle trhu vyžaduje explicitní pravidla specificity. Oborová data jsou pouze v `attributes` a vždy odkazují přesnou dvojici typu a verze schématu.
 
 Mutace existující revize a publikace vyžadují silný `If-Match`: chybějící podmínka vrací `428 Precondition Required`, zastaralá `412 Precondition Failed`. Publikovat musí jiný člověk než autor draftu; identita autora i schvalovatele pochází z ověřeného JWT, nikdy z request body.
 

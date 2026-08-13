@@ -46,11 +46,11 @@ class PostgresProductRepository(
 
     // Hibernate Reactive may wrap a driver constraint in RuntimeException; classify its cause chain.
     @Suppress("TooGenericExceptionCaught")
-    override suspend fun save(product: Product, legacyCode: String?): Product = try {
+    override suspend fun save(product: Product, legacyCode: String?, actorId: String): Product = try {
         sf.withTransaction { s ->
             s.persist(newEntity(product, legacyCode))
                 .flatMap { s.flush() }
-                .flatMap { compatibilityProjector.ensureMapped(s, product, legacyCode, "legacy-v1-api") }
+                .flatMap { compatibilityProjector.ensureMapped(s, product, legacyCode, actorId) }
         }
             .replaceWith(product)
             .awaitSuspending()
@@ -61,7 +61,7 @@ class PostgresProductRepository(
         throw e
     }
 
-    override suspend fun update(product: Product): Product = try {
+    override suspend fun update(product: Product, actorId: String): Product = try {
         sf.withTransaction { s ->
             s.createQuery(
                 "FROM ProductEntity WHERE id = :id AND revision = :revision",
@@ -73,9 +73,10 @@ class PostgresProductRepository(
                 .map { it.firstOrNull() }
                 .flatMap { existing ->
                     if (existing != null) {
+                        val previous = existing.toDomain()
                         val updated = product.copy(revision = product.revision + 1)
                         existing.applyFrom(updated) // managed — flushes on commit; legacy_code preserved
-                        compatibilityProjector.syncDraft(s, updated, "legacy-v1-api").replaceWith(updated)
+                        compatibilityProjector.syncDraft(s, previous, updated, actorId).replaceWith(updated)
                     } else {
                         throw ProductUpdateConflictException(
                             "Product ${product.id} was modified concurrently (expected revision ${product.revision})",

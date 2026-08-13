@@ -57,13 +57,14 @@ The catalog is a **reference-data provider**: it sits upstream of the operationa
 | Author specification, offering and draft revision | `/api/v2/specifications`, `/offerings`, `/revisions` | durable audit + outbox |
 | Publish with an independent checker | `POST /api/v2/offerings/{id}/revisions/{revisionId}/publish` | `catalog.revision_published` v1 |
 | Resolve one effective published offering | `GET /api/v2/products/{offeringId}` | — |
+| Pull committed catalog changes | `GET /api/v2/events?after={cursor}` | ordered durable outbox |
 
 Every accepted v2 change records append-only audit evidence and a versioned outbox event in the
-same PostgreSQL transaction. No Kafka dispatcher is enabled yet; delivery adapters are a later phase.
+same PostgreSQL transaction. Standalone consumers can poll an opaque durable cursor; Kafka is optional.
 
 ## Callers
 
-- **admin-ui** — operators browse/maintain the product master and render the Fees pricing screen from `GET /api/v1/fees`.
+- **admin-ui** — Product Studio authors schema-governed v2 revisions; the legacy screen and Fees remain on v1.
 - **account-service** — reads product definitions (type, currency, multi-currency config) at account opening.
 - **interest / fx / card-issuance services** — read declared rates, FX margins, and card configuration.
 - **customer-facing surfaces** — no dedicated public projection exists yet; they must not expose the operator list directly.
@@ -72,6 +73,10 @@ same PostgreSQL transaction. No Kafka dispatcher is enabled yet; delivery adapte
 
 - **openbank-libs** — shared runtime plumbing (BuildInfo / `ServiceInfoResource`, DocsResource for Docs-as-Service, API-version filter).
 - **PostgreSQL** — reactive Panache + reactive PG client for the app path, JDBC for Flyway (ADR-0009 / ADR-0105 P1); see [04 — Data](./04-data.md).
+
+The catalog also ships independently as an attested OCI image, a hardened Helm chart, and a Docker
+Compose quickstart. Standalone mode requires only PostgreSQL plus a standard OIDC issuer and enables
+no industry pack unless the operator opts in; see `standalone/README.md` in the service module.
 - **Keycloak** — pure OIDC resource server (`quarkus-oidc`, realm `openbank`): it validates bearer tokens against the realm JWKS and mints none, so it needs no client secret.
 - **No** Kafka / Redis runtime dependency today; the transactional outbox is delivery-neutral.
 

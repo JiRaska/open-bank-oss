@@ -27,6 +27,7 @@
 | `/api/v1/fees` | 8104 | bank-wide fee schedule |
 | `/api/v2/product-types/...` | 8104 | trusted schema discovery and validation |
 | `/api/v2/specifications`, `/offerings`, `/products/...` | 8104 | governed generic catalog |
+| `/api/v2/events` | 8104 | durable standalone event cursor |
 | `/api/v1/info` | 8104 | `ServiceInfoResource` (build metadata, from openbank-libs) |
 | `/q/openbank/docs` | 8085 | **Docs-as-Service** (this documentation) |
 | `/q/openapi` | 8085 | OpenAPI spec |
@@ -44,6 +45,10 @@ The service is configured via `application.yaml`. PostgreSQL and OIDC are requir
 | `REACTIVE_URL` / `JDBC_URL` | local PostgreSQL defaults | application and Flyway database URLs |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` | local development defaults | database credentials |
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | local OpenBank realm | OIDC issuer/discovery URL |
+| `CATALOG_SCOPE_CLAIM` | `scope` | claim containing space-separated or array OAuth scopes |
+| `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral permission mapping |
+| `OPENBANK_CATALOG_PACKS` | `banking,insurance` in bank; empty standalone | explicit trusted-pack selection |
+| `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | `true` in bank; `false` standalone | explicit legacy banking API, seed and projection opt-in |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | security headers | CSP, HSTS, X-Frame-Options, nosniff, etc. |
 | `quarkus.log.level` | `INFO` | log level |
@@ -52,6 +57,8 @@ The service is configured via `application.yaml`. PostgreSQL and OIDC are requir
 | `quarkus.swagger-ui.path` | `/api/docs` | Swagger UI |
 
 Production database credentials are secrets and must be supplied by the deployment; the checked-in password is a local-development default, not a production value.
+Standalone rejects a plaintext OIDC issuer at boot. Legacy `/api/v1` additionally requires both the
+trusted banking pack and the explicit compatibility flag.
 
 ## Health checks
 
@@ -85,6 +92,12 @@ _These are design-target SLOs for a production-shaped deployment — they are no
   the exact schema still validates and the effective interval does not overlap.
 - **Outbox insert fails** — the accepted change did not commit. Repair PostgreSQL and retry the
   authoring operation; never manufacture audit or outbox evidence by hand.
+- **Standalone consumer is behind** — resume `GET /api/v2/events` from its last committed cursor;
+  process every page in order and persist `nextCursor` only after the page succeeds.
+- **A rollback-era v1 binary changed a banking product** — the current binary reconciles
+  `products.row_version` against its watermark at startup and every 30 seconds, creating or
+  refreshing the v2 draft. It rejects changes made independently on both sides; resolve those
+  through the normal author/publish flow and never edit audit or outbox evidence by hand.
 
 ## Release
 

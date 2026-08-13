@@ -33,6 +33,11 @@ class ApiVersionResponseFilter(
     // Must be at least api_deprecation.min_sunset_window_days (180) ahead (rules.yaml).
     @ConfigProperty(name = "openbank.api.sunset-date")
     private val sunsetDate: Optional<String>,
+
+    // Optional explicit prefix mapping (`/api/v1/foo=>/api/v2/bar`) for majors whose resource
+    // topology changed. Without it, the historical path-major substitution remains the fallback.
+    @ConfigProperty(name = "openbank.api.successor-links")
+    private val successorLinks: Optional<List<String>>,
 ) : ContainerResponseFilter {
 
     override fun filter(req: ContainerRequestContext, resp: ContainerResponseContext) {
@@ -60,7 +65,7 @@ class ApiVersionResponseFilter(
                 sunsetDate.ifPresent { putSingleHeader("Sunset", it) }
                 putSingleHeader(
                     "Link",
-                    "<${replacePathMajor(req.uriInfo.path, currentMajor, nextMajor)}>" +
+                    "<${successorFor(req.uriInfo.path) ?: replacePathMajor(req.uriInfo.path, currentMajor, nextMajor)}>" +
                         "; rel=\"successor-version\"",
                 )
             }
@@ -69,7 +74,18 @@ class ApiVersionResponseFilter(
 
     // Returns true when the request path starts with any of the configured deprecated-path prefixes.
     private fun isDeprecatedPath(path: String): Boolean =
-        deprecatedPaths.map { paths -> paths.any { path.startsWith(it) } }.orElse(false)
+        deprecatedPaths.map { paths -> paths.any { normalise(path).startsWith(normalise(it)) } }.orElse(false)
+
+    private fun successorFor(path: String): String? = successorLinks.orElse(emptyList())
+        .mapNotNull { mapping ->
+            val parts = mapping.split("=>", limit = 2)
+            if (parts.size == 2) normalise(parts[0]) to normalise(parts[1]) else null
+        }
+        .filter { (source) -> normalise(path).startsWith(source) }
+        .maxByOrNull { (source) -> source.length }
+        ?.second
+
+    private fun normalise(path: String): String = "/${path.trimStart('/')}"
 
     private fun pathMajor(path: String): String? = API_PATH_VERSION.find(path)?.groupValues?.get(1)
 

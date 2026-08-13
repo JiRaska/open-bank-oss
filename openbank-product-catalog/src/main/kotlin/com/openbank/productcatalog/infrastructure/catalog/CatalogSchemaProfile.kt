@@ -17,7 +17,7 @@ class CatalogSchemaProfile {
         expectedId?.let {
             require(document.get("\$id")?.asText() == it) { "catalog schema declares a mismatched schema id" }
         }
-        visit(document, depth = 0)
+        visit(document, depth = 0, conditionalFragment = false)
     }
 
     fun requireValidInstance(document: JsonNode) {
@@ -25,7 +25,7 @@ class CatalogSchemaProfile {
         visitInstance(document, depth = 0)
     }
 
-    private fun visit(node: JsonNode, depth: Int) {
+    private fun visit(node: JsonNode, depth: Int, conditionalFragment: Boolean) {
         require(depth <= MAX_NESTING_DEPTH) { "catalog schema nesting exceeds $MAX_NESTING_DEPTH" }
         when {
             node.isObject -> {
@@ -35,7 +35,15 @@ class CatalogSchemaProfile {
                 }
                 require(!node.has("\$dynamicRef")) { "catalog schema must not use dynamic references" }
                 require(depth == 0 || !node.has("\$id")) { "nested schema ids are forbidden" }
-                if (node.get("type")?.asText() == "object") {
+                val types = node.get("type")?.let { type ->
+                    when {
+                        type.isTextual -> setOf(type.asText())
+                        type.isArray -> type.map(JsonNode::asText).toSet()
+                        else -> emptySet()
+                    }
+                }.orEmpty()
+                val objectApplicator = OBJECT_APPLICATORS.any(node::has)
+                if (!conditionalFragment && ("object" in types || objectApplicator)) {
                     require(
                         node.get("additionalProperties")?.isBoolean == true &&
                             !node.get("additionalProperties").asBoolean(),
@@ -43,9 +51,14 @@ class CatalogSchemaProfile {
                         "every object schema must set additionalProperties to false"
                     }
                 }
-                node.elements().forEachRemaining { visit(it, depth + 1) }
+                node.fields().forEachRemaining { (keyword, child) ->
+                    // Conditional roots are partial schemas over their enclosing closed object.
+                    // Descendants introduced beneath them are ordinary schemas and must close
+                    // every object they define.
+                    visit(child, depth + 1, keyword in CONDITIONAL_KEYWORDS)
+                }
             }
-            node.isArray -> node.elements().forEachRemaining { visit(it, depth + 1) }
+            node.isArray -> node.elements().forEachRemaining { visit(it, depth + 1, conditionalFragment) }
         }
     }
 
@@ -61,5 +74,16 @@ class CatalogSchemaProfile {
         const val MAX_SCHEMA_BYTES = 256 * 1024
         const val MAX_INSTANCE_BYTES = 1024 * 1024
         const val MAX_NESTING_DEPTH = 64
+        private val OBJECT_APPLICATORS = setOf(
+            "properties",
+            "patternProperties",
+            "required",
+            "dependentRequired",
+            "dependentSchemas",
+            "propertyNames",
+            "additionalProperties",
+            "unevaluatedProperties",
+        )
+        private val CONDITIONAL_KEYWORDS = setOf("if", "then", "else")
     }
 }

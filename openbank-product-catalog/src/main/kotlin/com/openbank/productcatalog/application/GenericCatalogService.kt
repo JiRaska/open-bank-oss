@@ -56,6 +56,8 @@ class GenericCatalogService(
         return repository.createSpecification(specification, actorId)
     }
 
+    suspend fun listSpecifications(): List<ProductSpecification> = repository.listSpecifications()
+
     suspend fun findSpecification(id: UUID): ProductSpecification = repository.findSpecification(id)
         ?: throw CatalogNotFoundException("specification $id not found")
 
@@ -72,11 +74,14 @@ class GenericCatalogService(
         )
     }
 
+    suspend fun listOfferings(specificationId: UUID?): List<ProductOffering> = repository.listOfferings(specificationId)
+
     suspend fun findOffering(id: UUID): ProductOffering = repository.findOffering(id)
         ?: throw CatalogNotFoundException("offering $id not found")
 
     suspend fun createDraft(
         offeringId: UUID,
+        schemaRef: SchemaRef,
         content: RevisionContent,
         effectiveFrom: Instant?,
         effectiveTo: Instant?,
@@ -84,13 +89,17 @@ class GenericCatalogService(
     ): ProductRevision {
         val offering = findOffering(offeringId)
         val specification = findSpecification(offering.specificationId)
-        validateOrThrow(specification.schemaRef, content.attributes)
+        require(schemaRef.id == specification.schemaRef.id) {
+            "a revision may advance its schema version but may not change its schema family"
+        }
+        findSchema(schemaRef)
+        validateOrThrow(schemaRef, content.attributes)
         val now = Instant.now(clock)
         return repository.createDraft(
             ProductRevision(
                 offeringId = offeringId,
                 number = 1, // repository allocates the offering-scoped number while holding its lock
-                schemaRef = specification.schemaRef,
+                schemaRef = schemaRef,
                 content = content,
                 effectiveFrom = effectiveFrom,
                 effectiveTo = effectiveTo,
@@ -104,6 +113,11 @@ class GenericCatalogService(
 
     suspend fun findRevision(id: UUID): ProductRevision = repository.findRevision(id)
         ?: throw CatalogNotFoundException("revision $id not found")
+
+    suspend fun listRevisions(offeringId: UUID): List<ProductRevision> {
+        findOffering(offeringId)
+        return repository.listRevisions(offeringId)
+    }
 
     suspend fun updateDraft(
         revisionId: UUID,

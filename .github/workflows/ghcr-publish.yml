@@ -54,12 +54,24 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${REQUESTED:-}" ]; then
-            list="$(printf '%s\n' $REQUESTED)"
+            list=""
+            for requested in $REQUESTED; do
+              case "$requested" in
+                openbank-*-service|openbank-product-catalog) ;;
+                *) echo "::error::Invalid service directory: $requested"; exit 1 ;;
+              esac
+              [ -f "$requested/version.txt" ] && [ -f "$requested/build.gradle.kts" ] || {
+                echo "::error::Unknown released service: $requested"; exit 1;
+              }
+              list="${list}${requested}"$'\n'
+            done
           else
             # A module is a released component iff it has a version.txt (rule #2);
             # only service modules bake a runtime image (libs/admin-ui have their
             # own distribution channels).
-            list="$(for d in openbank-*-service; do
+            # product-catalog predates the fleet's *-service suffix but is a released runtime and
+            # ships a standalone Helm/Compose distribution, so it belongs in the same attested OCI lane.
+            list="$(for d in openbank-*-service openbank-product-catalog; do
               [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
             done)"
           fi
@@ -88,6 +100,7 @@ jobs:
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
       IMAGE: ghcr.io/jiraska/${{ matrix.service }}
+      SERVICE_DIR: ${{ matrix.service }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -106,7 +119,7 @@ jobs:
 
       - name: Build fast-jar + SBOM
         run: |
-          ./gradlew :${{ matrix.service }}:quarkusBuild :${{ matrix.service }}:cyclonedxBom \
+          ./gradlew ":${SERVICE_DIR}:quarkusBuild" ":${SERVICE_DIR}:cyclonedxBom" \
             --build-cache --console=plain
 
       - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -123,7 +136,7 @@ jobs:
         id: push
         run: |
           set -euo pipefail
-          svc="${{ matrix.service }}"
+          svc="${SERVICE_DIR}"
           qa="${svc}/build/quarkus-app"
           [ -d "$qa" ] || { echo "::error::${svc}: quarkus-app missing (fast-jar not built?)"; exit 1; }
           version="$(tr -d '[:space:]' < "${svc}/version.txt")"

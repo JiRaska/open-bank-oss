@@ -18,10 +18,13 @@ interface GenericCatalogRepository {
     suspend fun findSchema(ref: SchemaRef): CatalogSchema?
     suspend fun listSchemas(): List<CatalogSchema>
     suspend fun createSpecification(specification: ProductSpecification, actorId: String): ProductSpecification
+    suspend fun listSpecifications(): List<ProductSpecification>
     suspend fun findSpecification(id: UUID): ProductSpecification?
     suspend fun createOffering(offering: ProductOffering, actorId: String): ProductOffering
+    suspend fun listOfferings(specificationId: UUID?): List<ProductOffering>
     suspend fun findOffering(id: UUID): ProductOffering?
     suspend fun createDraft(revision: ProductRevision, actorId: String): ProductRevision
+    suspend fun listRevisions(offeringId: UUID): List<ProductRevision>
     suspend fun findRevision(id: UUID): ProductRevision?
     suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision
     suspend fun publishDraft(

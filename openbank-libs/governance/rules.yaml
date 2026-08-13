@@ -1093,7 +1093,9 @@ coverage:
 api_deprecation:
   header_set: [Deprecation, Sunset, "Link: rel=successor-version"]
   min_sunset_window_days: 180
-  deprecated_paths: []                  # populate as endpoints are deprecated; filter reads this
+  deprecated_paths:
+    - /api/v1/products                  # product-catalog v2 successor; sunset 2027-02-10
+    - /api/v1/fees                      # product-catalog v2 pricing successor; sunset 2027-02-10
 
 # ---------------------------------------------------------------------------------------
 # Supply-chain / release provenance (ADR-0029 D2, enforced at deploy by ADR-0030 D4).

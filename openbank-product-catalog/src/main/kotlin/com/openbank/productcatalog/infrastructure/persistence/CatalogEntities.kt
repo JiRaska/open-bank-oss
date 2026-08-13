@@ -256,6 +256,16 @@ class BankV1ProductMappingEntity {
     @Column(name = "projected_revision_id")
     var projectedRevisionId: UUID? = null
 
+    @Column(name = "last_synced_product_revision")
+    var lastSyncedProductRevision: Long = -1
+
+    @Column(name = "last_synced_draft_revision")
+    var lastSyncedDraftRevision: Long = UNINITIALISED_DRAFT_REVISION
+
     @Column(name = "created_at")
     lateinit var createdAt: Instant
+
+    private companion object {
+        const val UNINITIALISED_DRAFT_REVISION = -2L
+    }
 }

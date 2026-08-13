@@ -16,6 +16,7 @@ import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -56,6 +57,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class ProductCatalogPactBrokerProviderVerificationTest {
 
+    @Inject
+    lateinit var catalogFixtures: CatalogPactProviderFixtures
+
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
@@ -91,4 +95,24 @@ class ProductCatalogPactBrokerProviderVerificationTest {
     fun unknownProductCodeIsAbsent() {
         // Intentionally empty — see the KDoc above.
     }
+
+    @State("trusted insurance term-life schema version 1 is installed")
+    fun trustedInsuranceSchemaIsInstalled() {
+        // CatalogPackSeeder installs the trusted test pack before provider verification.
+    }
+
+    @State("Product Studio specification code is available")
+    fun productStudioSpecificationCodeIsAvailable() = catalogFixtures.specificationCodeIsAvailable()
+
+    @State("Product Studio offering prerequisite specification exists")
+    fun productStudioOfferingPrerequisiteExists() = catalogFixtures.offeringPrerequisiteExists()
+
+    @State("Product Studio draft prerequisite offering exists")
+    fun productStudioDraftPrerequisiteExists() = catalogFixtures.draftPrerequisiteOfferingExists()
+
+    @State("Product Studio editable draft exists")
+    fun productStudioEditableDraftExists() = catalogFixtures.editableDraftExists()
+
+    @State("Product Studio independently checkable draft exists")
+    fun productStudioCheckableDraftExists() = catalogFixtures.independentlyCheckableDraftExists()
 }

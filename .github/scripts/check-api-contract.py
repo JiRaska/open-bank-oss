@@ -271,6 +271,19 @@ def _majors(service_dir: Path, pattern: re.Pattern[str]) -> set[int]:
         for path_value in _PATH_ANNOTATION.findall(strip_comments(text)):
             for m in pattern.finditer(path_value):
                 majors.add(int(m.group(1)))
+    # A design-first service may compile its JAX-RS interface from OpenAPI into build/generated,
+    # so there is intentionally no handwritten @Path in src/main/kotlin. Count the provider spec
+    # only when the module explicitly configures the kotlin-server generator; a plain spec file
+    # still does not prove that the service exposes those routes.
+    build_file = service_dir / "build.gradle.kts"
+    provider_spec = service_dir / "src/main/resources/openapi.yaml"
+    if build_file.is_file() and provider_spec.is_file():
+        build_text = build_file.read_text(encoding="utf-8", errors="replace")
+        if 'generatorName.set("kotlin-server")' in build_text and "openApiGenerate" in build_text:
+            spec_text = provider_spec.read_text(encoding="utf-8", errors="replace")
+            for path_value in re.findall(r"(?m)^\s{2}(/[^:]+):\s*$", spec_text):
+                for m in pattern.finditer(path_value):
+                    majors.add(int(m.group(1)))
     return majors
 
 
@@ -420,6 +433,25 @@ def _self_test() -> int:
                 failures += 1
             else:
                 print(f"ok: {name}")
+        generated = Path(tmp) / "generated_server_contract"
+        generated_src = generated / "src/main/kotlin/com/openbank/x"
+        generated_src.mkdir(parents=True, exist_ok=True)
+        (generated_src / "Adapter.kt").write_text("class Adapter\n", encoding="utf-8")
+        (generated / "src/main/resources").mkdir(parents=True, exist_ok=True)
+        (generated / "src/main/resources/openapi.yaml").write_text(
+            "paths:\n  /api/v1/compatibility:\n    get: {}\n  /api/v2/items:\n    get: {}\n",
+            encoding="utf-8",
+        )
+        (generated / "build.gradle.kts").write_text(
+            'openApiGenerate { generatorName.set("kotlin-server") }\n',
+            encoding="utf-8",
+        )
+        got = url_majors(generated)
+        if got != {1, 2}:
+            print(f"SELF-TEST FAIL: generated server spec majors: expected [1, 2], got {sorted(got)}")
+            failures += 1
+        else:
+            print("ok: generated kotlin-server contract contributes its provider spec majors")
     # Two real services pin the distinction between the two major sets. Both were one edit away
     # from a regression while #3119 was being fixed, and neither is reachable from the synthetic
     # cases above.

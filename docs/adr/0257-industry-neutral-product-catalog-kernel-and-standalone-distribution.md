@@ -1,13 +1,14 @@
 ---
 date: 2026-08-12
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [product-catalog, architecture, api-contract, database]
 summary: "Product-catalog gains an industry-neutral specification/offering/revision kernel beside its compatible banking API, then ships as a single-tenant standalone product with banking and insurance packs."
+followup: "#4481 — expand the insurance reference pack and add bounded ACORD/TMF adapter conformance"
 ---
 
 # ADR-0257 — Industry-neutral product catalog kernel and standalone distribution

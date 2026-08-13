@@ -97,3 +97,8 @@ erasure dimension because there is no personal data (see [06 — Compliance](./0
 | `V1__init_products.sql` | Creates the canonical product table and indexes. |
 | `V2__add_product_row_version.sql` | Adds the expand-only optimistic-concurrency token; old binaries ignore it. |
 | `V3__add_generic_catalog_platform.sql` | Adds the v2 schema/specification/offering/revision, approval, audit and outbox model beside v1. |
+| `V4__map_legacy_bank_products.sql` | Adds the canonical v1-to-v2 identity mapping without changing legacy rows. |
+| `V5__complete_catalog_evidence_contract.sql` | Adds effective price ranges, mixed-version-safe outbox evidence and child immutability. |
+| `V6__preserve_mixed_version_outbox_and_published_children.sql` | Restores old-writer outbox defaults first and closes published-child INSERT/relocation bypasses. |
+| `V7__track_bank_v1_projection_revision.sql` | Records v1 and draft watermarks so one-sided rollback writes reconcile and two-sided drift fails closed. |
+| `V8__order_catalog_outbox_for_cursor.sql` | Assigns immutable commit-safe cursor positions so reverse commits or clock changes cannot create a gap. |

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "product-catalog.name" . }}
+  labels:
+    {{- include "product-catalog.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ include "product-catalog.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    {{- if .Values.studio.enabled }}
+    - name: studio
+      port: {{ .Values.studio.port }}
+      targetPort: studio
+    {{- end }}

@@ -80,6 +80,13 @@ class PostgresGenericCatalogRepository(
         session.find(CatalogSpecificationEntity::class.java, id)
     }.map { it?.toDomain() }.awaitSuspending()
 
+    override suspend fun listSpecifications(): List<ProductSpecification> = sessions.withSession { session ->
+        session.createQuery(
+            "FROM CatalogSpecificationEntity ORDER BY code, id",
+            CatalogSpecificationEntity::class.java,
+        ).resultList
+    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
+
     override suspend fun createOffering(offering: ProductOffering, actorId: String): ProductOffering =
         translatePersistenceConflict("offering code already exists") {
             sessions.withTransaction { session ->
@@ -92,6 +99,22 @@ class PostgresGenericCatalogRepository(
     override suspend fun findOffering(id: UUID): ProductOffering? = sessions.withSession { session ->
         session.find(CatalogOfferingEntity::class.java, id)
     }.map { it?.toDomain() }.awaitSuspending()
+
+    override suspend fun listOfferings(specificationId: UUID?): List<ProductOffering> =
+        sessions.withSession { session ->
+            val query = if (specificationId == null) {
+                session.createQuery(
+                    "FROM CatalogOfferingEntity ORDER BY code, id",
+                    CatalogOfferingEntity::class.java,
+                )
+            } else {
+                session.createQuery(
+                    "FROM CatalogOfferingEntity WHERE specificationId = :specificationId ORDER BY code, id",
+                    CatalogOfferingEntity::class.java,
+                ).setParameter("specificationId", specificationId)
+            }
+            query.resultList
+        }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
     override suspend fun createDraft(revision: ProductRevision, actorId: String): ProductRevision =
         translatePersistenceConflict("revision number already exists") {
@@ -119,6 +142,13 @@ class PostgresGenericCatalogRepository(
     override suspend fun findRevision(id: UUID): ProductRevision? = sessions.withSession { session ->
         session.find(CatalogRevisionEntity::class.java, id)
     }.map { it?.toDomain() }.awaitSuspending()
+
+    override suspend fun listRevisions(offeringId: UUID): List<ProductRevision> = sessions.withSession { session ->
+        session.createQuery(
+            "FROM CatalogRevisionEntity WHERE offeringId = :offeringId ORDER BY number DESC, id",
+            CatalogRevisionEntity::class.java,
+        ).setParameter("offeringId", offeringId).resultList
+    }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
     override suspend fun updateDraft(revision: ProductRevision, actorId: String): ProductRevision =
         translateOptimisticFailure {

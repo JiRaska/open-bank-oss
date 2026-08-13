@@ -265,7 +265,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0254](0254-ci-gate-estate-integrity.md) | CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage | Accepted | Partial | ci,governance | — |
 | [0255](0255-ci-gate-observability.md) | CI/QG observability: a read-only health snapshot, an admin-ui panel, and a ClickHouse/Grafana historical trend | Accepted | Partial | ci,governance,observability | — |
 | [0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md) | Perpetual KYC: event-driven re-screening between periodic reviews | Proposed | Planned | kyc,aml-sanctions,kafka,ai-agents | — |
-| [0257](0257-industry-neutral-product-catalog-kernel-and-standalone-distribution.md) | Industry-neutral product catalog kernel and standalone distribution | Accepted | Planned | product-catalog,architecture,api-contract,database | — |
+| [0257](0257-industry-neutral-product-catalog-kernel-and-standalone-distribution.md) | Industry-neutral product catalog kernel and standalone distribution | Accepted | Partial | product-catalog,architecture,api-contract,database | — |
 | [0258](0258-trusted-json-schema-profile-for-industry-packs.md) | Trusted JSON Schema profile for industry packs | Accepted | Shipped | product-catalog,api-contract,security | — |
 
 ## By tag
