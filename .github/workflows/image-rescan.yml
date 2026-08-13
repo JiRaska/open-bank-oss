@@ -48,18 +48,50 @@ jobs:
           REQUESTED: ${{ inputs.services }}
         run: |
           set -euo pipefail
+          # Same discovery rule as ghcr-publish.yml: a module is a released
+          # component iff it has a version.txt; only services bake an image.
+          # Always computed, even for a narrowed dispatch, so the run can state
+          # its own DENOMINATOR — see the coverage note below.
+          all="$(for d in openbank-*-service; do
+            [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
+          done)"
+          total="$(echo "$all" | grep -c . || true)"
+
           if [ -n "${REQUESTED:-}" ]; then
             list="$(printf '%s\n' $REQUESTED)"
+            # A typo in the dispatch input is otherwise invisible: the matrix
+            # entry exists, its image is not on GHCR, the scan step is skipped
+            # by `found == 'false'` and the job goes GREEN having scanned
+            # nothing. Reject a requested name that is not a released service.
+            unknown=""
+            for svc in $REQUESTED; do
+              echo "$all" | grep -qx "$svc" || unknown="$unknown $svc"
+            done
+            if [ -n "$unknown" ]; then
+              echo "::error::not released openbank-*-service module(s):${unknown}"
+              exit 1
+            fi
           else
-            # Same discovery rule as ghcr-publish.yml: a module is a released
-            # component iff it has a version.txt; only services bake an image.
-            list="$(for d in openbank-*-service; do
-              [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
-            done)"
+            list="$all"
           fi
+
           services="$(echo "$list" | jq -Rnc '[inputs | select(length > 0)]')"
+          selected="$(echo "$services" | jq 'length')"
+
+          # An empty scope must FAIL, never pass quietly. With `services=[]` the
+          # rescan job's `if:` is false, so it is SKIPPED; `escalate` then guards
+          # on `needs.rescan.result == 'failure'`, which 'skipped' is not — so the
+          # whole run concludes SUCCESS having rescanned zero images and told
+          # nobody. A control that reports green about nothing is worse than an
+          # absent one, because its green argues the images are covered (#4026).
+          if [ "$selected" -eq 0 ]; then
+            echo "::error::no services to rescan — refusing to report a green run that scanned nothing"
+            exit 1
+          fi
+
           echo "services=$services" >> "$GITHUB_OUTPUT"
-          echo "Rescanning: $services"
+          echo "Rescanning ${selected} of ${total} released services: $services"
+          echo "Rescanning **${selected} of ${total}** released services." >> "$GITHUB_STEP_SUMMARY"
 
   rescan:
     name: rescan / ${{ matrix.service }}
