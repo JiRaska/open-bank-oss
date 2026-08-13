@@ -5,6 +5,7 @@
 package com.openbank.productcatalog.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.productcatalog.application.CatalogConflictException
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
@@ -18,6 +19,7 @@ import jakarta.interceptor.Interceptor
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /** Idempotently expands every persisted v1 product into its canonical v2 banking mapping. */
 @ApplicationScoped
@@ -25,15 +27,18 @@ class BankV1CompatibilityBackfill(
     private val sessions: Mutiny.SessionFactory,
     private val mapper: ObjectMapper,
     private val projector: BankV1CompatibilityProjector,
+    domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.catalog.bank-v1-compatibility-enabled", defaultValue = "true")
     private val bankCompatibilityEnabled: Boolean,
 ) {
     private val log = Logger.getLogger(BankV1CompatibilityBackfill::class.java)
+    private val liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
 
     @Suppress("UnusedParameter")
     fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION + STARTUP_PRIORITY_OFFSET) event: StartupEvent) {
         if (!bankCompatibilityEnabled) return
         val mapped = run()
+        liveness.recordSuccess()
         if (mapped > 0) log.info("Mapped $mapped legacy banking product(s) into the v2 catalog.")
     }
 
@@ -53,12 +58,16 @@ class BankV1CompatibilityBackfill(
         identity = "bank-v1-compatibility-reconciler",
     )
     suspend fun reconcileAfterRollingWriters() {
-        if (!bankCompatibilityEnabled) return
+        if (!bankCompatibilityEnabled) {
+            liveness.recordSuccess()
+            return
+        }
         val result = reconcile(failOnConflict = false).awaitSuspending()
         if (result.changed > 0) {
             log.info("Reconciled ${result.changed} banking product(s) after a mixed-version write.")
         }
         result.conflicts.forEach { log.error("Banking compatibility reconciliation conflict: ${it.message}") }
+        liveness.recordSuccess()
     }
 
     private fun reconcile(failOnConflict: Boolean): Uni<ReconciliationResult> = sessions.withSession { session ->
@@ -102,5 +111,7 @@ class BankV1CompatibilityBackfill(
 
     private companion object {
         const val STARTUP_PRIORITY_OFFSET = 100
+        const val WORKFLOW_NAME = "bank-v1-compatibility-reconciliation"
+        val EXPECTED_INTERVAL: Duration = Duration.ofSeconds(30)
     }
 }
