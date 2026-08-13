@@ -113,9 +113,13 @@ class SurfaceResource(
         val isCampaignPlacement = request.contentId == CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID &&
             request.interactionRef != null &&
             banners.belongsToParty(request.interactionRef, request.partyId)
-        return isCampaignPlacement
-            .takeIf { slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES }
-            ?.let { ValidatedContent(true) }
+        val isInteractiveCampaignPlacement =
+            isCampaignPlacement && slot == SurfaceSlot.HOME_BANNER && request.type in INTERACTION_EVENT_TYPES
+        return if (isInteractiveCampaignPlacement) {
+            ValidatedContent(true)
+        } else {
+            null
+        }
     }
 
     private fun parseSlot(name: String): SurfaceSlot? = SurfaceSlot.entries.find { it.name == name }
