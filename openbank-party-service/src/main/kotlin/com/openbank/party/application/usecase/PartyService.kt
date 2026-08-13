@@ -99,7 +99,10 @@ class PartyService : PartyUseCase {
             consentMarketing = cmd.consentMarketing,
             consentCapturedAt = consentCapturedAt,
         )
-        val saved = partyRepo.save(party, PartyEvents.created(party, Instant.now(clock)))
+        val saved = partyRepo.save(
+            party,
+            PartyEvents.created(party, Instant.now(clock), PartyActor.system("party-api")),
+        )
         metrics.partyCreated(saved.partyType.name)
         return saved
     }
@@ -184,7 +187,10 @@ class PartyService : PartyUseCase {
             tradingName = cmd.tradingName ?: party.tradingName,
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated, PartyEvents.updated(updated, Instant.now(clock)))
+        val saved = partyRepo.update(
+            updated,
+            PartyEvents.updated(updated, Instant.now(clock), PartyActor.system("party-api")),
+        )
         return saved
     }
 
@@ -287,7 +293,10 @@ class PartyService : PartyUseCase {
             status = deriveStatus(status, party.amlStatus, party.status),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated, PartyEvents.kycStatusChanged(updated, Instant.now(clock)))
+        val saved = partyRepo.update(
+            updated,
+            PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("kyc-status-projection")),
+        )
         countIfVerifyingTransition(party.status, saved)
         return saved
     }
@@ -301,7 +310,10 @@ class PartyService : PartyUseCase {
         )
         // Emits the party's current status (incl. ACTIVE) to downstream consumers
         // (account-service activation, onboarding cockpit) on the party events topic.
-        val saved = partyRepo.update(updated, PartyEvents.kycStatusChanged(updated, Instant.now(clock)))
+        val saved = partyRepo.update(
+            updated,
+            PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("aml-status-projection")),
+        )
         countIfVerifyingTransition(party.status, saved)
         return saved
     }
@@ -398,7 +410,10 @@ class PartyService : PartyUseCase {
             mergedIntoPartyId = target.id,
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(merged, PartyEvents.merged(merged, target.id, Instant.now(clock)))
+        val saved = partyRepo.update(
+            merged,
+            PartyEvents.merged(merged, target.id, Instant.now(clock), PartyActor.system("party-merge")),
+        )
         return saved
     }
 
@@ -423,7 +438,10 @@ class PartyService : PartyUseCase {
             createdAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.save(party, PartyEvents.created(party, Instant.now(clock)))
+        val saved = partyRepo.save(
+            party,
+            PartyEvents.created(party, Instant.now(clock), PartyActor.customer(cmd.keycloakSub)),
+        )
         return Pair(saved, true)
     }
 

@@ -14,7 +14,9 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
+import com.openbank.kyc.domain.model.KycEvents
 import com.openbank.kyc.domain.model.RiskLevel
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -28,7 +30,7 @@ import java.util.UUID
  * ever a message CONSUMER before (see the kyc->party edge, `PartyEventMessagePactConsumerTest`
  * in kyc-service). Plain JUnit + [MessageTestTarget] — no Quarkus boot needed, mirroring
  * `PartyEventPactProviderVerificationTest`'s original (pre-HTTP) shape. Each message mirrors the
- * wire shape of [com.openbank.kyc.infrastructure.kafka.KycEventPublisher] and is serialized with
+ * wire shape built by [com.openbank.kyc.domain.model.KycEvents] and is serialized with
  * the same Jackson modules so the contract is verified against the real envelope.
  *
  * Reads the consumer pact from the git-pact folder (`@PactFolder`, resolved relative to this
@@ -53,17 +55,34 @@ class KycEventPactProviderVerificationTest {
         context?.verifyInteraction()
     }
 
+    // Built by the PRODUCTION envelope builder (KycEvents), not by a hand-rolled copy of it: a
+    // second copy of the envelope moves with the first and keeps passing against a shape the
+    // service no longer emits. Issue #4007 moved these events onto `kyc_outbox`; the builder is
+    // now the single place the wire shape is defined, and this replays exactly it.
     private fun event(eventType: String, status: KycCaseStatus): String {
-        // Mirrors KycEventPublisher.publish: the flat envelope, enums serialized to their names.
-        val payload = linkedMapOf(
-            "eventType" to eventType,
-            "kycCaseId" to UUID.randomUUID(),
-            "partyId" to UUID.randomUUID(),
-            "status" to status,
-            "riskLevel" to RiskLevel.MEDIUM,
-            "occurredAt" to Instant.now(),
+        val now = Instant.now()
+        val case = KycCase(
+            id = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            status = status,
+            riskLevel = RiskLevel.MEDIUM,
+            assignedTo = null,
+            checks = emptyList(),
+            notes = null,
+            reviewedBy = null,
+            reviewedAt = null,
+            expiresAt = null,
+            createdAt = now,
+            updatedAt = now,
         )
-        return objectMapper.writeValueAsString(payload)
+        val built = when (eventType) {
+            "KYC_CASE_OPENED" -> KycEvents.caseOpened(case, now)
+            "KYC_CASE_STATUS_CHANGED" -> KycEvents.caseStatusChanged(case, now)
+            "KYC_CASE_APPROVED" -> KycEvents.caseApproved(case, now)
+            "KYC_CASE_REJECTED" -> KycEvents.caseRejected(case, now)
+            else -> error("no KycEvents builder for $eventType")
+        }
+        return objectMapper.writeValueAsString(built.envelope)
     }
 
     @State("a KYC case has been opened")

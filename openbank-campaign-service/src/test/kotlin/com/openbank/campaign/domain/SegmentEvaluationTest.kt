@@ -79,6 +79,22 @@ class SegmentEvaluationTest {
     }
 
     /**
+     * Case fold, tracked against #4604 (the #4553 follow-up). bronze_events holds `ACCOUNT`/`Account`
+     * and `Transaction`/`Consent`-only spellings for the same domains — #4576 stops NEW rows
+     * splitting, but every row written before it keeps its original case, forever, until a backfill
+     * runs. `PARTY` itself has not been observed mixed-case on the sandbox, but a literal
+     * `aggregate_type = 'PARTY'` is one producer rename away from silently matching nothing — the
+     * exact failure #4553 measured on a Grafana tile that had read 0 for its whole life. Fold, don't
+     * trust the literal.
+     */
+    @Test
+    fun `party status folds aggregate_type case, never trusting the producer's spelling`() {
+        val (where, _) = Segment("actives", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE"))).toWhereClause()
+        assertTrue(where.contains("upper(aggregate_type) = 'PARTY'"), "actual: $where")
+        assertFalse(where.contains("aggregate_type = 'PARTY'"), "unfolded literal reintroduced — actual: $where")
+    }
+
+    /**
      * silver_current_state keeps only the latest event per aggregate, so tenure has to reach into
      * the bronze log for the party's first-seen timestamp.
      */
@@ -87,6 +103,15 @@ class SegmentEvaluationTest {
         val (where, _) = Segment("tenured", 1, listOf(SegmentRule.TenureAtLeastDays(30))).toWhereClause()
         assertTrue(where.contains("bronze_events"), "actual: $where")
         assertTrue(where.contains("min(occurred_at)"), "actual: $where")
+    }
+
+    @Test
+    fun `tenure folds aggregate_type case in BOTH the outer filter and the bronze subquery`() {
+        val (where, _) = Segment("tenured", 1, listOf(SegmentRule.TenureAtLeastDays(30))).toWhereClause()
+        // Two occurrences: the outer silver_current_state filter and the bronze_events subquery.
+        // A fold on only one leaves the other as the exact bug #4553 measured.
+        assertEquals(2, Regex("upper\\(aggregate_type\\) = 'PARTY'").findAll(where).count(), "actual: $where")
+        assertFalse(where.contains("aggregate_type = 'PARTY'"), "unfolded literal reintroduced — actual: $where")
     }
 
     /**

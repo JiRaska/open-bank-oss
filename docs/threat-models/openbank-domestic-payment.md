@@ -87,6 +87,47 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-09** — Settlement outage no longer completes the workflow on a non-terminal state
+  (#4182). No new trust boundary and no new caller: the outbound edge to transaction-service is
+  unchanged, and what changes is what this service does when that edge fails. Previously
+  `settlePayment` caught `SettlementUnavailableException` — and, more broadly, every `Exception` —
+  and *returned* `SENT_TO_CLEARING`. Temporal drives activity retries off activity failure, so an
+  activity that returns is a success: the configured retry policy was structurally unreachable on
+  precisely the fault it exists for, and `DomesticPaymentWorkflowImpl.process` completed on a
+  business state that is not terminal.
+  - **Availability / non-repudiation (STRIDE-D, -R)** is the property at stake. The money left the
+    payer's instruction path and was never booked, while the workflow, the API response and every
+    tier-1 rule reported success — the only artefact anywhere was one WARN line, and a row that
+    stops changing raises nothing. The blanket `catch (Exception)` additionally made a settlement
+    *bug* indistinguishable from a planned degradation.
+  - **Mitigation**: the activity now fails. `SettlementUnavailableException` is logged at ERROR and
+    rethrown; the blanket catch is gone, so any other fault propagates with its own type. The
+    workflow therefore retries under its existing policy and, if the fault persists, ends as
+    **failed** — a state Temporal surfaces and an operator can re-drive — rather than completed.
+  - **Why retrying is safe rather than a duplicate-payment risk**, established from the code and
+    not assumed: `SettlementAdapter` sends `idempotencyKey = "domestic-settlement-<paymentId>"`,
+    payment-scoped and stable across attempts; transaction-service deduplicates on it by
+    early-returning the existing transaction (`TransactionService.initiateTransaction`), which it
+    answers as **201 with that transaction** — not 409, and the adapter maps that arm to
+    `settled = true` too; and the `SENT_TO_CLEARING` guard makes the activity re-entrant once the
+    status write lands. The `HTTP_CONFLICT` branch in `SettlementAdapter` is unreachable today and
+    kept only as defence if that service ever starts answering 409.
+
+    One caveat that follows from the early return and is NOT covered: it returns the existing row
+    whatever its status, so a first attempt that committed the transaction but died before posting
+    hands a retry a `PENDING` transaction as 201, which the adapter reads as `settled = true`. The
+    fix belongs in transaction-service; recorded here so the safety argument is not read as wider
+    than it is. This is the opposite of the #4218 dispatch
+    edge, where no downstream deduplication exists and holding is therefore the correct trade.
+  - **Residual risk**: the retry window is unchanged (3 attempts, 10 min schedule-to-close), so a
+    multi-hour outage still ends in a failed workflow with the payment in `SENT_TO_CLEARING`. That
+    is a visible, re-drivable strand rather than a silent one, but it is still a strand needing a
+    human. A resumable state with a sweeper (issue #4182's second suggestion) is deliberately left
+    out of scope — it needs a new status and a migration. `DomesticPaymentStrandedGauge` (#3273)
+    exports age-in-status and is the reader for it meanwhile.
+  - **Rollback**: revert the commit; the previous behaviour was to swallow and return
+    `SENT_TO_CLEARING`.
+
 - **2026-08-09** — Duplicate clearing submission closed (#4218). No new trust boundary and no new
   caller: the outbound edge to the scheme gateway (`pacs.008` → clearing-simulator / CERTIS) is the
   same one, and what changes is how many times a single payment may cross it. Previously: **more

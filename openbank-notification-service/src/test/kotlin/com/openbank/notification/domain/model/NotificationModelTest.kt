@@ -80,4 +80,11 @@ class NotificationModelTest {
         assertThat(req.channel).isEqualTo(NotificationChannel.PUSH)
         assertThat(req.variables).containsEntry("code", "123456")
     }
+
+    @Test
+    fun `mobile deep links are an allow-list, not arbitrary URLs`() {
+        assertThat(MobileDeepLink.isAllowed("openbank://savings")).isTrue()
+        assertThat(MobileDeepLink.isAllowed("https://example.invalid/redirect")).isFalse()
+        assertThat(MobileDeepLink.isAllowed("openbank://savings?next=https://evil.invalid")).isFalse()
+    }
 }

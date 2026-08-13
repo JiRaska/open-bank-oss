@@ -47,7 +47,11 @@ spec:
     - Ingress
   ingress:
     # OpenBank services calling the Temporal frontend gRPC (7233).
-    # - platform-plane: copilot, agent, etc. (openbank.io/plane: platform).
+    # - namespaces labelled openbank.io/plane: platform. NOTE this is a PLANE label, not the
+    #   namespace named `platform`: it is carried by argo-rollouts, external-dns, external-secrets,
+    #   falco, reposilite, vault and vpa, and NOT by `platform` itself. This comment used to read
+    #   "platform-plane: copilot, agent, etc.", which named workloads that live in ns `platform`
+    #   and so implied a coverage this selector has never provided (#4187).
     # - app-plane Temporal workflow clients enumerated explicitly (least-privilege).
     #   ADD a namespace here when a service flips openbank.temporal.enabled=true,
     #   otherwise its worker onStart() blocks on getSystemInfo → DEADLINE_EXCEEDED →
@@ -74,6 +78,13 @@ spec:
                   - docs-truth-agent
                   - authz-policy-auditor
                   - flaky-test-hunter
+                  # ns `platform` hosts case-coordinator-agent (ADR-0244 phase 4, TEMPORAL_ENABLED
+                  # =true, namespace openbank-casecoord). It was never added, so the pod
+                  # CrashLoopBackOff'd on exactly the failure this comment predicts:
+                  # "DEADLINE_EXCEEDED: CallOptions deadline exceeded after 4.98s ...
+                  # connecting_and_lb_delay" out of CaseWorkerRegistrar.onStart. The plane-label
+                  # branch above does not cover it — see the note there.
+                  - platform
       ports:
         - protocol: TCP
           port: 7233

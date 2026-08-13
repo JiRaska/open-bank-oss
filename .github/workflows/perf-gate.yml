@@ -94,9 +94,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           cache-read-only: true
 
@@ -139,7 +139,7 @@ jobs:
             -Dquarkus.datasource.username=openbank \
             -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             -Dquarkus.oidc.enabled=false \
-            -Dquarkus.http.auth.enabled=false \
+            -Dquarkus.security.auth.enabled-in-dev-mode=false \
             -Dquarkus.management.enabled=false \
             -Dquarkus.console.basic=true \
             --console=plain --quiet \
@@ -160,6 +160,20 @@ jobs:
           fi
 
           SCRIPT="${SERVICE}/src/test/k6/$(echo "${SERVICE}" | sed 's/^openbank-//;s/-service$//')-smoke.js"
+
+          # A readiness probe is not proof the PROBED route answers. This gate spent its whole
+          # life measuring 401s: /q/health/ready returned 200, @Authenticated rejected every
+          # request to the route the script actually calls, and k6 reported a p95 for the
+          # rejection. Assert one real 200 on that route before handing k6 the clock.
+          SMOKE_PATH="$(python3 .github/scripts/k6-smoke-path.py "$SCRIPT")"
+          probe="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}${SMOKE_PATH}" || true)"
+          if [ "$probe" != "200" ]; then
+            echo "::error::[${SERVICE}] ${SMOKE_PATH} answered ${probe}, not 200 — k6 would time the error path. Refusing to report a latency for a request that never reached the handler."
+            tail -50 "perf-reports/${SERVICE}-boot.log" || true
+            exit 1
+          fi
+          echo "==> [${SERVICE}] ${SMOKE_PATH} answered 200 — the probe reaches its subject"
+
           echo "==> [${SERVICE}] running k6 ${SCRIPT}"
           BASE_URL="http://localhost:${PORT}" \
             k6 run \

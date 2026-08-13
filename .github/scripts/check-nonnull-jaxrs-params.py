@@ -75,32 +75,19 @@ PARAM_ANNOTATIONS = ("QueryParam", "HeaderParam", "MatrixParam")
 # JVM primitives: JAX-RS supplies the zero value, never null, so no NPE is possible here.
 KOTLIN_PRIMITIVES = {"Int", "Long", "Double", "Float", "Boolean", "Short", "Byte", "Char"}
 
-# The tail left after the money-path fix in #3625, being worked through in #3624. psd2 and
-# card-issuance are done (#3658); customer-edge, dispute and statement are done too.
+# EMPTY, and it stays that way — #3624 closed the tail (aml, party, pid ×3, tpp-registry ×2), the
+# last of which were `suspend` handlers where no `Intrinsics.checkNotNullParameter` is emitted, so
+# the null flowed into the body instead of failing at offset 0. Each was fixed by declaring the
+# parameter nullable and either widening its existing guard to `isNullOrBlank()` (preserving the
+# service's own error envelope) or adding `requireNotNull` — libs-runtime maps
+# IllegalArgumentException to 400; never a service-local mapper (#526).
 #
-# Everything still listed below is a `suspend` handler, which is a materially different fix: no
-# `Intrinsics.checkNotNullParameter` is emitted, so the null flows into the body and each of these
-# already carries a hand-written guard (`isBlank()`, or a dereference) that has to be widened to
-# `isNullOrBlank()` rather than replaced, preserving the service's own error envelope. Left for a
-# separate change so the plain-`fun` half is not held up behind it.
+# An entry added here needs a reason and an issue. The check reports a baseline key that no longer
+# occurs as well as a new occurrence, so the list cannot rot in either direction — do not add one
+# to silence a finding you have not read.
 #
-# Each entry is "<service>|<Class>|<param>".
-# The count per key is not recorded on purpose: several of these repeat the identical parameter
-# across sibling handlers (card-issuance's X-Operator-Id sevenfold), and pinning the count would
-# make an unrelated refactor fail the gate for no defect.
-BASELINE = {
-    # openbank-aml-service — POST /api/v1/aml/cases
-    "openbank-aml-service|AmlCaseResource|Idempotency-Key",
-    # openbank-party-service
-    "openbank-party-service|PartyResource|Idempotency-Key",
-    # openbank-pid-service
-    "openbank-pid-service|PartyResource|index",
-    "openbank-pid-service|PartyResource|type",
-    "openbank-pid-service|PartyResource|value",
-    # openbank-tpp-registry-service
-    "openbank-tpp-registry-service|TppRegistryResource|tppId",
-    "openbank-tpp-registry-service|TppRegistryResource|role",
-}
+# Each entry would be "<service>|<Class>|<param>".
+BASELINE: set[str] = set()
 
 
 def strip_comments(src: str) -> str:

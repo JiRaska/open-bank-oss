@@ -4,6 +4,7 @@
 
 package com.openbank.party.domain.model
 
+import com.openbank.libs.domain.event.EventActor
 import java.time.Instant
 import java.util.UUID
 
@@ -25,6 +26,43 @@ data class PartyEvent(
 )
 
 /**
+ * Who a party event is attributed to (#3994).
+ *
+ * An explicit parameter on every builder rather than a default, because the honest answer differs
+ * per entry path and a default would let the wrong one be inherited silently — which is how the
+ * 171 unattributed `PARTY_*`/`KYC_STATUS_CHANGED` audit rows happened in the first place.
+ *
+ * There is no request-scoped holder behind this and deliberately so: `PartyService` is the domain
+ * use case, `openbank-libs-domain` carries zero framework imports (ADR-0002/ADR-0122), and a
+ * CDI-produced ambient actor in `openbank-libs-runtime` would be injected into every service that
+ * consumes the module whether or not it wants one.
+ */
+data class PartyActor(val id: String, val type: String) {
+    companion object {
+        private const val SERVICE = "party-service"
+
+        /** No person originated this — a projection, a consumer, or an unattributed API call. */
+        fun system(mechanism: String): PartyActor =
+            PartyActor(EventActor.system(SERVICE, mechanism), EventActor.TYPE_SYSTEM)
+
+        /**
+         * The customer acting on their own record, identified by their Keycloak subject.
+         *
+         * Used only where the identity is unambiguous — self-registration, where `keycloakSub` IS
+         * the authenticated caller. It is deliberately NOT used for the admin/onboarding
+         * `createParty` path: the B1 invariant makes `cmd.id` equal the subject for self-service
+         * onboarding but that path is also driven by onboarding-service, so attributing every
+         * creation to the party itself would be a plausible, confident and sometimes false claim —
+         * strictly worse than the `SYSTEM` id, which is at least true.
+         */
+        fun customer(keycloakSub: String): PartyActor = PartyActor(keycloakSub, TYPE_CUSTOMER)
+
+        /** Matches the `actorType` customer-edge already writes for a self-service subject. */
+        private const val TYPE_CUSTOMER = "CUSTOMER"
+    }
+}
+
+/**
  * Builds the party lifecycle events.
  *
  * These used to be built inside `KafkaPartyEventPublisher`, a bare `@Channel("party-events-out")`
@@ -36,12 +74,21 @@ data class PartyEvent(
  */
 object PartyEvents {
 
-    fun created(party: Party, at: Instant): PartyEvent = lifecycle("PARTY_CREATED", party, at)
+    fun created(party: Party, at: Instant, actor: PartyActor): PartyEvent = lifecycle("PARTY_CREATED", party, at, actor)
 
-    fun updated(party: Party, at: Instant): PartyEvent = lifecycle("PARTY_UPDATED", party, at)
+    fun updated(party: Party, at: Instant, actor: PartyActor): PartyEvent = lifecycle("PARTY_UPDATED", party, at, actor)
 
-    fun kycStatusChanged(party: Party, at: Instant): PartyEvent = lifecycle("KYC_STATUS_CHANGED", party, at)
+    fun kycStatusChanged(party: Party, at: Instant, actor: PartyActor): PartyEvent =
+        lifecycle("KYC_STATUS_CHANGED", party, at, actor)
 
+    /**
+     * **Deliberately carries no actor (#3994).** Every other builder here gained `actorId`/
+     * `actorType`; this one did not. GDPR Art. 17 erasure is the one event whose envelope is
+     * narrowed on purpose (see `PartyEventEnvelopeContractTest`), and the plausible actor for a
+     * self-service erasure is the data subject's own Keycloak subject — putting that on a
+     * broadcast topic would re-publish an identifier for the person the event exists to erase.
+     * Zero rows of the live unattributed set are `PARTY_ERASED`, so nothing is lost by leaving it.
+     */
     fun erased(partyId: UUID, at: Instant): PartyEvent = PartyEvent(
         eventType = "PARTY_ERASED",
         aggregateId = partyId,
@@ -57,7 +104,7 @@ object PartyEvents {
      * ADR-0179: [merged] is the retired duplicate (status MERGED); [survivingPartyId] is the party
      * consumers should follow from now on.
      */
-    fun merged(merged: Party, survivingPartyId: UUID, at: Instant): PartyEvent = PartyEvent(
+    fun merged(merged: Party, survivingPartyId: UUID, at: Instant, actor: PartyActor): PartyEvent = PartyEvent(
         eventType = "PARTY_MERGED",
         aggregateId = merged.id,
         occurredAt = at,
@@ -67,10 +114,12 @@ object PartyEvents {
             "mergedIntoPartyId" to survivingPartyId,
             "status" to merged.status,
             "occurredAt" to at,
+            EventActor.FIELD_ACTOR_ID to actor.id,
+            EventActor.FIELD_ACTOR_TYPE to actor.type,
         ),
     )
 
-    private fun lifecycle(eventType: String, party: Party, at: Instant): PartyEvent = PartyEvent(
+    private fun lifecycle(eventType: String, party: Party, at: Instant, actor: PartyActor): PartyEvent = PartyEvent(
         eventType = eventType,
         aggregateId = party.id,
         occurredAt = at,
@@ -83,6 +132,8 @@ object PartyEvents {
             "legalName" to party.legalName,
             "email" to party.email,
             "occurredAt" to at,
+            EventActor.FIELD_ACTOR_ID to actor.id,
+            EventActor.FIELD_ACTOR_TYPE to actor.type,
         ),
     )
 }

@@ -4,6 +4,7 @@
 package com.openbank.campaign.application.workflow
 
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
@@ -83,6 +84,8 @@ class CampaignJourneyWorkflowTest {
         worker = env.newWorker(TASK_QUEUE)
         worker.registerWorkflowImplementationTypes(CampaignJourneyWorkflowImpl::class.java)
         activities = mockk(relaxed = true)
+        every { activities.controlState(campaignId, partyId) } returns
+            JourneyControlState(CampaignState.ACTIVE, goalReached = false)
         every { activities.deliverStep(any(), any(), any()) } returns StepOutcome.SENT
         every { activities.previousDeliveryStatus(any(), any(), any()) } returns null
         worker.registerActivitiesImplementations(activities)
@@ -203,5 +206,44 @@ class CampaignJourneyWorkflowTest {
         // the new activity is never invoked, so a journey started before this change emits no
         // command its recorded history lacks.
         verify(exactly = 0) { activities.previousDeliveryStatus(any(), any(), any()) }
+    }
+
+    // --- live campaign controls and goal exit ---------------------------------------------------
+
+    @Test
+    fun `a closed campaign terminates before its next send`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(listOf(step(0)), null)
+        every { activities.controlState(campaignId, partyId) } returns
+            JourneyControlState(CampaignState.CLOSED, goalReached = false)
+
+        run()
+
+        verify(exactly = 0) { activities.deliverStep(any(), any(), any()) }
+        verify { activities.markTerminated(campaignId, partyId, TerminationReason.CAMPAIGN_CLOSED) }
+    }
+
+    @Test
+    fun `a recorded conversion ends the journey before another persuasion`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(listOf(step(0)), null)
+        every { activities.controlState(campaignId, partyId) } returns
+            JourneyControlState(CampaignState.ACTIVE, goalReached = true)
+
+        run()
+
+        verify(exactly = 0) { activities.deliverStep(any(), any(), any()) }
+        verify { activities.markTerminated(campaignId, partyId, TerminationReason.GOAL_REACHED) }
+    }
+
+    @Test
+    fun `a pause observed at delivery retries the same step after resume instead of advancing`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(listOf(step(0)), null)
+        every { activities.deliverStep(campaignId, partyId, 0) } returnsMany
+            listOf(StepOutcome.CAMPAIGN_PAUSED, StepOutcome.SENT)
+
+        run()
+
+        verify(exactly = 2) { activities.deliverStep(campaignId, partyId, 0) }
+        verify(exactly = 1) { activities.advanceStep(campaignId, partyId, 0) }
+        verify { activities.markCompleted(campaignId, partyId) }
     }
 }

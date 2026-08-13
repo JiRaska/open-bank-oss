@@ -193,6 +193,18 @@ class CustomerEdgeResource(
     @ConfigProperty(name = "openbank.edge.notification-service-url")
     lateinit var notificationServiceUrl: String
 
+    /**
+     * The app's server-driven engagement surfaces. This is deliberately separate from
+     * notification-service: an app surface is rendered after the customer opens the app, it is
+     * not an outbound notification pretending to have been delivered (ADR-0220 D1).
+     */
+    @ConfigProperty(name = "openbank.edge.engagement-service-url")
+    lateinit var engagementServiceUrl: String
+
+    /** Campaign validates opaque PUSH interaction references before engagement data is appended. */
+    @ConfigProperty(name = "openbank.edge.campaign-service-url")
+    lateinit var campaignServiceUrl: String
+
     @ConfigProperty(name = "openbank.edge.statement-service-url")
     lateinit var statementServiceUrl: String
 
@@ -2596,6 +2608,99 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- In-app engagement surfaces ---
+
+    /**
+     * Resolve one named mobile surface for the authenticated customer. The app receives only a
+     * typed, catalogue-backed payload; it owns presentation, accessibility and local navigation.
+     * The party id is derived from the JWT and injected only at this boundary, never accepted from
+     * the device, so changing a query parameter cannot render another customer's campaign.
+     */
+    @GET
+    @Path("/surfaces/{slot}")
+    @Authorize(action = "customer.engagement.read", resource = "#slot")
+    @Blocking
+    fun getSurface(@PathParam("slot") slot: String): Response {
+        if (slot !in SURFACE_SLOTS) return Response.status(Response.Status.BAD_REQUEST).build()
+        val customer = customer()
+        return upstream.get(
+            "$engagementServiceUrl/api/v1/surfaces/$slot?partyId=${customer.partyId}",
+            customer.partyId.toString(),
+        )
+    }
+
+    /**
+     * Record what the app actually observed: impression, click or dismissal. The edge overwrites
+     * any supplied partyId with the JWT party id before forwarding, which makes the feedback loop
+     * meaningful without turning it into an IDOR write primitive. Content/slot/type validation is
+     * owned by engagement-service, alongside the catalogue it validates against.
+     *
+     * When the app includes an interactionRef from a PUSH payload, it is validated against the
+     * campaign send log for this JWT party before it can become an attribution datum. A reference
+     * for another party, a non-PUSH send, or an unknown id all receive the same public error — the
+     * endpoint must never disclose which of those cases happened.
+     */
+    @POST
+    @Path("/surfaces/events")
+    @Authorize(action = "customer.engagement.record-event")
+    @Blocking
+    fun recordSurfaceEvent(body: String): Response {
+        val customer = customer()
+        val event = runCatching { objectMapper.readTree(body) as? ObjectNode }.getOrNull()
+            ?: return badRequest("Malformed engagement event")
+        // A phone can report attention, never a product outcome. Campaign-service already derives
+        // conversions from authoritative account/card events; accepting this value here would let
+        // a client turn a click into revenue attribution.
+        if (event.path("type").asText() == "CONVERSION") {
+            return badRequest("Conversions must originate from authoritative product events")
+        }
+        // These fields are server-owned. Remove any client attempt before optionally filling them
+        // from campaign-service's validated send-log row below.
+        event.remove(listOf("campaignId", "stepOrder", "channel"))
+        val interactionRefNode = event.get("interactionRef")
+        if (interactionRefNode != null) {
+            if (!interactionRefNode.isTextual) return badRequest("Invalid interaction reference")
+            val interactionRef = runCatching { UUID.fromString(interactionRefNode.asText()) }.getOrNull()
+                ?: return badRequest("Invalid interaction reference")
+            val validation = upstream.get(
+                "$campaignServiceUrl/api/v1/campaigns/interactions/$interactionRef/attribution",
+                customer.partyId.toString(),
+            )
+            if (validation.status != Response.Status.OK.statusCode) {
+                // 400/403/404 are deliberately indistinguishable to the mobile client. Upstream
+                // failure stays a 502 so the client can safely retry instead of discarding an event.
+                return if (validation.status >= UPSTREAM_SERVER_ERROR_MIN) {
+                    Response.status(Response.Status.BAD_GATEWAY).build()
+                } else {
+                    badRequest("Invalid interaction reference")
+                }
+            }
+            val attribution = runCatching {
+                objectMapper.readTree(validation.entity as? String ?: "")
+            }.getOrNull() ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val campaignId = attribution.path("campaignId").asText()
+                .takeIf { runCatching { UUID.fromString(it) }.isSuccess }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val stepOrder = attribution.path("stepOrder").asInt(0)
+                .takeIf { it >= 0 && attribution.has("stepOrder") }
+                ?: return Response.status(Response.Status.BAD_GATEWAY).build()
+            val channel = attribution.path("channel").asText()
+            if (channel !in setOf("PUSH", "BANNER")) {
+                return Response.status(Response.Status.BAD_GATEWAY).build()
+            }
+            event.put("campaignId", campaignId)
+            event.put("stepOrder", stepOrder)
+            event.put("channel", channel)
+        }
+        event.put("partyId", customer.partyId.toString())
+        val enriched = objectMapper.writeValueAsString(event)
+        return upstream.post(
+            "$engagementServiceUrl/api/v1/surfaces/events",
+            customer.partyId.toString(),
+            enriched,
+        )
+    }
+
     // --- Theme preferences (ADR-0190) — edge-local, party-keyed, roams the app look ---
 
     /** The caller's stored ThemeSpec, 404 when none. Party is taken from the JWT, never the client. */
@@ -3031,27 +3136,51 @@ class CustomerEdgeResource(
     // the SCA-gated reveal for a virtual/single-use card. That one response carries PAN/CVV, is never
     // logged, never cached (no-store) and never audited by value.
 
-    /** List the caller's cards (masked PAN only). Party-scoped by the JWT party. */
+    /**
+     * List the caller's cards (masked PAN only): their own, plus any card shared with them under an
+     * ACTIVE `CARD_VIEW` grant (ADR-0249 D2), marked `sharedWithMe`.
+     *
+     * The caller's own cards are fetched first and returned even if the delegation lookup fails —
+     * an unreachable delegation-service must not blank out a customer's own wallet. A shared card is
+     * only ever ADDED, never substituted, and never presented as the caller's own.
+     */
     @GET
     @Path("/cards")
     @Authorize(action = "customer.cards.read")
     @Blocking
     fun listCards(): Response {
         val customer = customer()
-        return upstream.get(
+        val own = upstream.get(
             "$cardIssuanceServiceUrl/api/v1/cards/party/${customer.partyId}",
             customer.partyId.toString(),
         )
+        if (own.status != 200) return own
+        val ownArray = runCatching { objectMapper.readTree((own.entity as? String).orEmpty()) }.getOrNull()
+            ?.takeIf { it.isArray } ?: return own
+        val shared = sharedCardsFor(customer.partyId)
+        if (shared.isEmpty()) return own
+        val merged = objectMapper.createArrayNode().apply {
+            addAll(ownArray.toList())
+            // A card the caller both holds and was granted must appear once, as their own.
+            val ownIds = ownArray.mapNotNull { it.path("id").asText(null) }.toSet()
+            addAll(shared.filter { it.path("id").asText(null) !in ownIds })
+        }
+        return Response.ok(merged.toString()).type(MediaType.APPLICATION_JSON).build()
     }
 
-    /** Freeze (temporarily suspend) one of the caller's OWN cards — the reversible self-service lock. */
+    /**
+     * Freeze (temporarily suspend) a card the caller controls — the reversible self-service lock.
+     *
+     * Open to a delegate holding `CARD_MANAGE_LIMITS` (ADR-0249 D2): freezing is one of the controls
+     * a real disponent expects, it is reversible, and it can only ever REDUCE what the card may do.
+     */
     @POST
     @Path("/cards/{id}/freeze")
     @Authorize(action = "customer.cards.update", resource = "#id")
     @Blocking
     fun freezeCard(@PathParam("id") id: UUID): Response = cardAction(id, "suspend")
 
-    /** Unfreeze (resume) one of the caller's OWN cards. */
+    /** Unfreeze (resume) a card the caller controls. Same authority as [freezeCard]. */
     @POST
     @Path("/cards/{id}/unfreeze")
     @Authorize(action = "customer.cards.update", resource = "#id")
@@ -3086,7 +3215,9 @@ class CustomerEdgeResource(
     // is the audit subject. Ownership is enforced here (the card must belong to the JWT party).
     private fun cardAction(id: UUID, action: String): Response {
         val customer = customer()
-        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+            return forbidden("Card does not belong to caller")
+        }
         return upstream.post(
             "$cardIssuanceServiceUrl/api/v1/cards/$id/$action",
             customer.partyId.toString(),
@@ -3141,7 +3272,12 @@ class CustomerEdgeResource(
         @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
     ): Response {
         val customer = customer()
-        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        // HOLDER ONLY, deliberately not ownsCard: that predicate was widened to the account owner
+        // so a grantor can freeze or re-limit a delegate's card, which is right. Reading the full
+        // PAN and CVV is not the same act — D5 refuses a delegated PAN reveal on PCI grounds, and
+        // the account-owner arm would grant exactly that, retroactively, for every card whose
+        // holder differs from the account owner.
+        if (!isCardHolder(id, customer.partyId)) return forbidden("Card does not belong to caller")
         scaCardGate(scaChallengeId, customer, id.toString(), "REVEAL_DETAILS", "cards.details")?.let { return it }
         val resp = upstream.get(
             "$cardIssuanceServiceUrl/api/v1/cards/$id/secure-details",
@@ -3224,7 +3360,12 @@ class CustomerEdgeResource(
                 "CARD_LIMITS_INVALID",
             )
         val cardJson = fetchCard(id, customer.partyId) ?: return forbidden("Card does not belong to caller")
-        if (extractOwnerPartyId(cardJson) != customer.partyId.toString()) {
+        // ADR-0249 D2: the holder, the account owner, or a delegate holding CARD_MANAGE_LIMITS. The
+        // one already-fetched body serves the authority check AND the current-limits comparison, so
+        // honouring a grant costs at most one extra call, and only for a caller who is neither.
+        if (!isHolderOrAccountOwner(cardJson, customer.partyId) &&
+            !hasGrant(customer.partyId, "CARD", id, CAP_CARD_MANAGE_LIMITS)
+        ) {
             return forbidden("Card does not belong to caller")
         }
         val current = parseLimits(objectMapper, cardJson)
@@ -3268,7 +3409,9 @@ class CustomerEdgeResource(
                 "contactlessEnabled, onlineEnabled, atmEnabled and abroadEnabled (booleans) are all required",
                 "CARD_CONTROLS_INVALID",
             )
-        if (!ownsCard(id, customer.partyId)) return forbidden("Card does not belong to caller")
+        if (!mayControlCard(id, customer.partyId, CAP_CARD_MANAGE_LIMITS)) {
+            return forbidden("Card does not belong to caller")
+        }
         val resp = upstream.put(
             "$cardIssuanceServiceUrl/api/v1/cards/$id/controls",
             customer.partyId.toString(),
@@ -3288,9 +3431,119 @@ class CustomerEdgeResource(
         return (resp.entity as? String)?.takeIf { it.isNotBlank() }
     }
 
+    /**
+     * Unconditional control over a card: the card's HOLDER, or the OWNER of the account it draws on
+     * (ADR-0249 D1).
+     *
+     * The account-owner arm is not a widening — it is what stops an additional cardholder ("dodatková
+     * karta") from being a card the account owner cannot touch. On such a card `partyId` is the
+     * DELEGATE, so a holder-only check would hand the grantor's own account to the grantee and lock
+     * the grantor out of blocking, cancelling and re-limiting the instrument they paid for. The
+     * grantor must keep every control, unconditionally and without a grant of their own.
+     */
     private fun ownsCard(id: UUID, partyId: UUID): Boolean {
         val cardJson = fetchCard(id, partyId) ?: return false
+        return isHolderOrAccountOwner(cardJson, partyId)
+    }
+
+    /** Holder only — see [revealCardDetails] for why the account-owner arm must not apply there. */
+    private fun isCardHolder(id: UUID, partyId: UUID): Boolean {
+        val cardJson = fetchCard(id, partyId) ?: return false
         return extractOwnerPartyId(cardJson) == partyId.toString()
+    }
+
+    private fun isHolderOrAccountOwner(cardJson: String, partyId: UUID): Boolean {
+        if (extractOwnerPartyId(cardJson) == partyId.toString()) return true
+        val accountId = extractTextField(objectMapper, cardJson, "accountId")
+            ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+            ?: return false
+        return ownsAccount(accountId, partyId)
+    }
+
+    /**
+     * May this caller exercise [capability] on this card — as its holder, as the owner of the
+     * account behind it, or as someone the card was shared with (ADR-0249 D2)?
+     *
+     * The delegated arm is the same `hasGrant` call the delegated ACCOUNT reads use, against the
+     * same delegation-service, with the same fail-closed and no-cache properties: a revoked grant
+     * stops working on the very next request rather than at the end of a TTL. Holder and account
+     * owner are checked FIRST and never pay for a delegation round-trip.
+     *
+     * Callers pass the capability the ACTION needs, not the weakest one that would let the caller
+     * in — `CARD_VIEW` must never be enough to move a limit.
+     */
+    private fun mayControlCard(id: UUID, partyId: UUID, capability: String): Boolean {
+        val cardJson = fetchCard(id, partyId) ?: return false
+        if (isHolderOrAccountOwner(cardJson, partyId)) return true
+        return hasGrant(partyId, "CARD", id, capability)
+    }
+
+    /**
+     * The cards shared WITH this caller, as card JSON, for appending to their own list — the
+     * read half of ADR-0249 D2. Mirrors [sharedAccountsFor] exactly, including the `sharedWithMe`
+     * marking: a delegate must never be shown someone else's instrument as their own.
+     *
+     * `CARD_VIEW` decides visibility. A card the caller may re-limit but not view is not a state the
+     * vocabulary can express today; if it ever is, the limit screen still needs the card in the list,
+     * so this deliberately asks for the read capability only.
+     */
+    private fun sharedCardsFor(partyId: UUID): List<com.fasterxml.jackson.databind.JsonNode> {
+        val resp = runCatching {
+            upstream.get("$delegationServiceUrl/api/v1/delegations/grantee/$partyId", partyId.toString())
+        }.getOrNull() ?: return emptyList()
+        if (resp.status != 200) return emptyList()
+        val grants = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+            ?.takeIf { it.isArray } ?: return emptyList()
+        return grants.asSequence()
+            .filter { it.path("status").asText() == "ACTIVE" }
+            .filter { it.path("resourceType").asText() == "CARD" }
+            .filter { g -> g.path("capabilities").any { it.asText() == CAP_CARD_VIEW } }
+            .mapNotNull { it.path("resourceId").asText(null) }
+            .distinct()
+            .mapNotNull { id -> runCatching { UUID.fromString(id) }.getOrNull() }
+            .mapNotNull { id -> fetchCard(id, partyId) }
+            .mapNotNull { body -> runCatching { objectMapper.readTree(body) }.getOrNull() }
+            .filterIsInstance<com.fasterxml.jackson.databind.node.ObjectNode>()
+            .map { node -> node.put("sharedWithMe", true) }
+            .toList()
+    }
+
+    /**
+     * The id of an ACTIVE grant from [grantorPartyId] to [granteePartyId] over this exact account,
+     * or null. This is the authority ADR-0249 D1 requires before a card may be issued to a third
+     * party, and the id is what the card is then linked to, so that revoking the grant blocks the
+     * card (D2).
+     *
+     * The grantee's own grant list is the source, filtered by grantor — the same endpoint and the
+     * same ACTIVE-only rule as [sharedAccountsFor], so there is one notion of "a live share" at this
+     * edge rather than two. A missing, dead or unparseable delegation-service yields null, i.e. the
+     * issue is refused: minting a payment instrument on a guess is not a failure mode worth having.
+     */
+    private fun activeAccountGrantId(granteePartyId: UUID, grantorPartyId: UUID, accountId: UUID): String? {
+        val resp = runCatching {
+            upstream.get(
+                "$delegationServiceUrl/api/v1/delegations/grantee/$granteePartyId",
+                grantorPartyId.toString(),
+            )
+        }.getOrNull() ?: return null
+        if (resp.status != 200) return null
+        val grants = runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") }.getOrNull()
+            ?.takeIf { it.isArray } ?: return null
+        return grants.asSequence()
+            .filter { it.path("status").asText() == "ACTIVE" }
+            .filter { it.path("resourceType").asText() == "ACCOUNT" }
+            .filter { it.path("resourceId").asText() == accountId.toString() }
+            .filter { it.path("grantorPartyId").asText() == grantorPartyId.toString() }
+            // A card is a spending instrument, so the grant behind it must actually authorise
+            // spending. Without this the four filters above admit a read-only grant — e.g. one
+            // carrying ACCOUNT_READ_BALANCES alone — and mint a live payment card from it. That
+            // also routes around ADR-0232 D5, whose EXECUTION_CAPABILITIES => KycLevel.FULL rule
+            // only engages when an execution capability is present.
+            .filter { grant ->
+                grant.path("capabilities").any { it.asText() == ACCOUNT_INITIATE_PAYMENT_CAPABILITY }
+            }
+            .mapNotNull { it.path("id").asText(null)?.takeIf { id -> id.isNotBlank() } }
+            .firstOrNull()
     }
 
     /**
@@ -3404,6 +3657,163 @@ class CustomerEdgeResource(
         )
         auditCard(resp, customer, "cards.issue", "CUSTOMER_CARD_ISSUED", acct.toString(), cardType)
         return resp
+    }
+
+    /**
+     * Issue an ADDITIONAL CARDHOLDER card — a "dodatková karta" (ADR-0249 D1). The caller is the
+     * GRANTOR: the card is minted on THEIR account, in the GRANTEE's name, with its own PAN and its
+     * own daily/monthly ceilings, and the grantee becomes its holder.
+     *
+     * Body: `{"accountId":"…","granteePartyId":"…","cardType":"VIRTUAL"|"SINGLE_USE",
+     * "dailyLimitMinorUnits":N,"monthlyLimitMinorUnits":M}`.
+     *
+     * Four things must all hold, and each fails closed:
+     *  1. the caller OWNS the account — nobody mints a card on an account they do not hold;
+     *  2. an ACTIVE delegation grant already runs from the caller to the grantee over that exact
+     *     account — the standing relationship, which the grantee accepted and can renounce;
+     *  3. the caller passes SCA, bound to the ACCOUNT (no card id exists yet), exactly as
+     *     self-service issue is gated — a new payment instrument in someone else's hands is at
+     *     least as consequential as one in your own (ADR-0021, ADR-0249 D4);
+     *  4. BOTH ceilings are supplied and valid. They are mandatory here although optional on a
+     *     self-service card, because ADR-0249 D5 refuses "unlimited access to someone else's
+     *     account" — and unlike a delegation ceiling, a CARD ceiling is one the card rail actually
+     *     counts, so it is a promise the platform can keep.
+     *
+     * The issued card is linked to the grant, which is what makes revocation bite: when the grant
+     * ends, card-issuance blocks every card carrying its id (ADR-0249 D2).
+     */
+    @POST
+    @Path("/cards/delegated")
+    @Authorize(action = "customer.cards.create", resource = "")
+    @Blocking
+    fun issueDelegatedCard(
+        body: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
+        val customer = customer()
+        val req = when (val parsed = parseDelegatedCardRequest(body, customer.partyId)) {
+            is DelegatedCardParse.Bad -> return parsed.response
+            is DelegatedCardParse.Ok -> parsed.request
+        }
+        if (!ownsAccount(req.accountId, customer.partyId)) return forbidden("Account does not belong to caller")
+        val grantId = activeAccountGrantId(req.granteePartyId, customer.partyId, req.accountId)
+            ?: return forbidden("No active delegation grant to that party on this account")
+        scaCardGate(scaChallengeId, customer, req.accountId.toString(), "ISSUE_DELEGATED", "cards.issue.delegated")
+            ?.let { return it }
+        // The card is embossed in the GRANTEE's name — it is their instrument, and a card carrying
+        // the grantor's name would misrepresent who is presenting it at a terminal. No usable name
+        // means no card: an additional card reading "OpenBank Customer" is not one anybody can use.
+        val name = fetchPartyLegalName(req.granteePartyId)
+            ?: return cardError(
+                BAD_REQUEST_STATUS,
+                "Cannot resolve the cardholder name for that party",
+                "CARD_GRANTEE_UNKNOWN",
+            )
+        // Same generation-suffix trick as the self-service virtual card, keyed on the GRANTEE: a
+        // retry after a dropped response replays instead of minting a second card, but a card that
+        // was blocked or cancelled — including by this grant's own revocation — can be re-issued.
+        val key = idempotencyKey?.takeIf { it.isNotBlank() }
+            ?: "dcard-${req.granteePartyId}-${req.accountId}-r" +
+            terminalVirtualCardCount(req.granteePartyId, req.accountId)
+        val resp = upstream.post(
+            "$cardIssuanceServiceUrl/api/v1/cards",
+            customer.partyId.toString(),
+            delegatedCardPayload(req, grantId, name, customer.partyId).toString(),
+            key,
+        )
+        auditCard(
+            resp,
+            customer,
+            "cards.issue.delegated",
+            "CUSTOMER_DELEGATED_CARD_ISSUED",
+            req.accountId.toString(),
+            req.cardType,
+        )
+        return resp
+    }
+
+    /** What a delegated-card issue asks for, once it has been proved well-formed. */
+    private data class DelegatedCardRequest(
+        val accountId: UUID,
+        val granteePartyId: UUID,
+        val cardType: String,
+        val dailyLimitMinorUnits: Long,
+        val monthlyLimitMinorUnits: Long,
+    )
+
+    private sealed interface DelegatedCardParse {
+        data class Ok(val request: DelegatedCardRequest) : DelegatedCardParse
+        data class Bad(val response: Response) : DelegatedCardParse
+    }
+
+    /**
+     * Validate a delegated-card request BEFORE any authority is consulted. Split out from the route
+     * so that shape-checking and authorisation stay separately readable: each refusal keeps its own
+     * machine-readable code, and none of them can be confused with a 403.
+     */
+    @Suppress("ReturnCount") // one early return per refusal — each carries a distinct error code
+    private fun parseDelegatedCardRequest(body: String, callerPartyId: UUID): DelegatedCardParse {
+        fun bad(message: String, code: String) = DelegatedCardParse.Bad(cardError(BAD_REQUEST_STATUS, message, code))
+
+        val parsed = runCatching { objectMapper.readTree(body) }.getOrNull()
+            ?: return bad("Malformed request body", "CARD_REQUEST_MALFORMED")
+        val accountId = parsed.uuidField("accountId")
+            ?: return bad("Missing or malformed accountId", "CARD_ACCOUNT_INVALID")
+        val grantee = parsed.uuidField("granteePartyId")
+            ?: return bad("Missing or malformed granteePartyId", "CARD_GRANTEE_INVALID")
+        if (grantee == callerPartyId) {
+            // Not a hair-split: this route skips the self-service quota and naming path, so letting
+            // it address the caller would be a second, weaker way to mint your own card.
+            return bad(
+                "granteePartyId must be another party — use POST /cards to issue your own card",
+                "CARD_GRANTEE_IS_SELF",
+            )
+        }
+        val cardType = parsed.get("cardType")?.takeIf { it.isTextual }?.asText()?.trim()?.uppercase()
+            ?: CARD_TYPE_VIRTUAL
+        if (cardType !in SELF_SERVICE_CARD_TYPES) {
+            return bad("cardType must be one of ${SELF_SERVICE_CARD_TYPES.joinToString(", ")}", "CARD_TYPE_INVALID")
+        }
+        // Mandatory here although optional on a self-service card: ADR-0249 D5 refuses "unlimited
+        // access to someone else's account". parseLimits enforces non-negative and daily <= monthly.
+        val limits = parseLimits(objectMapper, body) ?: return bad(
+            "dailyLimitMinorUnits and monthlyLimitMinorUnits are required, non-negative, and daily <= monthly",
+            "CARD_LIMITS_REQUIRED",
+        )
+        return DelegatedCardParse.Ok(
+            DelegatedCardRequest(accountId, grantee, cardType, limits.first, limits.second),
+        )
+    }
+
+    private fun com.fasterxml.jackson.databind.JsonNode.uuidField(field: String): UUID? =
+        get(field)?.takeIf { it.isTextual }?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+
+    /** The card-issuance issue payload for a delegated card. `partyId` is the GRANTEE, by design. */
+    private fun delegatedCardPayload(
+        req: DelegatedCardRequest,
+        grantId: String,
+        cardholderName: String,
+        grantorPartyId: UUID,
+    ) = objectMapper.createObjectNode().apply {
+        val productCode = resolveCardProductCode(req.accountId, grantorPartyId) ?: run {
+            Log.warn(
+                "delegated card issue: cannot resolve product code for account ${req.accountId} " +
+                    "— falling back to $FALLBACK_CARD_PRODUCT_CODE (entitlements will use the upstream default)",
+            )
+            FALLBACK_CARD_PRODUCT_CODE
+        }
+        put("partyId", req.granteePartyId.toString())
+        put("accountId", req.accountId.toString())
+        put("productCode", productCode)
+        put("cardType", req.cardType)
+        put("network", "VISA")
+        put("cardholderName", cardholderName)
+        put("embossedName", cardholderName.uppercase())
+        put("currency", "CZK")
+        put("dailyLimitMinorUnits", req.dailyLimitMinorUnits)
+        put("monthlyLimitMinorUnits", req.monthlyLimitMinorUnits)
+        put("delegationGrantId", grantId)
     }
 
     /**
@@ -3833,8 +4243,24 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
+        private val SURFACE_SLOTS: Set<String> = setOf(
+            "HOME_BANNER",
+            "HOME_CAROUSEL",
+            "STORIES",
+            "PRODUCT_FEED",
+            "REWARDS_HUB",
+        )
+
         // A ThemeSpec is a small token document; 8 KiB leaves headroom for future fields
         // while keeping Redis abuse-proof (ADR-0190).
+        /**
+         * The one ACCOUNT capability that authorises spending. Named here rather than inlined
+         * because the delegation capability vocabulary lives in DelegationGrant.CAPABILITY_MATRIX
+         * and this edge only ever sees it as a JSON string.
+         */
+        private const val ACCOUNT_INITIATE_PAYMENT_CAPABILITY = "ACCOUNT_INITIATE_PAYMENT"
+
         private const val THEME_SPEC_MAX_BYTES = 8 * 1024
 
         // Decimal scale for the FX mid-price projected to the app (rate = (bid+ask)/2).
@@ -3878,6 +4304,16 @@ class CustomerEdgeResource(
 
         /** The only card types a customer may mint themselves — plastic stays an operator flow. */
         internal val SELF_SERVICE_CARD_TYPES = setOf(CARD_TYPE_VIRTUAL, CARD_TYPE_SINGLE_USE)
+
+        /**
+         * The CARD-scoped delegation capabilities (ADR-0232 D2's vocabulary, honoured here per
+         * ADR-0249 D2). There is deliberately no delegated capability for BLOCK, CANCEL or the PAN
+         * reveal: the first two are terminal and belong to the grantor alone, and the third is
+         * refused outright by ADR-0249 D5 on PCI grounds — the delegate has their own card with
+         * their own credentials.
+         */
+        internal const val CAP_CARD_VIEW = "CARD_VIEW"
+        internal const val CAP_CARD_MANAGE_LIMITS = "CARD_MANAGE_LIMITS"
 
         /**
          * Last-resort product code when the account's real one cannot be resolved. Historically this
@@ -3961,6 +4397,9 @@ class CustomerEdgeResource(
 
         /** Upper bound for upstream error text carried into an audit detail field. */
         private const val AUDIT_DETAIL_MAX_CHARS = 300
+
+        /** HTTP status classes start at this value; named to keep upstream-retry policy legible. */
+        private const val UPSTREAM_SERVER_ERROR_MIN = 500
 
         /** PSD2 RTS 2018/389 Art. 15: same-person, same-PSP transfers are SCA-exempt. */
         internal const val SCA_EXEMPTION_OWN_ACCOUNT = "PSD2_RTS_ART15_OWN_ACCOUNT"
@@ -4414,8 +4853,15 @@ class CustomerEdgeResource(
     }
 
     /**
-     * Link the applicant's new Keycloak sub (KEYCLOAK_ID) to the matched existing party in pid —
-     * the ADR-0072 §5 identity merge so one human across channels maps to one golden-record party.
+     * Link the applicant's new Keycloak sub (KEYCLOAK_ID) to the matched existing party in pid, so
+     * one human arriving through another channel maps to one golden-record party (ADR-0072 §5
+     * identity unification).
+     *
+     * This is an external-id ATTACHMENT, not a party merge: it creates no `MERGED` party, moves no
+     * accounts and retires no row. The real merge is ADR-0179's `POST /api/v1/parties/{id}/merge`
+     * on party-service (four-eyes gated), whose `merged_into` pointer this service follows at
+     * request time in [PartyMergeResolver] — do not confuse the two (issue #1984).
+     *
      * Best-effort: returns true on a 2xx; failures are audited via the caller but never block
      * onboarding. The pid endpoint is idempotent and 409s a sub already linked elsewhere.
      */

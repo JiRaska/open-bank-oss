@@ -79,7 +79,10 @@ class ProposalService(
                     payload = buildMap {
                         put("title", title)
                         put("state", row.state.name)
-                        modelId?.let { put("model_id", it) }
+                        // ADR-0031 D5 (#3667): ALWAYS present. A conditional put makes an
+                        // unattributed proposal indistinguishable from one nobody looked at;
+                        // "unknown" is evidence, an absent key is a gap in the evidence chain.
+                        put("model_id", modelId ?: CharterRegistry.UNKNOWN_MODEL)
                         correlationId?.let { put("correlation_id", it) }
                     },
                 ),

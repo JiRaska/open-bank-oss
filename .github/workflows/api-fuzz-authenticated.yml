@@ -125,9 +125,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           cache-read-only: true
 
@@ -172,8 +172,26 @@ jobs:
           SPEC="${svc}/src/main/resources/openapi.yaml"
           PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
           DB="$(grep -m1 'jdbc:postgresql://\|postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
-          DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
+          # `${VAR:default}` is a MicroProfile config EXPRESSION, not a literal. The harness sets
+          # no env, so the DEFAULT is what the service will actually use, and the raw string must
+          # never be handed to docker. settlement-service writes its username that way; the literal
+          # reached `docker run -e POSTGRES_USER=${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}`,
+          # initdb rejected it, the container exited, and the boot log then blamed Flyway
+          # ("Connection to localhost:5432 refused") — never the container that was already gone.
+          # Credentials are then passed EXPLICITLY below rather than left to whichever env var
+          # the service happens to read: the fleet mostly reads ${POSTGRES_PASSWORD}, which this
+          # job sets, while settlement-service reads ${QUARKUS_DATASOURCE_PASSWORD}, which it does
+          # not — so settlement met "password authentication failed" once its container did start.
+          resolve_expr() {
+            printf '%s' "$1" | sed -E 's/^"//; s/"$//; s/^\$\{[A-Za-z0-9_]+:([^}]*)\}$/\1/'
+          }
+          DBUSER="$(resolve_expr "$(grep -m1 '^    username:' "$APP_YAML" | sed -E 's/^[^:]*:[[:space:]]*//')")"
           DBUSER="${DBUSER:-openbank}"
+          case "$DBUSER" in
+            *[!A-Za-z0-9_]*)
+              echo "::error::[${svc}] datasource username did not resolve to a plain identifier: ${DBUSER}"
+              exit 1 ;;
+          esac
           echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
 
           docker run -d --name fuzz-pg -p 5432:5432 \
@@ -186,6 +204,38 @@ jobs:
             docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && break; sleep 2
           done
 
+          # Four money-path services register a Temporal worker AT BOOT and the harness provided no
+          # Temporal server: dev mode retried gRPC to :7233 (or to the cluster DNS name, which does
+          # not resolve on a runner) until the readiness window expired, so they never reached the
+          # fuzz step. 4 of the 5 boot failures in run 30804842325 — sepa-payment, transaction,
+          # domestic-payment, lending (#3039). The CLI image's `server start-dev` is IN-MEMORY, so
+          # this costs no extra database, and it creates the namespaces it is given — a worker
+          # registering against a namespace that does not exist fails the same way.
+          # The namespace is READ FROM THE SERVICE's own config, never a list kept here.
+          TEMPORAL_NS="$(resolve_expr "$(grep -m1 -A6 '^  temporal:' "$APP_YAML" \
+            | grep -m1 'namespace:' | sed -E 's/^[^:]*:[[:space:]]*//')")"
+          TEMPORAL_ARGS=""
+          if [ -n "${TEMPORAL_NS:-}" ]; then
+            echo "==> [${svc}] starting Temporal dev server (namespace ${TEMPORAL_NS})"
+            docker run -d --name fuzz-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            TEMPORAL_UP=0
+            for i in $(seq 1 30); do
+              if docker exec fuzz-temporal temporal operator namespace describe \
+                   --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1; then
+                TEMPORAL_UP=1; break
+              fi
+              sleep 2
+            done
+            if [ "$TEMPORAL_UP" != "1" ]; then
+              echo "::error::[${svc}] Temporal dev server never became ready"
+              docker logs fuzz-temporal 2>&1 | tail -20; exit 1
+            fi
+            # domestic-payment and lending default to the in-cluster frontend DNS name; the
+            # override points every target at the throwaway server regardless of its default.
+            TEMPORAL_ARGS="-Dopenbank.temporal.server-url=localhost:7233"
+          fi
+
           # Boot with OIDC ENABLED (override the %dev oidc.enabled=false) pointed at
           # the throwaway Keycloak. authz.enforce stays false for this target, so no
           # OPA sidecar is needed — OIDC authN is the only gate being exercised.
@@ -193,10 +243,13 @@ jobs:
           ./gradlew ":${svc}:quarkusDev" \
             -Dquarkus.console.basic=true --console=plain --quiet \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.username="${DBUSER}" \
+            -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             -Dquarkus.oidc.enabled=true \
             -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
             -Dquarkus.oidc.client-id=openbank-services \
             -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
+            ${TEMPORAL_ARGS} \
             > "fuzz-reports/${svc}-boot.log" 2>&1 &
           DEV_PID=$!
           UP=0
@@ -245,7 +298,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f fuzz-pg fuzz-redis fuzz-keycloak >/dev/null 2>&1 || true
+          docker rm -f fuzz-pg fuzz-redis fuzz-keycloak fuzz-temporal >/dev/null 2>&1 || true
           exit "$RC"
 
       - name: Upload fuzz reports

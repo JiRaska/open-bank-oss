@@ -20,6 +20,14 @@ data class Enrolment(
     val currentStep: Int,
     val startedAt: Instant,
     val completedAt: Instant?,
+    /** Stored experiment assignment; historical rows default to [ExperimentCohort.TREATMENT]. */
+    val experimentCohort: ExperimentCohort = ExperimentCohort.TREATMENT,
+    /**
+     * Stable content arm, null when this campaign has no content experiment or this party is a
+     * no-contact holdout. Persisted rather than recalculated so an audit remains true if the
+     * allocation implementation ever changes.
+     */
+    val contentVariant: ContentVariant? = null,
 )
 
 enum class EnrolmentState {
@@ -28,6 +36,12 @@ enum class EnrolmentState {
 
     /** Journey terminated mid-flight by a consent.revoked signal (ADR-0200 D2 push mechanism). */
     TERMINATED_CONSENT_REVOKED,
+
+    /** Campaign was closed while this party was still in its journey. */
+    TERMINATED_CAMPAIGN_CLOSED,
+
+    /** The campaign's observed product goal was reached, so no further persuasion is lawful or useful. */
+    COMPLETED_GOAL_REACHED,
 
     /** Journey ended early because a step's suppression check failed (ADR-0200 D6). */
     TERMINATED_SUPPRESSED,
@@ -39,6 +53,9 @@ enum class EnrolmentState {
      * choosing to end the journey, so the console can say why the funnel ended early.
      */
     STOPPED_MAX_SENDS,
+
+    /** Intentionally not contacted, retained to measure the campaign against a control cohort. */
+    HOLDOUT,
 }
 
 /** A recorded send decision — the input to the frequency-cap evaluation (ADR-0219 D2). */
@@ -67,6 +84,8 @@ data class SendRecord(
     val deliveryReason: String? = null,
     /** When [deliveryStatus] last moved. Null while it has never moved off `PENDING`. */
     val deliveryUpdatedAt: Instant? = null,
+    /** The actual medium passed to notification-service; null for historical and non-send rows. */
+    val channel: Channel? = null,
 )
 
 /**

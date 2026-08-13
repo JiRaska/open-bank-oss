@@ -8,15 +8,12 @@ import com.openbank.kyc.domain.model.CheckType
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.KycCheck
+import com.openbank.kyc.domain.model.KycEvent
 import com.openbank.kyc.domain.model.RiskLevel
-import com.openbank.kyc.infrastructure.kafka.KycEventPublisher
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
-import io.mockk.every
-import io.mockk.just
 import io.mockk.mockk
-import io.mockk.runs
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -31,7 +28,6 @@ import java.util.UUID
 class KycServiceTest {
 
     private val repo = mockk<KycCaseRepository>()
-    private val eventPublisher = mockk<KycEventPublisher>()
     private val metrics = mockk<DomainMetrics>(relaxed = true)
     private val clock: Clock = Clock.fixed(Instant.parse("2024-01-15T12:00:00Z"), ZoneOffset.UTC)
 
@@ -41,7 +37,6 @@ class KycServiceTest {
     fun setUp() {
         service = KycService().also {
             it.repo = repo
-            it.eventPublisher = eventPublisher
             it.metrics = metrics
             it.clock = clock
         }
@@ -51,8 +46,7 @@ class KycServiceTest {
     fun `open case seeds mandatory checks and publishes open event`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { repo.findActiveByPartyId(partyId) } returns null // no active case → create new
-        coEvery { repo.save(any()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseOpened(any()) } just runs
+        coEvery { repo.save(any(), any()) } answers { firstArg<KycCase>() }
 
         val result = service.openCase(partyId)
 
@@ -68,15 +62,14 @@ class KycServiceTest {
         assertThat(result.checks).allMatch { it.status == CheckStatus.PENDING }
         assertThat(result.expiresAt).isAfter(result.createdAt)
 
-        coVerify { repo.save(match<KycCase> { it.partyId == partyId && it.checks.size == 4 }) }
+        coVerify { repo.save(match<KycCase> { it.partyId == partyId && it.checks.size == 4 }, any()) }
     }
 
     @Test
     fun `open case counts a kyc submission`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { repo.findActiveByPartyId(partyId) } returns null
-        coEvery { repo.save(any()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseOpened(any()) } just runs
+        coEvery { repo.save(any(), any()) } answers { firstArg<KycCase>() }
 
         service.openCase(partyId)
 
@@ -88,8 +81,9 @@ class KycServiceTest {
         val caseId = UUID.randomUUID()
         val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
         coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
         coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseApproved(any()) } just runs
 
         service.approve(caseId, "operator-1")
 
@@ -101,8 +95,9 @@ class KycServiceTest {
         val caseId = UUID.randomUUID()
         val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
         coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
         coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseRejected(any()) } just runs
 
         service.reject(caseId, "operator-1", "documents invalid")
 
@@ -113,16 +108,15 @@ class KycServiceTest {
     fun `openCaseForParty opens a new case when the party has none`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { repo.findActiveByPartyId(partyId) } returns null
-        coEvery { repo.save(any()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseOpened(any()) } just runs
+        coEvery { repo.save(any(), any()) } answers { firstArg<KycCase>() }
 
         val result = service.openCaseForParty(partyId)
 
         assertThat(result.created).isTrue()
         assertThat(result.case.partyId).isEqualTo(partyId)
         assertThat(result.case.status).isEqualTo(KycCaseStatus.OPEN)
-        coVerify(exactly = 1) { repo.save(any()) }
-        verify(exactly = 1) { eventPublisher.publishCaseOpened(any()) }
+        coVerify(exactly = 1) { repo.save(any(), any()) }
+        coVerify(exactly = 1) { repo.save(any(), match<KycEvent> { it.eventType == "KYC_CASE_OPENED" }) }
     }
 
     @Test
@@ -135,8 +129,8 @@ class KycServiceTest {
 
         assertThat(result.created).isFalse()
         assertThat(result.case).isSameAs(existing)
-        coVerify(exactly = 0) { repo.save(any()) }
-        verify(exactly = 0) { eventPublisher.publishCaseOpened(any()) }
+        coVerify(exactly = 0) { repo.save(any(), any()) }
+        coVerify(exactly = 0) { repo.save(any(), any()) }
     }
 
     @Test
@@ -146,8 +140,7 @@ class KycServiceTest {
         // First lookup sees nothing; our insert loses the uq_kyc_cases_active_party race;
         // the re-read then returns the case the concurrent winner committed.
         coEvery { repo.findActiveByPartyId(partyId) } returns null andThen winner
-        coEvery { repo.save(any()) } throws RuntimeException("duplicate key value violates unique constraint")
-        every { eventPublisher.publishCaseOpened(any()) } just runs
+        coEvery { repo.save(any(), any()) } throws RuntimeException("duplicate key value violates unique constraint")
 
         val result = service.openCaseForParty(partyId)
 
@@ -160,8 +153,7 @@ class KycServiceTest {
     fun `openCaseForParty rethrows when the insert fails for a non-race reason`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         coEvery { repo.findActiveByPartyId(partyId) } returns null // no active case, before and after
-        coEvery { repo.save(any()) } throws RuntimeException("connection reset")
-        every { eventPublisher.publishCaseOpened(any()) } just runs
+        coEvery { repo.save(any(), any()) } throws RuntimeException("connection reset")
 
         assertThatThrownBy { runBlocking { service.openCaseForParty(partyId) } }
             .hasMessageContaining("connection reset")
@@ -197,8 +189,7 @@ class KycServiceTest {
         )
 
         coEvery { repo.findById(caseId) } returns existing
-        coEvery { repo.update(any<KycCase>()) } returns expectedUpdated
-        every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+        coEvery { repo.update(any<KycCase>(), any()) } returns expectedUpdated
 
         val result = service.updateCheckStatus(caseId, CheckType.IDENTITY, CheckStatus.PASSED, "document verified")
 
@@ -207,7 +198,7 @@ class KycServiceTest {
         assertThat(result.checks.first { it.checkType == CheckType.IDENTITY }.result).isEqualTo("document verified")
         assertThat(result.checks.first { it.checkType == CheckType.IDENTITY }.performedAt).isNotNull()
 
-        coVerify { repo.update(match<KycCase> { it.status == KycCaseStatus.UNDER_REVIEW }) }
+        coVerify { repo.update(match<KycCase> { it.status == KycCaseStatus.UNDER_REVIEW }, any()) }
     }
 
     @Test
@@ -269,8 +260,8 @@ class KycServiceTest {
             .isInstanceOf(KycCaseConflictException::class.java)
             .hasMessageContaining(existingCase.id.toString())
 
-        coVerify(exactly = 0) { repo.save(any()) }
-        coVerify(exactly = 0) { eventPublisher.publishCaseOpened(any()) }
+        coVerify(exactly = 0) { repo.save(any(), any()) }
+        coVerify(exactly = 0) { repo.save(any(), any()) }
     }
 
     @Test
@@ -278,13 +269,12 @@ class KycServiceTest {
         val partyId = UUID.randomUUID()
         // A terminal case is not "active", so findActiveByPartyId returns null and a fresh one opens.
         coEvery { repo.findActiveByPartyId(partyId) } returns null
-        coEvery { repo.save(any()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseOpened(any()) } just runs
+        coEvery { repo.save(any(), any()) } answers { firstArg<KycCase>() }
 
         val result = service.openCase(partyId)
 
         assertThat(result.status).isEqualTo(KycCaseStatus.OPEN)
-        coVerify(exactly = 1) { repo.save(any()) }
+        coVerify(exactly = 1) { repo.save(any(), any()) }
     }
 
     // ── approveCase / rejectCase — state machine validation (ADR-0068) ───────
@@ -294,8 +284,9 @@ class KycServiceTest {
         val caseId = UUID.randomUUID()
         val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
         coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
         coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseApproved(any()) } just runs
 
         val result = service.approveCase(caseId, "operator-kyc-1", "All documents verified, identity confirmed")
 
@@ -306,9 +297,10 @@ class KycServiceTest {
         coVerify {
             repo.update(
                 match<KycCase> { it.status == KycCaseStatus.APPROVED && it.reviewedBy == "operator-kyc-1" },
+                any(),
             )
         }
-        verify(exactly = 1) { eventPublisher.publishCaseApproved(any()) }
+        coVerify(exactly = 1) { repo.update(any<KycCase>(), match<KycEvent> { it.eventType == "KYC_CASE_APPROVED" }) }
         verify(exactly = 1) { metrics.kycVerdict("unknown", "approved") }
     }
 
@@ -333,7 +325,7 @@ class KycServiceTest {
                 .hasMessageContaining("approve")
                 .hasMessageContaining("UNDER_REVIEW")
 
-            coVerify(exactly = 0) { repo.update(any()) }
+            coVerify(exactly = 0) { repo.update(any(), any()) }
         }
     }
 
@@ -342,8 +334,9 @@ class KycServiceTest {
         val caseId = UUID.randomUUID()
         val existing = kycCase(id = caseId, checks = emptyList()).copy(status = KycCaseStatus.UNDER_REVIEW)
         coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
         coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseRejected(any()) } just runs
 
         val result = service.rejectCase(caseId, "operator-kyc-2", "Address document expired and not replaceable")
 
@@ -354,9 +347,10 @@ class KycServiceTest {
         coVerify {
             repo.update(
                 match<KycCase> { it.status == KycCaseStatus.REJECTED && it.reviewedBy == "operator-kyc-2" },
+                any(),
             )
         }
-        verify(exactly = 1) { eventPublisher.publishCaseRejected(any()) }
+        coVerify(exactly = 1) { repo.update(any<KycCase>(), match<KycEvent> { it.eventType == "KYC_CASE_REJECTED" }) }
         verify(exactly = 1) { metrics.kycVerdict("unknown", "rejected") }
     }
 
@@ -381,7 +375,7 @@ class KycServiceTest {
                 .hasMessageContaining("reject")
                 .hasMessageContaining("UNDER_REVIEW")
 
-            coVerify(exactly = 0) { repo.update(any()) }
+            coVerify(exactly = 0) { repo.update(any(), any()) }
         }
     }
 
@@ -470,8 +464,11 @@ class KycServiceTest {
                 checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
             )
             coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
             coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
 
             val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.CLEAR, 0.1, null)
 
@@ -490,8 +487,11 @@ class KycServiceTest {
                 checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
             ).copy(riskLevel = RiskLevel.MEDIUM)
             coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
             coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
 
             val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.MATCH, 0.97, "Andrej Babiš")
 
@@ -499,7 +499,15 @@ class KycServiceTest {
             assertThat(pepCheck.status).isEqualTo(CheckStatus.MANUAL_REVIEW)
             assertThat(pepCheck.result).contains("Andrej Babiš")
             assertThat(result.riskLevel).isEqualTo(RiskLevel.HIGH)
-            verify(exactly = 1) { eventPublisher.publishCaseStatusChanged(any()) }
+            coVerify(exactly = 1) {
+                repo.update(
+                    any<KycCase>(),
+                    match<KycEvent> {
+                        it.eventType ==
+                            "KYC_CASE_STATUS_CHANGED"
+                    },
+                )
+            }
         }
 
     @Test
@@ -510,8 +518,9 @@ class KycServiceTest {
             checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
         ).copy(riskLevel = RiskLevel.VERY_HIGH)
         coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
         coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseStatusChanged(any()) } just runs
 
         val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.MATCH, 0.99, "Some PEP")
 
@@ -527,8 +536,11 @@ class KycServiceTest {
                 checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
             )
             coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
             coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
 
             val result = service.applyPepScreeningResult(
                 caseId,
@@ -550,8 +562,9 @@ class KycServiceTest {
             checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.PENDING)),
         )
         coEvery { repo.findById(caseId) } returns existing
+        coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+        // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
         coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-        every { eventPublisher.publishCaseStatusChanged(any()) } just runs
 
         val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.UNAVAILABLE, 0.0, null)
 
@@ -575,8 +588,11 @@ class KycServiceTest {
                 checks = listOf(check(caseId, CheckType.PEP_SCREENING, CheckStatus.MANUAL_REVIEW)),
             ).copy(riskLevel = RiskLevel.HIGH)
             coEvery { repo.findById(caseId) } returns existing
+            coEvery { repo.update(any<KycCase>(), any()) } answers { firstArg<KycCase>() }
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
             coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
-            every { eventPublisher.publishCaseStatusChanged(any()) } just runs
+            // No status/risk change ⇒ the service must take the event-FREE overload (no event is due).
+            coEvery { repo.update(any<KycCase>()) } answers { firstArg<KycCase>() }
 
             val result = service.applyPepScreeningResult(caseId, PepScreeningStatus.CLEAR, 0.05, null)
 

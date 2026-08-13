@@ -14,9 +14,11 @@ import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
+import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
@@ -61,6 +63,7 @@ class CampaignService(
         createdBy: String,
         stopCondition: StopCondition? = null,
         conversionRule: String? = null,
+        holdoutPercent: Int = 0,
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
     ): Campaign {
@@ -85,6 +88,7 @@ class CampaignService(
             steps = steps.sortedBy { it.order },
             stopCondition = stopCondition,
             conversionRule = conversionRule,
+            holdoutPercent = holdoutPercent,
             // Stored on the DRAFT, but no Temporal schedule is created until activation: a schedule
             // firing against a campaign that has not passed four-eyes would enrol real people into
             // an unapproved journey (ADR-0200 D5).
@@ -140,12 +144,15 @@ class CampaignService(
     suspend fun pause(id: UUID): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         if (campaign.schedule != null) scheduler.pause(id)
-        return campaigns.save(campaign.pause())
+        val paused = campaigns.save(campaign.pause())
+        signalActiveEnrolments(enrolments, id) { partyId -> journeys.signalCampaignPaused(id, partyId) }
+        return paused
     }
 
     suspend fun resume(id: UUID): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         val resumed = campaigns.save(campaign.resume())
+        signalActiveEnrolments(enrolments, id) { partyId -> journeys.signalCampaignResumed(id, partyId) }
         if (resumed.schedule != null) scheduler.unpause(id)
         return resumed
     }
@@ -159,7 +166,9 @@ class CampaignService(
     suspend fun close(id: UUID): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         if (campaign.schedule != null) scheduler.delete(id)
-        return campaigns.save(campaign.close())
+        val closed = campaigns.save(campaign.close())
+        signalActiveEnrolments(enrolments, id) { partyId -> journeys.signalCampaignClosed(id, partyId) }
+        return closed
     }
 
     /**
@@ -186,25 +195,50 @@ class CampaignService(
         for (partyId in partyIds) {
             if (enrolments.findByCampaignAndParty(id, partyId) != null) continue
             try {
-                // Start FIRST, persist on success. The workflow id is the idempotency key
-                // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
-                // crash between these two lines costs a duplicate start that is a no-op, and the
-                // next `enrol` completes the pair. The reverse order costs a party: the row is
-                // already committed, the skip below sees it, and that party is never contacted and
-                // never retried (#2953).
-                journeys.startJourney(id, partyId)
-                enrolments.save(
-                    Enrolment(
-                        id = Ids.newId(),
-                        campaignId = id,
-                        partyId = partyId,
-                        state = EnrolmentState.ACTIVE,
-                        currentStep = 0,
-                        startedAt = Instant.now(),
-                        completedAt = null,
-                    ),
-                )
-                started++
+                val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
+                if (cohort == ExperimentCohort.HOLDOUT) {
+                    // A control cohort must never receive a workflow: storing it as ACTIVE and
+                    // merely hoping every future activity checks a flag would leak a send on the
+                    // first new path. It is a completed, observable no-contact assignment.
+                    enrolments.save(
+                        Enrolment(
+                            id = Ids.newId(),
+                            campaignId = id,
+                            partyId = partyId,
+                            state = EnrolmentState.HOLDOUT,
+                            currentStep = 0,
+                            startedAt = Instant.now(),
+                            completedAt = Instant.now(),
+                            experimentCohort = cohort,
+                            contentVariant = null,
+                        ),
+                    )
+                    started++
+                } else {
+                    // Start FIRST, persist on success. The workflow id is the idempotency key
+                    // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
+                    // crash between these two lines costs a duplicate start that is a no-op, and the
+                    // next `enrol` completes the pair. The reverse order costs a party: the row is
+                    // already committed, the skip below sees it, and that party is never contacted and
+                    // never retried (#2953).
+                    journeys.startJourney(id, partyId)
+                    val contentVariant = ContentVariant.assign(campaign.id, partyId)
+                        .takeIf { campaign.hasContentExperiment }
+                    enrolments.save(
+                        Enrolment(
+                            id = Ids.newId(),
+                            campaignId = id,
+                            partyId = partyId,
+                            state = EnrolmentState.ACTIVE,
+                            currentStep = 0,
+                            startedAt = Instant.now(),
+                            completedAt = null,
+                            experimentCohort = cohort,
+                            contentVariant = contentVariant,
+                        ),
+                    )
+                    started++
+                }
             } catch (e: Exception) {
                 // Per party, so one bad party is local rather than fatal: the loop used to abort on
                 // the first failure, leaving every party after it unenrolled by a fault that had
@@ -217,4 +251,15 @@ class CampaignService(
     }
 
     suspend fun listEnrolments(id: UUID): List<Enrolment> = enrolments.listByCampaign(id)
+}
+
+/**
+ * Campaign control targets only live journeys. Completed enrolments have no workflow to wake and
+ * signalling them turns an O(actively running) operation into O(all historical recipients).
+ */
+private suspend fun signalActiveEnrolments(enrolments: EnrolmentRepository, campaignId: UUID, signal: (UUID) -> Unit) {
+    enrolments.listByCampaign(campaignId)
+        .asSequence()
+        .filter { it.state == EnrolmentState.ACTIVE }
+        .forEach { signal(it.partyId) }
 }

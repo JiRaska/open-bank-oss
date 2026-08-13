@@ -58,6 +58,10 @@ class TriggeredEnrolmentTest {
     private class Journeys : JourneySignaller {
         val started = mutableListOf<UUID>()
         override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignClosed(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
         override fun startJourney(campaignId: UUID, partyId: UUID) {
             started += partyId
         }

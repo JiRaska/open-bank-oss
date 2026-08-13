@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.6](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.5...party-service-v0.15.6) (2026-08-10)
+
+
+### Bug Fixes
+
+* **audit:** give the unattributed producers a real actor, and a way to say nobody did it ([#4424](https://github.com/JiRaska/open-bank-oss/issues/4424)) ([0cadda3](https://github.com/JiRaska/open-bank-oss/commit/0cadda3725280119a86dba722efa692e1f783fc9))
+
+## [0.15.5](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.4...party-service-v0.15.5) (2026-08-09)
+
+
+### Bug Fixes
+
+* **jaxrs-params:** answer 400, not 500, for a missing required query/header parameter ([#4375](https://github.com/JiRaska/open-bank-oss/issues/4375)) ([32ab2a2](https://github.com/JiRaska/open-bank-oss/commit/32ab2a2dfe0d208ae5ba865758c774ec47a92d09)), closes [#4175](https://github.com/JiRaska/open-bank-oss/issues/4175)
+
 ## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.3...party-service-v0.15.4) (2026-08-09)
 
 

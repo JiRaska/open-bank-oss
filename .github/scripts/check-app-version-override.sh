@@ -18,6 +18,46 @@
 # stdlib-only (awk); no PyYAML/yamllint dependency. ENFORCED.
 # Usage: check-app-version-override.sh [root]   (default root: .)
 set -euo pipefail
+
+# --- self-test ------------------------------------------------------------------------
+# `quarkus.application.version` in application.yaml OVERRIDES the value release-please derives
+# from version.txt, so the artifact reports a version nobody bumped (rules.yaml:
+# release_invariant). The check is an awk path-walk — exactly the code that looks right and is
+# off by one nesting level.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+  svc() { mkdir -p "$td/$1/src/main/resources"; printf '%b' "$3" > "$td/$1/src/main/resources/application.yaml"
+          if [ "$2" = released ]; then echo 1.0.0 > "$td/$1/version.txt"; fi; }
+  expect() { local label="$1" want="$2" sub="${3:-}" out rc
+    out=$(bash "$0" "$td" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
+  reset() { rm -rf "$td"/openbank-x; }
+
+  reset; svc openbank-x released 'quarkus:\n  application:\n    version: 9.9.9\n'
+  expect "quarkus.application.version is FLAGGED" 1 "must NOT be set"
+  reset; svc openbank-x released 'quarkus:\n  application:\n    name: x\n'
+  expect "no version key is clean" 0 "none set quarkus.application.version"
+  # NESTING: the same leaf under a different parent is a different property entirely, and
+  # flagging it would push authors to delete a legitimate container-image version.
+  reset; svc openbank-x released 'quarkus:\n  container-image:\n    version: 1.2.3\n'
+  expect "version under another quarkus child is not this defect" 0 "none set"
+  reset; svc openbank-x released 'other:\n  application:\n    version: 1.2.3\n'
+  expect "application.version outside quarkus is not this defect" 0 "none set"
+  # SCOPE: a module with no version.txt is not a released component, so the invariant is moot.
+  reset; svc openbank-x unreleased 'quarkus:\n  application:\n    version: 9.9.9\n'
+  expect "a non-released module is skipped" 0 "1 non-released skipped"
+  # Every fix for this carries a comment naming the key it removed.
+  reset; svc openbank-x released 'quarkus:\n  application:\n    # version: never set this here\n    name: x\n'
+  expect "the key in a comment is not a hit" 0 "none set"
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: quarkus.application.version override guard is falsifiable (6 cases)"
+  exit 0
+fi
 root="${1:-.}"
 fail=0
 checked=0

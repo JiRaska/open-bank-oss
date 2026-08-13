@@ -95,3 +95,35 @@ test_edge_may_not_confirm_b2b_mandate if {
 test_edge_may_not_authorise_collection if {
 	count(allowed_reasons) == 0 with input as {"principal": edge, "action": "sdd.authorise"}
 }
+
+# --- read-only oversight personas (the AUTHZ_ENFORCE precondition, #3679) ---
+
+compliance := {"type": "HUMAN", "id": "u-comp", "roles": ["ROLE_COMPLIANCE"]}
+
+test_viewer_may_read_and_list if {
+	"sdd-oversight-read" in allowed_reasons with input as {"principal": viewer, "action": "sdd.read"}
+	"sdd-oversight-read" in allowed_reasons with input as {"principal": viewer, "action": "sdd.list"}
+}
+
+# The gap that made the flip a regression: base compliance-read-any matches ".read" only, so the
+# list endpoint an analyst actually opens was ungranted.
+test_compliance_may_list_not_only_read if {
+	"sdd-oversight-read" in allowed_reasons with input as {"principal": compliance, "action": "sdd.list"}
+}
+
+# The grant is a closed two-action literal, so it can never reach a write — asserted per action
+# rather than as a family, since a family assertion would pass against a widened rule.
+test_oversight_read_grants_no_write if {
+	not "sdd-oversight-read" in allowed_reasons with input as {"principal": viewer, "action": "sdd.create"}
+	not "sdd-oversight-read" in allowed_reasons with input as {"principal": viewer, "action": "sdd.update"}
+	not "sdd-oversight-read" in allowed_reasons with input as {"principal": compliance, "action": "sdd.delete"}
+	not "sdd-oversight-read" in allowed_reasons with input as {"principal": compliance, "action": "sdd.approve"}
+	not "sdd-oversight-read" in allowed_reasons with input as {"principal": compliance, "action": "sdd.authorise"}
+}
+
+# Must-DENY control for this file: an action outside the sdd family gets no reason from any rule
+# here, so a rule that ever starts matching on principal alone fails this test.
+test_no_reason_for_unknown_action if {
+	count(allowed_reasons) == 0 with input as {"principal": viewer, "action": "zzz.frobnicate"}
+	count(allowed_reasons) == 0 with input as {"principal": operator, "action": "zzz.frobnicate"}
+}

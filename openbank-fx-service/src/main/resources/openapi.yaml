@@ -3,9 +3,12 @@
 openapi: 3.1.0
 info:
   title: FX Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
-  # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.6.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). The note here used to describe the
+  # 1.2 -> 1.3 bump and was never updated through four more; it now records the CURRENT one.
+  # Minor bump (1.6 -> 1.7): additive only — an optional `asOf` query parameter on
+  # GET /rates/{base}/{quote} plus response fields the service has always served and this spec did
+  # not declare (bidRate/askRate/validFrom/validTo). No breaking change (#3921).
+  version: 1.7.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -52,6 +55,28 @@ paths:
           schema:
             type: string
             example: CZK
+        - name: source
+          in: query
+          required: false
+          description: >-
+            CNB returns the central-bank fixing (the exact stored direction, never derived).
+            Omitted returns the commercial quote, which may be derived by inverting the stored pair.
+          schema:
+            type: string
+            enum: [CNB]
+        - name: asOf
+          in: query
+          required: false
+          description: >-
+            Business day (ISO yyyy-MM-dd) the fixing must have been in effect on, i.e. the row whose
+            stored validity window contains the start of that day in the CNB publication zone.
+            Omitted returns the latest fixing still valid now. Requires source=CNB — any other
+            source is answered 400 rather than silently ignoring the date (#3921). A day with no
+            fixing in effect is 404, NOT a fallback to the newest one.
+          schema:
+            type: string
+            format: date
+            example: '2026-05-30'
       responses:
         '200':
           description: Exchange rate
@@ -59,6 +84,11 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExchangeRateResponse'
+        '400':
+          description: >-
+            asOf is not an ISO yyyy-MM-dd date, or was supplied without source=CNB. Both are
+            rejected rather than ignored — a silently-dropped date parameter reads as a correct
+            backfill while the caller is answered at today's rate (#3921).
         '404':
           $ref: '#/components/responses/NotFound'
         '403':
@@ -278,10 +308,25 @@ components:
           type: string
         quoteCurrency:
           type: string
+        bidRate:
+          type: number
+        askRate:
+          type: number
         rate:
           type: number
         spread:
           type: number
+        validFrom:
+          type: string
+          format: date-time
+          description: >-
+            Start of this rate's validity window. For a CNB fixing this is the fixing's own business
+            day at midnight in the publication zone, i.e. the fixing's identity in time — ledger
+            reads it to publish `openbank_fx_fixing_age_seconds` and to key the revaluation entry on
+            the fixing it actually marked at (#3921).
+        validTo:
+          type: string
+          format: date-time
         validAt:
           type: string
           format: date-time

@@ -5,6 +5,7 @@
 package com.openbank.cardissuance.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.cardissuance.application.port.`in`.CardUseCase
 import com.openbank.cardissuance.application.port.out.CardDelegationProjectionRepository
 import com.openbank.cardissuance.domain.model.DelegatedCardGrant
 import jakarta.enterprise.context.ApplicationScoped
@@ -35,6 +36,7 @@ private data class DelegationEvent(
 @ApplicationScoped
 class CardDelegationEventConsumer(
     private val projectionRepository: CardDelegationProjectionRepository,
+    private val cardUseCase: CardUseCase,
     private val objectMapper: ObjectMapper,
 ) {
     private val log = Logger.getLogger(CardDelegationEventConsumer::class.java)
@@ -77,11 +79,20 @@ class CardDelegationEventConsumer(
     }
 
     private suspend fun dispatch(event: DelegationEvent) {
+        // ADR-0249 D2 runs BEFORE the resourceType filter, and keys on the grant id alone.
+        //
+        // A "dodatková karta" is authorised by an ACCOUNT-scoped grant (the grantor sharing their
+        // account), not a CARD-scoped one — the card did not exist when the grant was written. The
+        // filter below drops every non-CARD lifecycle event, so putting this after it would mean
+        // the exact revocation that has to kill the card is the one event we never see. The card is
+        // found by its own stored delegation_grant_id, which is why no resourceType is needed here.
+        if (event.type in ENDING_TYPES) {
+            cardUseCase.blockCardsForRevokedGrant(event.grantId, "$REVOCATION_REASON_PREFIX${event.type}")
+        }
         if (event.resourceType != RESOURCE_CARD && event.type in LIFECYCLE_TYPES) return
         when (event.type) {
             "DelegationActivated", "DelegationReinstated" -> upsert(event)
-            "DelegationRevoked", "DelegationSuspended", "DelegationRenounced", "DelegationExpired" ->
-                projectionRepository.closeById(event.grantId)
+            in CLOSING_TYPES -> projectionRepository.closeById(event.grantId)
             else -> Unit
         }
     }
@@ -131,6 +142,32 @@ class CardDelegationEventConsumer(
         const val RESOURCE_CARD = "CARD"
         const val MAX_PROJECTION_ATTEMPTS = 4
         const val RETRY_BACKOFF_MS = 500L
+        const val REVOCATION_REASON_PREFIX = "DELEGATION_"
+
+        /** Events that close the local projection row — the delegate's borrowed controls stop. */
+        val CLOSING_TYPES = setOf(
+            "DelegationRevoked",
+            "DelegationSuspended",
+            "DelegationRenounced",
+            "DelegationExpired",
+        )
+
+        /**
+         * Events that END the authority for good, and therefore end the card it authorised
+         * (ADR-0249 D2).
+         *
+         * `DelegationSuspended` is deliberately absent. A suspension is reversible, so the matching
+         * card action would be a reversible freeze — but `DelegationReinstated` would then have to
+         * unfreeze, and nothing here can tell a card the BANK froze from one the CUSTOMER froze.
+         * Silently unfreezing a card its owner deliberately locked is a worse failure than the one
+         * it would fix. A suspended grant still stops the delegate's controls instantly, because
+         * the projection row closes below and the edge consults the live grant on every request.
+         */
+        val ENDING_TYPES = setOf(
+            "DelegationRevoked",
+            "DelegationRenounced",
+            "DelegationExpired",
+        )
 
         val LIFECYCLE_TYPES = setOf(
             "DelegationActivated",

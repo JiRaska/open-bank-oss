@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.3...statement-service-v0.8.4) (2026-08-10)
+
+
+### Bug Fixes
+
+* **audit:** give the unattributed producers a real actor, and a way to say nobody did it ([#4424](https://github.com/JiRaska/open-bank-oss/issues/4424)) ([0cadda3](https://github.com/JiRaska/open-bank-oss/commit/0cadda3725280119a86dba722efa692e1f783fc9))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.2...statement-service-v0.8.3) (2026-08-09)
 
 

@@ -7,8 +7,10 @@ package com.openbank.balance.infrastructure.schedule
 import com.openbank.balance.application.port.out.BalanceEventPublisher
 import com.openbank.balance.application.port.out.BalanceRepository
 import com.openbank.balance.domain.model.BalanceEvent
+import com.openbank.balance.domain.model.BalanceEventActors
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.event.EventActor
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
@@ -162,6 +164,8 @@ class ValueDateRollScheduler(
                     availableAmount = effective.effectiveAvailable(),
                     reservedAmount = effective.reservedAmount,
                     occurredAt = OffsetDateTime.ofInstant(accountingClock.instant(), java.time.ZoneOffset.UTC),
+                    actorId = BalanceEventActors.VALUE_DATE_ROLL,
+                    actorType = EventActor.TYPE_SYSTEM,
                 ),
             )
             published++

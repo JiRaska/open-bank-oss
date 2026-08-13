@@ -21,8 +21,8 @@ import java.util.UUID
  * Wires the ADR-0219 gate for campaign-service (issue #3656 slice 1): consent stays the ADR-0198
  * live per-call check, send counters keep counting from the durable Postgres send log (the
  * cache-flush burst class of ADR-0219 D2 never applied here — there is no cache), and the
- * suppression list is the truthfully-empty port until D3's platform store exists — an honest
- * zero, not a stub that silently stays.
+ * suppression list is read live from consent-service's ADR-0219 D3 platform store. A read failure
+ * propagates into ContactPolicyGate, which fails closed rather than treating an outage as no entries.
  */
 @ApplicationScoped
 class ContactGateProducer {
@@ -32,6 +32,7 @@ class ContactGateProducer {
     fun contactPolicyGate(
         consentCheck: ConsentCheckPort,
         sendLog: SendLogRepository,
+        suppression: ContactSuppressionPort,
         @ConfigProperty(name = "openbank.campaign.max-sends-per-party-per-week", defaultValue = "2") maxSends: Int,
         @ConfigProperty(name = "openbank.campaign.quiet-hours-start", defaultValue = "21") quietStart: Int,
         @ConfigProperty(name = "openbank.campaign.quiet-hours-end", defaultValue = "8") quietEnd: Int,
@@ -45,7 +46,7 @@ class ContactGateProducer {
             // the engagement service (ADR-0220), not here.
             override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant): Int = 0
         },
-        suppression = ContactSuppressionPort { emptyList() },
+        suppression = suppression,
         policy = ContactPolicy(
             sendCapPerWindow = maxSends,
             quietHoursStart = quietStart,

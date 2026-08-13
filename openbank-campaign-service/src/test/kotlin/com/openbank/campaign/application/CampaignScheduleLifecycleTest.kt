@@ -18,6 +18,7 @@ import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
@@ -65,6 +66,23 @@ class CampaignScheduleLifecycleTest {
         }
     }
 
+    private class RecordingJourneys : JourneySignaller {
+        val calls = mutableListOf<String>()
+
+        override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) {
+            calls += "pause:$partyId"
+        }
+        override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) {
+            calls += "resume:$partyId"
+        }
+        override fun signalCampaignClosed(campaignId: UUID, partyId: UUID) {
+            calls += "close:$partyId"
+        }
+        override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
+        override fun startJourney(campaignId: UUID, partyId: UUID) = Unit
+    }
+
     private fun campaign(state: CampaignState, schedule: CampaignSchedule?) = Campaign(
         id = campaignId,
         name = "winback",
@@ -87,7 +105,12 @@ class CampaignScheduleLifecycleTest {
         updatedAt = Instant.parse("2026-08-01T09:00:00Z"),
     )
 
-    private fun service(stored: Campaign, scheduler: CampaignScheduler): CampaignService {
+    private fun service(
+        stored: Campaign,
+        scheduler: CampaignScheduler,
+        journeys: JourneySignaller = RecordingJourneys(),
+        existingEnrolments: List<Enrolment> = emptyList(),
+    ): CampaignService {
         val segment = Segment("dormant-parties", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE")))
         return CampaignService(
             campaigns = object : CampaignRepository {
@@ -98,7 +121,8 @@ class CampaignScheduleLifecycleTest {
             },
             enrolments = object : EnrolmentRepository {
                 override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? = null
-                override suspend fun listByCampaign(campaignId: UUID): List<Enrolment> = emptyList()
+                override suspend fun listByCampaign(campaignId: UUID): List<Enrolment> =
+                    existingEnrolments.filter { it.campaignId == campaignId }
                 override suspend fun listByParty(partyId: UUID): List<Enrolment> = emptyList()
                 override suspend fun countAllByCampaign() = emptyList<CampaignEnrolmentCount>()
                 override suspend fun save(enrolment: Enrolment): Enrolment = enrolment
@@ -112,10 +136,7 @@ class CampaignScheduleLifecycleTest {
                 override suspend fun evaluate(segment: Segment): List<UUID> = emptyList()
                 override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
             },
-            journeys = object : JourneySignaller {
-                override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
-                override fun startJourney(campaignId: UUID, partyId: UUID) = Unit
-            },
+            journeys = journeys,
             scheduler = scheduler,
         )
     }
@@ -196,4 +217,39 @@ class CampaignScheduleLifecycleTest {
 
         assertThat(scheduler.calls).isEmpty()
     }
+
+    @Test
+    fun `pause resume and close wake every active journey but not historical enrolments`(): Unit = runBlocking {
+        val activeParty = UUID.randomUUID()
+        val completedParty = UUID.randomUUID()
+        val enrolments = listOf(
+            enrolment(activeParty, EnrolmentState.ACTIVE),
+            enrolment(completedParty, EnrolmentState.COMPLETED),
+        )
+
+        val pauseSignals = RecordingJourneys()
+        service(campaign(CampaignState.ACTIVE, null), RecordingScheduler(), pauseSignals, enrolments)
+            .pause(campaignId)
+        assertThat(pauseSignals.calls).containsExactly("pause:$activeParty")
+
+        val resumeSignals = RecordingJourneys()
+        service(campaign(CampaignState.PAUSED, null), RecordingScheduler(), resumeSignals, enrolments)
+            .resume(campaignId)
+        assertThat(resumeSignals.calls).containsExactly("resume:$activeParty")
+
+        val closeSignals = RecordingJourneys()
+        service(campaign(CampaignState.ACTIVE, null), RecordingScheduler(), closeSignals, enrolments)
+            .close(campaignId)
+        assertThat(closeSignals.calls).containsExactly("close:$activeParty")
+    }
+
+    private fun enrolment(partyId: UUID, state: EnrolmentState) = Enrolment(
+        id = UUID.randomUUID(),
+        campaignId = campaignId,
+        partyId = partyId,
+        state = state,
+        currentStep = 0,
+        startedAt = Instant.EPOCH,
+        completedAt = null,
+    )
 }

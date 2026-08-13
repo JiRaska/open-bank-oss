@@ -1,0 +1,265 @@
+.dashboard {
+  max-width: 1400px;
+  padding: 28px 32px 40px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.headerIcon {
+  color: var(--accent);
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lastRefresh {
+  color: var(--text-tertiary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.metric {
+  min-height: 122px;
+  padding: 18px;
+  border-radius: 12px;
+}
+
+.healthOverview,
+.serviceGroup,
+.quickAccess {
+  padding: 18px;
+}
+
+.healthOverview {
+  margin-bottom: 16px;
+}
+
+.sectionLabel {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.healthGroups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+
+.healthGroupHeader,
+.serviceGroupHeader,
+.serviceGroupTitle {
+  display: flex;
+  align-items: center;
+}
+
+.healthGroupHeader,
+.serviceGroupHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.healthGroupHeader {
+  margin-bottom: 7px;
+}
+
+.groupName {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.groupSummary {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.healthBar {
+  height: 6px;
+  overflow: hidden;
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.healthBarFill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+.serviceGroups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.serviceGroupHeader {
+  margin-bottom: 14px;
+}
+
+.serviceGroupTitle {
+  gap: 8px;
+  min-width: 0;
+}
+
+.serviceGroupTitle .sectionLabel {
+  margin-bottom: 0;
+}
+
+.groupDot,
+.serviceDot {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.groupDot {
+  width: 8px;
+  height: 8px;
+}
+
+.groupStatus {
+  flex: 0 0 auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.serviceChips,
+.quickLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.serviceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.serviceChipHealthy {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.serviceChipHealthy .serviceDot {
+  background: var(--success);
+}
+
+.serviceChipUnhealthy {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.serviceChipUnhealthy .serviceDot {
+  background: var(--danger);
+}
+
+.serviceChipPlanned {
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  opacity: 0.78;
+}
+
+.serviceChipPlanned .serviceDot {
+  background: var(--text-tertiary);
+}
+
+.serviceDot {
+  width: 5px;
+  height: 5px;
+}
+
+.serviceLatency {
+  opacity: 0.7;
+}
+
+.quickLink {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.quickLinkContent {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.quickLink:hover .quickLinkContent,
+.quickLink:focus-visible .quickLinkContent {
+  border-color: var(--quick-link-accent);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+
+.quickLink:focus-visible {
+  outline: none;
+}
+
+@media (max-width: 1180px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .healthGroups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .dashboard {
+    padding: 20px 16px 32px;
+  }
+
+  .headerActions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .metrics,
+  .healthGroups,
+  .serviceGroups {
+    grid-template-columns: 1fr;
+  }
+
+  .serviceGroupHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .groupStatus {
+    white-space: normal;
+  }
+}

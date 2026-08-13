@@ -5,12 +5,17 @@
 package com.openbank.kyc.infrastructure.retention
 
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.quarkus.scheduler.Scheduled.ConcurrentExecution.SKIP
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
 
@@ -33,9 +38,19 @@ class KycRetentionScheduler(
     private val dryRun: Boolean,
     @ConfigProperty(name = "openbank.retention.kyc.enabled", defaultValue = "true")
     private val enabled: Boolean,
+    private val domainMetrics: DomainMetrics,
 ) {
 
     private val log = Logger.getLogger(KycRetentionScheduler::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /**
+     * Registers a boot-seeded heartbeat (ADR-0237) before the first daily tick. A disabled or
+     * dry-run sweep deliberately does not record success: neither proves the retention delete ran.
+     */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     @Scheduled(
         cron = "{openbank.retention.kyc.cron:0 30 3 * * ?}",
@@ -63,6 +78,7 @@ class KycRetentionScheduler(
         }
 
         val count = kycCaseRepository.deleteErasedCasesOlderThan(cutoff)
+        liveness?.recordSuccess()
         if (count > 0) {
             log.infof(
                 "[retention] Deleted %d KYC case(s) with erased_at < %s (ADR-0118 §5, AML Act §16)",
@@ -70,5 +86,10 @@ class KycRetentionScheduler(
                 cutoff,
             )
         }
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "kyc-retention"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 }

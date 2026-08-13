@@ -4,11 +4,14 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.application.port.out.BannerPlacementPort
+import com.openbank.campaign.application.port.out.BannerPlacementRequest
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.NotificationSendPort
+import com.openbank.campaign.application.port.out.NotificationSendRequest
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
@@ -17,6 +20,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -60,18 +64,50 @@ class CampaignJourneyActivitiesTest {
     )
 
     private inner class Harness {
-        var consent = true
+        var emailConsent = true
+        var pushConsent = true
+        var consentScope: String? = null
+        var channel = Channel.EMAIL
+        var fallbackToPush = false
         var sends = 0
         var entries = listOf<SuppressionEntry>()
         var failWith: RuntimeException? = null
         val recorded = mutableListOf<SendRecord>()
         var sendsRequested = 0
+        val bannerPlacements = mutableListOf<BannerPlacementRequest>()
 
         /** Correlation ids put on the wire, in order (ADR-0239 D1). */
         val correlationIds = mutableListOf<UUID>()
 
+        /** App destinations handed to notification-service for the current delivery. */
+        val deepLinks = mutableListOf<String?>()
+
+        /** Opaque PUSH-only references handed to notification-service (issue #4480). */
+        val interactionRefs = mutableListOf<UUID?>()
+
         val campaigns = object : CampaignRepository {
-            override suspend fun findById(id: UUID) = if (id == campaignId) campaign else null
+            override suspend fun findById(id: UUID) = if (id == campaignId) {
+                campaign.copy(
+                    steps = listOf(
+                        campaign.steps.single().copy(
+                            channel = channel,
+                            template = when (channel) {
+                                Channel.PUSH -> "MARKETING_PRODUCT_OFFER_PUSH"
+                                Channel.BANNER -> "MARKETING_PRODUCT_OFFER_BANNER"
+                                Channel.EMAIL -> "MARKETING_PRODUCT_OFFER"
+                            },
+                            fallbackToPush = fallbackToPush,
+                            mobileDestination = if (channel == Channel.BANNER) {
+                                MobileDestination.HOME
+                            } else {
+                                campaign.steps.single().mobileDestination
+                            },
+                        ),
+                    ),
+                )
+            } else {
+                null
+            }
             override suspend fun list() = listOf(campaign)
             override suspend fun save(campaign: Campaign) = campaign
             override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
@@ -113,23 +149,29 @@ class CampaignJourneyActivitiesTest {
             ): DeliveryStatus? = null
         }
         val notificationSend = object : NotificationSendPort {
-            override suspend fun requestSend(
-                partyId: UUID,
-                channel: Channel,
-                template: String,
-                recipient: String,
-                variables: Map<String, String>,
-                correlationId: UUID,
-            ) {
+            override suspend fun requestSend(request: NotificationSendRequest) {
                 sendsRequested += 1
-                correlationIds += correlationId
+                correlationIds += request.correlationId
+                deepLinks += request.deepLink
+                interactionRefs += request.interactionRef
+            }
+        }
+        val bannerPlacement = object : BannerPlacementPort {
+            override suspend fun place(request: BannerPlacementRequest) {
+                bannerPlacements += request
             }
         }
 
         val gate = ContactPolicyGate(
-            consent = ContactConsentPort { _, _ ->
+            consent = ContactConsentPort { _, scope ->
+                consentScope = scope
                 failWith?.let { throw it }
-                consent
+                when (scope) {
+                    "MARKETING_COMMS_EMAIL" -> emailConsent
+                    "MARKETING_COMMS_PUSH" -> pushConsent
+                    "MARKETING_COMMS_INAPP" -> pushConsent
+                    else -> false
+                }
             },
             counters = object : ContactCounterPort {
                 override suspend fun sendsInWindow(partyId: UUID, windowStart: Instant): Int {
@@ -153,8 +195,8 @@ class CampaignJourneyActivitiesTest {
                 sendLog,
                 gate,
                 notificationSend,
+                bannerPlacement,
                 dryRun = false,
-                marketingScope = "MARKETING_COMMS_EMAIL",
             )
     }
 
@@ -165,6 +207,21 @@ class CampaignJourneyActivitiesTest {
         assertThat(outcome).isEqualTo(StepOutcome.SENT)
         assertThat(h.sendsRequested).isEqualTo(1)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SENT)
+    }
+
+    @Test
+    fun `banner uses in-app consent and publishes a placement instead of a notification`() {
+        val h = Harness().apply { channel = Channel.BANNER }
+
+        val outcome = runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(outcome).isEqualTo(StepOutcome.SENT)
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_INAPP")
+        assertThat(h.sendsRequested).isZero()
+        val placement = h.bannerPlacements.single()
+        assertThat(placement.partyId).isEqualTo(partyId)
+        assertThat(placement.deepLink).isEqualTo("openbank://home")
+        assertThat(placement.template).isEqualTo("MARKETING_PRODUCT_OFFER_BANNER")
     }
 
     /**
@@ -184,6 +241,19 @@ class CampaignJourneyActivitiesTest {
         assertThat(h.correlationIds).hasSize(1)
         assertThat(h.recorded).hasSize(1)
         assertThat(h.correlationIds.single()).isEqualTo(h.recorded.single().id)
+    }
+
+    @Test
+    fun `a PUSH handoff carries its opaque send reference but email does not`() {
+        val push = Harness().apply { channel = Channel.PUSH }
+        runBlocking { push.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(push.interactionRefs).containsExactly(push.recorded.single().id)
+
+        val email = Harness()
+        runBlocking { email.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(email.interactionRefs).containsExactly(null)
     }
 
     /**
@@ -227,13 +297,61 @@ class CampaignJourneyActivitiesTest {
 
     @Test
     fun `no consent maps to SUPPRESSED_CONSENT`() {
-        val h = Harness().apply { consent = false }
+        val h = Harness().apply { emailConsent = false }
         assertThat(
             runBlocking {
                 h.activities.deliverStepGated(campaignId, partyId, 1)
             },
         ).isEqualTo(StepOutcome.SUPPRESSED)
         assertThat(h.recorded.map { it.outcome }).containsExactly(SendOutcome.SUPPRESSED_CONSENT)
+    }
+
+    @Test
+    fun `email delivery checks the email-specific marketing consent`() {
+        val h = Harness()
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_EMAIL")
+    }
+
+    @Test
+    fun `push delivery checks push consent rather than borrowing email consent`() {
+        val h = Harness().apply { channel = Channel.PUSH }
+
+        runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }
+
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_PUSH")
+    }
+
+    @Test
+    fun `missing email consent falls back to a separately consented push and records the actual channel`() {
+        val h = Harness().apply {
+            emailConsent = false
+            pushConsent = true
+            fallbackToPush = true
+        }
+
+        assertThat(runBlocking { h.activities.deliverStepGated(campaignId, partyId, 1) }).isEqualTo(StepOutcome.SENT)
+        assertThat(h.sendsRequested).isEqualTo(1)
+        assertThat(h.consentScope).isEqualTo("MARKETING_COMMS_PUSH")
+        assertThat(h.recorded.single().channel).isEqualTo(Channel.PUSH)
+    }
+
+    @Test
+    fun `a cap denial never switches to push`() {
+        val h = Harness().apply {
+            sends = 2
+            fallbackToPush = true
+        }
+
+        assertThat(
+            runBlocking {
+                h.activities.deliverStepGated(campaignId, partyId, 1)
+            },
+        ).isEqualTo(StepOutcome.SUPPRESSED)
+        assertThat(h.sendsRequested).isZero()
+        assertThat(h.recorded.single().outcome).isEqualTo(SendOutcome.SUPPRESSED_CAP)
     }
 
     @Test

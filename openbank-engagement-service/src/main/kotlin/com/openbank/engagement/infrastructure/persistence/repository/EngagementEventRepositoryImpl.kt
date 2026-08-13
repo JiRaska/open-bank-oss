@@ -34,14 +34,25 @@ class EngagementEventRepositoryImpl(
         Panache.withTransaction {
             persist(EngagementEventEntity.from(event, eventId)).chain { _ ->
                 val payload = mapper.writeValueAsString(
-                    mapOf(
-                        "eventId" to eventId.toString(),
-                        "partyId" to event.partyId.toString(),
-                        "contentId" to event.contentId,
-                        "slot" to event.slot.name,
-                        "type" to event.type.name,
-                        "occurredAt" to event.occurredAt.toString(),
-                    ),
+                    buildMap {
+                        put("eventId", eventId.toString())
+                        // One app observation is one immutable analytics fact. Keep the broker
+                        // partition key party-scoped, but give bronze an event-scoped aggregate so
+                        // multiple clicks by one party never collapse into one current-state row.
+                        put("aggregateType", "ENGAGEMENT")
+                        put("aggregateId", eventId.toString())
+                        put("partyId", event.partyId.toString())
+                        put("contentId", event.contentId)
+                        put("slot", event.slot.name)
+                        put("type", event.type.name)
+                        put("occurredAt", event.occurredAt.toString())
+                        event.interactionRef?.let { put("interactionRef", it.toString()) }
+                        event.campaignAttribution?.let { attribution ->
+                            put("campaignId", attribution.campaignId.toString())
+                            put("stepOrder", attribution.stepOrder)
+                            put("channel", attribution.channel)
+                        }
+                    },
                 )
                 outbox.persistInTransaction(
                     OutboxMessage(

@@ -58,7 +58,9 @@ BASELINE = {
     "openbank-audit-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
     "openbank-balance-service": "#4007 — publishes via the direct KafkaBalanceEventPublisher instead",
     "openbank-billing-service": "#4007 — 2 DEAD rows exist from a writer no longer present; see the issue",
-    "openbank-kyc-service": "#4007 — repository method present, nothing constructs a message",
+    # openbank-kyc-service was wired instead of deleted (#4007): the case lifecycle events now go
+    # through kyc_outbox in the state-change transaction and the direct KycEventPublisher is gone.
+    # Removing an entry from this list is the definition of done for that service.
     # openbank-party-service was wired instead of deleted (#4007): the lifecycle events now go
     # through party_outbox in the state-change transaction and the direct KafkaPartyEventPublisher
     # is gone. Removing an entry from this list is the definition of done for that service.

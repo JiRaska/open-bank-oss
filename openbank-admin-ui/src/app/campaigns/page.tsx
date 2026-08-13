@@ -14,12 +14,10 @@
 // the drill-down. Same board, motion and age semantics as the lending pipeline — a third visual
 // language on one console would be worse than either (see components/flow/StageBoard).
 //
-// WHAT THIS PAGE HONESTLY CANNOT SHOW
-// Reach, delivery and conversion — the numbers a CDP screen is really about. `GET /api/v1/campaigns`
-// returns campaign records only; enrolments and sends are per-campaign endpoints, so a performance
-// overview here would mean one request per campaign or an API that does not exist yet. Inventing
-// the numbers, or quietly implying the page covers performance, would be worse than saying so — the
-// board carries that sentence rather than hiding it in a doc.
+// EVIDENCE SEMANTICS
+// Campaign-service supplies enrolment and notification handoff. Analytics independently supplies
+// server-attributed app observations. The UI keeps those stages separate and renders unavailable or
+// not-observed explicitly; neither state is a numeric zero and neither handoff nor click is delivery.
 //
 // Read-only by design (#2895). Authoring is ADR-0221: `submit` → `activate`-by-a-DIFFERENT-approver
 // is a two-people-at-a-screen flow, and exposing half of it as buttons would lose the point of the
@@ -29,7 +27,20 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Megaphone, Play, PauseCircle, PenLine, ShieldCheck } from 'lucide-react'
+import {
+  Activity,
+  ArrowRight,
+  Clock3,
+  Eye,
+  Gauge,
+  GitBranch,
+  Megaphone,
+  PauseCircle,
+  PenLine,
+  Play,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
@@ -44,6 +55,16 @@ interface CampaignSummary {
   sent: number
   suppressed: number
   failed: number
+  outcomes?: { outcome: string; count: number }[]
+}
+
+interface CampaignEngagement {
+  campaignId: string
+  impressions: number
+  clicks: number
+  dismissals: number
+  firstObservedAt: string
+  lastObservedAt: string
 }
 
 interface Campaign {
@@ -68,10 +89,22 @@ const LIFECYCLE: { key: string; cs: string; en: string; terminal?: boolean }[] =
   { key: 'CLOSED', cs: 'Ukončená', en: 'Closed', terminal: true },
 ]
 
+/** A marketing landing page should surface the next decision, not merely count lifecycle states.
+ *  This is a display priority only — it never changes the campaign state machine. */
+const DECISION_PRIORITY: Record<string, number> = {
+  PENDING_APPROVAL: 0,
+  PAUSED: 1,
+  DRAFT: 2,
+  ACTIVE: 3,
+  CLOSED: 9,
+}
+
 export default function CampaignsPage() {
   const { t, language } = useLanguage()
   const [items, setItems] = useState<Campaign[]>([])
   const [summary, setSummary] = useState<Record<string, CampaignSummary> | null>(null)
+  const [engagement, setEngagement] = useState<Record<string, CampaignEngagement>>({})
+  const [engagementState, setEngagementState] = useState<'ok' | 'unavailable'>('unavailable')
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -80,7 +113,12 @@ export default function CampaignsPage() {
   useEffect(() => {
     fetch('/api/campaigns')
       .then(r => r.json())
-      .then((d: { items: Campaign[]; state: string; summary?: CampaignSummary[] | null }) => {
+      .then((d: {
+        items: Campaign[]
+        state: string
+        summary?: CampaignSummary[] | null
+        engagement?: { state: 'ok' | 'unavailable'; items: CampaignEngagement[] }
+      }) => {
         if (d.state !== 'ok') {
           setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable')
           return
@@ -88,6 +126,12 @@ export default function CampaignsPage() {
         setItems(d.items ?? [])
         setSummary(
           Array.isArray(d.summary) ? Object.fromEntries(d.summary.map(x => [x.campaignId, x])) : null,
+        )
+        setEngagementState(d.engagement?.state ?? 'unavailable')
+        setEngagement(
+          Array.isArray(d.engagement?.items)
+            ? Object.fromEntries(d.engagement.items.map(x => [x.campaignId, x]))
+            : {},
         )
       })
       .catch(() => setUnavailable('unreachable'))
@@ -122,12 +166,73 @@ export default function CampaignsPage() {
 
   const counts = (k: string) => stats.get(k)?.count ?? 0
 
+  const decisionQueue = useMemo(
+    () => [...items]
+      .filter(c => c.state !== 'CLOSED')
+      .sort((a, b) => {
+        const priority = (DECISION_PRIORITY[a.state] ?? 8) - (DECISION_PRIORITY[b.state] ?? 8)
+        return priority !== 0 ? priority : Date.parse(a.createdAt) - Date.parse(b.createdAt)
+      })
+      .slice(0, 3),
+    [items],
+  )
+
+  const deliveryPulse = useMemo(() => {
+    if (!summary) return null
+    return Object.values(summary).reduce(
+      (total, item) => ({
+        enrolled: total.enrolled + item.enrolled,
+        sent: total.sent + item.sent,
+        suppressed: total.suppressed + item.suppressed,
+      }),
+      { enrolled: 0, sent: 0, suppressed: 0 },
+    )
+  }, [summary])
+
+  const engagementPulse = useMemo(() => {
+    if (engagementState !== 'ok') return null
+    const values = Object.values(engagement)
+    if (values.length === 0) return null
+    return values.reduce(
+      (total, item) => ({
+        impressions: total.impressions + item.impressions,
+        clicks: total.clicks + item.clicks,
+        dismissals: total.dismissals + item.dismissals,
+      }),
+      { impressions: 0, clicks: 0, dismissals: 0 },
+    )
+  }, [engagement, engagementState])
+
+  const authoritativeConversions = useMemo(() => {
+    if (!summary) return null
+    const observed = Object.values(summary)
+      .flatMap(item => item.outcomes ?? [])
+      .filter(item => item.outcome === 'CONVERTED')
+    return observed.length > 0 ? observed.reduce((total, item) => total + item.count, 0) : null
+  }, [summary])
+
+  /** This is a campaign-operation rate, not customer delivery or conversion. Campaign-service
+   * can establish that it handed work to notification-service or protected someone with a
+   * suppression rule; only the channel and a campaign-attributed outcome could establish more. */
+  const handoffRate = useMemo(() => {
+    if (!deliveryPulse) return null
+    const decided = deliveryPulse.sent + deliveryPulse.suppressed
+    return decided > 0 ? Math.round((deliveryPulse.sent / decided) * 100) : null
+  }, [deliveryPulse])
+
   const needle = search.trim().toLowerCase()
   const filtered = items.filter(
     c =>
       (!stateFilter || c.state === stateFilter) &&
       (!needle || c.name.toLowerCase().includes(needle) || (c.goal ?? '').toLowerCase().includes(needle)),
   )
+
+  const nextAction = (campaign: Campaign) => {
+    if (campaign.state === 'PENDING_APPROVAL') return t('Čeká na druhé oči', 'Needs a second pair of eyes')
+    if (campaign.state === 'PAUSED') return t('Rozhodněte o pokračování', 'Decide whether to resume')
+    if (campaign.state === 'DRAFT') return t('Dokončete zadání', 'Finish the brief')
+    return t('Sledujte živou cestu', 'Follow the live journey')
+  }
 
   return (
     <div className="space-y-6">
@@ -168,6 +273,157 @@ export default function CampaignsPage() {
             <StatCard label={t('Pozastavené', 'Paused')} value={counts('PAUSED')}
                       tone={counts('PAUSED') > 0 ? 'warning' : undefined} icon={<PauseCircle size={13} />} />
           </div>
+
+          <section className="campaign-control-room" aria-label={t('Řídicí místnost kampaní', 'Campaign control room')} data-testid="campaign-control-room">
+            <div className="campaign-control-hero">
+              <div className="campaign-control-orbit campaign-control-orbit-one" aria-hidden="true" />
+              <div className="campaign-control-orbit campaign-control-orbit-two" aria-hidden="true" />
+              <div className="campaign-control-kicker"><Sparkles size={13} /> {t('Campaign OS', 'Campaign OS')}</div>
+              <div className="campaign-control-hero-copy">
+                <div>
+                  <h2>{t('Od nápadu k další akci. V jednom tahu.', 'From idea to next action. In one flow.')}</h2>
+                  <p>{t('Pracovní plocha pro rozhodnutí, ne inventář kampaní.', 'A decision workspace, not a campaign inventory.')}</p>
+                </div>
+                <Link href="/campaigns/new" className="campaign-control-create">
+                  <Sparkles size={14} /> {t('Vytvořit cestu', 'Create journey')}
+                </Link>
+              </div>
+              <div className="campaign-control-flow" aria-label={t('Tok práce kampaně', 'Campaign work flow')}>
+                <div className="campaign-flow-node" data-state="brief">
+                  <PenLine size={15} /><span>{t('Zadání', 'Brief')}</span><strong>{counts('DRAFT')}</strong>
+                </div>
+                <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
+                <div className="campaign-flow-node" data-state="review">
+                  <ShieldCheck size={15} /><span>{t('Druhé oči', 'Review')}</span><strong>{counts('PENDING_APPROVAL')}</strong>
+                </div>
+                <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
+                <div className="campaign-flow-node" data-state="live">
+                  <Activity size={15} /><span>{t('Živá cesta', 'Live journey')}</span><strong>{counts('ACTIVE')}</strong>
+                </div>
+                <ArrowRight className="campaign-flow-arrow" size={15} aria-hidden="true" />
+                <div className="campaign-flow-node" data-state="learn">
+                  <Eye size={15} /><span>{t('Důkaz', 'Evidence')}</span>
+                  <strong>{engagementState === 'unavailable' ? t('neznámé', 'unknown') : engagementPulse ? t('živě', 'live') : t('čeká', 'waiting')}</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="campaign-control-radar">
+              <div className="campaign-radar-heading">
+                <div>
+                  <p>{t('Signály operátora', 'Operator signals')}</p>
+                  <h3>{t('Co vyžaduje pozornost', 'What needs attention')}</h3>
+                </div>
+                <Gauge size={17} aria-hidden="true" />
+              </div>
+              <div className="campaign-radar-cards">
+                <div className="campaign-radar-card" data-tone={counts('PENDING_APPROVAL') > 0 ? 'attention' : 'clear'}>
+                  <div><Clock3 size={15} /><span>{t('Rozhodnutí čekají', 'Decisions waiting')}</span></div>
+                  <strong>{counts('PENDING_APPROVAL')}</strong>
+                  <p>{counts('PENDING_APPROVAL') > 0
+                    ? t('Kampaň potřebuje nezávislé schválení.', 'A campaign needs independent approval.')
+                    : t('Nic nečeká na schválení.', 'Nothing is waiting for approval.')}
+                  </p>
+                </div>
+                <div className="campaign-radar-card" data-tone={counts('PAUSED') > 0 ? 'attention' : 'clear'}>
+                  <div><PauseCircle size={15} /><span>{t('Zastavené cesty', 'Paused journeys')}</span></div>
+                  <strong>{counts('PAUSED')}</strong>
+                  <p>{counts('PAUSED') > 0
+                    ? t('Rozhodněte, zda pokračovat nebo uzavřít.', 'Decide whether to resume or close.')
+                    : t('Žádná cesta není pozastavená.', 'No journey is paused.')}
+                  </p>
+                </div>
+              </div>
+              <div className="campaign-evidence-strip" data-testid="campaign-evidence-strip">
+                <GitBranch size={15} aria-hidden="true" />
+                <div>
+                  <strong>{handoffRate === null ? t('Čeká na provozní data', 'Waiting for operating data') : `${handoffRate} % ${t('předáno do kanálu', 'handed to channel')}`}</strong>
+                  <span>{t('Je to pouze handoff do kanálu. Pozorované reakce aplikace jsou odděleně níže.', 'This is channel handoff only. Observed app response is reported separately below.')}</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="campaign-decision-desk" aria-label={t('Dnešní priority kampaní', 'Today’s campaign priorities')} data-testid="campaign-decision-desk">
+            <div className="campaign-decision-queue">
+              <div className="campaign-desk-heading">
+                <div>
+                  <p>{t('Dnešní fokus', 'Today’s focus')}</p>
+                  <h2>{t('Co posune kampaně dál', 'What moves campaigns forward')}</h2>
+                </div>
+                <span>{decisionQueue.length}</span>
+              </div>
+              {decisionQueue.length > 0 ? (
+                <div className="campaign-decision-items">
+                  {decisionQueue.map((campaign, index) => (
+                    <Link key={campaign.id} href={`/campaigns/${campaign.id}`} className="campaign-decision-item" data-decision-campaign={campaign.id}>
+                      <span className="campaign-decision-rank">0{index + 1}</span>
+                      <span className="campaign-decision-copy">
+                        <strong>{campaign.name}</strong>
+                        <small>{nextAction(campaign)}</small>
+                      </span>
+                      <StatusBadge status={campaign.state} label={label(campaign.state)} />
+                    </Link>
+                  ))}
+                </div>
+              ) : (
+                <p className="campaign-decision-empty">{t('Nic nečeká. Můžete připravit další nápad.', 'Nothing is waiting. You can prepare the next idea.')}</p>
+              )}
+            </div>
+
+            <div className="campaign-delivery-pulse" data-testid="campaign-delivery-pulse">
+              <div className="campaign-desk-heading">
+                <div>
+                  <p>{t('Doručení', 'Delivery')}</p>
+                  <h2>{t('Pulse portfolia', 'Portfolio pulse')}</h2>
+                </div>
+                <span className={deliveryPulse ? 'campaign-pulse-live' : 'campaign-pulse-muted'}>{deliveryPulse ? t('Živě', 'Live') : t('Čeká na data', 'Waiting for data')}</span>
+              </div>
+              {deliveryPulse ? (
+                <div className="campaign-pulse-numbers">
+                  <div><strong>{deliveryPulse.enrolled.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('zařazeno', 'enrolled')}</span></div>
+                  <div><strong>{deliveryPulse.sent.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('odesláno', 'sent')}</span></div>
+                  <div><strong>{deliveryPulse.suppressed.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('potlačeno', 'suppressed')}</span></div>
+                </div>
+              ) : (
+                <p className="campaign-pulse-empty">{t('Nasazená služba zatím neposílá souhrn doručení. Nuly by byly zavádějící.', 'The deployed service does not yet return a delivery aggregate. Zeros would mislead.')}</p>
+              )}
+              <p className="campaign-pulse-footnote">{t('Tento panel končí handoffem do kanálu; níže jsou samostatně pozorované reakce aplikace.', 'This panel stops at channel handoff; observed app response is separate below.')}</p>
+              <div
+                data-testid="campaign-engagement-pulse"
+                style={{ marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--border)' }}
+              >
+                <div className="campaign-desk-heading">
+                  <div>
+                    <p>{t('Reakce v aplikaci', 'App response')}</p>
+                    <h2>{t('Pozorovaný engagement', 'Observed engagement')}</h2>
+                  </div>
+                  <span className={engagementPulse ? 'campaign-pulse-live' : 'campaign-pulse-muted'}>
+                    {engagementState === 'unavailable'
+                      ? t('Neznámé', 'Unknown')
+                      : engagementPulse
+                        ? t('Živě', 'Live')
+                        : t('Zatím nepozorováno', 'Not yet observed')}
+                  </span>
+                </div>
+                {engagementPulse ? (
+                  <div className="campaign-pulse-numbers" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+                    <div><strong>{engagementPulse.impressions.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('zobrazení', 'impressions')}</span></div>
+                    <div><strong>{engagementPulse.clicks.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('kliknutí', 'clicks')}</span></div>
+                    <div><strong>{engagementPulse.dismissals.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('odmítnutí', 'dismissals')}</span></div>
+                    <div><strong>{authoritativeConversions === null ? '—' : authoritativeConversions.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong><span>{t('produktové konverze', 'product-event conversions')}</span></div>
+                  </div>
+                ) : (
+                  <p className="campaign-pulse-empty">
+                    {engagementState === 'unavailable'
+                      ? t('Analytická projekce právě není čitelná. Stav je neznámý, nikoli nula.', 'The analytics projection is not readable right now. The state is unknown, not zero.')
+                      : t('Pro kampaně zatím nebyla pozorována žádná serverově přiřazená reakce.', 'No server-attributed app response has been observed for these campaigns yet.')}
+                  </p>
+                )}
+                <p className="campaign-pulse-footnote">{t('Zobrazení, kliknutí a odmítnutí jsou akce aplikace. Produktová konverze přichází z autoritativní account/card události, nikdy z telefonu ani kliku.', 'Impressions, clicks and dismissals are app actions. Product conversion comes from an authoritative account/card event, never from the phone or a click.')}</p>
+              </div>
+            </div>
+          </section>
 
           <StageBoard
             stages={stages}
@@ -233,6 +489,7 @@ export default function CampaignsPage() {
                     {summary && <th>{t('Zařazeno', 'Enrolled')}</th>}
                     {summary && <th>{t('Doručeno', 'Sent')}</th>}
                     {summary && <th>{t('Potlačeno', 'Suppressed')}</th>}
+                    <th>{t('Reakce v aplikaci', 'App response')}</th>
                     <th>{t('Vytvořil', 'Created by')}</th>
                     <th>{t('Schválil', 'Approved by')}</th>
                     <th>{t('Vytvořeno', 'Created')}</th>
@@ -269,6 +526,16 @@ export default function CampaignsPage() {
                           {summary[c.id]?.suppressed ?? 0}
                         </td>
                       )}
+                      <td className="text-xs" data-testid={`campaign-engagement-${c.id}`}>
+                        {engagementState === 'unavailable'
+                          ? t('Neznámé', 'Unknown')
+                          : engagement[c.id]
+                            ? t(
+                                `${engagement[c.id].impressions} zobrazení · ${engagement[c.id].clicks} kliknutí`,
+                                `${engagement[c.id].impressions} impressions · ${engagement[c.id].clicks} clicks`,
+                              )
+                            : t('Zatím nepozorováno', 'Not yet observed')}
+                      </td>
                       <td className="text-xs">{c.createdBy}</td>
                       {/* The checker, shown next to the maker on purpose: the maker/checker pair is
                           the audit-relevant fact about an ACTIVE campaign, not a detail. */}

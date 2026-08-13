@@ -5,9 +5,11 @@
 package com.openbank.engagement.application
 
 import com.openbank.engagement.application.port.out.AdverseStateRepository
+import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.application.usecase.ResolveSurfaceUseCase
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.engagement.domain.model.CampaignBannerPlacement
 import com.openbank.engagement.domain.model.EngagementEvent
 import com.openbank.engagement.domain.model.EngagementEventType
 import com.openbank.engagement.domain.model.SurfaceSlot
@@ -45,12 +47,16 @@ class ResolveSurfaceUseCaseTest {
         return repo
     }
 
+    private fun banners() = mockk<CampaignBannerPlacementRepository>().also {
+        coEvery { it.latestForPartyAndSlot(any(), any()) } returns null
+    }
+
     @Test
     fun `a consented party with no dismissal history sees the slot's catalogue`(): Unit = runBlocking {
         val events = mockk<EngagementEventRepository>()
         coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns emptyList()
 
-        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates())
+        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates(), banners())
             .resolve(party, SurfaceSlot.HOME_BANNER)
 
         assertThat(result).isInstanceOf(ResolveSurfaceUseCase.Result.Rendered::class.java)
@@ -59,11 +65,59 @@ class ResolveSurfaceUseCaseTest {
     }
 
     @Test
+    fun `a consented party sees their latest campaign banner before the catalogue fallback`(): Unit = runBlocking {
+        val events = mockk<EngagementEventRepository>()
+        val placements = mockk<CampaignBannerPlacementRepository>()
+        val ref = UUID.randomUUID()
+        coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns emptyList()
+        coEvery { placements.latestForPartyAndSlot(party, SurfaceSlot.HOME_BANNER) } returns CampaignBannerPlacement(
+            ref,
+            party,
+            UUID.randomUUID(),
+            0,
+            "MARKETING_PRODUCT_OFFER_BANNER",
+            mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            "openbank://savings",
+            Instant.now(),
+        )
+
+        val result = ResolveSurfaceUseCase(
+            gate(),
+            events,
+            adverseStates(),
+            placements,
+        ).resolve(party, SurfaceSlot.HOME_BANNER)
+
+        val content = (result as ResolveSurfaceUseCase.Result.Rendered).content.first()
+        assertThat(content.id).isEqualTo(CampaignBannerPlacement.CAMPAIGN_BANNER_CONTENT_ID)
+        assertThat(content.interactionRef).isEqualTo(ref)
+        assertThat(content.deepLink).isEqualTo("openbank://savings")
+    }
+
+    @Test
+    fun `a campaign carousel is returned only in its selected app surface`(): Unit = runBlocking {
+        val events = mockk<EngagementEventRepository>()
+        val placements = mockk<CampaignBannerPlacementRepository>()
+        coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_CAROUSEL, any()) } returns emptyList()
+        coEvery { placements.latestForPartyAndSlot(party, SurfaceSlot.HOME_CAROUSEL) } returns CampaignBannerPlacement(
+            UUID.randomUUID(), party, UUID.randomUUID(), 0, "MARKETING_PRODUCT_OFFER_CAROUSEL",
+            mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            "openbank://savings", Instant.now(), SurfaceSlot.HOME_CAROUSEL,
+        )
+
+        val result = ResolveSurfaceUseCase(gate(), events, adverseStates(), placements)
+            .resolve(party, SurfaceSlot.HOME_CAROUSEL) as ResolveSurfaceUseCase.Result.Rendered
+
+        assertThat(result.content.single().id).isEqualTo("CAMPAIGN_HOME_CAROUSEL")
+        assertThat(result.content.single().slot).isEqualTo(SurfaceSlot.HOME_CAROUSEL)
+    }
+
+    @Test
     fun `a party with no marketing consent is not eligible, not silently empty`(): Unit = runBlocking {
         val events = mockk<EngagementEventRepository>()
         coEvery { events.recentForPartyAndSlot(any(), any(), any()) } returns emptyList()
 
-        val result = ResolveSurfaceUseCase(gate(consented = false), events, adverseStates())
+        val result = ResolveSurfaceUseCase(gate(consented = false), events, adverseStates(), banners())
             .resolve(party, SurfaceSlot.HOME_BANNER)
 
         assertThat(result).isInstanceOf(ResolveSurfaceUseCase.Result.NotEligible::class.java)
@@ -83,7 +137,7 @@ class ResolveSurfaceUseCaseTest {
         }
         coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns dismissals
 
-        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates())
+        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates(), banners())
             .resolve(party, SurfaceSlot.HOME_BANNER)
 
         assertThat(result).isEqualTo(ResolveSurfaceUseCase.Result.Suppressed)
@@ -94,7 +148,12 @@ class ResolveSurfaceUseCaseTest {
         val events = mockk<EngagementEventRepository>()
         coEvery { events.recentForPartyAndSlot(party, SurfaceSlot.HOME_BANNER, any()) } returns emptyList()
 
-        val result = ResolveSurfaceUseCase(gate(consented = true), events, adverseStates(setOf(AdverseState.ARREARS)))
+        val result = ResolveSurfaceUseCase(
+            gate(consented = true),
+            events,
+            adverseStates(setOf(AdverseState.ARREARS)),
+            banners(),
+        )
             .resolve(party, SurfaceSlot.HOME_BANNER)
 
         // Still a Rendered result (SurfaceResolver's own D3.5 exclusion, not a gate/consent

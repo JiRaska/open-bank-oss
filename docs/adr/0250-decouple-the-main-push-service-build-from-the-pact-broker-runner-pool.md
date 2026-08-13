@@ -1,16 +1,33 @@
 ---
 date: 2026-08-09
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, finops, capacity, testing]
 summary: "Main-push service builds run on the 6-slot in-cluster ARC pool only because the Pact Broker has no public ingress. Split the job so compile+test run on free hosted runners and only broker-touching work stays in-cluster."
+followup: "#4414 — Phase 2, the actual _service-ci.yml job split and Gradle provider-test isolation, is specified below but not implemented: it needs a session with a working Gradle/JVM environment to verify a Gradle Test Suite change across 26 services, which this session does not have."
 ---
 
 # ADR-0250 — Decouple the main-push service build from the Pact Broker runner pool
+
+**Delivery note (2026-08-09, same day as acceptance):** Accepted with a two-phase plan (see
+"Implementation phases" below), added on re-reading this ADR with fresh queue data (see that
+section) and, critically, after actually reading `_service-ci.yml` and the shared Gradle
+convention plugin rather than reasoning from this document alone. **Phase 1** (raise
+`arc_max_runners` 6→12, retire `runners-warm`) already shipped in #4319, *before* this ADR was
+accepted — the immediate lever from "Alternatives considered" was taken first, and the queue
+depth this section originally measured (42, p50 7h) has since moved (see below) but the
+underlying saturation has not resolved, which is itself evidence for the harder half of this
+ADR rather than against it. **Phase 2** (the actual `build`/`contract` split + Gradle task
+isolation) is specified precisely enough to hand off, and NOT implemented, for a reason worth
+stating rather than working around: it requires a Gradle Test Suite change verified by
+compiling and running tests across up to 26 services, which needs a real Gradle/JVM toolchain
+this session does not have. Attempting it blind would risk the fleet's own deploy pipeline —
+exactly the "hard to reverse, affects shared systems" class of action that gets a pause, not a
+guess.
 
 ## Context
 
@@ -150,6 +167,76 @@ That is the quantitative case for this ADR: the in-cluster pool is scarce (6 slo
 runs, p50 queue 85 min) and roughly 90% of what it computes has no in-cluster dependency. The
 residual is provider verification, which is embedded in `test` and therefore not visible as
 its own line above.
+
+## Implementation phases
+
+**Phase 1 — shipped (#4319, merged 2026-08-09T13:20:58Z), before this ADR was formally
+accepted.** `arc_max_runners` 6→12, `runners-warm` retired. Re-measured same day, ~7h after
+merge: queue 57 (was 42 at proposal time), in-progress 5 (was 6 of 6 — i.e. now *under* even
+the old cap), oldest queued entry ~18h (was max 23.4h). The queue did not clear and at one
+point *grew* to 58 during the re-measurement window. This is not evidence Phase 1 failed on
+its own terms — throughput did increase (in-progress dropping below the old ceiling while the
+queue still has entries means the pool is draining, just not fast enough against arrival) — it
+is evidence that a capacity lever alone cannot out-run an arrival rate that already exceeds
+6-12 slots' worth of throughput on a day with this much commit/PR/auto-deploy volume. Which is
+exactly this ADR's original thesis in "Two things follow" above: doubling a scarce resource
+delays saturation, it does not remove the dependency that makes it scarce.
+
+**Phase 2 — specified here, not implemented.** Investigated on 2026-08-09 by reading
+`_service-ci.yml` and the shared Gradle convention plugin
+(`build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts`) rather than reasoning from
+this ADR's text alone. Three findings change the shape of the work from "move some steps to
+another job" to a real Gradle change:
+
+1. **The Pact-property forwarding block is genuinely centralizable, and already almost
+   duplicated correctly.** `tasks.withType<Test> { listOf("pactbroker.url", …9 keys…).forEach {
+   key -> System.getProperty(key)?.let { systemProperty(key, it) } } }` is copy-pasted into 32
+   individual `<service>/build.gradle.kts` files rather than living in the one convention
+   plugin every service already applies. A first pass at hashing all 32 occurrences to confirm
+   they are byte-identical before centralizing them returned **5 distinct hashes, not 1** — the
+   extraction script's own crude `awk` boundary-matching was unreliable (closing-brace
+   detection triggered early on at least one file), which is the "probe that lies by reporting
+   almost-clean" pattern this repo's CLAUDE.md already documents at length, caught here before
+   it produced a bad mechanical edit rather than after. **Do not centralize this without a
+   tool that diffs each file's block individually and shows every difference** — do not trust
+   a hash-of-32 rollup, prove each one.
+2. **The actual isolation target is unambiguous.** Every provider-verification test class
+   across the fleet ends in `ProviderVerificationTest` (confirmed: `grep -rl '@Provider('
+   --include='*.kt'` → 26 services, every match's filename matches
+   `*ProviderVerificationTest.kt`, split between `*PactFolderProviderVerificationTest`
+   — no broker, always safe to run anywhere — and `*Pact(Broker)?ProviderVerificationTest`
+   — the ones that need `pactbroker.url`). A Gradle `--tests "*ProviderVerificationTest"`
+   filter targets exactly the right classes by name with no ambiguity.
+3. **A `--tests` filter alone does NOT achieve the goal, and this is the reason Phase 2 is a
+   Gradle change and not a workflow change.** `--tests` narrows which JUnit Platform tests
+   *execute* within one invocation of the `test` task; it does not change what Gradle
+   considers that task's *inputs* for its own up-to-date/cache-key computation. `-Dpactbroker.url`
+   is already one of those tracked inputs (the #1009 hazard this file documents elsewhere), so
+   the `contract` job's `test` invocation (broker URL set) is *always* a different cache key
+   from the `build` job's (broker URL blank) — meaning `contract` cannot reuse `build`'s
+   compiled output via the task-level cache no matter how the test selection is filtered, and
+   would still pay compile + full dependency resolution before running even one filtered test.
+   The in-cluster remote build cache (`GRADLE_REMOTE_CACHE_URL`) cannot rescue this either: it
+   is reachable only from inside the cluster, so the hosted `build` job can never populate it
+   for `contract` to read.
+
+   **The actual fix is a separate Gradle test source set / JVM Test Suite**
+   (`providerPactTest`, wired once into the shared convention plugin) whose own task has a
+   narrower input set — the compiled main + provider-test classes only, not entangled with the
+   general `test` task's other system properties — so it can be invoked independently
+   (`./gradlew :service:providerPactTest -Dpactbroker.url=…`) without forcing a redundant full
+   recompilation/retest of everything `build` already did. This is real Gradle build-logic
+   surgery across a shared convention plugin (low fan-out: one file) feeding 26 services' test
+   trees (real fan-out: the verification surface), and needs to be compiled and run for real,
+   which needs a session with a Gradle/JVM toolchain — not available here.
+
+**What Phase 2 buys, once built**, per the existing "How much of the job actually needs the
+cluster" measurement: `contract` job shrinks from the full 4–11 minute build to roughly the
+`providerPactTest` slice plus a 0–1s publish — the 61–83% (`Build + test`) and ~22%
+(`Generate Kover XML report`) shares move to free hosted runners entirely, for every one of the
+~26 services that has a provider contract. The GitHub Free-plan 20-concurrent-hosted-job
+ceiling (see Consequences → Negative) becomes the binding constraint at that point, so the
+concurrency governor named there is a Phase 2 prerequisite, not an afterthought.
 
 ## Compliance impact
 

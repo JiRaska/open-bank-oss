@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.workflow
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.sepa.application.port.out.AmlCasePort
 import com.openbank.sepa.application.port.out.FraudScoreOutcome
 import com.openbank.sepa.application.port.out.FraudScoringPort
@@ -13,6 +14,7 @@ import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.application.port.out.SchemeGatewayUnavailableException
 import com.openbank.sepa.application.port.out.SchemeSubmissionOutcome
 import com.openbank.sepa.application.port.out.ScreeningUnavailableException
+import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.application.port.out.SettlementOutcome
 import com.openbank.sepa.application.port.out.SettlementPort
@@ -24,10 +26,12 @@ import com.openbank.sepa.domain.screening.ScreeningDecision
 import com.openbank.sepa.domain.screening.ScreeningMatchStatus
 import com.openbank.sepa.domain.screening.ScreeningResult
 import com.openbank.sepa.domain.screening.ScreeningRole
+import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -35,6 +39,7 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
+import java.time.ZoneOffset
 import java.util.UUID
 
 class SepaPaymentActivitiesImplTest {
@@ -258,6 +263,76 @@ class SepaPaymentActivitiesImplTest {
         coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
+
+    // --- #3914: business event time on the Temporal-path payloads -----------------------------
+    //
+    // These five payloads carried no time field at all, so AuditConsumer.eventTime() returned null
+    // and audit_entries recorded the CONSUMER's ingest time as the business time. The assertion is
+    // an EXACT expected instant against a fixed clock, never `isNotNull()` — a non-null check would
+    // pass against Instant.EPOCH, and an `isNotEmpty()` on the string would pass against the
+    // four-character text "null" that Jackson's asText() yields for a JSON null.
+
+    private val fixedInstant: Instant = Instant.parse("2026-03-01T12:34:56Z")
+
+    private fun fixedClockActivities(): SepaPaymentActivitiesImpl = TestableActivities(
+        paymentRepository,
+        screeningPort,
+        amlCasePort,
+        fraudScoringPort,
+        schemeGatewayPort,
+        settlementPort,
+        clock = Clock.fixed(fixedInstant, ZoneOffset.UTC),
+        schemeSubmissionEnabled = true,
+    )
+
+    @Test
+    fun `validatePayment stamps occurredAt with the transition instant`() {
+        val outbox: CapturingSlot<SepaPaymentOutboxMessage> = slot()
+        coEvery { paymentRepository.findById(paymentId) } returns payment
+        coEvery { paymentRepository.update(any(), capture(outbox)) } answers { firstArg() }
+
+        fixedClockActivities().validatePayment(paymentId)
+
+        assertThat(outbox.captured.payload).contains(""""occurredAt":"$fixedInstant"""")
+        val parsed = Instant.parse(
+            objectMapper.readTree(outbox.captured.payload).get("occurredAt").asText(),
+        )
+        assertThat(parsed).isEqualTo(fixedInstant)
+    }
+
+    @Test
+    fun `rejectPayment stamps occurredAt with the transition instant`() {
+        val outbox: CapturingSlot<SepaPaymentOutboxMessage> = slot()
+        coEvery { paymentRepository.findById(paymentId) } returns payment
+        coEvery { paymentRepository.update(any(), capture(outbox)) } answers { firstArg() }
+
+        fixedClockActivities().rejectPayment(paymentId)
+
+        assertThat(Instant.parse(objectMapper.readTree(outbox.captured.payload).get("occurredAt").asText()))
+            .isEqualTo(fixedInstant)
+    }
+
+    @Test
+    fun `submitToScheme stamps occurredAt on PROCESSING and COMPLETED`() {
+        val validated = payment.copy(status = SepaPaymentStatus.VALIDATED)
+        val outboxes = mutableListOf<SepaPaymentOutboxMessage>()
+        coEvery { paymentRepository.findById(paymentId) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
+
+        val result = fixedClockActivities().submitToScheme(paymentId)
+
+        assertThat(result).isEqualTo(SepaPaymentStatus.COMPLETED)
+        assertThat(outboxes).hasSize(2)
+        assertThat(outboxes.map { objectMapper.readTree(it.payload).get("status").asText() })
+            .containsExactly("PROCESSING", "COMPLETED")
+        outboxes.forEach {
+            assertThat(Instant.parse(objectMapper.readTree(it.payload).get("occurredAt").asText()))
+                .isEqualTo(fixedInstant)
+        }
+    }
+
+    private val objectMapper = ObjectMapper()
 }
 
 /**

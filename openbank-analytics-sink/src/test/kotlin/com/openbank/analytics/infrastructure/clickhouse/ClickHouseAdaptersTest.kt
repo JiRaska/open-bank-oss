@@ -82,6 +82,38 @@ class ClickHouseAdaptersTest {
         assertThat(client.lastQuery).contains("groupUniqArray(aggregate_version)")
     }
 
+    /**
+     * Case fold, issue #4604 (the #4553 follow-up). AggregateKey's equals/hashCode are
+     * case-sensitive, and bronze holds both `ACCOUNT`/`Account` for the same account — an unfolded
+     * GROUP BY would produce two AggregateKeys for one real aggregate, which ReconciliationJob
+     * would compare against ReconciliationSource's own (consistently-cased) key and report as BOTH a
+     * version mismatch and an orphan. Measured on the sandbox warehouse before this fix: account
+     * `28ed9683-…` split into `(ACCOUNT, maxVersion=0)` and `(Account, maxVersion=1)` — the true
+     * max (1) invisible under the `ACCOUNT` key a source-of-truth service would report.
+     *
+     * A unit test with a faked query RESPONSE cannot exercise ClickHouse's own GROUP BY merge — only
+     * asserting the emitted SQL asks for it is possible at this layer; the merge itself was verified
+     * directly against the sandbox warehouse before writing this fix, not assumed.
+     */
+    @Test
+    fun `all three warehouse queries fold aggregate_type case, so one aggregate cannot become two keys`() {
+        val client = FakeClickHouseClient()
+        val reader = ClickHouseWarehouseStateReader().apply { clickhouse = client }
+        runBlocking {
+            reader.currentVersions()
+            assertThat(client.lastQuery).contains("upper(aggregate_type)")
+            assertThat(client.lastQuery).doesNotContain("GROUP BY aggregate_type,")
+
+            reader.rowCountsByType()
+            assertThat(client.lastQuery).contains("upper(aggregate_type)")
+            assertThat(client.lastQuery).doesNotContain("GROUP BY aggregate_type ")
+
+            reader.versionsByAggregate()
+            assertThat(client.lastQuery).contains("upper(aggregate_type)")
+            assertThat(client.lastQuery).doesNotContain("GROUP BY aggregate_type,")
+        }
+    }
+
     @Test
     fun `warehouse reader tolerates blank and malformed lines`() = runBlocking<Unit> {
         val client = FakeClickHouseClient().apply { queryResponse = "\nACCOUNT\tacc-1\t5\nBROKEN_LINE\n" }

@@ -6,6 +6,7 @@ package com.openbank.ledger.application.port.out
 
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.LocalDate
 
 /**
  * A ČNB fixing as the revaluation consumes it: the statutory CZK-per-unit [rate] **and** the moment
@@ -32,6 +33,20 @@ data class CnbFixing(val rate: BigDecimal, val validFrom: Instant?)
  */
 interface CnbRateProvider {
 
-    /** Latest ČNB fixing as CZK per 1 unit of [base] (against CZK), or `null` if none is published. */
-    suspend fun cnbRate(base: String): CnbFixing?
+    /**
+     * The ČNB fixing as CZK per 1 unit of [base] (against CZK) that was **in effect on [asOf]**, or
+     * `null` if none was.
+     *
+     * [asOf] is the second half of #3921. The port used to take the currency alone, so it could
+     * only ever answer "the latest fixing valid right now" — and `FxRevaluationService` passes the
+     * business day it is marking, which for a belated or manual run of an older day is not today.
+     * A backfill therefore marked that day at **today's** rate, and there was no parameter through
+     * which it could have asked for anything else.
+     *
+     * `null` for a day with no fixing in effect is deliberate and is NOT a fallback to the newest
+     * one: falling back is precisely the defect. The caller logs and skips that leg (`posted =
+     * false`), which the `FxRevaluationSkippedAllLegs` Loki rule observes now that its selector
+     * names the namespace ledger actually deploys to.
+     */
+    suspend fun cnbRate(base: String, asOf: LocalDate): CnbFixing?
 }

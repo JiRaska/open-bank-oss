@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.1...ledger-service-v1.20.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **ledger:** resolve the ČNB fixing by business day and let a corrected one supersede ([#4397](https://github.com/JiRaska/open-bank-oss/issues/4397)) ([e2c5d87](https://github.com/JiRaska/open-bank-oss/commit/e2c5d87e21e913d24ff6e1558eff8425f5abf4a7)), closes [#1302](https://github.com/JiRaska/open-bank-oss/issues/1302)
+
 ## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.0...ledger-service-v1.20.1) (2026-08-09)
 
 

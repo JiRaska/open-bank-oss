@@ -82,7 +82,9 @@ describe('campaign console', () => {
     vi.stubGlobal('fetch', mockFetch(LIST, DETAIL))
     render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
 
-    await waitFor(() => expect(screen.getByText('smoke-offer')).toBeTruthy())
+    // The same campaign intentionally appears in the decision desk and in the complete table.
+    // A single-element query makes that useful repetition look like a UI regression.
+    await waitFor(() => expect(screen.getAllByText('smoke-offer')).toHaveLength(2))
     // The state is now rendered as a human label ("Running"), because a marketer should not have to
     // know what ACTIVE means. Both halves are asserted on purpose: the label is what the reader
     // sees, and the raw enum stays reachable as the title so the screen and the state machine can
@@ -127,8 +129,9 @@ describe('campaign console', () => {
     // tile — same rule as the journey canvas: the enum stays queryable, never visible text.
     expect(document.querySelector('[data-state="TERMINATED_CONSENT_REVOKED"]')).toBeTruthy()
 
-    // Surfaced as a headline number, not buried in the table.
-    expect(screen.getByText('Suppressed sends')).toBeTruthy()
+    // Surfaced as a headline number, not buried in the table. “Protected” is deliberate:
+    // a consent or quiet-hours suppression is a safeguard, not a failed delivery.
+    expect(screen.getByText('Protected')).toBeTruthy()
     // And broken down by reason: "2 suppressed" says something is off, "2× quiet hours" says whether to act.
     expect(screen.getByText(/1× Consent withdrawn/)).toBeTruthy()
   }, 15000)
@@ -158,7 +161,7 @@ describe('campaign console', () => {
   /**
    * The send log pages, so anything derived from the rows on screen describes the page, not the
    * campaign. This pins the two numbers that would otherwise silently mean "so far on this page":
-   * the suppressed headline and the suppression breakdown, both of which an operator acts on.
+   * the protected headline and the suppression breakdown, both of which an operator acts on.
    *
    * Falsification: with the previous page-derived implementation the headline reads 1 and the
    * breakdown reads "1× Consent withdrawn" against the same fixture.
@@ -178,8 +181,10 @@ describe('campaign console', () => {
       ),
     )
 
-    await waitFor(() => expect(screen.getByText('Suppressed sends')).toBeTruthy(), { timeout: 8000 })
-    expect(screen.getByText('4000')).toBeTruthy()
+    await waitFor(() => expect(screen.getByText('Protected')).toBeTruthy(), { timeout: 8000 })
+    // Outcome metrics follow the active locale, while the machine-readable reason keeps its raw
+    // aggregate below. The English console therefore displays the headline with a thousands mark.
+    expect(screen.getByText('4,000')).toBeTruthy()
     expect(screen.getByText(/4000× Consent withdrawn/)).toBeTruthy()
 
     // And the range states what fraction is on screen: "1–2" alone cannot distinguish the whole

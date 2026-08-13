@@ -105,11 +105,24 @@ spec:
         # it existed an undeliverable SCA approval was indistinguishable at the metrics layer from
         # any other push. Measured 2026-08-08: 11 failed SCA_APPROVAL pushes across 6 parties over
         # two weeks, none of which raised anything.
+        # NOT increase(). Micrometer registers a counter lazily, on its first increment, so after
+        # every pod restart the series is BORN at 1: there is no earlier sample, every point in
+        # the window equals 1, and increase() is 0. The rule would have stayed silent on the first
+        # undelivered SCA approval after each restart — the exact event it exists for. Measured
+        # against the live estate: raw counter 1, increase()[15m] 0, stable across six scrapes.
+        #
+        # Comparing the counter to its own value 15m ago, with `or vector(0)` on BOTH sides so an
+        # absent series reads as zero, fires on the 0 -> 1 birth as well as on later increments.
+        # A pod restart makes the delta negative for one window, which correctly does not alert.
         - alert: ScaApprovalPushUndeliverable
           expr: |
-            increase(openbank_notification_push_fanouts_total{
+            (sum(openbank_notification_push_fanouts_total{
               template="SCA_APPROVAL", outcome="FAILED"
-            }[15m]) > 0
+            }) or vector(0))
+            -
+            (sum(openbank_notification_push_fanouts_total{
+              template="SCA_APPROVAL", outcome="FAILED"
+            } offset 15m) or vector(0)) > 0
           for: 0m
           labels:
             severity: critical

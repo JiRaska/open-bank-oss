@@ -30,7 +30,7 @@ Služba dodržuje hexagonální uspořádání OpenBank (ADR-0002): doménu bez 
 | **Doména** | `com.openbank.kyc.domain.model` | `KycCase`, `KycCheck` a enumy `KycCaseStatus`, `RiskLevel`, `CheckType`, `CheckStatus`. Čistý Kotlin, nulové importy frameworku. |
 | **Aplikace** | `com.openbank.kyc.application` | `KycService` — use-casy open / list / get / update-check / approve / reject, včetně idempotentního `openCaseForParty`. Definuje výstupní porty pod `application.port.out`. |
 | **Adaptéry — vstupní** | `infrastructure.rest`, `infrastructure.kafka` | `KycResource` (REST), `PartyEventConsumer` (`PARTY_CREATED` → auto-open). |
-| **Adaptéry — výstupní** | `infrastructure.persistence`, `infrastructure.kafka`, `infrastructure.outbox` | `KycRepository` (Panache), `KafkaKycOutboxEventPublisher` / `KycEventPublisher`, `KycOutboxDispatcher`. |
+| **Adaptéry — výstupní** | `infrastructure.persistence`, `infrastructure.kafka`, `infrastructure.outbox` | `KycRepository` (Panache), `KafkaKycOutboxEventPublisher`, `KycOutboxDispatcher`. |
 | **Průřezové** | `infrastructure.authz` | `AuthzProducer` napojující OPA-backed `@Authorize` (ADR-0034). |
 
 ### Klíčové porty (`application.port.out`)
@@ -48,7 +48,7 @@ KYC rozhodnutí se propagují vzorem transakčního outboxu, aby se změna stavu
 3. `publishWithResilience` je obalen MicroProfile Fault Tolerance — `@Bulkhead(1)`, `@CircuitBreaker`, `@Retry(2)`, `@Timeout(3000)` — pro izolaci výpadků Kafky.
 4. Při úspěchu se řádek označí `SENT`; při selhání `markFailed` zaznamená chybu a `attempt_count` pro pozdější retry.
 
-> Poznámka: `KycEventPublisher` též emituje události na kanál `kyc-events-out` přímo (např. `publishCaseOpened`). Tabulka outboxu je trvanlivá at-least-once cesta; oba publikují do téhož topicu `openbank.kyc.events`.
+> Poznámka: události životního cyklu KYC opouštějí službu POUZE přes `kyc_outbox`, zapsaný ve stejné transakci jako změna stavu případu (issue #4007) a přeposílaný kanálem `kyc-outbox-out` do topicu `openbank.kyc.events`. Přímý emitor `kyc-events-out`, který tytéž události publikoval až po commitu, byl odstraněn — dva publisheři nad jedním topicem by soupeřili a atomický může být jen jeden.
 
 ### Vstupní konzument
 

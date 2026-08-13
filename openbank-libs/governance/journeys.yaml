@@ -109,3 +109,75 @@ journeys:
       ADR-0252 phase 3 (#4348) — needs the canary device fleet and the /probe/ack endpoint.
       Delivery is not observable server-side at any effort: APNs issues no receipt, so no
       amount of in-cluster probing can substitute for a device acknowledging the push.
+
+# ---------------------------------------------------------------------------------------
+# MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
+#
+# WHY THIS BLOCK EXISTS
+#   The journeys above are the ones we run or intend to run. That says nothing about the
+#   services nobody has considered — and a catalog is a coverage claim, so the services it
+#   never mentions are the dangerous ones. This block forces the money path to be ACCOUNTED
+#   for: every service in `rules.yaml: money_path_services` is either covered by a journey
+#   above (`covered_by`) or listed here with the reason it is not.
+#
+#   check-journey-coverage.py enforces the set BOTH WAYS against rules.yaml — a money-path
+#   service missing from this file fails the gate, and a stale entry for a service that is no
+#   longer money-path fails it too. That is the difference between a list that can quietly get
+#   short and one that cannot: a new money-path service is red until a human decides what
+#   watches it.
+#
+#   What this does NOT claim: that a service listed as `covered_by` is well covered, or that
+#   the money path is the whole of the customer-visible surface. Deriving the full capability
+#   set is still unbuilt (#4348). This closes the gap that matters most first.
+money_path_accountability:
+
+  # All twenty-three share one blocker today, so it is stated once rather than pasted
+  # twenty-three times — a per-service copy of the same sentence is not more information, and
+  # it drifts. Where a service's situation genuinely differs, it gets its own `note`.
+  default_blocker: >-
+    ADR-0252 phase 1 (#4348) — no journey can drive a money-path service in production until
+    bank-owned synthetic parties exist and the SYNTHETIC taint reaches the ledger and the
+    regulatory aggregates. Until then, exercising these paths would post synthetic movements
+    into FINREP/COREP/AnaCredit and the AML baseline.
+
+  services:
+    - service: openbank-ledger-service
+    - service: openbank-transaction-service
+    - service: openbank-account-service
+    - service: openbank-balance-service
+    - service: openbank-sepa-payment
+    - service: openbank-sepa-instant
+    - service: openbank-domestic-payment
+      note: >-
+        The reported outage. A failed payment between two customers went unnoticed until they
+        said so; `domestic-payment` above is the journey that covers it once phase 1 lands.
+    - service: openbank-clearing-service
+    - service: openbank-swift-service
+    - service: openbank-fx-service
+      note: >-
+        Its ČNB fixing URL was a 404 for the service's whole life and every test layer stayed
+        green (#2204). A journey here would have to assert the SHAPE of the fetched rate, not
+        that a request succeeded — a 404 is a valid HTTP response.
+    - service: openbank-lending-service
+    - service: openbank-sdd-service
+    - service: openbank-interest-service
+    - service: openbank-sca-service
+      note: >-
+        Highest-value target after the payment itself: where push carries the SCA challenge,
+        a broken push channel is a broken authentication factor, not a UX defect. Depends on
+        `push-delivery` (phase 3) as much as on phase 1.
+    - service: openbank-consent-service
+    - service: openbank-delegation-service
+    - service: openbank-fraud-service
+    - service: openbank-billing-service
+    - service: openbank-settlement-service
+    - service: openbank-sanctions-service
+      note: >-
+        A control path, so a journey must prove it RUNS for synthetic traffic rather than
+        being skipped for it — the one place where the taint must never suppress anything.
+    - service: openbank-vop-service
+    - service: openbank-standing-order-service
+    - service: openbank-psd2-service
+      note: >-
+        Also the PSD2 RTS Art. 32(4) interface whose quarterly availability statistics this
+        programme is meant to generate, so its journey is evidence as well as monitoring.

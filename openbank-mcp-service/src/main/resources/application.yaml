@@ -69,6 +69,15 @@ quarkus:
     password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
     reactive:
       url: postgresql://localhost:5432/openbank_mcp
+      # Reactive pool eviction. openbank-libs META-INF/microprofile-config.properties carries
+      # these fleet-wide (issue #1682), but this service depends only on openbank-libs-domain /
+      # openbank-libs-runtime, neither of which ships that file — so it inherited neither, and
+      # both levers are OFF by Quarkus default. Eviction-only: they purge dead/aged connections
+      # and add no reconnect aggression. Also the compensating control recorded in the
+      # CVE-2025-14969 VEX statement (hibernate-reactive connection-leak DoS): a leaked pooled
+      # connection ages out instead of persisting until a pod restart.
+      idle-timeout: 5M
+      max-lifetime: 30M
     jdbc:
       url: jdbc:postgresql://localhost:5432/openbank_mcp
   flyway:

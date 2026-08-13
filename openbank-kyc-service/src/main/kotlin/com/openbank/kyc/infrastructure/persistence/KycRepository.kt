@@ -6,13 +6,17 @@ package com.openbank.kyc.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.kyc.application.port.out.KycOutboxRepository
 import com.openbank.kyc.domain.model.KycCase
 import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.kyc.domain.model.KycCheck
+import com.openbank.kyc.domain.model.KycEvent
 import com.openbank.kyc.domain.model.RiskLevel
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -97,7 +101,7 @@ class KycCaseEntity : PanacheEntity() {
 
 @Suppress("TooManyFunctions")
 @ApplicationScoped
-class KycRepository :
+class KycRepository(private val outboxRepository: KycOutboxRepository) :
     KycCaseRepository,
     PanacheRepository<KycCaseEntity> {
 
@@ -105,6 +109,20 @@ class KycRepository :
 
     override suspend fun save(case: KycCase): KycCase {
         Panache.withTransaction { persist(case.toEntity(objectMapper)) }.awaitSuspending()
+        return case
+    }
+
+    // Aggregate state change + outbox row in ONE transaction (issue #4007): persistInTransaction
+    // uses the CALLER's reactive session, so it joins this `Panache.withTransaction` block and the
+    // case row and its event commit together. persist() and not merge() here because
+    // KycCaseEntity extends PanacheEntity — the @Id is generated, so this is a genuine INSERT;
+    // the app-assigned-id trap that forces merge() elsewhere in the fleet does not apply.
+    // `case_id` is the business key, not the @Id.
+    override suspend fun save(case: KycCase, event: KycEvent): KycCase {
+        Panache.withTransaction {
+            persist(case.toEntity(objectMapper))
+                .flatMap { outboxRepository.persistInTransaction(event.toOutboxMessage(objectMapper)) }
+        }.awaitSuspending()
         return case
     }
 
@@ -138,20 +156,28 @@ class KycRepository :
     override suspend fun countByStatus(status: KycCaseStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
 
-    override suspend fun update(case: KycCase): KycCase = Panache.withTransaction {
-        find("caseId", case.id).firstResult().map { e ->
-            e?.also {
-                it.status = case.status.name
-                it.riskLevel = case.riskLevel.name
-                it.assignedTo = case.assignedTo
-                it.checksJson = objectMapper.writeValueAsString(case.checks)
-                it.notes = case.notes
-                it.reviewedBy = case.reviewedBy
-                it.reviewedAt = case.reviewedAt
-                it.updatedAt = case.updatedAt
-            }
-        }.replaceWith(case)
+    override suspend fun update(case: KycCase): KycCase =
+        Panache.withTransaction { applyUpdate(case) }.awaitSuspending()
+
+    /** Transactional outbox (issue #4007) — the UPDATE and the event row share one transaction. */
+    override suspend fun update(case: KycCase, event: KycEvent): KycCase = Panache.withTransaction {
+        applyUpdate(case).flatMap { updated ->
+            outboxRepository.persistInTransaction(event.toOutboxMessage(objectMapper)).replaceWith(updated)
+        }
     }.awaitSuspending()
+
+    private fun applyUpdate(case: KycCase): Uni<KycCase> = find("caseId", case.id).firstResult().map { e ->
+        e?.also {
+            it.status = case.status.name
+            it.riskLevel = case.riskLevel.name
+            it.assignedTo = case.assignedTo
+            it.checksJson = objectMapper.writeValueAsString(case.checks)
+            it.notes = case.notes
+            it.reviewedBy = case.reviewedBy
+            it.reviewedAt = case.reviewedAt
+            it.updatedAt = case.updatedAt
+        }
+    }.replaceWith(case)
 
     override suspend fun anonymizeByPartyId(partyId: UUID, now: Instant) {
         Panache.withTransaction {
@@ -201,6 +227,16 @@ class KycRepository :
         }
     }
 }
+
+// The outbox payload is the event's own flat envelope verbatim — `kyc-outbox-out` and the retired
+// `kyc-events-out` both target topic `openbank.kyc.events`, so a consumer sees exactly the bytes it
+// saw before, plus the additive OutboxKafkaHeaders and a partition key.
+private fun KycEvent.toOutboxMessage(objectMapper: ObjectMapper) = OutboxMessage(
+    aggregateId = aggregateId,
+    eventType = eventType,
+    payload = objectMapper.writeValueAsString(envelope),
+    createdAt = occurredAt,
+)
 
 // Mappers kept at file scope (pure functions over an injected ObjectMapper) so the repository
 // class stays within detekt's per-class function budget.

@@ -214,8 +214,12 @@ class PartyResource(
             produces a 404 that is operationally indistinguishable from a genuine no-match.
         """,
     )
-    suspend fun resolveByIndex(@QueryParam("index") index: String): Response {
-        if (index.isBlank()) {
+    // `index` is nullable by necessity: JAX-RS injects null for an absent query parameter, and
+    // on a suspend fun no null-check intrinsic is emitted — a non-nullable declaration made the
+    // absent-parameter case NPE at `isBlank()` (a 500), i.e. exactly the case this 400 branch
+    // was written for (#3624). Absent and blank collapse into the same documented envelope.
+    suspend fun resolveByIndex(@QueryParam("index") index: String?): Response {
+        if (index.isNullOrBlank()) {
             return Response.status(Response.Status.BAD_REQUEST)
                 .entity(mapOf("code" to "INVALID_PARAMETER", "message" to "'index' query parameter is required"))
                 .build()
@@ -279,9 +283,15 @@ class PartyResource(
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Operation(summary = "Get party by external ID (bankID sub, ROB AIFO, etc.)")
     suspend fun getByExternalId(
-        @QueryParam("type") type: ExternalIdType,
-        @QueryParam("value") value: String,
-    ): Response = Response.ok(getPartyUseCase.getByExternalId(type, value).toResponse()).build()
+        // Nullable by necessity — JAX-RS injects null for an absent query parameter (#3624).
+        // libs-runtime maps IllegalArgumentException to 400; never add a service-local mapper (#526).
+        @QueryParam("type") type: ExternalIdType?,
+        @QueryParam("value") value: String?,
+    ): Response {
+        requireNotNull(type) { "query parameter 'type' is required" }
+        requireNotNull(value) { "query parameter 'value' is required" }
+        return Response.ok(getPartyUseCase.getByExternalId(type, value).toResponse()).build()
+    }
 
     @GET
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
