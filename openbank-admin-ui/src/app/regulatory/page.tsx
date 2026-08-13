@@ -6,7 +6,9 @@
 
 import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { FileText, Send, CheckCircle2, Clock, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet } from 'lucide-react'
+import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
+import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
 
 type Report = (typeof REPORTS)[number]
 
@@ -18,7 +20,64 @@ interface ExportRow {
   value: string
 }
 
-function buildExportRows(report: Report): ExportRow[] {
+interface RegulatoryCell {
+  rowRef: string
+  colRef: string
+  value: number
+  currency: string
+  label?: string
+  isDataGap?: boolean
+  gapReason?: string | null
+}
+
+interface RegulatoryTemplate {
+  templateId: string
+  period: string
+  cells: RegulatoryCell[]
+  isBalanced?: boolean
+  hasDataGaps?: boolean
+}
+
+type PreviewData =
+  | { status: 'idle' | 'loading' }
+  | { status: 'unavailable'; kind: BffFailure }
+  | { status: 'unsupported' }
+  | { status: 'ready'; templates: RegulatoryTemplate[] }
+
+type TemplateLoadResult = { template: RegulatoryTemplate } | { kind: BffFailure }
+
+const TEMPLATE_PATHS: Record<string, string[]> = {
+  'cnb-finrep': [
+    '/api/v1/finrep/templates/F01.01',
+    '/api/v1/finrep/templates/F02.00',
+  ],
+  'cnb-capital': ['/api/v1/corep/templates/C_01.00'],
+}
+
+const CELL_LABELS: Record<string, string> = {
+  'F01.01:r010:c010': 'Celková aktiva',
+  'F01.01:r380:c010': 'Celkové závazky',
+  'F01.01:r490:c010': 'Vlastní kapitál',
+  'F02.00:r010:c010': 'Celkové výnosy',
+  'F02.00:r030:c010': 'Celkové náklady',
+  'F02.00:r450:c010': 'Čistý zisk / ztráta',
+}
+
+/** The latest fully completed calendar quarter, never a moving live-date report. */
+function defaultReportingDate(now = new Date()): string {
+  const quarterStart = Math.floor(now.getUTCMonth() / 3) * 3
+  return new Date(Date.UTC(now.getUTCFullYear(), quarterStart, 0)).toISOString().slice(0, 10)
+}
+
+function cellLabel(template: RegulatoryTemplate, cell: RegulatoryCell): string {
+  return cell.label ?? CELL_LABELS[`${template.templateId}:${cell.rowRef}:${cell.colRef}`] ?? `${cell.rowRef} / ${cell.colRef}`
+}
+
+function money(value: number, currency: string): string {
+  return new Intl.NumberFormat('cs-CZ', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
+}
+
+function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
   const meta: ExportRow[] = [
     { field: 'ID výkazu', value: report.id },
     { field: 'Název', value: report.name },
@@ -27,12 +86,26 @@ function buildExportRows(report: Report): ExportRow[] {
     { field: 'Kód SDAT', value: report.sdatCode },
     { field: 'Frekvence', value: report.frequency },
     { field: 'Termín', value: report.deadline },
-    { field: 'Stav', value: report.status },
-    { field: 'Poslední podání', value: report.lastSubmitted },
+    { field: 'Datový zdroj', value: TEMPLATE_PATHS[report.id] ? 'Živý náhled je připojen' : 'Katalog — datový zdroj není připojen' },
+    { field: 'Odeslání regulátorovi', value: 'Není připojeno' },
     { field: 'Příští termín', value: report.nextDue },
   ]
-  const fields: ExportRow[] = report.fields.map((f) => ({ field: f, value: '—' }))
-  return [...meta, ...fields]
+  if (data.status === 'ready') {
+    const rendered = data.templates.flatMap(template => [
+      { field: `Šablona ${template.templateId}`, value: `Období ${template.period}${template.isBalanced === false ? ' · nevyvážená' : ''}${template.hasDataGaps ? ' · obsahuje datové mezery' : ''}` },
+      ...template.cells.map((cell) => ({
+        field: `${template.templateId} · ${cellLabel(template, cell)}`,
+        value: `${money(cell.value, cell.currency)}${cell.isDataGap ? ' · DATOVÁ MEZERA' : ''}`,
+      })),
+    ])
+    return [...meta, { field: 'Zdroj', value: 'finrep-service ← ledger trial balance (ne ClickHouse)' }, ...rendered]
+  }
+  const message = data.status === 'loading' || data.status === 'idle'
+    ? 'Načítám…'
+    : data.status === 'unsupported'
+      ? 'Zatím není napojeno na datový zdroj'
+      : 'Zdroj dat není dostupný'
+  return [...meta, ...report.fields.map((field) => ({ field, value: message }))]
 }
 
 // RFC-4180-ish CSV escaping: wrap in quotes and double any embedded quote.
@@ -60,9 +133,7 @@ const REPORTS = [
     regulation: 'Vyhláška č. 314/2013 Sb.',
     frequency: 'Měsíčně',
     deadline: '15. den následujícího měsíce',
-    lastSubmitted: '2026-05-15',
     nextDue: '2026-06-15',
-    status: 'pending',
     description: 'Statistika platebního styku — počty a objemy plateb dle kanálu, typu a měny',
     sdatCode: 'PLAT',
     fields: ['Počet transakcí', 'Objem v CZK', 'Počet SEPA plateb', 'Počet domácích plateb', 'Počet přeshraničních plateb'],
@@ -74,9 +145,7 @@ const REPORTS = [
     regulation: 'Vyhláška č. 314/2013 Sb.',
     frequency: 'Měsíčně',
     deadline: '15. den následujícího měsíce',
-    lastSubmitted: '2026-05-15',
     nextDue: '2026-06-15',
-    status: 'pending',
     description: 'Statistika vkladů a úvěrů — zůstatky, úrokové sazby, počty účtů',
     sdatCode: 'VKLA',
     fields: ['Celkové vklady CZK', 'Celkové vklady EUR', 'Průměrná úroková sazba', 'Počet aktivních účtů'],
@@ -88,9 +157,7 @@ const REPORTS = [
     regulation: 'Zákon č. 253/2008 Sb. (AML zákon)',
     frequency: 'Ad-hoc (do 24h od zjištění)',
     deadline: 'Do 24 hodin',
-    lastSubmitted: '2026-05-10',
     nextDue: 'Ad-hoc',
-    status: 'ok',
     description: 'Hlášení podezřelých obchodů a transakcí dle AML zákona',
     sdatCode: 'SAR',
     fields: ['ID zákazníka', 'Popis podezřelé aktivity', 'Výše transakce', 'Datum zjištění', 'Kontaktní osoba MLRO'],
@@ -102,9 +169,7 @@ const REPORTS = [
     regulation: 'CRR/CRD IV (EU 575/2013)',
     frequency: 'Čtvrtletně',
     deadline: '30 dní po konci čtvrtletí',
-    lastSubmitted: '2026-04-30',
     nextDue: '2026-07-30',
-    status: 'ok',
     description: 'Common Reporting — kapitálová přiměřenost, rizikové expozice, pákový poměr',
     sdatCode: 'COREP',
     fields: ['Tier 1 kapitál', 'Tier 2 kapitál', 'RWA', 'CAR ratio', 'Leverage ratio'],
@@ -116,9 +181,7 @@ const REPORTS = [
     regulation: 'IAS/IFRS + EBA ITS',
     frequency: 'Čtvrtletně',
     deadline: '30 dní po konci čtvrtletí',
-    lastSubmitted: '2026-04-30',
     nextDue: '2026-07-30',
-    status: 'ok',
     description: 'Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky',
     sdatCode: 'FINREP',
     fields: ['Aktiva celkem', 'Závazky celkem', 'Vlastní kapitál', 'Čistý úrokový výnos', 'Provozní náklady'],
@@ -130,9 +193,7 @@ const REPORTS = [
     regulation: 'ECB/2013/43 Regulation',
     frequency: 'Ročně',
     deadline: '31. března',
-    lastSubmitted: '2026-03-28',
     nextDue: '2027-03-31',
-    status: 'ok',
     description: 'Statistika platebního styku pro ECB — počty a hodnoty platebních transakcí',
     sdatCode: 'ECB-PAYM',
     fields: ['Počet platebních účtů', 'Počet karet', 'Objem bezhotovostních plateb', 'Počet ATM'],
@@ -144,9 +205,7 @@ const REPORTS = [
     regulation: 'FATCA (US zákon) + CRS OECD',
     frequency: 'Ročně',
     deadline: '30. června',
-    lastSubmitted: '2025-06-28',
     nextDue: '2026-06-30',
-    status: 'pending',
     description: 'Hlášení účtů US osob a entit finančnímu úřadu pro přeposlání IRS',
     sdatCode: 'FATCA',
     fields: ['Jméno US osoby', 'TIN (US daňové číslo)', 'Zůstatek účtu', 'Příjmy z US zdrojů'],
@@ -158,46 +217,74 @@ const REPORTS = [
     regulation: 'DORA (EU 2022/2554) — od 17.1.2025',
     frequency: 'Ad-hoc (do 4h od zjištění)',
     deadline: 'Počáteční hlášení do 4 hodin',
-    lastSubmitted: '—',
     nextDue: 'Ad-hoc',
-    status: 'ok',
     description: 'Hlášení závažných ICT incidentů dle DORA — počáteční, průběžné a závěrečné hlášení',
     sdatCode: 'DORA-INC',
     fields: ['Klasifikace incidentu', 'Dopad na zákazníky', 'RTO/RPO', 'Příčina', 'Nápravná opatření'],
   },
 ]
 
-const STATUS_CONFIG = {
-  ok:      { label: 'Podáno',    color: '#16a34a', bg: '#f0fdf4', icon: <CheckCircle2 size={13} /> },
-  pending: { label: 'Čeká',      color: '#d97706', bg: '#fffbeb', icon: <Clock size={13} /> },
-  overdue: { label: 'Po termínu', color: '#dc2626', bg: '#fef2f2', icon: <AlertTriangle size={13} /> },
+const DATA_SOURCE_CONFIG = {
+  live: { label: 'Živý datový náhled', color: '#16a34a', icon: <CheckCircle2 size={13} /> },
+  catalog: { label: 'Katalog — bez zdroje', color: '#6b7280', icon: <AlertTriangle size={13} /> },
+}
+
+function dataSourceOf(report: Report): keyof typeof DATA_SOURCE_CONFIG {
+  return TEMPLATE_PATHS[report.id] ? 'live' : 'catalog'
 }
 
 export default function RegulatoryPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const { t } = useLanguage()
-  const [generating, setGenerating] = useState<string | null>(null)
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null)
   // The export now opens a visual preview first (operator visually checks the
   // table before committing to a download) — `preview` holds the report whose
   // export is being inspected.
   const [preview, setPreview] = useState<Report | null>(null)
+  const [previewData, setPreviewData] = useState<PreviewData>({ status: 'idle' })
+  const [reportingDate, setReportingDate] = useState(() => defaultReportingDate())
 
-  async function generateReport(id: string) {
-    setGenerating(id)
-    await new Promise(r => setTimeout(r, 1500))
-    setGenerating(null)
-    alert(t(`Report ${id} vygenerován (demo — v produkci by se odeslal přes API)`, `Report ${id} generated (demo — in production this would be submitted via API)`))
+  async function loadPreview(report: Report, asOf = reportingDate) {
+    const paths = TEMPLATE_PATHS[report.id]
+    if (!paths) {
+      setPreviewData({ status: 'unsupported' })
+      return
+    }
+    setPreviewData({ status: 'loading' })
+    try {
+      const results: TemplateLoadResult[] = await Promise.all(paths.map(async (path): Promise<TemplateLoadResult> => {
+        const response = await fetch(svcUrl('finrep-service', path, { asOf }), {
+          cache: 'no-store', signal: AbortSignal.timeout(15_000),
+        })
+        return response.ok
+          ? { template: await response.json() as RegulatoryTemplate }
+          : { kind: await classifyBffFailure(response) }
+      }))
+      const failed = results.find((result): result is { kind: BffFailure } => 'kind' in result)
+      if (failed) {
+        setPreviewData({ status: 'unavailable', kind: failed.kind })
+        return
+      }
+      setPreviewData({
+        status: 'ready',
+        templates: results.filter((result): result is { template: RegulatoryTemplate } => 'template' in result).map(result => result.template),
+      })
+    } catch {
+      setPreviewData({ status: 'unavailable', kind: 'unreachable' })
+    }
   }
 
   function openPreview(id: string, e: React.MouseEvent) {
     e.stopPropagation()
     const report = REPORTS.find(r => r.id === id)
-    if (report) setPreview(report)
+    if (report) {
+      setPreview(report)
+      void loadPreview(report)
+    }
   }
 
   function exportJson(report: Report) {
-    const rows = buildExportRows(report)
+    const rows = buildExportRows(report, previewData)
     const data = {
       ...Object.fromEntries(rows.map(r => [r.field, r.value])),
       keyFields: report.fields,
@@ -212,7 +299,7 @@ export default function RegulatoryPage() {
   }
 
   function exportCsv(report: Report) {
-    const rows = buildExportRows(report)
+    const rows = buildExportRows(report, previewData)
     const header = `${csvCell(t('Pole', 'Field'))},${csvCell(t('Hodnota', 'Value'))}`
     const body = rows.map(r => `${csvCell(r.field)},${csvCell(r.value)}`).join('\n')
     triggerDownload(
@@ -228,8 +315,8 @@ export default function RegulatoryPage() {
     setTimeout(() => setDownloadMessage(null), 3000)
   }
 
-  const overdue = REPORTS.filter(r => r.status === 'overdue').length
-  const pending = REPORTS.filter(r => r.status === 'pending').length
+  const livePreviewCount = REPORTS.filter(r => dataSourceOf(r) === 'live').length
+  const catalogueOnlyCount = REPORTS.length - livePreviewCount
 
   const authorities = REPORTS.reduce((acc, r) => {
     const key = r.authority.includes('CNB') ? 'ČNB' : r.authority.includes('FAÚ') ? 'FAÚ' : r.authority.includes('ECB') ? 'ECB' : 'Ostatní'
@@ -260,23 +347,13 @@ export default function RegulatoryPage() {
         </a>
       </div>
 
-      {/* Alert banner for overdue */}
-      {overdue > 0 && (
-        <div style={{ padding: '12px 16px', marginBottom: '16px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 'var(--r-lg)', display: 'flex', gap: '10px', alignItems: 'center' }}>
-          <AlertTriangle size={16} style={{ color: '#dc2626', flexShrink: 0 }} />
-          <div style={{ fontSize: '13px', color: '#991b1b', fontWeight: 600 }}>
-            {overdue} výkaz{overdue > 1 ? 'y jsou' : ' je'} po termínu podání! Okamžitě kontaktujte compliance oddělení.
-          </div>
-        </div>
-      )}
-
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         {[
-          { label: t('Celkem výkazů', 'Total Reports'), value: REPORTS.length, color: 'var(--accent)' },
-          { label: t('Podáno', 'Submitted'), value: REPORTS.filter(r => r.status === 'ok').length, color: '#16a34a' },
-          { label: t('Čeká', 'Pending'), value: pending, color: '#d97706' },
-          { label: t('Po termínu', 'Overdue'), value: overdue, color: '#dc2626' },
+          { label: t('Katalog výkazů', 'Report catalogue'), value: REPORTS.length, color: 'var(--accent)' },
+          { label: t('Živý náhled', 'Live preview'), value: livePreviewCount, color: '#16a34a' },
+          { label: t('Bez datového zdroje', 'No data source'), value: catalogueOnlyCount, color: '#6b7280' },
+          { label: t('Napojené odesílání', 'Connected submission'), value: 0, color: '#d97706' },
         ].map(s => (
           <div key={s.label} className="card" style={{ padding: '14px 16px' }}>
             <div style={{ fontSize: '22px', fontWeight: 700, color: s.color }}>{s.value}</div>
@@ -287,20 +364,20 @@ export default function RegulatoryPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px', marginBottom: '24px' }}>
         <div className="card" style={{ padding: '16px' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> {t('Rozložení stavů', 'Status breakdown')}</h3>
+          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> {t('Dostupnost dat', 'Data availability')}</h3>
           <div style={{ display: 'flex', height: '20px', borderRadius: '6px', overflow: 'hidden', marginBottom: '16px' }}>
-            {['ok', 'pending', 'overdue'].map(st => {
-              const count = REPORTS.filter(r => r.status === st).length;
+            {(['live', 'catalog'] as const).map(st => {
+              const count = REPORTS.filter(r => dataSourceOf(r) === st).length
               if (count === 0) return null;
               const percent = (count / REPORTS.length) * 100;
-              const color = STATUS_CONFIG[st as keyof typeof STATUS_CONFIG].color;
-              return <div key={st} style={{ width: `${percent}%`, background: color }} title={`${STATUS_CONFIG[st as keyof typeof STATUS_CONFIG].label}: ${count}`} />
+              const color = DATA_SOURCE_CONFIG[st].color;
+              return <div key={st} style={{ width: `${percent}%`, background: color }} title={`${DATA_SOURCE_CONFIG[st].label}: ${count}`} />
             })}
           </div>
           <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
-            {['ok', 'pending', 'overdue'].map(st => {
-              const count = REPORTS.filter(r => r.status === st).length;
-              const cfg = STATUS_CONFIG[st as keyof typeof STATUS_CONFIG];
+            {(['live', 'catalog'] as const).map(st => {
+              const count = REPORTS.filter(r => dataSourceOf(r) === st).length;
+              const cfg = DATA_SOURCE_CONFIG[st];
               return (
                 <div key={st} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                   <div style={{ width: '10px', height: '10px', borderRadius: '2px', background: cfg.color }} />
@@ -352,7 +429,8 @@ export default function RegulatoryPage() {
       {/* Reports list */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {REPORTS.map(report => {
-          const cfg = STATUS_CONFIG[report.status as keyof typeof STATUS_CONFIG]
+          const source = dataSourceOf(report)
+          const cfg = DATA_SOURCE_CONFIG[source]
           const isSelected = selected === report.id
           return (
             <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.color}` }}>
@@ -376,7 +454,7 @@ export default function RegulatoryPage() {
                 {/* Next due */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
                   <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Příští termín', 'Next due')}</div>
-                  <div style={{ fontSize: '12px', fontWeight: 600, color: report.status === 'overdue' ? '#dc2626' : 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Calendar size={11} />
                     {report.nextDue}
                   </div>
@@ -387,10 +465,6 @@ export default function RegulatoryPage() {
                   <button className="btn btn-secondary" style={{ fontSize: '11px', padding: '5px 10px' }}
                     onClick={(e) => openPreview(report.id, e)}>
                     {downloadMessage === report.id ? <><Check size={11} style={{ color: '#16a34a' }} /> {t('Staženo', 'Downloaded')}</> : <><Eye size={11} /> {t('Náhled exportu', 'Preview export')}</>}
-                  </button>
-                  <button className="btn btn-primary" style={{ fontSize: '11px', padding: '5px 10px' }}
-                    onClick={() => generateReport(report.id)} disabled={generating === report.id}>
-                    {generating === report.id ? <><Clock size={11} className="animate-spin" /> {t('Generuji…', 'Generating…')}</> : <><Send size={11} /> {t('Odeslat SDAT', 'Submit SDAT')}</>}
                   </button>
                 </div>
               </div>
@@ -409,7 +483,9 @@ export default function RegulatoryPage() {
                         <strong>{t('Termín:', 'Deadline:')}</strong> {report.deadline}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        <strong>{t('Poslední podání:', 'Last submitted:')}</strong> {report.lastSubmitted}
+                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {source === 'live'
+                          ? t('živý náhled přes finrep-service', 'live preview through finrep-service')
+                          : t('zatím nenapojeno', 'not connected yet')}
                       </div>
                     </div>
                     <div>
@@ -425,11 +501,10 @@ export default function RegulatoryPage() {
                     </div>
                   </div>
 
-                  {/* SDAT integration note */}
+                  {/* Reporting transport is deliberately not represented as implemented. */}
                   <div style={{ padding: '10px 12px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '6px', fontSize: '12px', color: '#1e40af' }}>
-                    <strong>{t('SDAT integrace:', 'SDAT integration:')}</strong> {t('Výkaz se odesílá přes CNB SDAT systém (https://sdat.cnb.cz).', 'Report is submitted via CNB SDAT system (https://sdat.cnb.cz).')}
-                    {t('Kód výkazu:', 'Report code:')} <code style={{ fontFamily: 'JetBrains Mono, monospace', background: '#dbeafe', padding: '1px 4px', borderRadius: '3px' }}>{report.sdatCode}</code>.
-                    {t('Formát: XML dle CNB XSD schématu. Autentizace: certifikát vydaný CNB.', 'Format: XML per CNB XSD schema. Authentication: certificate issued by CNB.')}
+                    <strong>{t('Stav odeslání:', 'Submission status:')}</strong> {t('Přenos k regulátorovi zatím není v Admin UI ani v backendu napojen. Kód výkazu je jen katalogová informace, ne důkaz podání.', 'Regulator transmission is not connected in the Admin UI or backend yet. The report code is catalogue metadata, not proof of submission.')}
+                    {' '}{t('Kód výkazu:', 'Report code:')} <code style={{ fontFamily: 'JetBrains Mono, monospace', background: '#dbeafe', padding: '1px 4px', borderRadius: '3px' }}>{report.sdatCode}</code>.
                   </div>
                 </div>
               )}
@@ -473,39 +548,60 @@ export default function RegulatoryPage() {
               </button>
             </div>
 
+            {TEMPLATE_PATHS[preview.id] && (
+              <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap', background: 'var(--surface-2)' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  {t('Referenční datum', 'Reference date')}
+                  <input
+                    type="date"
+                    value={reportingDate}
+                    onChange={e => setReportingDate(e.target.value)}
+                    style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px', background: 'var(--surface-1)' }}
+                  />
+                </label>
+                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'}>
+                  <RefreshCw size={13} className={previewData.status === 'loading' ? 'animate-spin' : ''} />
+                  {t('Načíst data', 'Load data')}
+                </button>
+              </div>
+            )}
+
             {/* Visual control table */}
             <div style={{ overflowY: 'auto', padding: '0' }}>
-              <table className="data-table" style={{ width: '100%' }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: '42%' }}>{t('Pole', 'Field')}</th>
-                    <th>{t('Hodnota', 'Value')}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {buildExportRows(preview).map((row, i) => (
-                    <tr key={i}>
-                      <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{row.field}</td>
-                      <td style={{ fontSize: '12px', color: 'var(--text-primary)', fontFamily: row.value === '—' ? 'inherit' : 'JetBrains Mono, monospace' }}>{row.value}</td>
+              {previewData.status === 'unavailable' ? (
+                <DataUnavailable kind={previewData.kind} service="FINREP / COREP service" feature={t('regulatorní šablony', 'regulatory templates')} lang="cs" dense />
+              ) : (
+                <table className="data-table" style={{ width: '100%' }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: '42%' }}>{t('Pole', 'Field')}</th>
+                      <th>{t('Hodnota', 'Value')}</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {buildExportRows(preview, previewData).map((row, i) => (
+                      <tr key={i}>
+                        <td style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{row.field}</td>
+                        <td style={{ fontSize: '12px', color: row.value.includes('DATOVÁ MEZERA') ? '#b45309' : 'var(--text-primary)', fontFamily: row.value === '—' ? 'inherit' : 'JetBrains Mono, monospace' }}>{row.value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
 
             {/* Footer: note + export actions */}
             <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}>
-                {t(
-                  'Hodnoty polic výkazu „—“ se v produkci doplní z dat služeb; zde slouží náhled ke kontrole struktury.',
-                  'Report-field values shown as “—” are populated from service data in production; this preview verifies the structure.',
-                )}
+                {previewData.status === 'unsupported'
+                  ? t('Tento katalogový výkaz zatím nemá implementovaný datový zdroj ani odeslání. Nezobrazuje fiktivní hodnoty.', 'This catalogue report has no implemented data source or submission path yet. It does not show fictional values.')
+                  : t('FINREP/COREP se čtou živě z finrep-service nad ledger trial balance. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are read live from finrep-service over the ledger trial balance. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)}>
+                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={previewData.status === 'loading'}>
                   <FileSpreadsheet size={13} /> {t('Export CSV', 'Export CSV')}
                 </button>
-                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)}>
+                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={previewData.status === 'loading'}>
                   <FileJson size={13} /> {t('Export JSON', 'Export JSON')}
                 </button>
               </div>
