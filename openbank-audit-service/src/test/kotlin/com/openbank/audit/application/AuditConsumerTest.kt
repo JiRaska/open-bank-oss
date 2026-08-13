@@ -550,6 +550,49 @@ class AuditConsumerTest {
         coVerify { repo.save(match { it.occurredAtSource == OccurredAtSource.INGEST }) }
     }
 
+    // -----------------------------------------------------------------------------------------
+    // Case fold, issue #4553's pattern found again here 2026-08-13. A producer's own
+    // "aggregateType" field used to survive verbatim while inferAggregateType's table is all
+    // uppercase, so the column recorded WHICH resolution path fired, not what the aggregate is.
+    // Measured on the live audit_entries table before this fix: ACCOUNT 656 / Account 126,
+    // Transaction 193 with ZERO uppercase TRANSACTION rows, Consent 11 with ZERO uppercase
+    // CONSENT rows.
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    fun `consume uppercases a producer's mixed-case aggregateType`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val payload = """
+            {
+              "eventType": "AccountCreated",
+              "aggregateType": "Account",
+              "accountId": "$accountId",
+              "occurredAt": "2026-05-27T12:00:00Z"
+            }
+        """.trimIndent()
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify { repo.save(match { it.aggregateType == "ACCOUNT" }) }
+    }
+
+    @Test
+    fun `consume uppercases an INFERRED aggregateType too, so both paths agree`(): Unit = runBlocking {
+        // inferAggregateType already returns uppercase ("TRANSACTION"), so this asserts the fold
+        // is a no-op on that path — both paths must converge on the SAME casing, not just each
+        // individually look fine.
+        val transactionId = UUID.randomUUID()
+        val payload = """{"eventType":"X","transactionId":"$transactionId"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify { repo.save(match { it.aggregateType == "TRANSACTION" }) }
+    }
+
     private companion object {
         val INGEST_TIME: Instant = Instant.parse("2026-05-27T12:00:00Z")
     }
