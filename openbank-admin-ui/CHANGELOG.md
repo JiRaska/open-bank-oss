@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.117.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.116.0...admin-ui-v0.117.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** add governed audience library ([#4653](https://github.com/JiRaska/open-bank-oss/issues/4653)) ([f2dc472](https://github.com/JiRaska/open-bank-oss/commit/f2dc472990b45978e4f0486099ac4589404cb08e)), closes [#4652](https://github.com/JiRaska/open-bank-oss/issues/4652)
+
 ## [0.116.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.115.0...admin-ui-v0.116.0) (2026-08-13)
 
 
