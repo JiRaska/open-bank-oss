@@ -27,9 +27,11 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
  * that is a pull request against the catalogue.
  */
 
-export type EditorChannel = 'EMAIL' | 'PUSH'
+export type EditorChannel = 'EMAIL' | 'PUSH' | 'BANNER'
 
 export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
+
+export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
 
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 
@@ -46,6 +48,8 @@ export interface EditorStep {
   fallbackToPush?: boolean
   /** Closed app context reached after a push tap; never an arbitrary URL. */
   mobileDestination?: EditorMobileDestination
+  /** Closed in-app inventory for a BANNER step; absent remains the backwards-compatible home banner. */
+  inAppSurface?: EditorInAppSurface
 }
 
 export const MAX_STEPS = 5
@@ -74,6 +78,11 @@ const CHANNEL: Record<EditorChannel, { tint: string; glyph: string }> = {
   PUSH: {
     tint: 'var(--success)',
     glyph: 'M7 3h10v18H7V3zm4 15h2',
+  },
+  // A home-surface card: a banner is rendered in the signed-in app, not dispatched as a message.
+  BANNER: {
+    tint: 'var(--warning)',
+    glyph: 'M3 5h18v14H3V5zm3 4h12M6 13h7',
   },
 }
 
@@ -294,7 +303,11 @@ export function JourneyEditor({
                 />
                 <text x={x + 14 + ICON + 12} y={ROW_Y - 12} fontSize="10" fill="var(--text-secondary)"
                   letterSpacing="0.06em">
-                  {t('KROK', 'STEP')} {i + 1} · {step.channel === 'PUSH' ? t('PUSH', 'PUSH') : t('E-MAIL', 'EMAIL')}
+                  {t('KROK', 'STEP')} {i + 1} · {step.channel === 'PUSH'
+                    ? t('PUSH', 'PUSH')
+                    : step.channel === 'BANNER'
+                      ? t('PLOCHA V APLIKACI', 'IN-APP SURFACE')
+                      : t('E-MAIL', 'EMAIL')}
                 </text>
                 <text x={x + 14 + ICON + 12} y={ROW_Y + 8} fontSize="13.5" fontWeight="600"
                   fill="var(--text-primary)">

@@ -60,13 +60,14 @@ BASELINE = REPO / ".github" / "event-contract-baseline.txt"
 CONTRACTS = REPO / "openbank-contracts"
 
 
-def producer_pairs() -> set[str]:
+def producer_pairs(root: pathlib.Path = None) -> set[str]:
     """`<service>:<topic>` for every topic a service produces to, derived from its own config."""
     import yaml
 
     pairs: set[str] = set()
-    for cfg in sorted(REPO.glob("openbank-*/src/main/resources/application.yaml")):
-        service = cfg.relative_to(REPO).parts[0]
+    base = root or REPO
+    for cfg in sorted(base.glob("openbank-*/src/main/resources/application.yaml")):
+        service = cfg.relative_to(base).parts[0]
         try:
             doc = yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}
         except Exception:  # noqa: BLE001 - a malformed config is another gate's problem
@@ -78,8 +79,8 @@ def producer_pairs() -> set[str]:
     return pairs
 
 
-def has_contract(service: str) -> bool:
-    return (CONTRACTS / service / "asyncapi.yaml").is_file()
+def has_contract(service: str, contracts: pathlib.Path = None) -> bool:
+    return ((contracts or CONTRACTS) / service / "asyncapi.yaml").is_file()
 
 
 def load_baseline() -> set[str]:
@@ -92,7 +93,81 @@ def load_baseline() -> set[str]:
     }
 
 
+def self_test() -> int:
+    """Falsify the deriver and the ratchet.
+
+    ADR-0006: a topic a service produces to must have an AsyncAPI contract declaring its
+    schema, consumers, retention and partitioning key. The gate is a RATCHET, so it has two
+    silent failure modes in opposite directions: a deriver that finds nothing reports full
+    coverage, and a baseline that never shrinks turns permanent debt into a permanent pass.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+
+        def svc(name: str, body: str) -> None:
+            d = root / name / "src" / "main" / "resources"
+            d.mkdir(parents=True, exist_ok=True)
+            (d / "application.yaml").write_text(body)
+
+        svc("openbank-a", "mp:\n  messaging:\n    outgoing:\n      out:\n        topic: a.events\n")
+        svc("openbank-b", "mp:\n  messaging:\n    outgoing:\n      o1:\n        topic: b.one\n"
+                          "      o2:\n        topic: b.two\n")
+        # A consumer-only service produces nothing and must not appear.
+        svc("openbank-c", "mp:\n  messaging:\n    incoming:\n      in:\n        topic: a.events\n")
+        # A channel with a connector but NO topic declares no wire name — counting it would
+        # invent a pair nobody produces to.
+        svc("openbank-d", "mp:\n  messaging:\n    outgoing:\n      out:\n        connector: smallrye-kafka\n")
+        # Malformed YAML is another gate's problem, but it must not take this one down.
+        svc("openbank-e", "mp: [unclosed\n")
+
+        got = producer_pairs(root)
+        want = {"openbank-a:a.events", "openbank-b:b.one", "openbank-b:b.two"}
+        if got != want:
+            fails.append(f"producer pairs wrong: expected {sorted(want)}, got {sorted(got)}")
+
+        # An empty tree must derive NOTHING — and main() turns that into a failure, because
+        # "no producers" is what a moved layout looks like, not a fleet with no events.
+        if producer_pairs(root / "nowhere") != set():
+            fails.append("an empty tree derived producer pairs from nothing")
+
+        # --- contract presence -----------------------------------------------------------
+        contracts = root / "contracts"
+        (contracts / "openbank-a").mkdir(parents=True)
+        (contracts / "openbank-a" / "asyncapi.yaml").write_text("asyncapi: 3.0.0\n")
+        if not has_contract("openbank-a", contracts):
+            fails.append("a service WITH an asyncapi.yaml was reported as having none")
+        if has_contract("openbank-b", contracts):
+            fails.append("a service with no asyncapi.yaml was reported as having one")
+        # A directory with no asyncapi.yaml is not a contract — an empty stub folder must not
+        # satisfy the requirement.
+        (contracts / "openbank-b").mkdir(parents=True)
+        if has_contract("openbank-b", contracts):
+            fails.append("an empty contract DIRECTORY counted as a contract")
+
+    # A live read: fixtures cannot tell that the globs still match this repo.
+    live = producer_pairs()
+    if not live:
+        fails.append("reading the real repo derived ZERO producer topics — the deriver or the "
+                     "layout moved, and full coverage would be reported about nothing")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: event-contract coverage is falsifiable "
+          f"(8 cases + a live read of {len(live)} producer pair(s))")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     pairs = producer_pairs()
     if not pairs:
         print("::error::check-event-contract-coverage: no producer topics found — the deriver is broken")

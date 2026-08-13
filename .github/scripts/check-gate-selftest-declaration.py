@@ -328,32 +328,22 @@ def main():
 # manifest agrees with the manifest by construction and could never flag anything (the same
 # self-corroboration trap as widening a known-good set with the layer it is checking).
 DEBT = {
-    "accounting-clock-gate": DEBT_MARKER,
     "adr-registry-integrity-check": DEBT_MARKER,
     "advisory-gate-registration": DEBT_MARKER,
     "ai-act-high-risk-inventory-vs-code": DEBT_MARKER,
     "ai-governance-snapshot-drift": DEBT_MARKER,
-    "authz-enforce-pdp-sidecar-parity": DEBT_MARKER,
-    "critical-alert-egress": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
-    "deploy-coverage-guard": DEBT_MARKER,
     "eu-ai-act-inventory-drift": DEBT_MARKER,
     "evals-registry-integrity": DEBT_MARKER,
-    "event-consumer-liveness": DEBT_MARKER,
-    "event-contract-coverage-ratchet": DEBT_MARKER,
     "feature-flag-governance": DEBT_MARKER,
     "gen-network-policies-drift-gate": DEBT_MARKER,
-    "gitops-ref-integrity-guard": DEBT_MARKER,
     "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
     "openapi-route-conformance": DEBT_MARKER,
     "prompt-registry-integrity": DEBT_MARKER,
-    "psd2-anonymous-grant-stays-behind-eidas-mtls": DEBT_MARKER,
     "release-scope-mismatch-gate": DEBT_MARKER,
-    "rolesallowed-realm-parity": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,
     "service-runbook-drift": DEBT_MARKER,
-    "threat-model-coverage": DEBT_MARKER,
 }
 
 if __name__ == "__main__":

@@ -93,7 +93,6 @@ DEBT = {
     "critical-alert-egress": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
-    "deploy-coverage-guard": DEBT_MARKER,
     "deploy-drift-declaration": DEBT_MARKER,
     "dockerfile-runtime-only": DEBT_MARKER,
     "domain-purity-gate": DEBT_MARKER,

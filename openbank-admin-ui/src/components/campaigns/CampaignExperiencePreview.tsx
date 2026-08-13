@@ -5,7 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { EditorMobileDestination, EditorStep } from '@/components/campaigns/JourneyEditor'
+import type { EditorInAppSurface, EditorMobileDestination, EditorStep } from '@/components/campaigns/JourneyEditor'
 
 type Destination = Exclude<EditorMobileDestination, undefined>
 
@@ -15,6 +15,13 @@ const destinationCopy: Record<Destination, { cs: string; en: string; eyebrowCs: 
   CARDS: { cs: 'Karty', en: 'Cards', eyebrowCs: 'Vaše karty', eyebrowEn: 'Your cards' },
   PAYMENTS: { cs: 'Platby', en: 'Payments', eyebrowCs: 'Poslat peníze', eyebrowEn: 'Move money' },
   PRODUCT_HUB: { cs: 'Produkty', en: 'Products', eyebrowCs: 'Pro vás', eyebrowEn: 'Picked for you' },
+}
+
+const surfaceCopy: Record<EditorInAppSurface, { cs: string; en: string; metaCs: string; metaEn: string }> = {
+  HOME_BANNER: { cs: 'Banner na domovské obrazovce', en: 'Home banner', metaCs: 'DOMOVSKÁ OBRAZOVKA', metaEn: 'HOME SCREEN' },
+  HOME_CAROUSEL: { cs: 'Carousel na domovské obrazovce', en: 'Home carousel', metaCs: 'DOMOVSKÝ CAROUSEL', metaEn: 'HOME CAROUSEL' },
+  PRODUCT_FEED: { cs: 'Feed produktů', en: 'Product feed', metaCs: 'FEED PRODUKTŮ', metaEn: 'PRODUCT FEED' },
+  REWARDS_HUB: { cs: 'Centrum odměn', en: 'Rewards hub', metaCs: 'CENTRUM ODMĚN', metaEn: 'REWARDS HUB' },
 }
 
 /**
@@ -34,6 +41,9 @@ export function CampaignExperiencePreview({
 }) {
   const { t, language } = useLanguage()
   const isPush = step?.channel === 'PUSH'
+  const isBanner = step?.channel === 'BANNER'
+  const inAppSurface = step?.inAppSurface ?? 'HOME_BANNER'
+  const surface = surfaceCopy[inAppSurface]
   const destination = step?.mobileDestination ?? 'HOME'
   const copy = destinationCopy[destination]
   const headline = step?.variables.offerTitle?.trim() || t('Vaše další chytrá volba', 'Your next smart move')
@@ -59,8 +69,8 @@ export function CampaignExperiencePreview({
             </div>
             <p className="campaign-phone-eyebrow">{language === 'cs' ? copy.eyebrowCs : copy.eyebrowEn}</p>
             <h4>{language === 'cs' ? copy.cs : copy.en}</h4>
-            <div className="campaign-phone-hero">
-              <span>{t('Doporučeno pro vás', 'Recommended for you')}</span>
+            <div className={`campaign-phone-hero${isBanner ? ` campaign-phone-banner campaign-phone-${inAppSurface.toLowerCase()}` : ''}`} data-preview-surface={isBanner ? inAppSurface : undefined}>
+              <span>{isBanner ? (language === 'cs' ? surface.cs : surface.en) : t('Doporučeno pro vás', 'Recommended for you')}</span>
               <strong>{headline}</strong>
               <button type="button" tabIndex={-1}>{t('Zjistit víc', 'Explore')}</button>
             </div>
@@ -68,20 +78,22 @@ export function CampaignExperiencePreview({
           </div>
         </div>
 
-        <div className="campaign-push-card" data-preview-channel={isPush ? 'PUSH' : 'EMAIL'}>
+        <div className={`campaign-push-card${isBanner ? ' campaign-banner-card' : ''}`} data-preview-channel={isPush ? 'PUSH' : isBanner ? 'BANNER' : 'EMAIL'}>
           <div className="campaign-push-icon">o</div>
           <div>
-            <div className="campaign-push-meta">OPENBANK · {t('nyní', 'now')}</div>
-            <p className="campaign-push-title">{isPush ? headline : t('Zvolte push krok', 'Choose a push step')}</p>
+            <div className="campaign-push-meta">OPENBANK · {isBanner ? (language === 'cs' ? surface.metaCs : surface.metaEn) : t('nyní', 'now')}</div>
+            <p className="campaign-push-title">{isPush ? headline : isBanner ? (language === 'cs' ? surface.cs : surface.en) : t('Zvolte push krok', 'Choose a push step')}</p>
             <p>{isPush
               ? t('Otevře zabezpečenou aplikaci — bez osobního obsahu v notifikaci.', 'Opens the secure app — with no personal content in the notification.')
+              : isBanner
+                ? t('Zobrazí se při další návštěvě této plochy. Žádné vyrušení, žádná zamčená obrazovka.', 'Shown on the next visit to this surface. No interruption, no lock screen.')
               : t('Tento krok je e-mail. Vyberte push krok na cestě pro náhled notifikace.', 'This step is email. Select a push step on the journey to preview the notification.')}</p>
           </div>
         </div>
       </div>
 
       <div className="campaign-preview-route">
-        <span>{t('Po klepnutí', 'After tap')}</span>
+        <span>{isBanner ? t('Po klepnutí na banner', 'After banner tap') : t('Po klepnutí', 'After tap')}</span>
         <strong>{campaignLabel} → {language === 'cs' ? copy.cs : copy.en}</strong>
         <code>{`openbank://${destination.toLowerCase().replace('product_hub', 'products')}`}</code>
       </div>

@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.SendLogRepository
 import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
@@ -11,12 +12,12 @@ import java.util.UUID
 /**
  * Narrow customer-edge lookup for campaign-originated app interactions.
  *
- * It deliberately returns no campaign data. The caller needs only one fact — that this opaque
- * reference belongs to the authenticated party and originated from a PUSH handoff — before it
- * allows engagement-service to append an attributed event.
+ * The app sees only the opaque reference. This trusted service-to-service query resolves the
+ * server-owned campaign context after the party/channel/handoff predicate has passed, so neither
+ * the app nor a client-supplied campaign id can choose attribution.
  */
 @ApplicationScoped
 class CampaignInteractionQuery(private val sendLog: SendLogRepository) {
-    suspend fun isValidForParty(interactionRef: UUID, partyId: UUID): Boolean =
-        sendLog.hasPushInteractionForParty(interactionRef, partyId)
+    suspend fun resolve(interactionRef: UUID, partyId: UUID): CampaignInteractionAttribution? =
+        sendLog.attributionForAppInteraction(interactionRef, partyId)
 }

@@ -175,6 +175,12 @@ data:
             "mode": rec.get("mode", "enforced"),
             "status": rec["status"],
             "seconds": rec["seconds"],
+            # .get with a 0 default, not rec["selftest_seconds"]: an OLDER run's artifact
+            # (produced by a run-gates.py before this field existed) has no such key, and a
+            # bare KeyError would abort the whole pull over one historical run rather than
+            # degrading that run's rows to "no selftest cost recorded" — the same default the
+            # ClickHouse column itself uses (DEFAULT 0), so old and new agree.
+            "selftest_seconds": rec.get("selftest_seconds", 0),
             "subjects": rec.get("subjects"),
             "selftest_declared": bool(rec.get("selftest_declared")),
             "selftest_passed": rec.get("selftest_passed"),

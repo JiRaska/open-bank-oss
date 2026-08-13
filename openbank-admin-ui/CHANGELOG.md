@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.114.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.113.0...admin-ui-v0.114.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** strengthen operator dashboard ([#4598](https://github.com/JiRaska/open-bank-oss/issues/4598)) ([914ab71](https://github.com/JiRaska/open-bank-oss/commit/914ab71e1d9542f74ebe2e06c0c27f6ff3de07c1))
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
+
+### Bug Fixes
+
+* **admin-ui:** load regulatory templates ([#4602](https://github.com/JiRaska/open-bank-oss/issues/4602)) ([9629531](https://github.com/JiRaska/open-bank-oss/commit/96295319c727c43407ac87628b596e27d26153bb))
+
+## [0.113.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.112.0...admin-ui-v0.113.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app banner channel ([#4577](https://github.com/JiRaska/open-bank-oss/issues/4577)) ([d95c85c](https://github.com/JiRaska/open-bank-oss/commit/d95c85cf3fbe0428e4cc5e44bcca27d05bc574ab))
+
+## [0.112.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.3...admin-ui-v0.112.0) (2026-08-13)
+
+
+### Features
+
+* add trusted campaign engagement analytics ([#4555](https://github.com/JiRaska/open-bank-oss/issues/4555)) ([22ab0ba](https://github.com/JiRaska/open-bank-oss/commit/22ab0ba6930bff0d70594ab2ee72cf5407bee0b8))
+* **admin-ui:** elevate campaign composer ([#4540](https://github.com/JiRaska/open-bank-oss/issues/4540)) ([28bddcc](https://github.com/JiRaska/open-bank-oss/commit/28bddcc13c1e52c9dc8354babdd88f0295ebb7f2))
+* **governance:** add gate lifecycle metadata gate, split selftest_seconds ([#4521](https://github.com/JiRaska/open-bank-oss/issues/4521)) ([d9951da](https://github.com/JiRaska/open-bank-oss/commit/d9951dab5e68c43c9328eeb702369c0f08e7672f))
+
 ## [0.111.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.2...admin-ui-v0.111.3) (2026-08-13)
 
 

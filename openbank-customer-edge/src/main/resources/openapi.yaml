@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.33.0
+  version: 1.34.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2233,7 +2233,8 @@ components:
         `partyId` is deliberately absent: customer-edge derives it from the bearer token and
         overwrites any unexpected field before the event reaches engagement-service. `interactionRef`
         is optional and opaque: it may only be copied from a PUSH payload. customer-edge verifies
-        its ownership and PUSH origin before accepting the event, so it is never a campaign id.
+        its ownership and PUSH origin before accepting the event, then resolves the server-owned
+        campaign, step and channel context. Any client-supplied attribution fields are discarded.
       properties:
         contentId:
           type: string
