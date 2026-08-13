@@ -86,7 +86,7 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
     { field: 'Kód SDAT', value: report.sdatCode },
     { field: 'Frekvence', value: report.frequency },
     { field: 'Termín', value: report.deadline },
-    { field: 'Datový zdroj', value: TEMPLATE_PATHS[report.id] ? 'Živý náhled je připojen' : 'Katalog — datový zdroj není připojen' },
+    { field: 'Datový zdroj', value: TEMPLATE_PATHS[report.id] ? 'Implementovaný náhled — data se ověřují při načtení' : 'Katalog — datový zdroj není připojen' },
     { field: 'Odeslání regulátorovi', value: 'Není připojeno' },
     { field: 'Příští termín', value: report.nextDue },
   ]
@@ -225,12 +225,12 @@ const REPORTS = [
 ]
 
 const DATA_SOURCE_CONFIG = {
-  live: { label: 'Živý datový náhled', color: '#16a34a', icon: <CheckCircle2 size={13} /> },
+  implemented: { label: 'Implementovaný náhled', color: '#2563eb', icon: <FileText size={13} /> },
   catalog: { label: 'Katalog — bez zdroje', color: '#6b7280', icon: <AlertTriangle size={13} /> },
 }
 
 function dataSourceOf(report: Report): keyof typeof DATA_SOURCE_CONFIG {
-  return TEMPLATE_PATHS[report.id] ? 'live' : 'catalog'
+  return TEMPLATE_PATHS[report.id] ? 'implemented' : 'catalog'
 }
 
 export default function RegulatoryPage() {
@@ -315,8 +315,8 @@ export default function RegulatoryPage() {
     setTimeout(() => setDownloadMessage(null), 3000)
   }
 
-  const livePreviewCount = REPORTS.filter(r => dataSourceOf(r) === 'live').length
-  const catalogueOnlyCount = REPORTS.length - livePreviewCount
+  const implementedPreviewCount = REPORTS.filter(r => dataSourceOf(r) === 'implemented').length
+  const catalogueOnlyCount = REPORTS.length - implementedPreviewCount
 
   const authorities = REPORTS.reduce((acc, r) => {
     const key = r.authority.includes('CNB') ? 'ČNB' : r.authority.includes('FAÚ') ? 'FAÚ' : r.authority.includes('ECB') ? 'ECB' : 'Ostatní'
@@ -324,8 +324,11 @@ export default function RegulatoryPage() {
     return acc
   }, {} as Record<string, number>)
 
-  const sortedByDate = [...REPORTS].filter(r => r.nextDue !== 'Ad-hoc').sort((a, b) => a.nextDue.localeCompare(b.nextDue))
-  const upcoming = sortedByDate.slice(0, 3)
+  const today = new Date().toISOString().slice(0, 10)
+  const upcoming = [...REPORTS]
+    .filter(r => r.nextDue !== 'Ad-hoc' && r.nextDue >= today)
+    .sort((a, b) => a.nextDue.localeCompare(b.nextDue))
+    .slice(0, 3)
 
   return (
     <div>
@@ -351,7 +354,7 @@ export default function RegulatoryPage() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
         {[
           { label: t('Katalog výkazů', 'Report catalogue'), value: REPORTS.length, color: 'var(--accent)' },
-          { label: t('Živý náhled', 'Live preview'), value: livePreviewCount, color: '#16a34a' },
+          { label: t('Implementovaný náhled', 'Implemented preview'), value: implementedPreviewCount, color: '#2563eb' },
           { label: t('Bez datového zdroje', 'No data source'), value: catalogueOnlyCount, color: '#6b7280' },
           { label: t('Napojené odesílání', 'Connected submission'), value: 0, color: '#d97706' },
         ].map(s => (
@@ -364,9 +367,9 @@ export default function RegulatoryPage() {
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px', marginBottom: '24px' }}>
         <div className="card" style={{ padding: '16px' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><CheckCircle2 size={14} /> {t('Dostupnost dat', 'Data availability')}</h3>
+          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><FileText size={14} /> {t('Pokrytí implementovanými náhledy', 'Implemented preview coverage')}</h3>
           <div style={{ display: 'flex', height: '20px', borderRadius: '6px', overflow: 'hidden', marginBottom: '16px' }}>
-            {(['live', 'catalog'] as const).map(st => {
+            {(['implemented', 'catalog'] as const).map(st => {
               const count = REPORTS.filter(r => dataSourceOf(r) === st).length
               if (count === 0) return null;
               const percent = (count / REPORTS.length) * 100;
@@ -375,7 +378,7 @@ export default function RegulatoryPage() {
             })}
           </div>
           <div style={{ display: 'flex', gap: '16px', fontSize: '12px' }}>
-            {(['live', 'catalog'] as const).map(st => {
+            {(['implemented', 'catalog'] as const).map(st => {
               const count = REPORTS.filter(r => dataSourceOf(r) === st).length;
               const cfg = DATA_SOURCE_CONFIG[st];
               return (
@@ -408,8 +411,9 @@ export default function RegulatoryPage() {
         </div>
 
         <div className="card" style={{ padding: '16px' }}>
-          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><Calendar size={14} /> {t('Nejbližší termíny', 'Upcoming deadlines')}</h3>
+          <h3 style={{ fontSize: '13px', fontWeight: 700, marginBottom: '16px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}><Calendar size={14} /> {t('Budoucí katalogové termíny', 'Future catalogue deadlines')}</h3>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {upcoming.length === 0 && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{t('V katalogu není evidován žádný budoucí termín.', 'No future deadline is recorded in the catalogue.')}</div>}
             {upcoming.map((report) => (
               <div key={report.id} style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minHeight: '28px', marginTop: '3px' }}>
@@ -453,7 +457,7 @@ export default function RegulatoryPage() {
 
                 {/* Next due */}
                 <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Příští termín', 'Next due')}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{report.nextDue !== 'Ad-hoc' && report.nextDue < today ? t('Katalogový termín (historický)', 'Catalogue deadline (historical)') : t('Katalogový termín', 'Catalogue deadline')}</div>
                   <div style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                     <Calendar size={11} />
                     {report.nextDue}
@@ -483,8 +487,8 @@ export default function RegulatoryPage() {
                         <strong>{t('Termín:', 'Deadline:')}</strong> {report.deadline}
                       </div>
                       <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {source === 'live'
-                          ? t('živý náhled přes finrep-service', 'live preview through finrep-service')
+                        <strong>{t('Datový zdroj:', 'Data source:')}</strong> {source === 'implemented'
+                          ? t('implementovaný náhled přes finrep-service; dostupnost se ověřuje při načtení', 'implemented preview through finrep-service; availability is checked on load')
                           : t('zatím nenapojeno', 'not connected yet')}
                       </div>
                     </div>
@@ -595,7 +599,7 @@ export default function RegulatoryPage() {
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}>
                 {previewData.status === 'unsupported'
                   ? t('Tento katalogový výkaz zatím nemá implementovaný datový zdroj ani odeslání. Nezobrazuje fiktivní hodnoty.', 'This catalogue report has no implemented data source or submission path yet. It does not show fictional values.')
-                  : t('FINREP/COREP se čtou živě z finrep-service nad ledger trial balance. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are read live from finrep-service over the ledger trial balance. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
+                  : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
                 <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={previewData.status === 'loading'}>
