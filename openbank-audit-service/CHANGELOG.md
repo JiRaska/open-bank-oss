@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.2...audit-service-v0.14.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* **audit:** normalise aggregate_type at ingest, same defect as [#4553](https://github.com/JiRaska/open-bank-oss/issues/4553) ([#4661](https://github.com/JiRaska/open-bank-oss/issues/4661)) ([4616820](https://github.com/JiRaska/open-bank-oss/commit/4616820e5df765c7a808d5d42740782d3399c50b))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.1...audit-service-v0.14.2) (2026-08-09)
 
 
