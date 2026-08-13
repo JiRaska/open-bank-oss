@@ -112,7 +112,19 @@ class AuditConsumer {
                     ?: node.textOrNull("type")
                     ?: address.ceType
                     ?: "UNKNOWN",
-                aggregateType = node.textOrNull("aggregateType") ?: inferAggregateType(node),
+                // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
+                // own "aggregateType" field survives verbatim while inferAggregateType's table below
+                // is all uppercase, so the column records WHICH resolution path fired, not what the
+                // aggregate is. Measured on the live audit_entries table before this fix:
+                // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
+                // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
+                // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
+                // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
+                // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
+                // this stops the split growing, it does not backfill the 10-year tamper-evident
+                // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
+                // its own decision, not a drive-by fix here).
+                aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
                 aggregateId = inferAggregateId(node),
                 actorId = node.textOrNull("requestedBy")
                     ?: node.textOrNull("actorId")
