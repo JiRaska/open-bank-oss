@@ -114,7 +114,13 @@ class AuditEntryEntity : PanacheEntity() {
     // ── Cross-channel correlation (ADR-0226): query indexes, NOT part of the chain hash — the
     // producer's raw event JSON (already hashed via `payload`) carries these fields verbatim, so
     // tamper-evidence covers them without recomputing every pre-V9 row.
-    @Column(name = "channel", length = 16)
+    //
+    // length=32 (V14, issue #4660): widened from 16. The bare JSON key "channel" turned out to be
+    // independently populated by THREE producers — AuditChannel (ADR-0226, this column's original
+    // intent), OnboardingChannel (party-service) and ComplaintChannel (dispute-service) — with no
+    // shared vocabulary, so AuditConsumer now namespaces the value by source topic before storing
+    // it (see resolveChannel there). "onboarding:MOBILE_APP" alone is 22 characters.
+    @Column(name = "channel", length = 32)
     var channel: String? = null
 
     /** JSON array string (e.g. `["agent-session:7f3…","mcp-cli"]`); null when the action was direct. */
