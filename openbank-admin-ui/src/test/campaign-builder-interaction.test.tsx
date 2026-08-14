@@ -180,7 +180,7 @@ describe('campaign builder conditions', () => {
     expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
   }, 25000)
 
-  it('makes a real delivery decision as two complementary paths, not two manually guessed gates', async () => {
+  it('makes a real delivery decision node, not two manually guessed linear gates', async () => {
     stub()
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
@@ -191,9 +191,9 @@ describe('campaign builder conditions', () => {
 
     expect(container.querySelectorAll('[data-step]')).toHaveLength(3)
     expect(container.querySelector('[data-step-editor="1"]')).toBeTruthy()
-    expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
-    expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_NOT_CONFIRMED"]')).toBeTruthy()
-    expect(container.textContent).toMatch(/step 1 delivered|kroku 1 doručen/)
+    expect(container.querySelector('[data-decision-node="0"]')).toBeTruthy()
+    expect(container.querySelector('[data-edge-condition]')).toBeNull()
+    expect(container.textContent).toMatch(/delivered\?|doručeno\?/)
   }, 25000)
 
   it('warns that a condition on the first step has nothing to test', async () => {

@@ -14,6 +14,7 @@ import {
   JourneyEditor,
   MAX_STEPS,
   type EditorChannel,
+  type EditorDecision,
   type EditorInAppSurface,
   type EditorStep,
 } from '@/components/campaigns/JourneyEditor'
@@ -105,6 +106,7 @@ export default function NewCampaignPage() {
   const [trigger, setTrigger] = useState('')
   const [entryUnavailable, setEntryUnavailable] = useState(false)
   const [steps, setSteps] = useState<EditorStep[]>([])
+  const [decisions, setDecisions] = useState<EditorDecision[]>([])
   const [journeyRecipe, setJourneyRecipe] = useState<JourneyRecipeId | null>('RETURN_TO_APP')
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
@@ -300,27 +302,27 @@ export default function NewCampaignPage() {
       }]
     })
 
-  /**
-   * A binary decision is an authoring shortcut over the service's two complementary, observable
-   * delivery conditions. Both generated paths explicitly point at the same source step: a skipped
-   * first path can therefore never become the second path's input.
-   */
+  /** Create a real reviewed decision node, not two hidden linear conditions. */
   const addDeliveryDecision = () =>
     setSteps(prev => {
       if (prev.length < 1 || prev.length > MAX_STEPS - 2) return prev
       const first = defaultStep()
       if (!first) return prev
-      const decisionStep = (condition: EditorStep['condition']): EditorStep => ({
+      const decisionStep = (): EditorStep => ({
         ...newStep(first),
-        condition,
-        conditionSourceOrder: prev.length - 1,
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       })
       setSelected(prev.length)
+      setDecisions(current => [...current, {
+        sourceStepOrder: prev.length - 1,
+        evaluationDelaySeconds: 0,
+        confirmedStepOrder: prev.length,
+        notConfirmedStepOrder: prev.length + 1,
+      }])
       return [
         ...prev,
-        decisionStep('IF_PREVIOUS_CONFIRMED'),
-        decisionStep('IF_PREVIOUS_NOT_CONFIRMED'),
+        decisionStep(),
+        decisionStep(),
       ]
     })
 
@@ -340,12 +342,16 @@ export default function NewCampaignPage() {
       ...(step.variantBVariables ? { variantBVariables: { ...step.variantBVariables } } : {}),
     })))
     setJourneyRecipe(recipe.id)
+    setDecisions([])
     setSelected(0)
   }
 
   const removeStep = (i: number) =>
     setSteps(prev => {
       const next = prev.filter((_, k) => k !== i)
+      // Renumbering graph edges after a deletion can silently choose a different customer path.
+      // Removing any card therefore intentionally returns the draft to its explicit linear shape.
+      setDecisions([])
       setSelected(null)
       return next
     })
@@ -421,6 +427,14 @@ export default function NewCampaignPage() {
         ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
         ...(entryMode === 'SCHEDULE' && cadence ? { schedule: { cadence } } : {}),
         ...(entryMode === 'TRIGGER' && trigger ? { trigger } : {}),
+        ...(decisions.length > 0 ? {
+          decisions: decisions.map(d => ({
+            sourceStepOrder: d.sourceStepOrder + 1,
+            evaluationDelaySeconds: d.evaluationDelaySeconds,
+            confirmedStepOrder: d.confirmedStepOrder + 1,
+            notConfirmedStepOrder: d.notConfirmedStepOrder + 1,
+          })),
+        } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
@@ -435,6 +449,7 @@ export default function NewCampaignPage() {
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
           ...(s.inAppSurface ? { inAppSurface: s.inAppSurface } : {}),
+          ...(s.nextStepOrder !== undefined ? { nextStepOrder: s.nextStepOrder + 1 } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -690,6 +705,7 @@ export default function NewCampaignPage() {
           onSelect={setSelected}
           onAdd={addStep}
           onAddDecision={addDeliveryDecision}
+          decisions={decisions}
           contentCatalogueReady={contentCatalogueState === 'ok'}
           onRemove={removeStep}
           templateLabels={templateLabels}

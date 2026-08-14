@@ -90,7 +90,7 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
     ) {
         val steps = definition.steps.associateBy { it.order }
         val decisions = definition.decisions.associateBy { it.sourceStepOrder }
-        var currentStepOrder: Int? = 0
+        var currentStepOrder: Int? = definition.steps.minOfOrNull { it.order }
         while (currentStepOrder != null) {
             val stepOrder = currentStepOrder
             val step = requireNotNull(steps[stepOrder]) { "graph references absent step $stepOrder" }

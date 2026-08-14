@@ -50,6 +50,19 @@ export interface JourneyStep {
   conditionSourceOrder?: number
 }
 
+export interface JourneyDecision {
+  sourceStepOrder: number
+  evaluationDelaySeconds: number
+  confirmedStepOrder: number
+  notConfirmedStepOrder: number
+}
+
+export interface DecisionPathSelection {
+  sourceStepOrder: number
+  selected: 'CONFIRMED' | 'NOT_CONFIRMED'
+  nextStepOrder: number
+}
+
 const NODE_W = 190
 const NODE_H = 78
 const GAP_X = 96
@@ -73,10 +86,15 @@ export function JourneyCanvas({
   steps,
   funnel,
   audienceSize,
+  decisions = [],
+  decisionPaths = [],
 }: {
   steps: JourneyStep[]
   funnel: StepFunnel[]
   audienceSize: number | null
+  decisions?: JourneyDecision[]
+  /** Per-enrolment path evidence; absent during a mixed-version rollout remains unknown. */
+  decisionPaths?: DecisionPathSelection[]
 }) {
   const { t, language } = useLanguage()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -128,6 +146,8 @@ export function JourneyCanvas({
 
   const colX = (i: number) => PAD + i * (NODE_W + GAP_X)
   const anyActivity = rows.some(f => f.reached > 0)
+  const pathCount = (sourceStepOrder: number, selected: DecisionPathSelection['selected']) =>
+    decisionPaths.filter(path => path.sourceStepOrder === sourceStepOrder && path.selected === selected).length
 
   return (
     <div className="overflow-x-auto rounded-xl border" style={{ background: 'var(--surface)' }}>
@@ -269,6 +289,23 @@ export function JourneyCanvas({
           </text>
         )}
       </svg>
+      {decisions.length > 0 && (
+        <div className="grid gap-2 border-t px-4 py-3 sm:grid-cols-2" data-decision-outcomes>
+          {decisions.map(decision => (
+            <div key={decision.sourceStepOrder} className="rounded-lg border bg-background px-3 py-2 text-xs">
+              <p className="font-medium text-foreground">
+                {t(`Rozhodnutí po kroku ${decision.sourceStepOrder}`, `Decision after step ${decision.sourceStepOrder}`)}
+              </p>
+              <p className="mt-1 text-muted-foreground">
+                {t(`${pathCount(decision.sourceStepOrder, 'CONFIRMED')}× potvrzeno → krok ${decision.confirmedStepOrder}; `,
+                  `${pathCount(decision.sourceStepOrder, 'CONFIRMED')}× confirmed → step ${decision.confirmedStepOrder}; `)}
+                {t(`${pathCount(decision.sourceStepOrder, 'NOT_CONFIRMED')}× nepotvrzeno → krok ${decision.notConfirmedStepOrder}`,
+                  `${pathCount(decision.sourceStepOrder, 'NOT_CONFIRMED')}× not confirmed → step ${decision.notConfirmedStepOrder}`)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

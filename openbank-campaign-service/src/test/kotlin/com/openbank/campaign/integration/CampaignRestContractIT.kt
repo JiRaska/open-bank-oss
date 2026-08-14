@@ -524,6 +524,47 @@ class CampaignRestContractIT {
         }
     }
 
+    @Test
+    fun `an explicit decision graph survives the campaign HTTP contract`() {
+        val body = """
+            {"name":"graph-${UUID.randomUUID()}","goal":"prove an explicit graph survives HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[
+               {"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":2,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":3,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}
+             ],
+             "decisions":[{"sourceStepOrder":1,"evaluationDelaySeconds":60,
+               "confirmedStepOrder":2,"notConfirmedStepOrder":3}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("decisions[0].sourceStepOrder", org.hamcrest.Matchers.equalTo(1))
+            body("decisions[0].evaluationDelaySeconds", org.hamcrest.Matchers.equalTo(60))
+            body("decisions[0].confirmedStepOrder", org.hamcrest.Matchers.equalTo(2))
+            body("decisions[0].notConfirmedStepOrder", org.hamcrest.Matchers.equalTo(3))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("decisions[0].sourceStepOrder", org.hamcrest.Matchers.equalTo(1))
+            body("decisions[0].notConfirmedStepOrder", org.hamcrest.Matchers.equalTo(3))
+        }
+    }
+
     /**
      * These terminal reasons are operator-visible contract values, not internal workflow detail.
      * Drive the real endpoint over rows that can only be produced by live journey control: a test

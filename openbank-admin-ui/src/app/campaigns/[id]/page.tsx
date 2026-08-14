@@ -11,7 +11,7 @@ import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
-import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
+import { JourneyCanvas, type DecisionPathSelection, type JourneyDecision, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
@@ -42,6 +42,7 @@ interface Campaign {
   holdoutPercent?: number
   schedule?: { cadence: string; endAt?: string | null } | null
   trigger?: string | null
+  decisions?: JourneyDecision[]
 }
 
 interface Enrolment {
@@ -49,6 +50,7 @@ interface Enrolment {
   partyId: string
   state: string
   currentStep: number
+  decisionPath?: (DecisionPathSelection & { decidedAt?: string })[]
 }
 
 interface Send {
@@ -314,6 +316,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const trigger = c?.trigger
     ? detail?.entryCatalogues?.triggers.find(x => x.trigger === c.trigger)
     : undefined
+  const decisionPaths = detail?.enrolments.flatMap(enrolment => enrolment.decisionPath ?? []) ?? []
 
   // From the server-side summary, never from the loaded page: a headline derived from the rows on
   // screen understates every campaign larger than one page.
@@ -781,6 +784,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   steps={c.steps ?? []}
                   funnel={detail?.journey ?? []}
                   audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
+                  decisions={c.decisions ?? []}
+                  decisionPaths={decisionPaths}
                 />
               </SectionBoundary>
             )}

@@ -209,7 +209,7 @@ private fun validateDecisionGraph(steps: List<CampaignStep>, decisions: List<Cam
         "legacy conditions and explicit decisions cannot be mixed"
     }
     val orders = steps.map { it.order }.toSet()
-    require(steps.any { it.order == 0 }) { "an explicit decision journey must start at step 0" }
+    val firstOrder = requireNotNull(steps.minOfOrNull { it.order }) { "a graph journey needs a step" }
     require(decisions.map { it.sourceStepOrder }.distinct().size == decisions.size) {
         "a step may have only one explicit decision"
     }
@@ -239,8 +239,8 @@ private fun validateDecisionGraph(steps: List<CampaignStep>, decisions: List<Cam
             steps.first { it.order == order }.nextStepOrder?.let(::visit)
         }
     }
-    visit(0)
-    require(reachable == orders) { "every campaign step must be reachable from step 0" }
+    visit(firstOrder)
+    require(reachable == orders) { "every campaign step must be reachable from its first step" }
 }
 
 /**
