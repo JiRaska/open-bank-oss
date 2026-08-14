@@ -16,21 +16,55 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import NewCampaignPage from '@/app/campaigns/new/page'
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
+
+const TEMPLATES = {
+  state: 'ok',
+  items: [
+    { template: 'MARKETING_PRODUCT_OFFER', channel: 'EMAIL', variables: ['offerTitle', 'offerText', 'ctaText'] },
+    { template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: ['offerTitle'] },
+    { template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_BANNER' },
+    { template: 'MARKETING_PRODUCT_OFFER_CAROUSEL', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_CAROUSEL' },
+    { template: 'MARKETING_PRODUCT_OFFER_STORY', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'STORIES' },
+    { template: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'PRODUCT_FEED' },
+    { template: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'REWARDS_HUB' },
+  ],
+}
 
 const stub = () => vi.stubGlobal('fetch', vi.fn(async (u: string) =>
-  String(u).includes('/preview')
+  String(u).includes('/templates')
+    ? { ok: true, json: async () => TEMPLATES }
+    : String(u).includes('/preview')
     ? { ok: true, json: async () => ({ size: 1240, state: 'ok' }) }
     : { ok: true, json: async () => ({ state: 'ok', items: [
         { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] },
         { name: 'savers', version: 2, rules: ['has a savings account', 'balance over 50 000 CZK'] }] }) }))
 
 describe('campaign builder interaction', () => {
+  it('turns an app-first recipe into an explicit, editable multi-surface journey', async () => {
+    stub()
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('savers'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
+
+    fireEvent.click(container.querySelector('[data-journey-recipe="IN_APP_DISCOVERY"]')!)
+
+    expect(container.querySelectorAll('[data-step]').length).toBe(2)
+    expect(container.querySelector('[data-step="0"]')!.getAttribute('data-channel')).toBe('BANNER')
+    expect(container.querySelector('[data-step="1"]')!.getAttribute('data-channel')).toBe('BANNER')
+    expect(container.querySelector('[data-journey-recipe="IN_APP_DISCOVERY"]')!.getAttribute('data-selected')).toBe('true')
+    // A recipe must reveal its first node for immediate editing, rather than act as a hidden
+    // black-box automation.
+    expect(container.querySelector('[data-step-editor="0"]')).toBeTruthy()
+  }, 25000)
+
   it('adds steps up to the domain cap, and the add affordance then disappears', async () => {
     stub()
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('savers'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
     expect(container.querySelectorAll('[data-step]').length).toBe(1)
     for (let i = 0; i < 4; i++) fireEvent.click(container.querySelector('[data-add-step]')!)
     expect(container.querySelectorAll('[data-step]').length).toBe(5)
@@ -44,6 +78,7 @@ describe('campaign builder interaction', () => {
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('savers'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
     fireEvent.click(container.querySelector('[data-add-step]')!)
     // A newly added step opens itself — you added it to fill it in.
     expect(container.querySelector('[data-step-editor="1"]')).toBeTruthy()
@@ -57,6 +92,7 @@ describe('campaign builder interaction', () => {
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('savers'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
     fireEvent.click(container.querySelector('[data-segment="savers@2"]')!)
     await waitFor(() => getByText(/1240 people/), { timeout: 8000 })
     fireEvent.click(container.querySelector('[data-add-step]')!)
@@ -82,13 +118,16 @@ describe('campaign builder interaction', () => {
 describe('campaign builder channels', () => {
   it('starts app-first and switching channels exposes only fields that channel can carry', async () => {
     vi.stubGlobal('fetch', vi.fn(async (u: string) =>
-      String(u).includes('/preview')
+      String(u).includes('/templates')
+        ? { ok: true, json: async () => TEMPLATES }
+        : String(u).includes('/preview')
         ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
         : { ok: true, json: async () => ({ state: 'ok', items: [
             { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }))
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
 
     // App-first: a new campaign opens on push with only its headline field.
     expect(container.querySelector('[data-step="0"]')!.getAttribute('data-channel')).toBe('PUSH')
@@ -120,7 +159,9 @@ describe('campaign builder channels', () => {
  */
 describe('campaign builder conditions', () => {
   const stub = () => vi.stubGlobal('fetch', vi.fn(async (u: string) =>
-    String(u).includes('/preview')
+    String(u).includes('/templates')
+      ? { ok: true, json: async () => TEMPLATES }
+      : String(u).includes('/preview')
       ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
       : { ok: true, json: async () => ({ state: 'ok', items: [
           { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }))
@@ -130,6 +171,7 @@ describe('campaign builder conditions', () => {
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
     fireEvent.click(container.querySelector('[data-add-step]')!)
 
     expect(container.querySelector('[data-edge-condition]')).toBeNull()
@@ -138,11 +180,28 @@ describe('campaign builder conditions', () => {
     expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
   }, 25000)
 
+  it('makes a real delivery decision as two complementary paths, not two manually guessed gates', async () => {
+    stub()
+    const { container, getByText } = render(
+      React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+    await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
+
+    fireEvent.click(container.querySelector('[data-add-decision="delivery"]')!)
+
+    expect(container.querySelectorAll('[data-step]')).toHaveLength(3)
+    expect(container.querySelector('[data-step-editor="1"]')).toBeTruthy()
+    expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
+    expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_NOT_CONFIRMED"]')).toBeTruthy()
+    expect(container.textContent).toMatch(/step 1 delivered|kroku 1 doručen/)
+  }, 25000)
+
   it('warns that a condition on the first step has nothing to test', async () => {
     stub()
     const { container, getByText, queryByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
 
     expect(queryByText(/has no predecessor/)).toBeNull()
     fireEvent.click(container.querySelector('[data-condition-pick="IF_PREVIOUS_CONFIRMED"]')!)
@@ -155,6 +214,7 @@ describe('campaign builder conditions', () => {
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
 
     expect(container.querySelector('[data-stop-after]')).toBeNull()
     fireEvent.click(container.querySelector('[data-stop-enabled]')!)
@@ -173,13 +233,16 @@ describe('campaign builder conditions', () => {
 describe('campaign builder conversion', () => {
   it('offers only catalogue rules, and says engagement is not tracked', async () => {
     vi.stubGlobal('fetch', vi.fn(async (u: string) =>
-      String(u).includes('/preview')
+      String(u).includes('/templates')
+        ? { ok: true, json: async () => TEMPLATES }
+        : String(u).includes('/preview')
         ? { ok: true, json: async () => ({ size: 10, state: 'ok' }) }
         : { ok: true, json: async () => ({ state: 'ok', items: [
             { name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }))
     const { container, getByText } = render(
       React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
     await waitFor(() => getByText('active-clients'), { timeout: 8000 })
+    await waitFor(() => expect(container.querySelector('[data-step="0"]')).toBeTruthy())
 
     const picks = Array.from(container.querySelectorAll('[data-conversion-pick]'))
       .map(e => e.getAttribute('data-conversion-pick'))

@@ -56,4 +56,24 @@ describe('Regulatory report preview', () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain('/api/svc/finrep-service/api/v1/finrep/templates/F02.00?asOf=')
     expect(screen.getByText('finrep-service ← ledger trial balance (ne ClickHouse)')).toBeInTheDocument()
   })
+
+  it('does not present an implemented endpoint as live data when the BFF cannot load it', async () => {
+    const fetchMock = vi.fn(async () => new Response('upstream unavailable', { status: 502 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    expect(screen.getByText('Implemented preview')).toBeInTheDocument()
+    expect(screen.queryByText('Live preview')).not.toBeInTheDocument()
+    expect(screen.getByText('Implemented preview coverage')).toBeInTheDocument()
+
+    const finrepCard = screen.getByText('CNB — Finanční výkazy (FINREP)').closest('.card')
+    expect(finrepCard).not.toBeNull()
+    fireEvent.click(within(finrepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(screen.queryByText('Celková aktiva')).not.toBeInTheDocument()
+    expect(screen.queryByText('Živý datový náhled')).not.toBeInTheDocument()
+    expect(screen.queryByText('Dostupnost dat')).not.toBeInTheDocument()
+  })
 })

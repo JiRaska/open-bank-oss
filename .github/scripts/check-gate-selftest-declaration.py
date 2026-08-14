@@ -60,43 +60,55 @@ import yaml
 MANIFEST = ".github/gates/gates.yaml"
 SELFTEST_RE = re.compile(r"--self-?test\b")
 
-# Gates with no self-test as of 2026-08-09, each with the reason it is acceptable — or, where
-# it is simply debt, saying so in those words. This list may SHRINK freely; growing it needs a
-# reason a reviewer accepts, which is the point (repo rule: make the exclusions the thing a
-# human has to justify).
+# WHERE THE EXEMPTIONS LIVE, and why they moved (#4587).
 #
-# Categories used below:
+# They used to be two dicts in THIS file: BASELINE (correct as-is) and a DEBT set. That made
+# one contiguous, alphabetically-sorted block of ~50 entries that EVERY gate PR edits — paying
+# off a gate means deleting a line from it. Contiguous plus universally-edited is the exact
+# recipe for a merge conflict, and it delivered: this one block conflicted SIX times on
+# 2026-08-13 alone, across #4513, #4547, #4557, #4575 and two others.
+#
+# Worse than the cost is the shape of the mistake it invites. Git reports the same conflict
+# whether both sides ADDED entries or both REMOVED them, and the two need opposite
+# resolutions: "keep both" is right for additions and silently puts already-paid-off gates
+# back on the debt list for removals. Nothing in the diff tells you which case you are in.
+#
+# So the exemption now lives on the gate it exempts, as `selftest_exempt:` in gates.yaml.
+# Each gate's data is its own block in a 3000-line file, so two PRs touching different gates
+# no longer touch the same lines — they conflict only when they genuinely edit the same gate,
+# which is a conflict worth having.
+#
+# Two properties fall out for free, rather than being enforced:
+#   * an exemption for a gate that no longer exists is now IMPOSSIBLE, not merely detected —
+#     deleting the gate deletes its exemption with it;
+#   * the reason sits next to the thing it excuses, where a reviewer of that gate reads it.
+#
+# The vocabulary is closed, and the category is the part that carries meaning:
 #   is-a-test-suite   the `run:` IS a unit-test suite, so it falsifies itself by construction
-#   third-party       the command is an externally maintained linter; we do not own its tests
+#   third-party       an externally maintained linter; we do not own its tests
 #   debt              a real checker with no harness. Not excused, just not fixed today.
-BASELINE = {
-    # --- the run: is itself a test suite -------------------------------------------------
-    "gate-runner-self-test": "is-a-test-suite — the run: IS run-gates.py --self-test",
-    "governance-script-unit-tests": "is-a-test-suite — pytest over the governance scripts",
-    "auto-deploy-reconcile-probe-unit-test": "is-a-test-suite",
-    "can-i-deploy-block-classifier-unit-test": "is-a-test-suite",
-    "can-i-deploy-version-selector-unit-test": "is-a-test-suite",
-    "co-deploy-set-derivation-unit-test": "is-a-test-suite",
-    "pact-version-tree-equivalence-unit-test": "is-a-test-suite",
-    "pact-version-probe-fail-closed-unit-test": "is-a-test-suite",
-    "blocking-counterpart-probe-unit-test": "is-a-test-suite",
-    "record-deployment-version-resolver": "is-a-test-suite",
-    "runtime-conformance-comparators": "is-a-test-suite",
-    "libs-change-dependents": "is-a-test-suite",
-    "agent-review-proof-falsifiable": "is-a-test-suite",
-    "agent-review-scope-falsifiable": "is-a-test-suite",
-    "ensure-ecr-repository": "is-a-test-suite — the deploy path needs AWS, so the "
-                             "classification harness is the whole gate",
-    # --- externally maintained tooling ---------------------------------------------------
-    "yamllint": "third-party — yamllint's own test suite is not ours to run",
-    "shellcheck": "third-party — shellcheck's own test suite is not ours to run",
-    "python-lint": "third-party — ruff's own test suite is not ours to run",
-}
+EXEMPT_FIELD = "selftest_exempt"
+CATEGORIES = ("is-a-test-suite", "third-party", "debt")
 
-# Everything else undeclared as of the measurement date is debt, enumerated at import time so
-# the file cannot silently disagree with the manifest. Kept separate from BASELINE so the two
-# reasons never blur: BASELINE is "correct as is", DEBT is "should get a harness eventually".
-DEBT_MARKER = "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
+
+def exemptions(gates):
+    """id -> reason, read from each gate's own entry. Split into (baseline, debt) because the
+    two are NOT interchangeable: `debt` never excuses a harness that demonstrably exists
+    (rule 1), while `is-a-test-suite` does."""
+    baseline, debt, malformed = {}, {}, []
+    for g in gates:
+        raw = _norm(g.get(EXEMPT_FIELD))
+        if not raw:
+            continue
+        gid = g.get("id")
+        category = raw.split(" ", 1)[0].split("\u2014")[0].strip()
+        if category not in CATEGORIES:
+            malformed.append(
+                f"{gid}: {EXEMPT_FIELD} must start with one of {', '.join(CATEGORIES)} "
+                f"followed by a reason; got {raw!r}")
+            continue
+        (debt if category == "debt" else baseline)[gid] = raw
+    return baseline, debt, malformed
 
 
 def load(root="."):
@@ -124,8 +136,7 @@ def analyse(gates, debt, baseline=None):
     exemption list — every case reported 8 stale entries and the self-test could not express
     any of the behaviours it was written to pin down. The counter-example has to reach the
     code, and a shared global is one of the ways it quietly does not."""
-    baseline = BASELINE if baseline is None else baseline
-    ids = {g.get("id") for g in gates}
+    baseline = {} if baseline is None else baseline
     known = set(baseline) | set(debt)
 
     undeclared_with_harness, new_undeclared, run_twice = [], [], []
@@ -157,14 +168,17 @@ def analyse(gates, debt, baseline=None):
             new_undeclared.append(gid)
 
     # Rule 3 — both directions.
+    # Rule 3 — one direction only now, and that is a gain rather than a loss. The old
+    # "baselined but no such gate exists" case is unreachable by construction: the exemption
+    # is a field ON the gate, so deleting the gate deletes it. What remains is the case that
+    # can still rot — a gate that has since grown a self-test and kept its exemption.
     stale = []
     for gid in sorted(known):
-        if gid not in ids:
-            stale.append(f"{gid}: baselined but no such gate exists any more — remove the entry")
-        else:
-            g = next(x for x in gates if x.get("id") == gid)
-            if g.get("selftest") and gid not in baseline:
-                stale.append(f"{gid}: now declares a self-test — remove it from the debt list")
+        g = next((x for x in gates if x.get("id") == gid), None)
+        if g is None:
+            continue
+        if g.get("selftest") and gid not in baseline:
+            stale.append(f"{gid}: now declares a self-test — drop its {EXEMPT_FIELD} field")
     return undeclared_with_harness, new_undeclared, stale, run_twice
 
 
@@ -174,7 +188,8 @@ def report(undeclared_with_harness, new_undeclared, stale, run_twice, enforce):
         print(f"::error::{gid}: the command in `selftest:` also appears in `run:`, so the "
               f"harness executes twice for one signal. Either drop it from run: (the gate has "
               f"real work of its own), or drop the `selftest:` field and baseline the gate as "
-              f"`is-a-test-suite` (the gate IS the harness).", file=sys.stderr)
+              f"`{EXEMPT_FIELD}: is-a-test-suite — <reason>` on the gate (the gate IS the "
+              f"harness).", file=sys.stderr)
         bad = True
     for gid in undeclared_with_harness:
         print(f"::error::{gid}: its run: invokes a --self-test but `selftest:` is not declared. "
@@ -184,8 +199,9 @@ def report(undeclared_with_harness, new_undeclared, stale, run_twice, enforce):
         bad = True
     for gid in new_undeclared:
         print(f"::error::{gid}: a gate with no `selftest:` and no baseline entry. A gate that "
-              f"has only ever passed is unfalsified — add a self-test, or add the id to "
-              f"BASELINE/DEBT in this script with a reason.", file=sys.stderr)
+              f"has only ever passed is unfalsified — add a `selftest:`, or add a "
+              f"`{EXEMPT_FIELD}:` field to THIS GATE'S OWN ENTRY in gates.yaml, starting "
+              f"with one of {', '.join(CATEGORIES)} and a reason.", file=sys.stderr)
         bad = True
     for msg in stale:
         print(f"::error::stale baseline — {msg}", file=sys.stderr)
@@ -236,8 +252,31 @@ def self_test():
          [{"id": "old", "run": "python3 x.py"}], {"old": "debt"}, [], [], 0)
 
     # Rule 3: both directions, so the list cannot rot either way.
-    case("a baseline entry for a vanished gate is stale",
-         [ok], {"gone": "debt"}, [], [], 1)
+    # The old "an exemption for a vanished gate is stale" case is GONE, and deliberately so:
+    # the exemption is a field on the gate, so deleting the gate deletes it. Asserting a
+    # property that cannot fail would be exactly the vacuous test this whole checker exists to
+    # forbid. What replaces it is a test that the derivation actually reads the field, and
+    # that a malformed category is refused rather than silently treated as an exemption.
+    def derive_case(label, gates, want_baseline, want_debt, want_malformed):
+        b, d, mal = exemptions(gates)
+        got = (sorted(b), sorted(d), len(mal))
+        exp = (sorted(want_baseline), sorted(want_debt), want_malformed)
+        if got != exp:
+            fails.append(f"{label}: expected {exp}, got {got}")
+
+    derive_case("an is-a-test-suite exemption lands in baseline, not debt",
+                [{"id": "a", "selftest_exempt": "is-a-test-suite — the run: IS the harness"}],
+                ["a"], [], 0)
+    derive_case("a debt exemption lands in debt, not baseline",
+                [{"id": "b", "selftest_exempt": "debt — no harness yet"}], [], ["b"], 0)
+    derive_case("third-party counts as baseline",
+                [{"id": "c", "selftest_exempt": "third-party — not our tests"}], ["c"], [], 0)
+    derive_case("an unknown category is REFUSED, not treated as an exemption",
+                [{"id": "d", "selftest_exempt": "because-i-said-so — trust me"}], [], [], 1)
+    derive_case("a bare reason with no category is refused",
+                [{"id": "e", "selftest_exempt": "no harness yet"}], [], [], 1)
+    derive_case("a gate with no field is not exempt at all",
+                [{"id": "f", "run": "x"}], [], [], 0)
     case("a baseline entry that healed is stale",
          [{"id": "healed", "selftest": "x --self-test", "run": "x"}], {"healed": "debt"}, [], [], 1)
 
@@ -295,7 +334,7 @@ def self_test():
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: gate-selftest-declaration is falsifiable (17 cases)")
+    print("self-test ok: gate-selftest-declaration is falsifiable (22 cases)")
     return 0
 
 
@@ -315,36 +354,18 @@ def main():
         sys.stderr.write(f"::error::{e}\n")
         return 1
 
-    debt = DEBT
-    h, n, s, t = analyse(gates, debt)
+    baseline, debt, malformed = exemptions(gates)
+    for msg in malformed:
+        sys.stderr.write(f"::error::{msg}\n")
+    if malformed:
+        return 1
+    h, n, s, t = analyse(gates, debt, baseline)
     declared = len([g for g in gates if g.get("selftest")])
     print(f"gate-selftest-declaration: {declared}/{len(gates)} gates declare a self-test; "
-          f"{len(BASELINE)} exempt by kind, {len(DEBT)} baselined as debt.")
+          f"{len(baseline)} exempt by kind, {len(debt)} carrying debt "
+          f"(all read from each gate's own selftest_exempt field).")
     return report(h, n, s, t, args.enforce)
 
-
-# The debt list, written out rather than derived, so that shrinking it is a visible diff and
-# growing it needs a reviewer. Derived would have been worse here: a set computed from the
-# manifest agrees with the manifest by construction and could never flag anything (the same
-# self-corroboration trap as widening a known-good set with the layer it is checking).
-DEBT = {
-    "adr-registry-integrity-check": DEBT_MARKER,
-    "advisory-gate-registration": DEBT_MARKER,
-    "ai-act-high-risk-inventory-vs-code": DEBT_MARKER,
-    "ai-governance-snapshot-drift": DEBT_MARKER,
-    "db-backup-association-gate": DEBT_MARKER,
-    "db-migration-gate": DEBT_MARKER,
-    "eu-ai-act-inventory-drift": DEBT_MARKER,
-    "evals-registry-integrity": DEBT_MARKER,
-    "feature-flag-governance": DEBT_MARKER,
-    "gen-network-policies-drift-gate": DEBT_MARKER,
-    "mcp-real-port-requires-caller-auth-first": DEBT_MARKER,
-    "openapi-route-conformance": DEBT_MARKER,
-    "prompt-registry-integrity": DEBT_MARKER,
-    "release-scope-mismatch-gate": DEBT_MARKER,
-    "schema-compat-gate": DEBT_MARKER,
-    "service-runbook-drift": DEBT_MARKER,
-}
 
 if __name__ == "__main__":
     sys.exit(main())

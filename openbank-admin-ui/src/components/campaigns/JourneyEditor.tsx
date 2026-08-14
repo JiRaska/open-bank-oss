@@ -31,7 +31,7 @@ export type EditorChannel = 'EMAIL' | 'PUSH' | 'BANNER'
 
 export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
 
-export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
+export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'STORIES' | 'PRODUCT_FEED' | 'REWARDS_HUB'
 
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 
@@ -40,10 +40,16 @@ export interface EditorStep {
   channel: EditorChannel
   variables: { [key: string]: string }
   delaySeconds: number
-  /** Absent means the step always runs. Evaluated against the previous send's delivery status. */
+  /** Absent means the step always runs. */
   condition?: EditorCondition
+  /** Optional explicit source step (zero-based canvas index) for a multi-path decision. */
+  conditionSourceOrder?: number
   /** Alternative B-arm values in a campaign-wide content experiment. */
   variantBVariables?: { [key: string]: string }
+  /** Optional journey-path treatment for B; absent retains the historical copy-only experiment. */
+  variantBTemplate?: string
+  variantBChannel?: EditorChannel
+  variantBDelaySeconds?: number
   /** Try the catalogue's safe app-push counterpart only when email consent is absent. */
   fallbackToPush?: boolean
   /** Closed app context reached after a push tap; never an arbitrary URL. */
@@ -93,6 +99,8 @@ export function JourneyEditor({
   selected,
   onSelect,
   onAdd,
+  onAddDecision,
+  contentCatalogueReady = true,
   onRemove,
   templateLabels,
   stopAfter,
@@ -105,6 +113,10 @@ export function JourneyEditor({
   selected: number | null
   onSelect: (index: number | null) => void
   onAdd: () => void
+  /** Adds the complementary delivered / not-delivered pair after the current journey path. */
+  onAddDecision?: () => void
+  /** Without the served catalogue, a new node would be an unverified template choice. */
+  contentCatalogueReady?: boolean
   onRemove: (index: number) => void
   templateLabels: Record<string, string>
   /** Campaign-level cap: the journey ends once a party has had this many sends. Null = no cap. */
@@ -124,7 +136,10 @@ export function JourneyEditor({
     return t(`za ${Math.floor(s / 60)} min`, `after ${Math.floor(s / 60)} min`)
   }
 
-  const canAdd = steps.length < MAX_STEPS
+  const canAdd = steps.length < MAX_STEPS && contentCatalogueReady
+  // A binary decision consumes two bounded journey slots. Reusing the service's complementary
+  // conditions means the authored paths remain observable and requires no invented engagement data.
+  const canAddDecision = contentCatalogueReady && steps.length >= 1 && steps.length <= MAX_STEPS - 2 && onAddDecision
   // Entry + steps + the add affordance, which occupies a slot so the canvas does not jump when a
   // step is added.
   const cols = 1 + steps.length + (canAdd ? 1 : 0)
@@ -141,9 +156,12 @@ export function JourneyEditor({
    * would be ornament suggesting a freedom of layout this canvas does not have. The label sits in a
    * chip that masks the line, which is what keeps it readable when the theme is dark.
    */
-  const conditionLabel = (c?: EditorCondition): string => {
-    if (c === 'IF_PREVIOUS_CONFIRMED') return t('jen po doručení', 'if delivered')
-    if (c === 'IF_PREVIOUS_NOT_CONFIRMED') return t('jen bez doručení', 'if not delivered')
+  const conditionLabel = (c?: EditorCondition, sourceOrder?: number): string => {
+    const source = sourceOrder !== undefined
+      ? t(`po kroku ${sourceOrder + 1}`, `step ${sourceOrder + 1}`)
+      : ''
+    if (c === 'IF_PREVIOUS_CONFIRMED') return source ? t(`${source} doručen`, `${source} delivered`) : t('jen po doručení', 'if delivered')
+    if (c === 'IF_PREVIOUS_NOT_CONFIRMED') return source ? t(`${source} nedoručen`, `${source} not delivered`) : t('jen bez doručení', 'if not delivered')
     return ''
   }
 
@@ -153,12 +171,18 @@ export function JourneyEditor({
    * the message rather than of the hop, and a marketer scanning the row would have to open each step
    * to find out why someone might not get it.
    */
-  const edge = (fromIdx: number, toIdx: number, label: string, condition?: EditorCondition) => {
+  const edge = (
+    fromIdx: number,
+    toIdx: number,
+    label: string,
+    condition?: EditorCondition,
+    conditionSourceOrder?: number,
+  ) => {
     const x0 = colX(fromIdx) + NODE_W
     const x1 = colX(toIdx)
     const mid = (x0 + x1) / 2
     const chipW = Math.max(46, label.length * 6.4 + 16)
-    const cLabel = conditionLabel(condition)
+    const cLabel = conditionLabel(condition, conditionSourceOrder)
     const cW = Math.max(60, cLabel.length * 6.2 + 22)
     return (
       <g key={`e${fromIdx}`}>
@@ -271,7 +295,7 @@ export function JourneyEditor({
           const ch = CHANNEL[step.channel] ?? CHANNEL.EMAIL
           return (
             <g key={i}>
-              {edge(i, i + 1, delayLabel(step.delaySeconds), step.condition)}
+              {edge(i, i + 1, delayLabel(step.delaySeconds), step.condition, step.conditionSourceOrder)}
               <g
                 filter="url(#je-shadow)"
                 style={{ cursor: 'pointer' }}
@@ -392,7 +416,7 @@ export function JourneyEditor({
           </g>
         )}
 
-        {!canAdd && (
+        {steps.length >= MAX_STEPS && (
           // Stated, not enforced silently: the cap is a domain rule (Campaign.MAX_STEPS), and a
           // marketer who cannot find the add button deserves to know why rather than assume a bug.
           <text
@@ -406,6 +430,30 @@ export function JourneyEditor({
           </text>
         )}
       </svg>
+      {canAddDecision && (
+        <div className="border-t border-dashed px-4 py-3" data-decision-creator>
+          <button
+            type="button"
+            onClick={onAddDecision}
+            className="flex w-full items-center gap-3 rounded-lg border border-dashed px-3 py-2 text-left text-sm transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface)]"
+            data-add-decision="delivery"
+          >
+            <span
+              aria-hidden="true"
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-md text-base font-semibold"
+              style={{ background: 'color-mix(in srgb, var(--warning) 14%, transparent)', color: 'var(--warning)' }}
+            >
+              ⑂
+            </span>
+            <span>
+              <span className="block font-medium text-foreground">{t('Rozdělit podle doručení', 'Split by delivery')}</span>
+              <span className="block text-xs text-muted-foreground">
+                {t('Vytvoří dvě výhradní cesty: doručeno a bez potvrzeného doručení.', 'Creates two exclusive paths: delivered and not confirmed delivered.')}
+              </span>
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   )
 }

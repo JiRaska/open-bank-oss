@@ -6,6 +6,7 @@ package com.openbank.libs.lending.compliance
 
 import com.openbank.libs.governance.MakerCheckerViolation
 import com.openbank.libs.governance.Proposal
+import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.origination.OriginationState
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -141,5 +142,64 @@ class CompliancePackRegistryTest {
             .containsExactly("cz-dsti-cap")
         assertThat(CompliancePackEvaluator.coolingOffDays(compiled)).isEqualTo(14)
         assertThat(CompliancePackEvaluator.terminationRules(compiled).defaultDpdThreshold).isEqualTo(90)
+    }
+
+    // --- #3467: convergence onto the durable activation set (a sibling replica's approval) ---
+
+    @Test
+    fun `syncFrom makes a pack activated elsewhere enforceable here`() {
+        val registry = CompliancePackRegistry()
+
+        val added = registry.syncFrom(listOf(approvedProposal(pack(1))))
+
+        assertThat(added).isEqualTo(1)
+        assertThat(registry.activePack("CZ", PackProductType.CONSUMER_CREDIT, LocalDate.parse("2026-08-15")))
+            .isNotNull
+    }
+
+    @Test
+    fun `syncFrom is idempotent - re-reading the same rows adds nothing`() {
+        val registry = CompliancePackRegistry()
+        val rows = listOf(approvedProposal(pack(1)), approvedProposal(pack(2)))
+
+        assertThat(registry.syncFrom(rows)).isEqualTo(2)
+        // Every refresh re-reads the whole table, so a second pass MUST be a no-op rather than the
+        // "already activated" failure `activate` raises. A refresher that threw on its second tick
+        // would converge once and then log an error on every tick afterwards.
+        assertThat(registry.syncFrom(rows)).isEqualTo(0)
+        assertThat(registry.allActive(LocalDate.parse("2026-08-15"))).hasSize(2)
+    }
+
+    @Test
+    fun `syncFrom never drops a pack this pod just activated`() {
+        val registry = CompliancePackRegistry()
+        registry.activate(approvedProposal(pack(2)))
+
+        // The snapshot a refresh reads can predate a concurrent approval on this same pod. Replacing
+        // the map wholesale would drop v2 here and refuse origination against it until the next
+        // refresh — on the very pod that approved it. syncFrom is additive precisely to prevent that.
+        registry.syncFrom(listOf(approvedProposal(pack(1))))
+
+        assertThat(registry.allActive(LocalDate.parse("2026-08-15")).map { it.pack.version })
+            .containsExactlyInAnyOrder(1, 2)
+    }
+
+    @Test
+    fun `syncFrom refuses a row that is not an approved four-eyes decision`() {
+        val registry = CompliancePackRegistry()
+        val selfApproved = Proposal(
+            id = "prop-self",
+            action = pack(1),
+            proposedBy = "compliance-officer-1",
+            proposedAt = now,
+            state = ProposalState.EXECUTED,
+            decidedBy = "compliance-officer-1",
+        )
+
+        // A row cannot become enforceable by arriving through the convergence door instead of the
+        // approval one. Rejected BEFORE anything is applied, so a bad row cannot half-converge a pod.
+        assertThatThrownBy { registry.syncFrom(listOf(approvedProposal(pack(2)), selfApproved)) }
+            .isInstanceOf(PackActivationException::class.java)
+        assertThat(registry.allActive(LocalDate.parse("2026-08-15"))).isEmpty()
     }
 }

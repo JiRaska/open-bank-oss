@@ -27,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
+import java.time.LocalDate
 import java.util.UUID
 
 class FxResourceTest {
@@ -88,11 +89,11 @@ class FxResourceTest {
         val stored = rate()
         coEvery { fxUseCase.getRate(GetRateQuery("EUR", "CZK")) } returns ResolvedRate(stored, derivedFrom = null)
 
-        val resp = resource.getRate(base = "eur", quote = "czk", source = null)
+        val resp = resource.getRate(base = "eur", quote = "czk", source = null, asOfStr = null)
 
         assertThat(resp.status).isEqualTo(200)
         assertThat(resp.entity).isEqualTo(FxRateResponse.of(stored, derivedFrom = null))
-        coVerify(exactly = 0) { cnbIngestion.getCnbRate(any(), any()) }
+        coVerify(exactly = 0) { cnbIngestion.getCnbRate(any(), any(), any()) }
     }
 
     @Test
@@ -101,7 +102,7 @@ class FxResourceTest {
         coEvery { fxUseCase.getRate(GetRateQuery("CZK", "EUR")) } returns
             ResolvedRate(stored.inverted(), derivedFrom = stored.id)
 
-        val resp = resource.getRate(base = "czk", quote = "eur", source = null)
+        val resp = resource.getRate(base = "czk", quote = "eur", source = null, asOfStr = null)
 
         assertThat(resp.status).isEqualTo(200)
         val body = resp.entity as FxRateResponse
@@ -120,20 +121,65 @@ class FxResourceTest {
     @Test
     fun `getRate with source=CNB delegates to the ČNB ingestion use case instead`(): Unit = runBlocking {
         val stored = rate()
-        coEvery { cnbIngestion.getCnbRate("EUR", "CZK") } returns stored
+        coEvery { cnbIngestion.getCnbRate("EUR", "CZK", null) } returns stored
 
-        val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb")
+        val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb", asOfStr = null)
 
         assertThat(resp.status).isEqualTo(200)
         assertThat(resp.entity).isEqualTo(FxRateResponse.of(stored, derivedFrom = null))
         coVerify(exactly = 0) { fxUseCase.getRate(any()) }
     }
 
+    // ── #3921 step 3: ?asOf pins the fixing's business day ───────────────────────────────────
+
+    @Test
+    fun `getRate with source=CNB and asOf resolves the fixing in effect on that day`(): Unit = runBlocking {
+        val stored = rate()
+        val backfill = LocalDate.of(2026, 5, 27)
+        coEvery { cnbIngestion.getCnbRate("EUR", "CZK", backfill) } returns stored
+
+        val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb", asOfStr = "2026-05-27")
+
+        assertThat(resp.status).isEqualTo(200)
+        // The DATE reaches the use case. A dropped date parameter is invisible from the response —
+        // it answers 200 with a rate either way — so the verify IS the assertion here.
+        coVerify(exactly = 1) { cnbIngestion.getCnbRate("EUR", "CZK", backfill) }
+        coVerify(exactly = 0) { cnbIngestion.getCnbRate("EUR", "CZK", null) }
+    }
+
+    @Test
+    fun `getRate answers 404 for a day no fixing was in effect, never the newest one`(): Unit = runBlocking {
+        val backfill = LocalDate.of(2020, 1, 1)
+        coEvery { cnbIngestion.getCnbRate("EUR", "CZK", backfill) } returns null
+
+        val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb", asOfStr = "2020-01-01")
+
+        // Falling back to the latest fixing is exactly the defect (#3921 item 3): a backfill would
+        // then report success having marked an old day at today's rate.
+        assertThat(resp.status).isEqualTo(404)
+    }
+
+    @Test
+    fun `getRate rejects asOf without source=CNB rather than ignoring it`(): Unit = runBlocking {
+        val resp = resource.getRate(base = "eur", quote = "czk", source = null, asOfStr = "2026-05-27")
+
+        assertThat(resp.status).isEqualTo(400)
+        coVerify(exactly = 0) { fxUseCase.getRate(any()) }
+    }
+
+    @Test
+    fun `getRate rejects an unparseable asOf with 400, not 500`(): Unit = runBlocking {
+        val resp = resource.getRate(base = "eur", quote = "czk", source = "cnb", asOfStr = "30-05-2026")
+
+        assertThat(resp.status).isEqualTo(400)
+        coVerify(exactly = 0) { cnbIngestion.getCnbRate(any(), any(), any()) }
+    }
+
     @Test
     fun `getRate returns 404 when no rate is stored for the pair`(): Unit = runBlocking {
         coEvery { fxUseCase.getRate(GetRateQuery("USD", "CZK")) } returns null
 
-        val resp = resource.getRate(base = "usd", quote = "czk", source = null)
+        val resp = resource.getRate(base = "usd", quote = "czk", source = null, asOfStr = null)
 
         assertThat(resp.status).isEqualTo(404)
         // The 404 message echoes the raw path params, not the uppercased lookup key (FxResource.getRate).

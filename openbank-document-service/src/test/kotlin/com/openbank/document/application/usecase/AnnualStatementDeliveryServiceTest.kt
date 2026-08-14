@@ -9,6 +9,7 @@ import com.openbank.document.application.port.`in`.AnnualFeeSummaryReadyCommand
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
 import com.openbank.document.application.port.out.AccountInfo
 import com.openbank.document.application.port.out.AccountLookupPort
+import com.openbank.document.application.port.out.DeliveryOutcome
 import com.openbank.document.application.port.out.PartyInfo
 import com.openbank.document.application.port.out.PartyLookupPort
 import com.openbank.document.application.port.out.StatementDeliveryPort
@@ -98,6 +99,9 @@ class AnnualStatementDeliveryServiceTest {
         val dataSlot = slot<Map<String, Any?>>()
         every { templateUseCase.previewRender(any(), capture(dataSlot)) } returns "<p>2026</p>"
         coEvery { idempotencyStore.save(any(), any(), any(), any()) } returns Unit
+        // Explicit, not left to the relaxed mock: `deliver` returns an enum now, and a relaxed
+        // mock would invent one — the test would then pass without ever choosing a branch.
+        every { deliveryPort.deliver(any(), any(), any(), any()) } returns DeliveryOutcome.DELIVERED
 
         service.deliverAnnualStatement(command())
 
@@ -129,6 +133,47 @@ class AnnualStatementDeliveryServiceTest {
             )
         }
         coVerify(exactly = 1) { idempotencyStore.save(idempotencyKey, 200, "delivered", any()) }
+    }
+
+    @Test
+    fun `does not record delivery when the channel skipped it`(): Unit = runBlocking {
+        // The defect: the phase-1 stub sends nothing, and the service recorded a 400-day
+        // "delivered" key anyway. The guard at the top of deliverAnnualStatement reads that key,
+        // so the record does not merely overstate today — it suppresses the delivery a REAL
+        // channel would make for the rest of the window, for a PAD Art. 5 push duty.
+        coEvery { idempotencyStore.get(idempotencyKey) } returns null
+        coEvery { templateRepo.findLatestPublished("ROCNI_VYPIS_POPLATKU_CS") } returns template()
+        coEvery { partyLookupPort.findById(partyId) } returns
+            PartyInfo(legalName = "Jan Novák", formattedAddress = "Praha 1")
+        coEvery { accountLookupPort.findCurrentAccount(partyId) } returns
+            AccountInfo(iban = "CZ6508000000192000145399", productId = UUID.randomUUID())
+        every { templateUseCase.previewRender(any(), any()) } returns "<p>2026</p>"
+        every { deliveryPort.deliver(any(), any(), any(), any()) } returns DeliveryOutcome.SKIPPED
+
+        service.deliverAnnualStatement(command())
+
+        verify(exactly = 1) { deliveryPort.deliver(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a skipped delivery stays re-attemptable on the next event`(): Unit = runBlocking {
+        // The consequence of the assertion above, stated as behaviour: because nothing was
+        // recorded, a redelivery is not short-circuited and reaches the channel again.
+        coEvery { idempotencyStore.get(idempotencyKey) } returns null
+        coEvery { templateRepo.findLatestPublished("ROCNI_VYPIS_POPLATKU_CS") } returns template()
+        coEvery { partyLookupPort.findById(partyId) } returns
+            PartyInfo(legalName = "Jan Novák", formattedAddress = "Praha 1")
+        coEvery { accountLookupPort.findCurrentAccount(partyId) } returns
+            AccountInfo(iban = "CZ6508000000192000145399", productId = UUID.randomUUID())
+        every { templateUseCase.previewRender(any(), any()) } returns "<p>2026</p>"
+        every { deliveryPort.deliver(any(), any(), any(), any()) } returns DeliveryOutcome.SKIPPED
+
+        service.deliverAnnualStatement(command())
+        service.deliverAnnualStatement(command())
+
+        verify(exactly = 2) { deliveryPort.deliver(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { idempotencyStore.save(any(), any(), any(), any()) }
     }
 
     @Test

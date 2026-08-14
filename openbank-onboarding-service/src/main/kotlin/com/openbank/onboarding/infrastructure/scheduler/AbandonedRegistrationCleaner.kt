@@ -4,16 +4,21 @@
 
 package com.openbank.onboarding.infrastructure.scheduler
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.onboarding.application.port.out.OnboardingRepository
 import com.openbank.onboarding.domain.model.FunnelStage
 import com.openbank.onboarding.infrastructure.client.PartyServiceClient
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.temporal.ChronoUnit
 
 /**
@@ -26,6 +31,26 @@ import java.time.temporal.ChronoUnit
  *
  * Compliance note: suspended parties can be reactivated manually by an operator from the
  * admin-UI onboarding cockpit (ADR-0068).
+ *
+ * ## Liveness heartbeat (ADR-0237)
+ *
+ * "No abandoned registrations found" is both the healthy quiet day and what a schedule that
+ * stopped firing looks like from the outside — the `HR000068` class that left five schedulers in
+ * this repo never running (#2148, #2187). [DomainMetrics.registerWorkflowLiveness] publishes the
+ * last-success age so the ADR-0237 staleness rule and `openbank-control-liveness-sentinel` can
+ * tell them apart.
+ *
+ * [WorkflowLivenessRecorder.recordSuccess] marks **the sweep's own pass**, not the fate of each
+ * party: the empty case records success (an empty pass is a successful pass, and withholding the
+ * heartbeat there would make a healthy job read as stale), and so does a pass in which individual
+ * `suspendParty` calls failed — those are already counted and logged per item, and gating the
+ * heartbeat on them would let one permanently unsuspendable party masquerade as a dead scheduler,
+ * hiding the signal this gauge exists to carry. A failure of [OnboardingRepository.listStuckBefore]
+ * itself propagates uncaught, so no heartbeat is recorded — which is the intended distinction.
+ *
+ * Registration hangs off [StartupEvent] rather than `@PostConstruct` because `@ApplicationScoped`
+ * is lazy: a `@PostConstruct` would first run when the cron first fires, up to a day after boot,
+ * leaving the gauge absent for that whole window — and absent is not the same signal as stale.
  */
 @ApplicationScoped
 class AbandonedRegistrationCleaner(private val clock: Clock) {
@@ -34,6 +59,8 @@ class AbandonedRegistrationCleaner(private val clock: Clock) {
         private val LOG: Logger = Logger.getLogger(AbandonedRegistrationCleaner::class.java)
         private const val ABANDONED_DAYS = 30L
         private val EARLY_STAGES = listOf(FunnelStage.KYC_OPEN, FunnelStage.KYC_DOCUMENTS_REQUIRED)
+        private const val WORKFLOW_NAME = "onboarding-abandoned-registration-cleanup"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofDays(1)
     }
 
     @Inject
@@ -43,6 +70,15 @@ class AbandonedRegistrationCleaner(private val clock: Clock) {
     @RestClient
     lateinit var partyClient: PartyServiceClient
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
     /** Runs daily at 02:00 UTC. Cron expression: second minute hour day-of-month month day-of-week */
     @Scheduled(cron = "0 0 2 * * ?", identity = "abandoned-registration-cleanup")
     suspend fun expireAbandoned() {
@@ -50,6 +86,7 @@ class AbandonedRegistrationCleaner(private val clock: Clock) {
         val stale = onboardingRepo.listStuckBefore(EARLY_STAGES, cutoff)
 
         if (stale.isEmpty()) {
+            liveness?.recordSuccess()
             LOG.debug("No abandoned registrations found")
             return
         }
@@ -73,6 +110,7 @@ class AbandonedRegistrationCleaner(private val clock: Clock) {
             }
         }
 
+        liveness?.recordSuccess()
         LOG.infof("Abandoned registration cleanup: %d suspended, %d failed", suspended, failed)
     }
 }

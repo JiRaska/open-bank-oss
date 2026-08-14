@@ -813,6 +813,19 @@ alerting:
   ci_producer: ".github/scripts/check-critical-alert-egress.py"
   checked_manifest: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
 
+  # An alert can also fail by never reaching its subject. Every top-level key an ArgoCD
+  # Application hands a Helm chart via `helm.valuesObject` must demonstrably change the
+  # rendered output; Helm discards an unknown key with no error and no ArgoCD diff.
+  # apps/argo-rollouts.yaml spelled `metrics` at the top level where the chart wants
+  # `controller.metrics`, so no ServiceMonitor was ever created, Prometheus held zero
+  # rollout_* series, and three Rollout alerts covered 0 of 21 Rollouts while reading
+  # `health: ok` — an expression over an absent metric is an empty result, not an error
+  # (#4584). Measured by rendering with and without each key, never by schema comparison,
+  # which false-positives on free-form chart sub-trees.
+  helm_values_keys_must_have_effect: true
+  helm_values_ci_producer: ".github/scripts/check-helm-values-keys.py"
+  helm_values_checked_manifests: "openbank-infra/gitops/apps/*.yaml"
+
 review:
   default_approvals: 1
   money_path_approvals: 2
@@ -963,6 +976,8 @@ four_eyes:
   # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
   # reason (ADR-0176 D4).
   actions:
+    - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
+                                         # core also enforces maker != checker for standalone installs.
     - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                          # Confirmed no M2M caller — the only allow rule for this
                                          # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and
@@ -1089,7 +1104,9 @@ coverage:
 api_deprecation:
   header_set: [Deprecation, Sunset, "Link: rel=successor-version"]
   min_sunset_window_days: 180
-  deprecated_paths: []                  # populate as endpoints are deprecated; filter reads this
+  deprecated_paths:
+    - /api/v1/products                  # product-catalog v2 successor; sunset 2027-02-10
+    - /api/v1/fees                      # product-catalog v2 pricing successor; sunset 2027-02-10
 
 # ---------------------------------------------------------------------------------------
 # Supply-chain / release provenance (ADR-0029 D2, enforced at deploy by ADR-0030 D4).

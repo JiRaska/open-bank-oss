@@ -32,6 +32,7 @@ class PartyServiceConsentTest {
         documentRepo = mockk()
         documentFileRepo = mockk()
         metrics = mockk(relaxed = true)
+        changeMetrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         rcPepper = Optional.empty()
         clock = Clock.fixed(now, ZoneOffset.UTC)

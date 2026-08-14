@@ -43,6 +43,22 @@
   replaces. `TopicAttribution` is a verified table whose COVERAGE (not values) is derived from
   `application.yaml`, so a newly subscribed topic fails `TopicAttributionCoverageTest` instead of
   silently defaulting again.
+- **Asking the audit DATABASE which fields producers send measures traffic, not the wire contract —
+  and it answers "nothing to recover" with total confidence.** Chasing the actor half of #3994, the
+  obvious probe was to enumerate the payload keys of every actor-less row
+  (`jsonb_object_keys(payload::jsonb)` filtered for `%by%`/`%actor%`/`%initiat%`). It returned two
+  keys, one of them already read and the other (`reviewedBy`) JSON-null on all 53 rows — i.e. every
+  gap is a producer omission and the consumer is fine. **Wrong.** Enumerating the producers'
+  serialised TYPES instead found three actor spellings genuinely on the wire and unread —
+  `reviewedBy` (sanctions' four-eyes review identity), `changedBy` (3 of 4 card event types) and
+  `actorKind` (lending, beside an `actorId` that WAS read, so the row named the actor but not
+  whether it was a human or the policy engine). The probe missed them because cards, lending and
+  account-service's savings path have **zero rows in the sandbox**, and no manual sanctions review
+  has ever run there. Same shape as the zero-denials-from-an-idle-service trap: a topic with no
+  traffic is not evidence about that topic. Note both halves of the trap fire here — a `grep` for
+  the quoted key finds nothing either, because all three live in serialised data classes where the
+  JSON key exists only as a Kotlin property name at runtime. **Enumerate the producing types; use
+  the database only to size what you found.**
 - **Switching an `@Incoming` from `String` to `Message<String>` switches SmallRye from auto-ack to
   MANUAL ack.** A missed ack stalls the partition and the audit trail stops dead — worse than the
   under-attribution being fixed. Ack explicitly, in a `finally`, and test it on the path most

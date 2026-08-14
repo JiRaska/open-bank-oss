@@ -14,6 +14,7 @@ const TEMPLATES = {
   MARKETING_PRODUCT_OFFER_PUSH: ['offerTitle'],
   MARKETING_PRODUCT_OFFER_BANNER: ['offerTitle', 'offerText', 'ctaText'],
   MARKETING_PRODUCT_OFFER_CAROUSEL: ['offerTitle', 'offerText', 'ctaText'],
+  MARKETING_PRODUCT_OFFER_STORY: ['offerTitle', 'offerText', 'ctaText'],
   MARKETING_PRODUCT_OFFER_PRODUCT_FEED: ['offerTitle', 'offerText', 'ctaText'],
   MARKETING_PRODUCT_OFFER_REWARDS_HUB: ['offerTitle', 'offerText', 'ctaText'],
 }
@@ -22,8 +23,16 @@ const TPL_CHANNEL = {
   MARKETING_PRODUCT_OFFER_PUSH: 'PUSH' as const,
   MARKETING_PRODUCT_OFFER_BANNER: 'BANNER' as const,
   MARKETING_PRODUCT_OFFER_CAROUSEL: 'BANNER' as const,
+  MARKETING_PRODUCT_OFFER_STORY: 'BANNER' as const,
   MARKETING_PRODUCT_OFFER_PRODUCT_FEED: 'BANNER' as const,
   MARKETING_PRODUCT_OFFER_REWARDS_HUB: 'BANNER' as const,
+}
+const TPL_SURFACE = {
+  HOME_BANNER: 'MARKETING_PRODUCT_OFFER_BANNER',
+  HOME_CAROUSEL: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+  STORIES: 'MARKETING_PRODUCT_OFFER_STORY',
+  PRODUCT_FEED: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED',
+  REWARDS_HUB: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB',
 }
 
 // The editor labels a variable in the marketer's words. The mapping is data, so the test carries its
@@ -40,7 +49,7 @@ const step = (delay = 0, vars: Record<string, string> = {}): EditorStep => ({
   delaySeconds: delay,
 })
 
-function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onRemove' | 'onSelect', ReturnType<typeof vi.fn>>> = {}) {
+function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onAddDecision' | 'onRemove' | 'onSelect', ReturnType<typeof vi.fn>>> = {}) {
   const props = {
     steps,
     audience: 'actives@1',
@@ -48,6 +57,7 @@ function canvas(steps: EditorStep[], handlers: Partial<Record<'onAdd' | 'onRemov
     selected: null,
     onSelect: handlers.onSelect ?? vi.fn(),
     onAdd: handlers.onAdd ?? vi.fn(),
+    onAddDecision: handlers.onAddDecision,
     onRemove: handlers.onRemove ?? vi.fn(),
     templateLabels: LABELS,
   }
@@ -85,6 +95,17 @@ describe('campaign builder canvas', () => {
     expect(onAdd).toHaveBeenCalled()
   })
 
+  it('offers a delivery decision only when its two complementary paths fit', () => {
+    const onAddDecision = vi.fn()
+    const { container } = canvas([step()], { onAddDecision })
+
+    fireEvent.click(container.querySelector('[data-add-decision="delivery"]')!)
+    expect(onAddDecision).toHaveBeenCalledTimes(1)
+
+    const full = canvas(Array.from({ length: MAX_STEPS - 1 }, () => step()), { onAddDecision })
+    expect(full.container.querySelector('[data-add-decision="delivery"]')).toBeNull()
+  })
+
   it('removes the step whose node was clicked, not the last one', () => {
     const onRemove = vi.fn()
     const { container } = canvas([step(), step(), step()], { onRemove })
@@ -104,7 +125,7 @@ describe('step editor', () => {
     const { container } = render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -122,7 +143,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -134,7 +155,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(0, { offerTitle: 'T' }), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange: vi.fn(), onClose: vi.fn(),
         })))
 
@@ -148,7 +169,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -166,7 +187,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: push, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -181,7 +202,7 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: step(), templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
@@ -200,13 +221,29 @@ describe('step editor', () => {
     render(
       React.createElement(LanguageProvider, null,
         React.createElement(StepEditor, {
-          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          index: 0, step: banner, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
           onChange, onClose: vi.fn(),
         })))
 
     fireEvent.change(document.querySelector('[data-in-app-surface="0"] select')!, { target: { value: 'HOME_CAROUSEL' } })
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
       inAppSurface: 'HOME_CAROUSEL', template: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
+    }))
+  })
+
+  it('lets a journey experiment compare a B path, not just alternative copy', () => {
+    const onChange = vi.fn()
+    const experimentStep: EditorStep = { ...step(), variantBVariables: {} }
+    const { container } = render(
+      React.createElement(LanguageProvider, null,
+        React.createElement(StepEditor, {
+          index: 0, step: experimentStep, templates: TEMPLATES, templateChannel: TPL_CHANNEL, templateSurface: TPL_SURFACE, templateLabels: LABELS, variableLabels: VAR_LABELS,
+          contentExperiment: true, onChange, onClose: vi.fn(),
+        })))
+
+    fireEvent.change(container.querySelector('[data-variant-b-path="0"] select')!, { target: { value: 'PUSH' } })
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      variantBChannel: 'PUSH', variantBTemplate: 'MARKETING_PRODUCT_OFFER_PUSH', variantBVariables: {},
     }))
   })
 })

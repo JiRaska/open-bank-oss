@@ -174,10 +174,19 @@ class PartyResource {
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "party.update", resource = "#id")
-    @Operation(summary = "Update party contact details")
+    @Operation(summary = "Update party contact details or material master data")
     suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
         val party = partyUseCase.updateParty(
-            UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName),
+            UpdatePartyCommand(
+                id = id,
+                email = req.email,
+                phone = req.phone,
+                address = req.address?.toDomain(),
+                tradingName = req.tradingName,
+                legalName = req.legalName,
+                dateOfBirth = req.dateOfBirth,
+                nationality = req.nationality,
+            ),
         )
         return Response.ok(party.toResponse()).build()
     }
@@ -326,7 +335,8 @@ class PartyResource {
         summary = "Merge a duplicate party into a surviving party (ADR-0179)",
         description = "Retires {id} as a duplicate, preserving all PII and history. NOT erasure: " +
             "no anonymization, no PARTY_ERASED event. Refuses while the duplicate still owns an " +
-            "open account — sweep the balances via a ledger ADJUSTMENT journal entry and close " +
+            "open account — sweep the balances via POST /api/v1/transactions/merge-sweep " +
+            "(transaction-service, ADR-0179) and close " +
             "the account first. Four-eyes gated (ADR-0155): when four-eyes enforcement is on, the " +
             "first call returns 202 with an approvalId; a DIFFERENT operator decides it via " +
             "PATCH /api/v1/parties/approvals/{approvalId} and the maker retries this call with an " +
@@ -585,14 +595,22 @@ data class CreatePartyRequest(
     }
 }
 
+/**
+ * All fields optional; null leaves the stored value alone. `legalName`, `dateOfBirth` and
+ * `nationality` are the MATERIAL master-data fields — editing one classifies the emitted
+ * `PARTY_UPDATED` as MATERIAL (ADR-0256 D1, #4458).
+ */
 data class UpdatePartyRequest(
     val email: String?,
     val phone: String?,
     val tradingName: String?,
     val address: AddressRequest?,
+    val legalName: String? = null,
+    val dateOfBirth: String? = null,
+    val nationality: String? = null,
 )
 
-/** ADR-0179. [approvalReference] links the ledger ADJUSTMENT journal that swept the balances. */
+/** ADR-0179. [approvalReference] links the merge-sweep transaction that swept the balances. */
 data class MergePartyRequest(val mergedIntoPartyId: UUID, val reason: String, val approvalReference: String? = null)
 data class UpdateConsentRequest(val marketingConsent: Boolean)
 data class AddDocumentRequest(

@@ -88,18 +88,18 @@ class CnbResourceTest {
     @Test
     fun `getCnbRate returns 200 with the latest ingested rate`(): Unit = runBlocking {
         val stored = rate()
-        coEvery { ingestion.getCnbRate("EUR", "CZK") } returns stored
+        coEvery { ingestion.getCnbRate("EUR", "CZK", null) } returns stored
 
         val resp = resource.getCnbRate(base = "eur")
 
         assertThat(resp.status).isEqualTo(200)
         assertThat(resp.entity).isEqualTo(stored)
-        coVerify(exactly = 1) { ingestion.getCnbRate("EUR", "CZK") }
+        coVerify(exactly = 1) { ingestion.getCnbRate("EUR", "CZK", null) }
     }
 
     @Test
     fun `getCnbRate returns 404 when no rate has been ingested for the currency`(): Unit = runBlocking {
-        coEvery { ingestion.getCnbRate("CHF", "CZK") } returns null
+        coEvery { ingestion.getCnbRate("CHF", "CZK", null) } returns null
 
         val resp = resource.getCnbRate(base = "chf")
 

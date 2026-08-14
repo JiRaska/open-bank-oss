@@ -4,44 +4,9 @@
 
 package com.openbank.productcatalog.domain
 
-import io.quarkus.runtime.annotations.RegisterForReflection
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
-
-/**
- * [Product] round-trips through the JSONB `doc` column via plain
- * `ObjectMapper.readValue(doc, Product::class.java)` (PostgresProductRepository), not as a direct
- * JAX-RS request/response body — so Quarkus's automatic REST-endpoint-based reflection registration
- * never sees it as reachable for DESERIALIZATION. Under GraalVM native this fails at request time with
- * `InvalidDefinitionException: ... no delegate- or property-based Creator ... this appears to be a
- * native image, in which case you may need to configure reflection` (verified locally, ADR-0083 T1
- * pilot). `@RegisterForReflection` on every type in the graph Jackson needs a Kotlin-data-class
- * Creator for fixes it; JVM mode never needed this because Jackson can always fall back to runtime
- * reflection there.
- */
-@RegisterForReflection(
-    targets = [
-        Fee::class,
-        InterestTier::class,
-        CardConfig::class,
-        MultiCurrencyConfig::class,
-        OverdraftConfig::class,
-        TermDepositConfig::class,
-        SavingsConfig::class,
-        TermsAndConditions::class,
-        ProductVersion::class,
-        ProductStatus::class,
-        ProductType::class,
-        CardNetwork::class,
-        CardTier::class,
-        InterestPayoutFrequency::class,
-        WithdrawalNotice::class,
-        OverdraftType::class,
-        EligibilitySegment::class,
-    ],
-)
-class ProductReflectionRegistration
 
 enum class ProductStatus { ACTIVE, INACTIVE, DRAFT, DEPRECATED, ARCHIVED }
 enum class ProductType { SAVINGS, CURRENT, LOAN, MORTGAGE, CREDIT_CARD, TERM_DEPOSIT, OVERDRAFT, INVESTMENT }
@@ -146,7 +111,6 @@ data class ProductVersion(
     val createdAt: Instant = Instant.EPOCH,
 )
 
-@RegisterForReflection
 data class Product(
     val id: String = UUID.randomUUID().toString(),
     val code: String,
@@ -176,4 +140,6 @@ data class Product(
     val eligibilitySegments: List<EligibilitySegment> = listOf(EligibilitySegment.ALL),
     val createdAt: Instant = Instant.EPOCH,
     val updatedAt: Instant = Instant.EPOCH,
+    /** Optimistic concurrency token; mapped from `products.row_version`, never client-generated. */
+    val revision: Long = 0,
 )

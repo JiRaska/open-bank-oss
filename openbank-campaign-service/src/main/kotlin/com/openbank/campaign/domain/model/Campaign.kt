@@ -11,6 +11,23 @@ import java.time.Instant
 import java.util.UUID
 
 /**
+ * The editable definition of a draft, deliberately separate from [Campaign]'s server-owned
+ * identity, lifecycle and audit fields. A maker supplies this whole value; revision can therefore
+ * never accidentally preserve an old field merely because another endpoint forgot to pass it.
+ */
+data class CampaignDefinition(
+    val name: String,
+    val goal: String,
+    val segmentRef: SegmentRef,
+    val steps: List<CampaignStep>,
+    val stopCondition: StopCondition? = null,
+    val conversionRule: String? = null,
+    val holdoutPercent: Int = 0,
+    val schedule: CampaignSchedule? = null,
+    val trigger: String? = null,
+)
+
+/**
  * Campaign aggregate (ADR-0200). A definition — steps, delays, stop conditions — that is executed
  * as one Temporal workflow per enrolled party. Content is composed from the notification-service
  * template catalogue with declared variables; free-form bodies are rejected by construction
@@ -57,6 +74,14 @@ data class Campaign(
         require(name.isNotBlank()) { "campaign name must not be blank" }
         require(steps.isNotEmpty()) { "campaign must have at least one step" }
         require(steps.size <= MAX_STEPS) { "journeys are capped at $MAX_STEPS steps in the first slice" }
+        require(steps.map { it.order }.distinct().size == steps.size) { "campaign step orders must be unique" }
+        steps.forEach { step ->
+            step.conditionSourceOrder?.let { sourceOrder ->
+                require(step.condition != null) { "a condition source requires a branch condition" }
+                require(sourceOrder < step.order) { "a condition source must be an earlier step" }
+                require(steps.any { it.order == sourceOrder }) { "a condition source must name a campaign step" }
+            }
+        }
         require(holdoutPercent in 0..MAX_HOLDOUT_PERCENT) {
             "holdoutPercent must be between 0 and $MAX_HOLDOUT_PERCENT"
         }
@@ -83,6 +108,27 @@ data class Campaign(
     fun submit(): Campaign {
         require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be submitted for approval" }
         return copy(state = CampaignState.PENDING_APPROVAL, updatedAt = Instant.now())
+    }
+
+    /**
+     * A maker may revise the definition while it is still a draft.  Once it enters approval, the
+     * exact reviewed definition is immutable: changing it afterwards would make the checker
+     * approve one journey while a different one is actually run.
+     */
+    fun revise(definition: CampaignDefinition): Campaign {
+        require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be revised" }
+        return copy(
+            name = definition.name,
+            goal = definition.goal,
+            segmentRef = definition.segmentRef,
+            steps = definition.steps.sortedBy { it.order },
+            stopCondition = definition.stopCondition,
+            conversionRule = definition.conversionRule,
+            holdoutPercent = definition.holdoutPercent,
+            schedule = definition.schedule,
+            trigger = definition.trigger,
+            updatedAt = Instant.now(),
+        )
     }
 
     fun activate(approver: String): Campaign {
@@ -194,6 +240,12 @@ data class CampaignStep(
      */
     val condition: StepCondition? = null,
     /**
+     * Optional explicit source for [condition].  Absent preserves the original "latest earlier
+     * delivery" semantics.  When present, both arms of a decision can name the same source step,
+     * so a skipped arm can never accidentally become the other's predecessor.
+     */
+    val conditionSourceOrder: Int? = null,
+    /**
      * Alternative declared values for the B arm of a campaign-wide A/B content experiment.
      * Null preserves the historical single-content step; when present every step must provide it
      * (enforced by [Campaign]) so one party keeps the same treatment throughout the journey.
@@ -215,6 +267,14 @@ data class CampaignStep(
      * service, so engagement never has to guess a customer's intended surface.
      */
     val inAppSurface: InAppSurface? = null,
+    /**
+     * The optional delivery shape for the B arm of a journey experiment. Leaving all three values
+     * absent keeps the existing copy-only experiment; providing a template and channel lets a
+     * marketer compare a real path, such as e-mail today against an app push tomorrow.
+     */
+    val variantBTemplate: String? = null,
+    val variantBChannel: Channel? = null,
+    val variantBDelaySeconds: Long? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }
@@ -240,7 +300,7 @@ data class CampaignStep(
         TemplateCatalog.unknownVariables(template, variables).let {
             require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
         }
-        variantBVariables?.let { alternative ->
+        variantBVariables?.takeIf { variantBTemplate == null }?.let { alternative ->
             TemplateCatalog.unknownVariables(template, alternative).let {
                 require(it.isEmpty()) { "template '$template' does not declare ${it.sorted()}" }
             }
@@ -251,15 +311,61 @@ data class CampaignStep(
         require(!fallbackToPush || template in TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL) {
             "template '$template' has no safe PUSH fallback"
         }
-        require(mobileDestination == null || channel == Channel.PUSH || channel == Channel.BANNER || fallbackToPush) {
-            "a mobile destination requires a PUSH or BANNER step, or an EMAIL step with PUSH fallback"
+        require(
+            mobileDestination == null ||
+                channel == Channel.PUSH ||
+                channel == Channel.BANNER ||
+                variantBChannel == Channel.PUSH ||
+                variantBChannel == Channel.BANNER ||
+                fallbackToPush,
+        ) {
+            "a mobile destination requires a PUSH or BANNER path, or an EMAIL step with PUSH fallback"
         }
         require(inAppSurface == null || channel == Channel.BANNER) {
             "an in-app surface requires a BANNER step"
         }
+        require(channel != Channel.BANNER || mobileDestination != null) {
+            "a BANNER step requires a mobile destination"
+        }
         if (channel == Channel.BANNER) {
             require(template == TemplateCatalog.templateForInAppSurface(inAppSurface ?: InAppSurface.HOME_BANNER)) {
                 "template '$template' does not render on ${inAppSurface ?: InAppSurface.HOME_BANNER}"
+            }
+        }
+        require((variantBTemplate == null) == (variantBChannel == null)) {
+            "a variant B path needs both its template and channel"
+        }
+        require(variantBTemplate == null || variantBVariables != null) {
+            "a variant B path needs variant B values so the campaign records an experiment"
+        }
+        require(variantBChannel != Channel.BANNER || mobileDestination != null) {
+            "a BANNER variant B path requires a mobile destination"
+        }
+        require(variantBDelaySeconds == null || variantBDelaySeconds >= 0) {
+            "variant B step delay must be >= 0"
+        }
+        variantBTemplate?.let { alternativeTemplate ->
+            val alternativeChannel = requireNotNull(variantBChannel)
+            require(TemplateCatalog.exists(alternativeTemplate)) {
+                "unknown variant B template '$alternativeTemplate' — ${TemplateCatalog.MARKETING_ONLY_REASON}"
+            }
+            require(TemplateCatalog.CHANNEL_OF[alternativeTemplate] == alternativeChannel) {
+                "variant B template '$alternativeTemplate' renders on ${TemplateCatalog.CHANNEL_OF[alternativeTemplate]}, not $alternativeChannel"
+            }
+            variantBVariables?.let { alternativeVariables ->
+                TemplateCatalog.unknownVariables(alternativeTemplate, alternativeVariables).let {
+                    require(it.isEmpty()) {
+                        "variant B template '$alternativeTemplate' does not declare ${it.sorted()}"
+                    }
+                }
+            }
+            require(!fallbackToPush || alternativeChannel == Channel.EMAIL) {
+                "an EMAIL fallback cannot be shared with a non-EMAIL variant B path"
+            }
+            if (alternativeChannel == Channel.BANNER) {
+                require(alternativeTemplate == TemplateCatalog.templateForInAppSurface(InAppSurface.HOME_BANNER)) {
+                    "a variant B BANNER path uses the reviewed HOME_BANNER card"
+                }
             }
         }
     }
@@ -268,27 +374,48 @@ data class CampaignStep(
     fun variablesFor(variant: ContentVariant?): Map<String, String> =
         if (variant == ContentVariant.B) variantBVariables ?: variables else variables
 
+    /** The persisted cohort chooses delivery structure as well as copy; retries cannot reshuffle it. */
+    fun delayFor(variant: ContentVariant?): Long =
+        variantBDelaySeconds.takeIf { variant == ContentVariant.B } ?: delaySeconds
+
+    private fun templateFor(variant: ContentVariant?): String =
+        variantBTemplate.takeIf { variant == ContentVariant.B } ?: template
+
+    private fun channelFor(variant: ContentVariant?): Channel =
+        variantBChannel.takeIf { variant == ContentVariant.B } ?: channel
+
     /** Primary delivery values, kept separate from the fallback's reduced template vocabulary. */
-    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery = CampaignDelivery(
-        channel,
-        template,
-        TemplateCatalog.valuesFor(template, variablesFor(variant)),
-        mobileDestination?.deepLink.takeIf { channel == Channel.PUSH || channel == Channel.BANNER },
-        inAppSurface?.takeIf { channel == Channel.BANNER }
-            ?: InAppSurface.HOME_BANNER.takeIf { channel == Channel.BANNER },
-    )
+    fun primaryDelivery(variant: ContentVariant?): CampaignDelivery {
+        val selectedChannel = channelFor(variant)
+        val selectedTemplate = templateFor(variant)
+        val selectedInAppSurface = when {
+            selectedChannel != Channel.BANNER -> null
+            variant == ContentVariant.B && variantBTemplate != null -> InAppSurface.HOME_BANNER
+            else -> inAppSurface ?: InAppSurface.HOME_BANNER
+        }
+        return CampaignDelivery(
+            selectedChannel,
+            selectedTemplate,
+            TemplateCatalog.valuesFor(selectedTemplate, variablesFor(variant)),
+            mobileDestination?.deepLink.takeIf {
+                selectedChannel == Channel.PUSH || selectedChannel == Channel.BANNER
+            },
+            selectedInAppSurface,
+        )
+    }
 
     /** The only supported fallback: a consented app push after EMAIL consent was absent. */
-    fun pushFallback(variant: ContentVariant?): CampaignDelivery? = TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[template]
-        ?.takeIf { fallbackToPush }
-        ?.let { pushTemplate ->
-            CampaignDelivery(
-                Channel.PUSH,
-                pushTemplate,
-                TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
-                mobileDestination?.deepLink,
-            )
-        }
+    fun pushFallback(variant: ContentVariant?): CampaignDelivery? =
+        TemplateCatalog.PUSH_FALLBACK_FOR_EMAIL[templateFor(variant)]
+            ?.takeIf { fallbackToPush && channelFor(variant) == Channel.EMAIL }
+            ?.let { pushTemplate ->
+                CampaignDelivery(
+                    Channel.PUSH,
+                    pushTemplate,
+                    TemplateCatalog.valuesFor(pushTemplate, variablesFor(variant)),
+                    mobileDestination?.deepLink,
+                )
+            }
 }
 
 /** A resolved per-attempt delivery, including the channel that will be recorded for audit. */
@@ -309,8 +436,8 @@ enum class MobileDestination(val deepLink: String) {
     PRODUCT_HUB("openbank://products"),
 }
 
-/** Closed app inventory a campaign may use; STORIES remains product-owned, not a campaign slot. */
-enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB }
+/** Closed authenticated-app inventory a campaign may use. */
+enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB }
 
 /**
  * Delivery channels a campaign step may use.
