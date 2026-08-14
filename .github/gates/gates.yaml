@@ -600,6 +600,11 @@ gates:
       against a stub cosign and asserts exit 0, 1 and 2, so its red is reachable by
       construction; falsified in both directions (see the run: comment).
     budget_seconds: 30   # 0.3s locally — no network, no registry
+    rationale: "Without it the gate's exit-2 branch is unreachable on any PR that does not touch fleet-attestation.yml, and a probe failure silently reads as a fleet-wide supply-chain gap (#1915: one ECR throttle published as UNATTESTED against an image that verifies by hand)."
+    review_after: "2027-02-14"
+    # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
+    # the floor is the number of cases that must run. It drops the day someone deletes one.
+    min_subjects: 14   # 15 today: 9 classifier + 5 end-to-end + 1 retry-count (2026-08-14)
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does

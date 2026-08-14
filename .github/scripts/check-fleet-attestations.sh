@@ -100,10 +100,14 @@ classify_failure() {
 }
 
 selftest() {
-  local failures=0 got
+  # `cases` is the SUBJECT COUNT this gate reports (gates.yaml min_subjects). A checker whose
+  # corpus is its own fixtures examines nothing the day someone deletes them, and the floor is
+  # what makes that a failure instead of a faster green.
+  local failures=0 got cases=0
   check_case() {
     local name="$1" expected="$2" input="$3"
     got="$(classify_failure "$input")"
+    cases=$((cases + 1))
     if [ "$got" = "$expected" ]; then
       printf '  ok: %s (%s)\n' "$name" "$got"
     else
@@ -166,6 +170,7 @@ STUB
   run_fixture() {
     local name="$1" expected_exit="$2" expected_summary="$3"; shift 3
     local out code
+    cases=$((cases + 1))
     : > "$tmp/gitops/images.yaml"
     for img in "$@"; do
       printf 'image: %s/%s\n' "$reg" "$img" >> "$tmp/gitops/images.yaml"
@@ -223,6 +228,7 @@ STUB
   # at 3, the first three images retry once each and the fourth must not retry at all. Asserted
   # as a count, because a fixture that only greps the banner passes with the retry suppression
   # deleted — measured, not assumed.
+  cases=$((cases + 1))
   retries="$(printf '%s' "${LAST_OUT:-}" | grep -c '  retry ' || true)"
   if [ "$retries" -eq 3 ]; then
     printf '  ok: systemic outage stops retrying (3 retries, not 4)\n'
@@ -234,6 +240,7 @@ STUB
 
   rm -rf "$tmp"
 
+  printf 'SUBJECTS=%s\n' "$cases"
   if [ "$failures" -gt 0 ]; then
     printf 'selftest FAILED (%s case(s))\n' "$failures"
     return 1
