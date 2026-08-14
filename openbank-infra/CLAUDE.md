@@ -33,9 +33,16 @@ out of it (they are path-scoped, not less important — several are live-inciden
   `keycloak-realm-drift` CronJob off the SAME projected Secrets Keycloak mounts — never a second
   copy, or it drifts from the one that deploys. It reads NAMES only: the template carries
   `__PLACEHOLDER__` where the artifact carries real client secrets, and the report is a ConfigMap.
-  Today's gap is baselined in its `KNOWN_STALE` (#2540's ordering point: a detector shipped before
-  the reconcile is an alert that is the resting state from minute one, clearable only by a Vault
-  write). The reconcile procedure is `docs/runbooks/0009-keycloak-realm-import-reconcile.md`; the
+  Today's gap is baselined in its `IMPORT_BASELINE` (#2540's ordering point: a detector shipped
+  before the reconcile is an alert that is the resting state from minute one, clearable only by a
+  Vault write). **Baseline the FROZEN side, never the difference.** The first version baselined the
+  gap — a function of both sides — so every legitimate template addition read as new drift: #4028
+  declared one service-account user and the CronJob went red nightly for six days on a run where
+  the drift had not changed, with "append the name to the baseline" as its only remedy. The
+  baseline now records what the import artifact CARRIES, so template growth is silent and the
+  artifact MOVING (a Vault write, in either direction) is the finding. Generalises past Keycloak:
+  any baseline keyed to `A - B` where only `B` is frozen will fire on changes to `A`.
+  The reconcile procedure is `docs/runbooks/0009-keycloak-realm-import-reconcile.md`; the
   `vault kv put` recipe in `components/external-secrets/README.md` reads the LIVE Secret back, so
   re-running it as maintenance can only re-store the stale ancestor.
 - **ArgoCD does NOT diff hook resources — so anything a hook reads from its own manifest can never
