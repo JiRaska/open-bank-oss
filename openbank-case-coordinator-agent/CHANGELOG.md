@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.1...case-coordinator-agent-v0.4.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **case-coordinator:** key the open-rate quota on the caller, not on the identity it claims ([#4834](https://github.com/JiRaska/open-bank-oss/issues/4834)) ([#4840](https://github.com/JiRaska/open-bank-oss/issues/4840)) ([6a61229](https://github.com/JiRaska/open-bank-oss/commit/6a61229fa783fd9c0c07f997fc92d4d066451ea8))
+
 ## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.0...case-coordinator-agent-v0.4.1) (2026-08-14)
 
 
