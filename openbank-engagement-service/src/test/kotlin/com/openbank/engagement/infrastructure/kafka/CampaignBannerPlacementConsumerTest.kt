@@ -6,6 +6,7 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.domain.model.CampaignBannerPlacement
+import com.openbank.engagement.domain.model.SurfaceContentType
 import com.openbank.engagement.domain.model.SurfaceSlot
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -29,5 +30,18 @@ class CampaignBannerPlacementConsumerTest {
         val placement = slot<CampaignBannerPlacement>()
         coVerify(exactly = 1) { repository.save(capture(placement)) }
         assertThat(placement.captured.slot).isEqualTo(SurfaceSlot.HOME_BANNER)
+    }
+
+    @Test
+    fun `story command is kept as a first party story placement`(): Unit = runBlocking {
+        val interactionRef = UUID.randomUUID()
+        CampaignBannerPlacementConsumer(repository, ObjectMapper()).consume(
+            """{"interactionRef":"$interactionRef","partyId":"${UUID.randomUUID()}","campaignId":"${UUID.randomUUID()}","stepOrder":1,"template":"MARKETING_PRODUCT_OFFER_STORY","variables":{"offerTitle":"Offer","offerText":"Details","ctaText":"Open"},"deepLink":"openbank://products","inAppSurface":"STORIES"}""",
+        )
+
+        val placement = slot<CampaignBannerPlacement>()
+        coVerify(exactly = 1) { repository.save(capture(placement)) }
+        assertThat(placement.captured.slot).isEqualTo(SurfaceSlot.STORIES)
+        assertThat(placement.captured.toSurfaceContent().type).isEqualTo(SurfaceContentType.STORY)
     }
 }

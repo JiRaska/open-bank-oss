@@ -43,9 +43,9 @@ data class CampaignBannerPlacement(
         fun templateFor(slot: SurfaceSlot): String = when (slot) {
             SurfaceSlot.HOME_BANNER -> PRODUCT_OFFER_BANNER_TEMPLATE
             SurfaceSlot.HOME_CAROUSEL -> "MARKETING_PRODUCT_OFFER_CAROUSEL"
+            SurfaceSlot.STORIES -> "MARKETING_PRODUCT_OFFER_STORY"
             SurfaceSlot.PRODUCT_FEED -> "MARKETING_PRODUCT_OFFER_PRODUCT_FEED"
             SurfaceSlot.REWARDS_HUB -> "MARKETING_PRODUCT_OFFER_REWARDS_HUB"
-            SurfaceSlot.STORIES -> error("campaign placements do not render in STORIES")
         }
 
         fun contentIdFor(slot: SurfaceSlot): String = "CAMPAIGN_${slot.name}"
@@ -55,13 +55,14 @@ data class CampaignBannerPlacement(
         private fun typeFor(slot: SurfaceSlot): SurfaceContentType = when (slot) {
             SurfaceSlot.HOME_BANNER -> SurfaceContentType.BANNER
             SurfaceSlot.HOME_CAROUSEL -> SurfaceContentType.CAROUSEL
+            SurfaceSlot.STORIES -> SurfaceContentType.STORY
             SurfaceSlot.PRODUCT_FEED, SurfaceSlot.REWARDS_HUB -> SurfaceContentType.CARD
-            SurfaceSlot.STORIES -> error("campaign placements do not render in STORIES")
         }
 
         private val campaignSlots = setOf(
             SurfaceSlot.HOME_BANNER,
             SurfaceSlot.HOME_CAROUSEL,
+            SurfaceSlot.STORIES,
             SurfaceSlot.PRODUCT_FEED,
             SurfaceSlot.REWARDS_HUB,
         )
