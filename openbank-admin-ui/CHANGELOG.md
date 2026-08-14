@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.129.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.128.0...admin-ui-v0.129.0) (2026-08-14)
+
+
+### Features
+
+* **product-catalog:** ship standalone platform and intelligence studio ([#4501](https://github.com/JiRaska/open-bank-oss/issues/4501)) ([cdd4af2](https://github.com/JiRaska/open-bank-oss/commit/cdd4af291b1f88500cdbcfdd3cf55dc316f94029))
+
 ## [0.128.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.127.0...admin-ui-v0.128.0) (2026-08-14)
 
 
