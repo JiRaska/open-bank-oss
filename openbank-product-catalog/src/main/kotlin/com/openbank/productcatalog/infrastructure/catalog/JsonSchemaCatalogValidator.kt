@@ -5,7 +5,6 @@
 package com.openbank.productcatalog.infrastructure.catalog
 
 import com.networknt.schema.JsonSchemaFactory
-import com.networknt.schema.SchemaValidatorsConfig
 import com.networknt.schema.SpecVersion
 import com.openbank.productcatalog.domain.catalog.CatalogSchema
 import com.openbank.productcatalog.domain.catalog.CatalogSchemaValidator
@@ -20,12 +19,12 @@ class JsonSchemaCatalogValidator(private val catalogJson: CatalogJson, private v
     CatalogSchemaValidator {
     private val factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012)
     private val schemas = ConcurrentHashMap<String, com.networknt.schema.JsonSchema>()
-    private val config = SchemaValidatorsConfig().apply {
-        isTypeLoose = false
-        isFailFast = false
-        setFormatAssertionsEnabled(true)
-        isCacheRefs = true
-    }
+    private val config = com.networknt.schema.SchemaValidatorsConfig.builder()
+        .typeLoose(false)
+        .failFast(false)
+        .formatAssertionsEnabled(true)
+        .cacheRefs(true)
+        .build()
 
     override fun validate(schema: CatalogSchema, attributes: CatalogValue.ObjectValue): SchemaValidationResult {
         val document = catalogJson.toNode(schema.document)

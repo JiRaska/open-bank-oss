@@ -127,13 +127,13 @@ class CatalogPlatformResourceTest {
         val endpoint = "/api/v2/offerings/$offeringId/revisions"
 
         val deep = mapper.readTree(revisionPayload("Deep input")) as ObjectNode
-        var nested = deep.with("attributes")
+        var nested = deep.withObject("attributes")
         repeat(CatalogSchemaProfile.MAX_NESTING_DEPTH + 1) { nested = nested.putObject("level") }
         given().contentType("application/json").body(mapper.writeValueAsString(deep)).post(endpoint).then()
             .statusCode(400)
 
         val oversized = mapper.readTree(revisionPayload("Large input")) as ObjectNode
-        oversized.with("attributes").put("blob", "x".repeat(CatalogSchemaProfile.MAX_INSTANCE_BYTES + 1))
+        oversized.withObject("attributes").put("blob", "x".repeat(CatalogSchemaProfile.MAX_INSTANCE_BYTES + 1))
         given().contentType("application/json").body(mapper.writeValueAsString(oversized)).post(endpoint).then()
             .statusCode(400)
 

@@ -36,7 +36,7 @@ class CatalogSchemaProfile {
     private fun visitObject(node: JsonNode, depth: Int, conditionalFragment: Boolean) {
         requireLocalReferences(node, depth)
         requireClosedObjects(node, conditionalFragment)
-        node.fields().forEachRemaining { (keyword, child) ->
+        node.properties().forEach { (keyword, child) ->
             visitChild(keyword, child, depth)
         }
     }
@@ -74,7 +74,7 @@ class CatalogSchemaProfile {
         if (keyword in SCHEMA_MAP_KEYWORDS && child.isObject) {
             // `properties` and `$defs` are dictionaries whose *values* are schemas. A valid
             // product attribute may itself be named `required`, `properties`, etc.
-            child.fields().forEachRemaining { (_, schema) -> visit(schema, depth + 1, false) }
+            child.properties().forEach { (_, schema) -> visit(schema, depth + 1, false) }
         } else {
             visit(child, depth + 1, keyword in CONDITIONAL_KEYWORDS)
         }

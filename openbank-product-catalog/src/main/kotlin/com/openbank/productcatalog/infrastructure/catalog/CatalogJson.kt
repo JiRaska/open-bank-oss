@@ -31,7 +31,7 @@ class CatalogJson(private val mapper: ObjectMapper) {
         node.isTextual -> CatalogValue.TextValue(node.textValue())
         node.isNumber -> CatalogValue.DecimalValue(node.decimalValue())
         node.isArray -> CatalogValue.ArrayValue(node.map(::toValue))
-        node.isObject -> CatalogValue.ObjectValue(node.fields().asSequence().associate { it.key to toValue(it.value) })
+        node.isObject -> CatalogValue.ObjectValue(node.properties().associate { it.key to toValue(it.value) })
         else -> error("unsupported JSON node type ${node.nodeType}")
     }
 

@@ -362,10 +362,10 @@ class CatalogBankCompatibilityTest {
     @Test
     fun `banking projection rejects malformed contradictory and invalid legacy documents`() {
         val mutations: List<(ObjectNode) -> Unit> = listOf(
-            { request -> request.with("attributes").put("legacyDocument", "{") },
-            { request -> request.with("attributes").put("currency", "CZK") },
+            { request -> request.withObject("attributes").put("legacyDocument", "{") },
+            { request -> request.withObject("attributes").put("currency", "CZK") },
             { request ->
-                val attributes = request.with("attributes")
+                val attributes = request.withObject("attributes")
                 val legacy = mapper.readTree(attributes.path("legacyDocument").asText()) as ObjectNode
                 legacy.putArray("fees").addObject()
                     .put("id", "negative-fee")
@@ -376,7 +376,7 @@ class CatalogBankCompatibilityTest {
                     .put("frequency", "MONTHLY")
                 attributes.put("legacyDocument", mapper.writeValueAsString(legacy))
             },
-            { request -> request.with("name").put("en", "Contradictory outer name") },
+            { request -> request.withObject("name").put("en", "Contradictory outer name") },
             { request ->
                 request.putArray("eligibility").addObject()
                     .put("field", "customer.age")
@@ -493,8 +493,8 @@ class CatalogBankCompatibilityTest {
 
     private fun editDraftName(offeringId: UUID, revisionId: UUID, name: String) {
         val request = revisionRequest(offeringId, revisionId)
-        request.with("name").put("en", name)
-        val attributes = request.with("attributes")
+        request.withObject("name").put("en", name)
+        val attributes = request.withObject("attributes")
         val legacy = mapper.readTree(attributes.path("legacyDocument").asText()) as ObjectNode
         legacy.put("name", name)
         attributes.put("legacyDocument", mapper.writeValueAsString(legacy))
