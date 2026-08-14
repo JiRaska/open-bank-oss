@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.128.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.127.0...admin-ui-v0.128.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** add campaign touchpoint rail ([#4782](https://github.com/JiRaska/open-bank-oss/issues/4782)) ([0905941](https://github.com/JiRaska/open-bank-oss/commit/09059417a608440ee25c425c83141162445f1261))
+
 ## [0.127.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.1...admin-ui-v0.127.0) (2026-08-14)
 
 
