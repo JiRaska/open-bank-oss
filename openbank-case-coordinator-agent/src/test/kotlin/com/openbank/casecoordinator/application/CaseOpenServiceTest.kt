@@ -24,6 +24,10 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Case-open authority rules (ADR-0244 D9): capability, per-agent rate limit, dedup mapping.
@@ -45,6 +49,7 @@ class CaseOpenServiceTest {
 
     companion object {
         private const val COORDINATOR = "case-coordinator"
+        private const val PRINCIPAL = "svc-operator-1"
     }
 
     @BeforeEach
@@ -71,8 +76,11 @@ class CaseOpenServiceTest {
         service = CaseOpenService(workflowClient, temporalConfig, gate, config, clock)
     }
 
-    private fun open(agent: String = COORDINATOR, subject: String = "ingest-1"): CaseOpenResult =
-        service.open(agent, CaseClass.INCIDENT_RESPONSE, subject, "hitl-incident-queue")
+    private fun open(
+        agent: String = COORDINATOR,
+        subject: String = "ingest-1",
+        principal: String = PRINCIPAL,
+    ): CaseOpenResult = service.open(principal, agent, CaseClass.INCIDENT_RESPONSE, subject, "hitl-incident-queue")
 
     @Test
     fun `temporal disabled means unavailable without touching the gate`() {
@@ -91,7 +99,7 @@ class CaseOpenServiceTest {
     @Test
     fun `a disabled case class is denied even for the coordinator`() {
         assertThat(
-            service.open(COORDINATOR, CaseClass.FRAUD_INVESTIGATION, "case-7", "hitl-fraud-queue"),
+            service.open(PRINCIPAL, COORDINATOR, CaseClass.FRAUD_INVESTIGATION, "case-7", "hitl-fraud-queue"),
         ).isEqualTo(CaseOpenResult.Denied)
     }
 
@@ -100,6 +108,37 @@ class CaseOpenServiceTest {
         assertThat(open()).isInstanceOf(CaseOpenResult.Opened::class.java)
 
         assertThat(open(subject = "ingest-2")).isEqualTo(CaseOpenResult.RateLimited)
+    }
+
+    /**
+     * #4834: the open-rate quota must key on the AUTHENTICATED caller, not on the agent identity
+     * the request claims. Keyed on the claim, a caller splits its own ceiling into one bucket per
+     * string it invents.
+     *
+     * Driven through two DIFFERENT allow-listed agent ids from ONE principal: under the old
+     * keying those are two buckets and both opens succeed; under principal keying the second is
+     * rate-limited. `maxOpensPerAgentPerHour` is 1 in this fixture.
+     */
+    @Test
+    fun `the quota is keyed on the caller, not on the agent identity it claims`() {
+        every { gate.canOpenCase(any()) } returns true
+
+        assertThat(open(agent = "case-coordinator", subject = "a")).isInstanceOf(CaseOpenResult.Opened::class.java)
+        assertThat(open(agent = "some-other-agent", subject = "b"))
+            .describedAs("a second open from the SAME principal must not get a fresh bucket by renaming the agent")
+            .isEqualTo(CaseOpenResult.RateLimited)
+    }
+
+    /** The flip side: two genuinely different callers keep their own ceilings. */
+    @Test
+    fun `separate principals keep separate quotas`() {
+        every { gate.canOpenCase(any()) } returns true
+
+        assertThat(open(subject = "a", principal = "svc-operator-1"))
+            .isInstanceOf(CaseOpenResult.Opened::class.java)
+        assertThat(open(subject = "b", principal = "svc-operator-2"))
+            .describedAs("a different authenticated caller has its own ceiling")
+            .isInstanceOf(CaseOpenResult.Opened::class.java)
     }
 
     @Test
@@ -111,6 +150,43 @@ class CaseOpenServiceTest {
         )
 
         assertThat(open()).isEqualTo(CaseOpenResult.Duplicate)
+    }
+
+    /**
+     * #4215: `openedBy` is free-form request-body input and was interpolated into the "case opened"
+     * line verbatim, so a caller could embed CRLF and forge log records. CodeQL flagged it and the
+     * finding was merged past unresolved.
+     *
+     * The assertion reads the REAL emitted record rather than calling the sanitiser directly — a
+     * test of the helper alone would stay green if the call site stopped using it, which is exactly
+     * the regression worth catching.
+     */
+    @Test
+    fun `a CRLF-laden openedBy cannot forge a log line`() {
+        val captured = mutableListOf<String>()
+        val jul = JulLogger.getLogger(CaseOpenService::class.java.name)
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                captured += java.text.MessageFormat.format(record.message, *(record.parameters ?: emptyArray()))
+                    .let { if (record.parameters == null) record.message else it }
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        jul.addHandler(handler)
+        jul.level = Level.ALL
+        try {
+            every { gate.canOpenCase(any()) } returns true
+            service.open(PRINCIPAL, "evil\r\nFATAL: forged entry", CaseClass.INCIDENT_RESPONSE, "acct-1", "ops")
+        } finally {
+            jul.removeHandler(handler)
+        }
+
+        val all = captured.joinToString("\n")
+        assertThat(all).describedAs("something must have been logged, or this test proves nothing")
+            .contains("case opened")
+        assertThat(all).describedAs("CR/LF from request input must not reach the log verbatim")
+            .doesNotContain("\r").doesNotContain("evil\nFATAL")
     }
 
     @Test

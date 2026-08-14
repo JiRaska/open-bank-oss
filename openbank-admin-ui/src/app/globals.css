@@ -144,6 +144,42 @@ main {
   animation: fadeIn 0.4s ease-out;
 }
 
+/* ── Operator application shell ── */
+.ob-app-shell {
+  display: flex;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 100% 0%, rgba(129, 140, 248, .10), transparent 30rem),
+    radial-gradient(circle at 5% 100%, rgba(45, 212, 191, .06), transparent 32rem),
+    var(--bg);
+}
+.ob-app-frame {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ob-app-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: clamp(1rem, 2vw, 2rem);
+  background: transparent;
+}
+.ob-app-content > * {
+  width: min(100%, 1600px);
+  margin-inline: auto;
+}
+
+@media (max-width: 860px) {
+  .ob-app-shell { display: block; overflow: auto; }
+  .ob-app-frame { min-height: 100dvh; }
+  .ob-app-content { padding: 1rem; }
+}
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

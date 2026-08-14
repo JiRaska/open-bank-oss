@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.1...case-coordinator-agent-v0.4.2) (2026-08-14)
+
+
+### Bug Fixes
+
+* **case-coordinator:** key the open-rate quota on the caller, not on the identity it claims ([#4834](https://github.com/JiRaska/open-bank-oss/issues/4834)) ([#4840](https://github.com/JiRaska/open-bank-oss/issues/4840)) ([6a61229](https://github.com/JiRaska/open-bank-oss/commit/6a61229fa783fd9c0c07f997fc92d4d066451ea8))
+
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.0...case-coordinator-agent-v0.4.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **case-coordinator:** stop logging and echoing an unsanitised openedBy ([#4215](https://github.com/JiRaska/open-bank-oss/issues/4215)) ([#4833](https://github.com/JiRaska/open-bank-oss/issues/4833)) ([8f5e53a](https://github.com/JiRaska/open-bank-oss/commit/8f5e53a0e94d2ef43d2f33249b92682bfba9e7ef))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.3.0...case-coordinator-agent-v0.4.0) (2026-08-09)
 
 
