@@ -129,7 +129,7 @@ red `1` still deserves the hand check: verify the named image by digest before r
 
 ### What to copy from this into the next probe
 
-Four rules, each of which this gate broke:
+Five rules, each of which this gate broke:
 
 1. **A checker that knows the difference must ENCODE the difference in the one thing its caller
    reads.** Knowing "this was a throttle, not a gap" is worth nothing if both outcomes exit `1`:
@@ -155,7 +155,21 @@ Four rules, each of which this gate broke:
    (a script that fails per-image the four ways) plus `check-fleet-attestations.sh --selftest`,
    which needs no registry and runs in the lint job on every PR. Falsify the selftest itself by
    reverting the classifier to the old fallback and confirming exactly the transient cases go
-   red — a classifier that has only ever agreed with you is unfalsified.
+   red — a classifier that has only ever agreed with you is unfalsified. Because
+   `fleet-attestation.yml` is path-filtered and can therefore never be a required check, that
+   selftest is *also* declared as gate `fleet-attestation-classifier` in
+   `.github/gates/gates.yaml`, so it runs unconditionally in `Validate manifests`.
+5. **A stub proves your parser, not the vocabulary — pair it with a live known-negative
+   control.** The fix in rule 2 buys correctness at the price of a new dependency: `UNATTESTED`
+   is now matched on cosign's own wording, so a future cosign that rewords it re-routes every
+   real gap to `UNKNOWN`. The gate would then exit `2` forever, never file a gap, and read as
+   an infrastructure problem — a strictly worse failure than the one being fixed, because it
+   fails in the reassuring direction. Nothing offline can catch that. The
+   `Vocabulary control` step does: it asks the real binary, in the real registry, for a verdict
+   it knows must be negative (a real fleet image with `--type spdx`, which nothing here
+   attests) and fails loudly if that stops classifying as `UNATTESTED`. Generalize: whenever a
+   verdict depends on parsing a third party's prose, keep one live case whose answer you
+   already know, or the parser is only ever tested against your own memory of the wording.
 
 ## 5. Related
 

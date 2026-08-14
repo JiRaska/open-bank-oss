@@ -100,10 +100,14 @@ classify_failure() {
 }
 
 selftest() {
-  local failures=0 got
+  # `cases` is the SUBJECT COUNT this gate reports (gates.yaml min_subjects). A checker whose
+  # corpus is its own fixtures examines nothing the day someone deletes them, and the floor is
+  # what makes that a failure instead of a faster green.
+  local failures=0 got cases=0
   check_case() {
     local name="$1" expected="$2" input="$3"
     got="$(classify_failure "$input")"
+    cases=$((cases + 1))
     if [ "$got" = "$expected" ]; then
       printf '  ok: %s (%s)\n' "$name" "$got"
     else
@@ -135,18 +139,167 @@ main.go:74: error during command execution: no matching attestations:'
   check_case "KMS unreachable" UNKNOWN \
     'Error: loading public key: getting signer: kms get: RequestCanceled: request context canceled'
 
+  # ---------------------------------------------------------------------------------------
+  # END-TO-END: the classifier is only half the fix. What the caller acts on is the EXIT
+  # CODE, and no PR can summon an ECR throttle to prove exit 2 is reachable — so the whole
+  # loop is driven here against a stub `cosign` that fails per-image in each way. Without
+  # this, the exit-2 branch is code nobody has ever run, which is the repo's oldest CI rule
+  # (a gate that has only ever passed is unfalsified) applied to the gate's own plumbing.
+  # ---------------------------------------------------------------------------------------
+  local tmp stub reg
+  tmp="$(mktemp -d)"
+  reg="$ECR_REGISTRY"
+  mkdir -p "$tmp/gitops"
+  stub="$tmp/cosign"
+  cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+# Stub cosign: version says v2 (the script refuses anything else), and each fixture image
+# fails the way its name declares. Deliberately writes to stderr, as the real one does.
+if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
+img="${!#}"
+case "$img" in
+  *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
+  *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
+  *fixture-flaky*)  echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
+esac
+echo "Error: stub reached with an unexpected image: $img" >&2; exit 1
+STUB
+  chmod +x "$stub"
+
+  run_fixture() {
+    local name="$1" expected_exit="$2" expected_summary="$3"; shift 3
+    local out code
+    cases=$((cases + 1))
+    : > "$tmp/gitops/images.yaml"
+    for img in "$@"; do
+      printf 'image: %s/%s\n' "$reg" "$img" >> "$tmp/gitops/images.yaml"
+    done
+    # The threshold is passed EXPLICITLY rather than inherited: `VAR=x run_fixture` sets it on
+    # the function, not on the grandchild process, so an inherited value would silently be the
+    # default and the systemic case would prove nothing.
+    out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
+           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
+           SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
+           bash "$SELF" 2>&1)"
+    code=$?
+    if [ "$code" != "$expected_exit" ]; then
+      printf '  FAIL: %s — expected exit %s, got %s\n' "$name" "$expected_exit" "$code"
+      failures=$((failures + 1))
+      return
+    fi
+    if ! printf '%s' "$out" | grep -qF "$expected_summary"; then
+      printf '  FAIL: %s — exit %s correct, but summary missing: %s\n' \
+        "$name" "$code" "$expected_summary"
+      failures=$((failures + 1))
+      return
+    fi
+    LAST_OUT="$out"
+    printf '  ok: %s (exit %s)\n' "$name" "$code"
+  }
+
+  # Every declared image attested -> 0.
+  run_fixture "all attested -> exit 0" 0 \
+    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  # A real gap -> 1. Both fatal classes, so the summary carries each count.
+  run_fixture "unattested + absent -> exit 1" 1 \
+    "1 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t" "openbank-fixture-bare:t" "openbank-fixture-gone:t"
+  # ONLY a probe failure -> 2, and crucially NOT 1: this is the case that used to be
+  # published as a fleet gap, and the exit code is the only thing the caller reads.
+  run_fixture "probe failure only -> exit 2 (not 1)" 2 \
+    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "openbank-fixture-ok:t" "openbank-fixture-flaky:t"
+  # A REAL gap alongside a probe failure must still be 1 — "could not run" never masks a
+  # verdict that was reached, or an unlucky throttle would downgrade a live outage.
+  run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \
+    "0 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "openbank-fixture-bare:t" "openbank-fixture-flaky:t"
+  # A TOTAL outage must short-circuit the retries rather than multiply them past the job
+  # timeout — a killed job reports no exit code at all, and the caller then cannot tell a gap
+  # from a probe failure, which is the whole distinction this file exists to keep.
+  fixture_threshold=3
+  run_fixture "systemic outage -> retries off, still exit 2" 2 \
+    "images in a row could not be probed: this is systemic" \
+    "openbank-fixture-flaky:1" "openbank-fixture-flaky:2" "openbank-fixture-flaky:3" \
+    "openbank-fixture-flaky:4"
+  # ...and the SHORT-CIRCUIT itself, which the message above cannot prove: with the threshold
+  # at 3, the first three images retry once each and the fourth must not retry at all. Asserted
+  # as a count, because a fixture that only greps the banner passes with the retry suppression
+  # deleted — measured, not assumed.
+  cases=$((cases + 1))
+  retries="$(printf '%s' "${LAST_OUT:-}" | grep -c '  retry ' || true)"
+  if [ "$retries" -eq 3 ]; then
+    printf '  ok: systemic outage stops retrying (3 retries, not 4)\n'
+  else
+    printf '  FAIL: systemic outage stops retrying — expected 3 retry lines, got %s\n' "$retries"
+    failures=$((failures + 1))
+  fi
+  fixture_threshold=""
+
+  rm -rf "$tmp"
+
+  printf 'SUBJECTS=%s\n' "$cases"
   if [ "$failures" -gt 0 ]; then
     printf 'selftest FAILED (%s case(s))\n' "$failures"
     return 1
   fi
-  printf 'selftest OK — classifier proven on all three classes, both directions.\n'
+  printf 'selftest OK — classifier proven on all three classes, and exit 0/1/2 driven end to end.\n'
   return 0
 }
 
-if [ "${1:-}" = "--selftest" ]; then
-  selftest
-  exit $?
-fi
+# ---------------------------------------------------------------------------------------
+# The LIVE control the stub cannot give: the UNATTESTED branch is matched on cosign's own
+# wording, so a wording change in a future cosign silently re-routes every real gap to
+# UNKNOWN — the gate would then exit 2 forever, never file a gap, and read as an infra
+# problem. Ask the real binary, against a real image in the real registry, for a verdict we
+# know is negative: the same image with an attestation type it has never carried. If that
+# does not classify as UNATTESTED, the vocabulary has moved and the gate is blind.
+# No side effects — verify-attestation is read-only.
+# ---------------------------------------------------------------------------------------
+vocabulary_control() {
+  local image="$1" err verdict
+  printf '==> Vocabulary control: %s with --type spdx (never attested; must read UNATTESTED)\n' \
+    "${image#"${ECR_REGISTRY}"/}"
+  if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+              --key "$COSIGN_KEY" --type spdx "$image" 2>&1)"; then
+    echo "ERROR: control image verified against a type it should not carry — the control is" >&2
+    echo "       no longer negative. Pick a type this fleet genuinely never attests." >&2
+    return 1
+  fi
+  verdict="$(classify_failure "$err")"
+  if [ "$verdict" != "UNATTESTED" ]; then
+    echo "ERROR: cosign's not-attested wording no longer classifies as UNATTESTED (got ${verdict})." >&2
+    echo "       Every real gap would now be reported as UNKNOWN and the gate would never fail" >&2
+    echo "       on one. Update classify_failure() against this output:" >&2
+    printf '%s\n' "$err" | sed 's/^/       | /' | tail -5 >&2
+    return 1
+  fi
+  printf '    OK — a known-negative verdict still reads UNATTESTED.\n'
+  return 0
+}
+
+SELF="$0"
+MODE=verify
+case "${1:-}" in
+  --selftest | --self-test)
+    selftest
+    exit $?
+    ;;
+  # Needs cosign + a real registry, so it runs as its own step in fleet-attestation.yml
+  # rather than inside the fleet loop — a vocabulary failure must be reported as itself,
+  # not as 62 UNKNOWN images.
+  --vocabulary-control)
+    MODE=vocabulary-control
+    ;;
+  "") ;;
+  *)
+    echo "ERROR: unknown argument: $1" >&2
+    echo "       usage: $0 [--selftest|--self-test|--vocabulary-control]" >&2
+    exit 1
+    ;;
+esac
 
 # cosign v2 is pinned on purpose: kyverno 3.2.6 discovers attestations only via the legacy
 # `sha256-<digest>.att` tag scheme; cosign v3 writes OCI 1.1 referrers it cannot read. This
@@ -214,6 +367,11 @@ fi
 echo "==> ${#IMAGES[@]} distinct openbank-* image(s) declared"
 echo
 
+if [ "$MODE" = vocabulary-control ]; then
+  vocabulary_control "${IMAGES[0]}"
+  exit $?
+fi
+
 is_allowed_placeholder() {
   [ -f "$PLACEHOLDER_FILE" ] || return 1
   grep -vE '^[[:space:]]*(#|$)' "$PLACEHOLDER_FILE" | grep -qxF "$1"
@@ -227,6 +385,16 @@ UNKNOWN=0
 UNATTESTED_IMAGES=()
 ABSENT_IMAGES=()
 UNKNOWN_IMAGES=()
+CONSECUTIVE_UNKNOWN=0
+RETRIES_DISABLED=0
+
+# Retry is per-image, so a TOTAL registry outage would multiply: 62 images x (attempts-1) x
+# sleep, on top of every call's own latency, which overruns the job timeout — and a killed
+# job produces no exit code at all, so the careful 1-vs-2 distinction is lost exactly when it
+# matters most. Retrying is worth it for a flaky registry and worthless for a dead one, so
+# after this many images in a row have failed the probe, stop retrying and let the run finish
+# and report exit 2 honestly.
+SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
 for image in "${IMAGES[@]}"; do
   short="${image#"${ECR_REGISTRY}"/}"
@@ -245,6 +413,7 @@ for image in "${IMAGES[@]}"; do
     fi
     verdict="$(classify_failure "$err")"
     [ "$verdict" != "UNKNOWN" ] && break
+    [ "$RETRIES_DISABLED" -eq 1 ] && break
     [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
     printf '  retry %s/%s  %s  (probe failed, not a verdict)\n' \
       "$attempt" "$VERIFY_ATTEMPTS" "$short"
@@ -280,6 +449,19 @@ for image in "${IMAGES[@]}"; do
       UNKNOWN_IMAGES+=("$image")
       ;;
   esac
+
+  if [ "$verdict" = "UNKNOWN" ]; then
+    CONSECUTIVE_UNKNOWN=$((CONSECUTIVE_UNKNOWN + 1))
+    if [ "$RETRIES_DISABLED" -eq 0 ] && [ "$CONSECUTIVE_UNKNOWN" -ge "$SYSTEMIC_UNKNOWN_THRESHOLD" ]; then
+      RETRIES_DISABLED=1
+      printf '  ---- %s images in a row could not be probed: this is systemic, not flaky.\n' \
+        "$CONSECUTIVE_UNKNOWN"
+      printf '       Retries OFF for the rest of the run so it finishes inside the job timeout —\n'
+      printf '       a killed job reports NO exit code, which loses the gap-vs-probe distinction.\n'
+    fi
+  else
+    CONSECUTIVE_UNKNOWN=0
+  fi
 done
 
 FAIL=$((UNATTESTED + ABSENT))
