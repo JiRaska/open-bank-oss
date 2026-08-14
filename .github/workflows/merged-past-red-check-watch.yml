@@ -59,7 +59,7 @@ concurrency:
 jobs:
   # PR lane: offline, cheap, and the only lane that runs on a PR. It proves the
   # classifier separates the 7 from the 22 and that the workflow still satisfies
-  # D1-D6, then measures what the CI identity can actually read.
+  # D1-D7, then measures what the CI identity can actually read.
   declaration:
     name: merged-past-red-check declaration
     if: ${{ github.event_name == 'pull_request' }}
@@ -71,7 +71,7 @@ jobs:
       - name: Self-test the classifier
         run: python3 .github/scripts/check-merged-past-red-check.py --self-test
 
-      - name: The watch still satisfies D1-D6
+      - name: The watch still satisfies D1-D7
         run: python3 .github/scripts/check-merged-past-red-check.py --check-declaration
 
       # Measured, never assumed: can the identity CI runs as read this endpoint?
@@ -133,28 +133,92 @@ jobs:
             *) echo "::error::Unexpected exit $code."; exit "$code" ;;
           esac
 
+      # `!cancelled()`, and NOT gated on the scan succeeding (#4791). The previous condition was
+      # `steps.verdict.outputs.code != '1'` — so escalation was skipped in exactly the case where
+      # the watch had gone BLIND, and the only signal left was a red scheduled run. This file's own
+      # docstring names why that is not enough: "a red scheduled workflow is addressed to nobody —
+      # that is the #4019 lesson this repo already paid for". It then reproduced it: 87 of 87 real
+      # runs red on a token without Administration:read, and nobody addressed.
       - name: Escalate or stand down
-        if: ${{ github.event_name != 'workflow_dispatch' && steps.verdict.outputs.code != '1' }}
+        if: ${{ !cancelled() && github.event_name != 'workflow_dispatch' && steps.verdict.outcome != 'skipped' }}
+        env:
+          VERDICT_CODE: ${{ steps.verdict.outputs.code }}
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
             const fs = require('fs')
-            const v = JSON.parse(fs.readFileSync('/tmp/merged-past-red.json', 'utf8'))
             const LABEL = 'fleet-health'
             const marker = '<!-- merged-past-red-check -->'
+            // A SEPARATE marker on purpose: "the watch is blind" and "these merges bypassed a
+            // check" are different states with different fixes, and one must never close or
+            // overwrite the other's issue.
+            const blindMarker = '<!-- merged-past-red-check-blind -->'
             const REOPEN_WINDOW_DAYS = 14
 
             // Find by MARKER, not by title: the title carries a count and moves.
-            const findByMarker = async (state) => {
+            const findByMarker = async (state, m) => {
               const issues = await github.paginate(github.rest.issues.listForRepo, {
                 ...context.repo, state, labels: LABEL, per_page: 100,
                 sort: 'updated', direction: 'desc',
               })
-              return issues.find(i => (i.body || '').includes(marker))
+              return issues.find(i => (i.body || '').includes(m))
             }
 
+            // ── the watch could not answer (#4791) ────────────────────────────────────────
+            // Escalated, not merely logged. "Could not answer" is NOT "nothing was bypassed",
+            // and the whole control is absent for as long as it lasts.
+            if (process.env.VERDICT_CODE === '1') {
+              const bTitle = 'The merged-past-red-check watch cannot answer — the bypass detector is blind'
+              const bBody = [
+                blindMarker,
+                '## This watch could not read the ruleset bypass log',
+                '',
+                '`rulesets/rule-suites` returned an error, so **no verdict was produced** — neither',
+                'clean nor dirty. For as long as this holds, nothing is checking whether a PR was',
+                'merged past an actively failing required check (#4240).',
+                '',
+                'Most likely `secrets.RULESET_AUDIT_TOKEN` is unset or lacks **Administration: read**.',
+                'A workflow `GITHUB_TOKEN` cannot hold that permission — `permissions:` has no',
+                '`administration:` key — so this needs a PAT or GitHub App token that does.',
+                '',
+                'This issue is refreshed while the watch stays blind and is closed by the watch',
+                'itself on the first run that produces a verdict.',
+                '',
+                `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4791)._`,
+              ].join('\n')
+
+              const openBlind = await findByMarker('open', blindMarker)
+              if (openBlind) {
+                await github.rest.issues.update({
+                  ...context.repo, issue_number: openBlind.number, title: bTitle, body: bBody,
+                })
+                core.info(`refreshed blind #${openBlind.number}`)
+              } else {
+                const created = await github.rest.issues.create({
+                  ...context.repo, title: bTitle, body: bBody, labels: [LABEL],
+                })
+                core.info(`opened blind #${created.data.number}`)
+              }
+              return
+            }
+
+            // A verdict exists, so the watch is not blind: stand the blind issue down first.
+            const openBlind = await findByMarker('open', blindMarker)
+            if (openBlind) {
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: openBlind.number,
+                body: `The watch produced a verdict again — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+              })
+              await github.rest.issues.update({
+                ...context.repo, issue_number: openBlind.number, state: 'closed',
+              })
+              core.info(`closed blind #${openBlind.number}`)
+            }
+
+            const v = JSON.parse(fs.readFileSync('/tmp/merged-past-red.json', 'utf8'))
+
             if (v.status !== 'dirty') {
-              const open = await findByMarker('open')
+              const open = await findByMarker('open', marker)
               if (open) {
                 await github.rest.issues.createComment({
                   ...context.repo, issue_number: open.number,
@@ -199,13 +263,13 @@ jobs:
               `_Automated: \`${context.workflow}\` run ${context.runId} (issue #4240)._`,
             ].join('\n')
 
-            const open = await findByMarker('open')
+            const open = await findByMarker('open', marker)
             if (open) {
               await github.rest.issues.update({ ...context.repo, issue_number: open.number, title, body })
               core.info(`refreshed #${open.number}`)
               return
             }
-            const closed = await findByMarker('closed')
+            const closed = await findByMarker('closed', marker)
             const fresh = closed && closed.closed_at &&
               (Date.now() - Date.parse(closed.closed_at)) < REOPEN_WINDOW_DAYS * 864e5
             if (fresh) {

@@ -102,6 +102,12 @@ own pull_request lane is only a fast echo. The rules:
       nobody pushes, and the bypass is by definition the last push.
   D6  It must read the ruleset token from a secret and skip loudly when it is unset, never
       fall back to GITHUB_TOKEN and report an empty window.
+  D7  It must escalate its OWN blindness, not only its findings (#4791). D4 covers "these merges
+      bypassed a check"; D7 covers "I could not look". The escalation step must not be gated on
+      the scan having succeeded, and the blind state needs its own marker so it can never close
+      or overwrite the findings issue. Without D7 the only signal is a red scheduled run — which
+      is the #4019 blind spot this file's ESCALATION section already rejects, and which this
+      watch then reproduced for 87 consecutive real runs.
 
 WHAT THIS CANNOT DO
 -------------------
@@ -316,7 +322,9 @@ def _strip_comments(text: str) -> str:
 # The declaration lane's corpus: one workflow file, six rules applied to it. Reported through
 # gatelib.subjects so a vanished workflow reads as "this gate examined nothing" rather than as a
 # pass — the #4339 failure mode, where a moved path turns a gate into a green no-op.
-RULE_IDS = ("D1", "D2", "D3", "D4", "D5", "D6")
+BLIND_MARKER = "<!-- merged-past-red-check-blind -->"
+
+RULE_IDS = ("D1", "D2", "D3", "D4", "D5", "D6", "D7")
 
 
 def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, list[str]]:
@@ -374,6 +382,20 @@ def check_declaration(root: Path, report_subjects: bool = False) -> tuple[int, l
         fails.append(
             "D6: the scan is not run with --require-token, so a missing secret would report "
             "an unread window as clean."
+        )
+
+    # D7 — the escalation must cover the watch's own blindness (#4791). Both halves are
+    # required: a condition that excludes the cannot-answer code, and a distinct marker so the
+    # blind issue and the findings issue cannot overwrite one another.
+    if re.search(r"outputs\.code\s*!=\s*['\"]1['\"]", body):
+        fails.append(
+            "D7: escalation is gated on the scan succeeding, so it is skipped in exactly the case "
+            "where the watch went blind — leaving a red scheduled run as the only signal (#4019)."
+        )
+    if BLIND_MARKER not in body:
+        fails.append(
+            f"D7: no distinct `{BLIND_MARKER}` marker — the blind state would share an issue with "
+            "the findings state, and a later clean window would close it."
         )
 
     # THIS script must still be the thing that keys on `failing`, not on the suite result.
@@ -498,9 +520,35 @@ def self_test() -> int:
         code, fails = check_declaration(Path(td))
         if code == 0:
             bad.append("declaration passed a workflow with no time_period, no pagination, no issue")
-        for want in ("D1", "D2", "D3", "D4", "D5", "D6"):
+        for want in ("D1", "D2", "D3", "D4", "D5", "D6", "D7"):
             if not any(f.startswith(want) for f in fails):
                 bad.append(f"declaration did not raise {want} against the deliberately broken file")
+
+        # 8d. D7, falsified on its own rather than only inside the everything-broken file.
+        #     Each half must fire alone, because each alone rebuilds the blind spot: gating the
+        #     escalation on the scan succeeding skips it when blind, and a shared marker lets a
+        #     clean window close the blind issue.
+        gated = (
+            "on:\n  schedule:\n    - cron: '17 6 * * *'\n"
+            "jobs:\n  x:\n    permissions:\n      issues: write\n    steps:\n"
+            "      - run: gh api --paginate repos/o/r/rulesets/rule-suites?time_period=month\n"
+            "      - run: python3 .github/scripts/check-merged-past-red-check.py --scan"
+            " --require-token\n"
+            "        env:\n          T: ${{ secrets.RULESET_AUDIT_TOKEN }}\n"
+            "      - uses: actions/github-script@v9\n"
+            "        if: ${{ steps.verdict.outputs.code != '1' }}\n"
+            f"        # {BLIND_MARKER}\n"
+        )
+        p.write_text(gated)
+        _, fails = check_declaration(Path(td))
+        if not any("gated on the scan succeeding" in f for f in fails):
+            bad.append("D7 accepted an escalation gated on `outputs.code != '1'`")
+
+        p.write_text(gated.replace(f"        # {BLIND_MARKER}\n", "").replace(
+            "        if: ${{ steps.verdict.outputs.code != '1' }}\n", ""))
+        _, fails = check_declaration(Path(td))
+        if not any("distinct" in f and f.startswith("D7") for f in fails):
+            bad.append("D7 accepted a workflow with no distinct blind marker")
 
         # 8b. A workflow whose ONLY defect is the default window must still fail D1 — the
         #     single-rule falsification, not just the everything-broken one.
@@ -525,7 +573,7 @@ def self_test() -> int:
         return 1
     print(
         f"self-test: {len(SIGNAL_DETAILS)} signal + {len(BENIGN_DETAILS)} benign detail strings, "
-        "dedup, rule-type scoping, suite-result scoping and 3 declaration falsifications all "
+        "dedup, rule-type scoping, suite-result scoping and 5 declaration falsifications all "
         "behaved as required"
     )
     return 0
@@ -552,7 +600,7 @@ def main() -> int:
         for f in fails:
             print(f"::error::{f}")
         if code == 0:
-            print(f"declaration holds: {WORKFLOW} satisfies D1-D6")
+            print(f"declaration holds: {WORKFLOW} satisfies D1-D7")
         return code
     if args.scan:
         return scan(args)
