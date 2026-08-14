@@ -137,8 +137,9 @@ describe('campaign console + reach', () => {
     // Portfolio pulse gives the cross-campaign total while the row keeps the per-campaign
     // number, so both deliberately surface the same single-campaign value.
     expect(screen.getAllByText('45')).toHaveLength(2)
-    // 2 sent against 43 suppressed is the whole story — "2 sent" alone reads as a tiny audience.
-    expect(screen.getAllByText('43')).toHaveLength(2)
+    // 2 sent against 43 suppressed is the whole story — pin the portfolio metric by its own
+    // surface rather than counting every identical number across independent UI panels.
+    expect(screen.getByTestId('campaign-delivery-health').textContent).toMatch(/Suppressed by policy.*43/)
   })
 
   it('omits the reach columns entirely when the deployed service cannot answer', async () => {

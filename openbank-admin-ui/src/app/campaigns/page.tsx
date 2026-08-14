@@ -166,6 +166,17 @@ export default function CampaignsPage() {
 
   const counts = (k: string) => stats.get(k)?.count ?? 0
 
+  /** Portfolio-level delivery evidence. These are sent/suppressed/failed decisions from the
+   * service, not customer reach or conversion; the labels must retain that distinction. */
+  const deliveryHealth = useMemo(() => {
+    if (!summary) return null
+    const values = Object.values(summary)
+    const sent = values.reduce((total, row) => total + row.sent, 0)
+    const suppressed = values.reduce((total, row) => total + row.suppressed, 0)
+    const failed = values.reduce((total, row) => total + row.failed, 0)
+    return { sent, suppressed, failed, affected: values.filter(row => row.failed > 0).length }
+  }, [summary])
+
   const decisionQueue = useMemo(
     () => [...items]
       .filter(c => c.state !== 'CLOSED')
@@ -439,6 +450,24 @@ export default function CampaignsPage() {
                   'Delivery and response are not here — the deployed service does not return them yet.',
                 )}
           />
+
+          {deliveryHealth && (
+            <section className="rounded-xl border bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 p-5 text-white shadow-sm" data-testid="campaign-delivery-health">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-200">{t('Zdraví doručování', 'Delivery health')}</p>
+                  <h2 className="mt-1 text-lg font-semibold">{t('Co se skutečně rozhodlo napříč kampaněmi', 'What was actually decided across campaigns')}</h2>
+                </div>
+                {deliveryHealth.failed > 0 && <span className="rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-200">{deliveryHealth.affected} {t('kampaní s chybou', 'campaigns with failures')}</span>}
+              </div>
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg bg-white/10 p-3"><p className="text-xs text-slate-300">{t('Odesláno', 'Sent')}</p><strong className="text-2xl">{deliveryHealth.sent}</strong></div>
+                <div className="rounded-lg bg-amber-300/10 p-3"><p className="text-xs text-amber-100">{t('Potlačeno politikou', 'Suppressed by policy')}</p><strong className="text-2xl">{deliveryHealth.suppressed}</strong></div>
+                <div className="rounded-lg bg-rose-400/10 p-3"><p className="text-xs text-rose-100">{t('Selhalo', 'Failed')}</p><strong className="text-2xl">{deliveryHealth.failed}</strong></div>
+              </div>
+              <p className="mt-3 text-xs text-slate-300">{t('Potlačení chrání souhlas, klidové hodiny a frekvenční limit; není to nedoručený kontakt. Konverze zde nejsou odhadovány.', 'Suppression protects consent, quiet hours and frequency caps; it is not an undelivered contact. Conversions are not estimated here.')}</p>
+            </section>
+          )}
 
           {unknownStates.length > 0 && (
             <p className="text-xs" style={{ color: 'var(--warning)' }} data-testid="unknown-states">
