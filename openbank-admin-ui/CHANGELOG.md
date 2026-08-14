@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.125.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.124.0...admin-ui-v0.125.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** render agent outcome metrics with their denominator ([#4749](https://github.com/JiRaska/open-bank-oss/issues/4749)) ([a27ac89](https://github.com/JiRaska/open-bank-oss/commit/a27ac8966ac99ca08a5beaa6800875a2aec057dc)), closes [#4462](https://github.com/JiRaska/open-bank-oss/issues/4462)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive readiness money-path set from rules.yaml ([#4746](https://github.com/JiRaska/open-bank-oss/issues/4746)) ([db83514](https://github.com/JiRaska/open-bank-oss/commit/db835142f882cfb8442231689ad6673da5301535)), closes [#2365](https://github.com/JiRaska/open-bank-oss/issues/2365)
+
 ## [0.124.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.123.0...admin-ui-v0.124.0) (2026-08-13)
 
 
