@@ -81,6 +81,11 @@ the downstream payment rail (covered by domestic-payment / instant threat models
   (UWB only on iPhone 11+ and a minority of flagship Android — see spec §5) → it
   can never be assumed. High-value transfers SHOULD require SAS or fall back to
   QR. **Open:** define the value threshold.
+- **MITM-hardening proposals from design review are recorded in spec §10**
+  (encrypted bundle via X25519+HKDF→ChaCha20-Poly1305 over the existing `sas`
+  DH, 6-digit SAS with default-on above the value threshold, LE Secure
+  Connections as defence-in-depth). Draft, additive, gated on the same §8
+  reviews — kept in the spec so the decision survives outside chat history.
 - First-name broadcast is a deliberate privacy/UX trade-off → DPIA sign-off
   pending; offer "initials only" opt-out.
 - Android peripheral-role hardware gaps → payee role degrades to QR; document per-device.
@@ -115,10 +120,22 @@ more private, nicer to use"**, not as "more secure", until those layers land.
 
 ## 8. Rollout gates (what must be true before code ships)
 
-The app-side implementation state (2026-07): protocol core, controller and the
-nearby-tiles UI exist; the **Android GATT receive/write paths are deliberate
-stubs** (`ProximityBeacon.android.kt` — `startListeningForSpayd` TODO, `pushSpayd`
-returns false). Those stubs must NOT be filled until all of the following hold:
+The app-side implementation state (re-audited 2026-08-14; code name in the app
+repo is **NearPay**, `tech.openbank.app.payment.nearpay`): the protocol core
+(beacon codec, CBOR bundle, Ed25519 mint/verify with sid/kh/exp/SPAYD checks) is
+complete and unit-tested, and **both** platform transports (GATT server + client,
+Android and iOS) are complete and at parity. The feature is nonetheless
+**dormant by construction**: the payer discovery path has no caller in the UI
+(the nearby-tiles list is never populated), so only the payee "receive" half is
+reachable. Relative to this spec the app is missing: **SAS** (flag bit reserved,
+no DH/no code), **bank attestation** (flag bit reserved, no `att` field),
+**nonce/sid replay defence** (nonce minted + signed but never checked — a
+captured pair replays within the 90 s TTL), and UWB ranging exists but is wired
+to the *legacy ADR-0087 nearby-pay stack*, not to this protocol. The 2026-07
+note about `ProximityBeacon.android.kt` stubs described that legacy stack, and
+those stubs have since been filled (openbank-app #339) — the gates below
+therefore now bind on **wiring the payer path** (populating the tiles list and
+calling `resolve()`), which must NOT happen until all of the following hold:
 
 1. **Independent cryptographic review** of the Ed25519 bundle format, the
    advert↔bundle `kh` binding, and the in-memory session keypair handling (§6).

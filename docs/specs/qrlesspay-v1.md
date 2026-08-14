@@ -149,3 +149,43 @@ An implementation is QRlessPay-v1 conformant iff it: advertises/parses the §2
 beacon both ways (service-data and local-name); serves/reads the §3 CBOR bundle
 over the §1 GATT profile; performs all §3 verification steps; enforces a §5
 proximity gate; and never presents a payable proposal that skips §6 confirmation.
+
+## 10. v1.1 draft — MITM hardening (proposal, not yet normative)
+
+Design-review outcome on the active-MITM axis, recorded here so it is not lost;
+none of it ships before the threat-model §8 gates (independent crypto review in
+particular). All items are **additive** — negotiated via advert flags / new CBOR
+keys per §8, with graceful downgrade to the v1 baseline.
+
+1. **Encrypted bundle (confidential + key-authenticated GATT read).** Today the
+   bundle is signed but plaintext: a passive sniffer of the payer-initiated GATT
+   read learns the IBAN and amount, and an active MITM is stopped only by the
+   `kh` binding + payer confirmation. Proposal: the payer writes an ephemeral
+   X25519 public key to `sas` (`…QP03`) before reading `bundle`; the payee
+   returns the CBOR bundle as a **ChaCha20-Poly1305** AEAD ciphertext under
+   `key = HKDF-SHA-256(X25519(payer_eph, payee_session), "QP-ENC" ‖ sid)`, with
+   the advert `sid` as associated data. This upgrades the existing SAS DH
+   exchange into a full encrypted channel: an attacker who cannot produce the
+   payee session key (bound to the advert via `kh`) cannot decrypt-and-reswap
+   the payload, and the IBAN is no longer readable off the air even during the
+   transfer. Signature inside stays Ed25519 — encryption complements, never
+   replaces, the §3 verification order. Advert flag `0x8` = encryption-capable;
+   either side lacking it falls back to the v1 plaintext bundle.
+2. **SAS strengthening.** 6 digits (~20 bits) instead of 4 (~13 bits) for the
+   numeric comparison, derived per §4; and a **default-on policy above a value
+   threshold** (threshold = threat-model §8 open item 5) rather than
+   opt-in-only. Below the threshold SAS stays optional to protect the tap-to-pay
+   UX.
+3. **Strong distance bounding where hardware allows** — unchanged from §5 (UWB
+   secure ranging / BT6 Channel Sounding, optional, graceful downgrade). Listed
+   here because with 1+2 in place, relay is the residual active attack and UWB
+   is its only cryptographic answer.
+4. **Platform link security.** Where both stacks allow it without pairing-UX
+   damage, prefer LE Secure Connections for the GATT link; treated as
+   defence-in-depth only — the profile's guarantees must never depend on BLE
+   link-layer security (it is absent on unpaired connections).
+
+Explicitly rejected in review: raising Ed25519/SHA-256 to larger primitives
+("stronger signature") — the curve is not the weak axis; the weak axes are
+payload confidentiality, human comparison entropy (SAS), and relay, which items
+1–3 address in that order.

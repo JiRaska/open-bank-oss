@@ -39,7 +39,8 @@ export default function QrlessPayPage() {
       {/* Status strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
         <Pill color="#059669" bg="#ecfdf5" border="#6ee7b7" Icon={CheckCircle} label={t('QR SPAYD: živé v app', 'QR SPAYD: live in app')} />
-        <Pill color="#94a3b8" bg="#f8fafc" border="#cbd5e1" Icon={Circle} label={t('BLE proximity: navrženo', 'BLE proximity: planned')} />
+        <Pill color="#d97706" bg="#fffbeb" border="#fcd34d" Icon={Circle} label={t('BLE proximity: v app, spící (čeká na security gates)', 'BLE proximity: in app, dormant (awaiting security gates)')} />
+        <Pill color="#94a3b8" bg="#f8fafc" border="#cbd5e1" Icon={Radio} label={t('UWB: volitelné zesílení', 'UWB: optional enhancement')} />
         <Link href="/docs/adr/0095-qrlesspay-ble-proximity-spayd-payments" style={{ textDecoration: 'none' }}>
           <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
         </Link>
@@ -182,15 +183,17 @@ export default function QrlessPayPage() {
           </div>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
-              'SDK pro Android (Kotlin) a iOS (Swift) pod Apache-2.0 pokryje: BLE scanning/advertising, GATT přenos, Ed25519 podepisování/ověřování a SPAYD parser. Banky doplní pouze svůj platební backend (IBAN rail). Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
-              'SDK for Android (Kotlin) and iOS (Swift) under Apache-2.0 will cover: BLE scanning/advertising, GATT transfer, Ed25519 signing/verification and SPAYD parser. Banks need only plug in their own payment backend (IBAN rail). Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
+              'Jádro protokolu je Kotlin Multiplatform (jedna auditovaná implementace ověřování), nad ním tenké idiomatické vazby: Android (Kotlin, Maven), iOS (Swift, SPM), React Native (TypeScript, npm) a Flutter (Dart, pub.dev) — obě mobilní cross-platform vazby delegují na stejná nativní jádra. Web není podporován (Web Bluetooth neumí roli příjemce). Banky doplní pouze svůj platební backend (IBAN rail) a vlastní potvrzovací UI + SCA. Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
+              'The protocol core is Kotlin Multiplatform (one audited verification implementation) with thin idiomatic bindings on top: Android (Kotlin, Maven), iOS (Swift, SPM), React Native (TypeScript, npm) and Flutter (Dart, pub.dev) — both cross-platform bindings delegate to the same native cores. Web is unsupported (Web Bluetooth cannot do the payee role). Banks plug in only their own payment backend (IBAN rail) plus their own confirmation UI + SCA. Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Tag>KMP / Apache-2.0</Tag>
+            <Tag>{t('Swift · Kotlin · TypeScript · Dart', 'Swift · Kotlin · TypeScript · Dart')}</Tag>
             <Tag>ČBA / EPC</Tag>
             <Tag>{t('Otevřený protokol', 'Open protocol')}</Tag>
             <Tag>{t('Mezibankovní', 'Interbank')}</Tag>
+            <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-sdk.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Návrh SDK (spec)', 'SDK proposal (spec)')}</a>
           </div>
         </div>
       </Section>
