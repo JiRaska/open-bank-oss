@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.130.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.129.0...admin-ui-v0.130.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** add campaign delivery health ([#4788](https://github.com/JiRaska/open-bank-oss/issues/4788)) ([5c14837](https://github.com/JiRaska/open-bank-oss/commit/5c14837f1c90e8b097775ebcc1a55be5f5f0e2a7))
+* **campaign:** add planning radar ([#4787](https://github.com/JiRaska/open-bank-oss/issues/4787)) ([8e88e85](https://github.com/JiRaska/open-bank-oss/commit/8e88e851200173644f4c93dd1891ad18964c1fa4))
+
 ## [0.129.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.128.0...admin-ui-v0.129.0) (2026-08-14)
 
 
