@@ -679,6 +679,39 @@ class CampaignRestContractIT {
         }
     }
 
+    @Test
+    fun `planning keeps a submitted recurring campaign visibly unplanned until activation`() {
+        val name = "planned-${UUID.randomUUID()}"
+        val id = Given {
+            contentType("application/json")
+            body(
+                draftBody(name).replace(
+                    "\"steps\":[",
+                    "\"schedule\":{\"cadence\":\"DAILY_MORNING\"},\"steps\":[",
+                ),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        submit(id)
+
+        When {
+            get("/api/v1/campaigns/planning")
+        } Then {
+            statusCode(200)
+            body("find { it.campaignId == '$id' }.entry", equalTo("SCHEDULED"))
+            body("find { it.campaignId == '$id' }.cadence", equalTo("DAILY_MORNING"))
+            body("find { it.campaignId == '$id' }.zone", equalTo("Europe/Prague"))
+            // A schedule is created only after four-eyes activation. Rendering a date here would
+            // make an unapproved campaign look operationally live.
+            body("find { it.campaignId == '$id' }.nextScheduledWindowAt", nullValue())
+        }
+    }
+
     /** Studio reads the exact catalogue the aggregate validates, including authenticated app placement. */
     @Test
     fun `the template catalogue serves channels declared variables and in-app surfaces`() {

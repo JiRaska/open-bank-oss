@@ -689,6 +689,31 @@ main {
 @media (max-width: 900px) { .campaign-control-room, .campaign-decision-desk { grid-template-columns: 1fr; } }
 @media (max-width: 560px) { .campaign-control-hero { min-height: auto; padding: 1.05rem; } .campaign-control-hero-copy { display: grid; } .campaign-control-create { justify-self: start; } .campaign-control-flow { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 1rem; } .campaign-flow-arrow { display: none; } }
 
+/* ── Campaign planning radar ── */
+.campaign-planning-board { background: linear-gradient(120deg, #fff 0%, #f8fafc 58%, #eef2ff 100%); border: 1px solid var(--border); border-radius: var(--r-2xl); box-shadow: var(--shadow-sm); overflow: hidden; }
+.campaign-plan-head { align-items: flex-start; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; padding: 1rem 1.15rem .9rem; }
+.campaign-plan-head p { align-items: center; color: var(--ob-accent-text); display: flex; font-size: .63rem; font-weight: 800; gap: .35rem; letter-spacing: .09em; text-transform: uppercase; }
+.campaign-plan-head h2 { font-size: 1rem; font-weight: 800; letter-spacing: -.02em; margin-top: .18rem; }
+.campaign-plan-head > span { background: #eef2ff; border: 1px solid #c7d2fe; border-radius: 99px; color: #4338ca; font-size: .62rem; font-weight: 800; padding: .3rem .52rem; }
+.campaign-plan-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(14rem, .55fr); }
+.campaign-plan-upcoming { padding: .72rem; }
+.campaign-plan-card { align-items: center; border: 1px solid transparent; border-radius: .72rem; color: inherit; display: grid; gap: .65rem; grid-template-columns: 1.6rem minmax(0, 1fr) auto; padding: .6rem; text-decoration: none; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
+.campaign-plan-card:hover { background: #fff; border-color: #c7d2fe; transform: translateX(2px); }
+.campaign-plan-index { color: #6366f1; font-family: var(--font-mono); font-size: .62rem; font-weight: 800; }
+.campaign-plan-copy { display: grid; min-width: 0; }
+.campaign-plan-copy strong { font-size: .76rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.campaign-plan-copy small { color: var(--text-secondary); font-size: .63rem; margin-top: .1rem; }
+.campaign-plan-card time { background: #eef2ff; border-radius: .48rem; color: #3730a3; font-size: .62rem; font-variant-numeric: tabular-nums; font-weight: 800; padding: .36rem .45rem; white-space: nowrap; }
+.campaign-plan-footnote, .campaign-plan-empty { color: var(--text-secondary); font-size: .64rem; line-height: 1.4; margin: .58rem .15rem .1rem; }
+.campaign-plan-aside { background: rgba(238,242,255,.56); border-left: 1px solid var(--border); padding: 1rem; }
+.campaign-plan-aside > div { align-items: center; display: flex; gap: .38rem; }
+.campaign-plan-aside > div svg { color: #6366f1; }
+.campaign-plan-aside strong { font-size: .72rem; }
+.campaign-plan-aside > div span { align-items: center; background: #4338ca; border-radius: 99px; color: #fff; display: inline-flex; font-size: .62rem; font-weight: 800; height: 1.22rem; justify-content: center; margin-left: auto; min-width: 1.22rem; }
+.campaign-plan-aside > p { color: #5b5b86; font-size: .64rem; line-height: 1.42; margin-top: .54rem; }
+.campaign-plan-events { align-items: flex-start; border-top: 1px solid #c7d2fe; color: #4338ca; display: flex; font-size: .62rem; gap: .35rem; line-height: 1.35; margin-top: .7rem; padding-top: .65rem; }
+@media (max-width: 700px) { .campaign-plan-grid { grid-template-columns: 1fr; } .campaign-plan-aside { border-left: 0; border-top: 1px solid var(--border); } .campaign-plan-head { gap: .5rem; } .campaign-plan-head > span { font-size: .56rem; } }
+
 /* ── Campaign outcome brief ── */
 .campaign-outcome-brief { background: linear-gradient(110deg, #111827 0%, #172554 56%, #312e81 100%); border-radius: var(--r-xl); box-shadow: var(--shadow-lg); color: #fff; display: grid; grid-template-columns: minmax(0, 1fr) minmax(13.5rem, .32fr); overflow: hidden; }
 .campaign-outcome-main { padding: 1.25rem; }
