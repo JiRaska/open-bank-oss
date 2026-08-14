@@ -93,6 +93,68 @@ test_edge_may_list if {
 	decision.allow == true
 }
 
+# --- interest-oversight-read (#3679): the console read regression #3695 shipped ---
+#
+# The matrix mock above grants ROLE_OPERATOR only, so neither of these principals has any base
+# grant whatsoever — the extension rule is the sole source of the allow, which is what makes these
+# falsifiable. Before the rule existed both resolved false, which is the live 403 demo@ and
+# compliance@ have been getting since 2026-08-07.
+
+viewer := {"type": "HUMAN", "id": "demo@openbank.local", "roles": ["ROLE_VIEWER"]}
+
+auditor := {"type": "HUMAN", "id": "aud@openbank.local", "roles": ["ROLE_AUDITOR"]}
+
+test_viewer_may_list if {
+	decision := rest.allow with input as {"principal": viewer, "action": "interest.list"}
+		with data.rules as rules_mock
+	decision.allow == true
+	"interest-oversight-read" in rest.allowed_reasons with input as {"principal": viewer, "action": "interest.list"}
+		with data.rules as rules_mock
+}
+
+test_viewer_may_read if {
+	decision := rest.allow with input as {"principal": viewer, "action": "interest.read"}
+		with data.rules as rules_mock
+	decision.allow == true
+}
+
+# ROLE_AUDITOR is admitted by WithholdingRemittanceResource's class @RolesAllowed and by nothing in
+# the base policy — so this case is carried entirely by the extension.
+test_auditor_may_list_withholding if {
+	"interest-oversight-read" in rest.allowed_reasons with input as {"principal": auditor, "action": "interest.list"}
+		with data.rules as rules_mock
+}
+
+# The point of the closed two-action literal. Replacing it with
+# startswith(input.action, "interest.") turns this test red — that is the falsification, and it is
+# why the rule is not written as a prefix family.
+test_oversight_read_grants_no_write if {
+	not "interest-oversight-read" in rest.allowed_reasons with input as {"principal": viewer, "action": "interest.create"}
+		with data.rules as rules_mock
+	not "interest-oversight-read" in rest.allowed_reasons with input as {"principal": viewer, "action": "interest.trigger"}
+		with data.rules as rules_mock
+	not "interest-oversight-read" in rest.allowed_reasons with input as {"principal": viewer, "action": "interest.delete"}
+		with data.rules as rules_mock
+}
+
+# A viewer still gets nothing on a write, at the FINAL decision layer and not merely the reason set.
+test_viewer_still_denied_every_write if {
+	rest.allow == false with input as {"principal": viewer, "action": "interest.create"}
+		with data.rules as rules_mock
+	rest.allow == false with input as {"principal": viewer, "action": "interest.trigger"}
+		with data.rules as rules_mock
+	rest.allow == false with input as {"principal": viewer, "action": "interest.delete"}
+		with data.rules as rules_mock
+}
+
+# Must-DENY control for this block: the new rule must not leak onto a foreign namespace.
+test_oversight_read_is_scoped_to_interest if {
+	rest.allow == false with input as {"principal": viewer, "action": "zzz.frobnicate"}
+		with data.rules as rules_mock
+	rest.allow == false with input as {"principal": auditor, "action": "ledger.read"}
+		with data.rules as rules_mock
+}
+
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-interest-write is the EXTENSION's reason, so its presence
 # proves the ext; matrix-allows proving the base+data wiring comes from test_edge_may_read above
