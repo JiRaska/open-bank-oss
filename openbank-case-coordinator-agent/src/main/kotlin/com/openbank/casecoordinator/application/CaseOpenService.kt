@@ -93,7 +93,11 @@ class CaseOpenService(
         val stub = workflowClient.newUntypedWorkflowStub(WORKFLOW_TYPE, options)
         return try {
             stub.start(start)
-            log.infof("case opened: %s by %s (class %s)", workflowId, openedBy, caseClass)
+            // openedBy is sanitised, workflowId is not, and the asymmetry is the point (#4215):
+            // workflowIdFor already strips everything outside [A-Za-z0-9_-], so it cannot carry a
+            // newline, while openedBy arrives verbatim from the request body. CodeQL flagged both
+            // arguments on this line; only this one was ever injectable.
+            log.infof("case opened: %s by %s (class %s)", workflowId, openedBy.sanitizeForLog(), caseClass)
             CaseOpenResult.Opened(workflowId)
         } catch (e: WorkflowExecutionAlreadyStarted) {
             refundOpenQuota(openedBy, now)
@@ -138,5 +142,14 @@ class CaseOpenService(
     private companion object {
         const val WORKFLOW_TYPE = "CaseWorkflow"
         const val OPEN_WINDOW_MS = 3_600_000L
+
+        /**
+         * The fleet's log-injection guard (13 services carry the same idiom): CR/LF out, so a
+         * caller-supplied string cannot forge a log line. Deliberately INSIDE the companion rather
+         * than a top-level `private fun`: a top-level declaration placed above a class silently
+         * takes that class's annotation, which is how `McpEndpoint` lost its `@Path` and answered
+         * 404 on every call for the life of the endpoint.
+         */
+        fun String.sanitizeForLog(): String = replace('\n', '_').replace('\r', '_')
     }
 }

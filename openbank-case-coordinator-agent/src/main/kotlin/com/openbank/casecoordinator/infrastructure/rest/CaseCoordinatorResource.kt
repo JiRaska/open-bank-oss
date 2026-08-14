@@ -117,7 +117,12 @@ class CaseCoordinatorResource(
             is CaseOpenResult.Opened -> Response.status(Response.Status.CREATED)
                 .entity(OpenCaseResponse(result.caseId)).build()
             CaseOpenResult.Denied -> Response.status(Response.Status.FORBIDDEN)
-                .entity(errorBody("case.open denied for '$openedBy' or class '$caseClass' not enabled")).build()
+                // The caller's own openedBy is NOT echoed back (#4215). It is free-form request
+                // input; reflecting it verbatim into a response body serves no diagnostic purpose
+                // the caller does not already have, and it is the same untrusted value the log
+                // line downstream had to sanitise. The class is a server-side enum, so it stays.
+                .entity(errorBody("case.open denied for the requested agent, or class not enabled"))
+                .build()
             CaseOpenResult.Duplicate -> Response.status(Response.Status.CONFLICT)
                 .entity(errorBody("a case for this class and subject already runs")).build()
             CaseOpenResult.RateLimited -> Response.status(HTTP_TOO_MANY_REQUESTS)

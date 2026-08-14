@@ -24,6 +24,10 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 /**
  * Case-open authority rules (ADR-0244 D9): capability, per-agent rate limit, dedup mapping.
@@ -111,6 +115,43 @@ class CaseOpenServiceTest {
         )
 
         assertThat(open()).isEqualTo(CaseOpenResult.Duplicate)
+    }
+
+    /**
+     * #4215: `openedBy` is free-form request-body input and was interpolated into the "case opened"
+     * line verbatim, so a caller could embed CRLF and forge log records. CodeQL flagged it and the
+     * finding was merged past unresolved.
+     *
+     * The assertion reads the REAL emitted record rather than calling the sanitiser directly — a
+     * test of the helper alone would stay green if the call site stopped using it, which is exactly
+     * the regression worth catching.
+     */
+    @Test
+    fun `a CRLF-laden openedBy cannot forge a log line`() {
+        val captured = mutableListOf<String>()
+        val jul = JulLogger.getLogger(CaseOpenService::class.java.name)
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                captured += java.text.MessageFormat.format(record.message, *(record.parameters ?: emptyArray()))
+                    .let { if (record.parameters == null) record.message else it }
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        jul.addHandler(handler)
+        jul.level = Level.ALL
+        try {
+            every { gate.canOpenCase(any()) } returns true
+            service.open("evil\r\nFATAL: forged entry", CaseClass.INCIDENT_RESPONSE, "acct-1", "ops")
+        } finally {
+            jul.removeHandler(handler)
+        }
+
+        val all = captured.joinToString("\n")
+        assertThat(all).describedAs("something must have been logged, or this test proves nothing")
+            .contains("case opened")
+        assertThat(all).describedAs("CR/LF from request input must not reach the log verbatim")
+            .doesNotContain("\r").doesNotContain("evil\nFATAL")
     }
 
     @Test
