@@ -6,6 +6,14 @@ import { expect, test } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
 const CAMPAIGN_ID = '019fb93a-0d54-7f05-aad3-9e8c7c9bc110'
+const CONTENT_CATALOGUE = [
+  { template: 'MARKETING_PRODUCT_OFFER', channel: 'EMAIL', variables: ['offerTitle', 'offerText', 'ctaText'] },
+  { template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: ['offerTitle'] },
+  { template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_BANNER' },
+  { template: 'MARKETING_PRODUCT_OFFER_CAROUSEL', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_CAROUSEL' },
+  { template: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'PRODUCT_FEED' },
+  { template: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'REWARDS_HUB' },
+]
 
 test.beforeEach(async ({ context, baseURL }) => {
   await signInAsOperator(context, baseURL!)
@@ -27,6 +35,11 @@ test('authors a measured A/B content experiment and renders its conservative res
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ state: 'ok', items: [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }] }),
+  }))
+  await page.route(/\/api\/campaigns\/templates$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ state: 'ok', items: CONTENT_CATALOGUE }),
   }))
   await page.route(/\/api\/campaigns$/, route => {
     if (route.request().method() !== 'POST') return route.fallback()

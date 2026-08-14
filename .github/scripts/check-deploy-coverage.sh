@@ -139,11 +139,17 @@ while IFS= read -r line; do
 done < <(jq -r '.packages | keys[]' "$RP_CONFIG" | grep '^openbank-' | sort)
 
 # The hand-maintained deploy list.
-# `|| true` is load-bearing, not defensive noise. Under `set -euo pipefail` a no-match grep
-# exits 1, the pipeline inherits it, and the script DIES HERE — before the explicit check
-# below, which is therefore unreachable. Measured: a workflow with no ALL_SERVICES produced
-# rc=1 and completely EMPTY output, so the gate failed with no diagnosis at all and the error
-# text it carries had never once been printed. Same shape as check-agent-charter-registry.sh.
+# `|| true` is load-bearing, not defensive noise: under `set -euo pipefail` a no-match grep
+# exits 1, the pipeline inherits it, and the script dies HERE — before the explicit check one
+# line below, which is therefore unreachable. Measured: a workflow with no ALL_SERVICES
+# produced rc=1 and completely EMPTY output — no diagnosis at all. Same shape as
+# check-agent-charter-registry.sh (batch 6) and check-adr-registry.sh (batch 16).
+#
+# Regressed once already by a merge-conflict resolution that picked the pre-fix side of this
+# exact line — the fix lived outside the conflicted hunk, so the diff never showed it as
+# changed, and taking HEAD silently un-fixed it. Caught by the self-test going UNFALSIFIED,
+# which is what that state exists to catch. If you are resolving a conflict here again: keep
+# the `|| true`.
 ALL_SERVICES="$(grep -oE "ALL_SERVICES='[^']+'" "$WORKFLOW" | head -1 | sed "s/ALL_SERVICES='//; s/'$//" || true)"
 [ -n "$ALL_SERVICES" ] || { echo "ERROR: could not read ALL_SERVICES from ${WORKFLOW}." >&2; exit 2; }
 

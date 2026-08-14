@@ -90,6 +90,32 @@ class RestDownstreamReadAdapterTest {
     }
 
     @Test
+    fun `catalog revision read uses the exact v2 offering and revision ids`() {
+        adapter.genericCatalogClient = mockk()
+        every {
+            adapter.genericCatalogClient.getRevision(
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            )
+        } returns mapper.createObjectNode().put("state", "DRAFT")
+
+        val result = adapter.read(
+            "get_catalog_revision",
+            mapper.createObjectNode()
+                .put("offeringId", "11111111-1111-1111-1111-111111111111")
+                .put("revisionId", "22222222-2222-2222-2222-222222222222"),
+        )
+
+        assertThat(result["state"].asText()).isEqualTo("DRAFT")
+        verify {
+            adapter.genericCatalogClient.getRevision(
+                "11111111-1111-1111-1111-111111111111",
+                "22222222-2222-2222-2222-222222222222",
+            )
+        }
+    }
+
+    @Test
     fun `a missing required argument is rejected before any downstream call`() {
         adapter.accountClient = mockk()
 

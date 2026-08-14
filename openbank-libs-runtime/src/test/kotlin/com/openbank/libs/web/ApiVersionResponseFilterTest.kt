@@ -20,12 +20,14 @@ class ApiVersionResponseFilterTest {
         apiVersion: String = "1",
         deprecatedPaths: Optional<List<String>> = Optional.empty(),
         sunsetDate: Optional<String> = Optional.empty(),
+        successorLinks: Optional<List<String>> = Optional.empty(),
     ) = ApiVersionResponseFilter(
         serviceName = "test-service",
         serviceVersion = "1.2.3",
         apiVersion = apiVersion,
         deprecatedPaths = deprecatedPaths,
         sunsetDate = sunsetDate,
+        successorLinks = successorLinks,
     )
 
     private fun makeReqResp(path: String): Pair<ContainerRequestContext, MultivaluedHashMap<String, Any>> {
@@ -49,6 +51,15 @@ class ApiVersionResponseFilterTest {
     }
 
     @Test
+    fun `uses the request path major when a service exposes v1 and v2 together`() {
+        val v1Headers = responseHeaders("/api/v1/products", apiVersion = "2")
+        val v2Headers = responseHeaders("/api/v2/products", apiVersion = "2")
+
+        assertThat(v1Headers.getFirst("X-API-Version")).isEqualTo("v1")
+        assertThat(v2Headers.getFirst("X-API-Version")).isEqualTo("v2")
+    }
+
+    @Test
     fun `no deprecation headers when no paths configured`() {
         val (_, headers) = makeReqResp("/api/v1/accounts")
         assertThat(headers).doesNotContainKey("Deprecation")
@@ -59,7 +70,7 @@ class ApiVersionResponseFilterTest {
     @Test
     fun `deprecation headers on matching path with sunset and successor link`() {
         val headers = MultivaluedHashMap<String, Any>()
-        val uriInfo = mockk<UriInfo> { every { path } returns "/api/v1/accounts/123" }
+        val uriInfo = mockk<UriInfo> { every { path } returns "api/v1/accounts/123" }
         val req = mockk<ContainerRequestContext>(relaxed = true) {
             every { this@mockk.uriInfo } returns uriInfo
         }
@@ -68,12 +79,13 @@ class ApiVersionResponseFilterTest {
         makeFilter(
             deprecatedPaths = Optional.of(listOf("/api/v1/accounts")),
             sunsetDate = Optional.of("Sat, 01 Jan 2028 00:00:00 GMT"),
+            successorLinks = Optional.of(listOf("/api/v1/accounts=>/api/v2/account-products")),
         ).filter(req, resp)
 
         assertThat(headers.getFirst("Deprecation") as String).isEqualTo("true")
         assertThat(headers.getFirst("Sunset") as String).isEqualTo("Sat, 01 Jan 2028 00:00:00 GMT")
         val link = headers.getFirst("Link") as String
-        assertThat(link).contains("/api/v2/accounts/123")
+        assertThat(link).contains("/api/v2/account-products")
         assertThat(link).contains("rel=\"successor-version\"")
     }
 
@@ -105,5 +117,16 @@ class ApiVersionResponseFilterTest {
         assertThat(headers.getFirst("Deprecation") as String).isEqualTo("true")
         assertThat(headers).doesNotContainKey("Sunset")
         assertThat(headers).containsKey("Link")
+    }
+
+    private fun responseHeaders(path: String, apiVersion: String): MultivaluedHashMap<String, Any> {
+        val headers = MultivaluedHashMap<String, Any>()
+        val uriInfo = mockk<UriInfo> { every { this@mockk.path } returns path }
+        val req = mockk<ContainerRequestContext>(relaxed = true) {
+            every { this@mockk.uriInfo } returns uriInfo
+        }
+        val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
+        makeFilter(apiVersion = apiVersion).filter(req, resp)
+        return headers
     }
 }

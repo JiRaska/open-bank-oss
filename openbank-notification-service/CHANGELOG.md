@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.1...notification-service-v0.22.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **notification:** count the outcome events published for a notification row that does not exist ([#4711](https://github.com/JiRaska/open-bank-oss/issues/4711)) ([e6b05dc](https://github.com/JiRaska/open-bank-oss/commit/e6b05dc5b8d9403f3f95c658898e9c0690f95d65)), closes [#4512](https://github.com/JiRaska/open-bank-oss/issues/4512)
+
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.0...notification-service-v0.22.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **notification:** record device sweep liveness ([#4650](https://github.com/JiRaska/open-bank-oss/issues/4650)) ([67cfb60](https://github.com/JiRaska/open-bank-oss/commit/67cfb60b5588c2ebf1ede760ae70d927900fc48d))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.21.0...notification-service-v0.22.0) (2026-08-13)
 
 

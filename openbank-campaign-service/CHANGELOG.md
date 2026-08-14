@@ -1,5 +1,59 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/v0.30.0...v0.31.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** add planning radar ([#4787](https://github.com/JiRaska/open-bank-oss/issues/4787)) ([8e88e85](https://github.com/JiRaska/open-bank-oss/commit/8e88e851200173644f4c93dd1891ad18964c1fa4))
+
+
+### Bug Fixes
+
+* **campaign:** project story engagement ([#4783](https://github.com/JiRaska/open-bank-oss/issues/4783)) ([de344a5](https://github.com/JiRaska/open-bank-oss/commit/de344a5446ced7ed61df4318cdbf608de34f8232))
+
+## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/v0.29.1...v0.30.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** add app story campaign surface ([#4771](https://github.com/JiRaska/open-bank-oss/issues/4771)) ([2f9aa3e](https://github.com/JiRaska/open-bank-oss/commit/2f9aa3e6943eed6f95df1ae4bc1dac5be4c12c64))
+
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/v0.29.0...v0.29.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **campaign:** report stale segment drafts as conflicts ([#4772](https://github.com/JiRaska/open-bank-oss/issues/4772)) ([169b4ab](https://github.com/JiRaska/open-bank-oss/commit/169b4abf91f524e6cc80721f985c38bd2692f07f))
+
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/v0.28.0...v0.29.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** enable reusable campaign drafts ([#4756](https://github.com/JiRaska/open-bank-oss/issues/4756)) ([d59e6c5](https://github.com/JiRaska/open-bank-oss/commit/d59e6c5aaf134fc08fd0acac1af915bc43cb46c2))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/v0.27.0...v0.28.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** explain live launch guardrails ([#4735](https://github.com/JiRaska/open-bank-oss/issues/4735)) ([0e70531](https://github.com/JiRaska/open-bank-oss/commit/0e7053135e57150016034eb6392f3fd7144d1b7b))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/v0.26.0...v0.27.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add explicit decision sources ([#4690](https://github.com/JiRaska/open-bank-oss/issues/4690)) ([3296001](https://github.com/JiRaska/open-bank-oss/commit/3296001b81fda644c6ba8d0b4d7b8703b2f5bc22))
+
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/v0.25.0...v0.26.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** let makers revise drafts ([#4667](https://github.com/JiRaska/open-bank-oss/issues/4667)) ([60b86bb](https://github.com/JiRaska/open-bank-oss/commit/60b86bb48e7c480bd05b79a5c8a2c544f9e2b1f4))
+
 ## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/v0.24.0...v0.25.0) (2026-08-13)
 
 

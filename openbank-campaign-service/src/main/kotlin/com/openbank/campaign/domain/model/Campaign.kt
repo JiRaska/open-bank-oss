@@ -11,6 +11,23 @@ import java.time.Instant
 import java.util.UUID
 
 /**
+ * The editable definition of a draft, deliberately separate from [Campaign]'s server-owned
+ * identity, lifecycle and audit fields. A maker supplies this whole value; revision can therefore
+ * never accidentally preserve an old field merely because another endpoint forgot to pass it.
+ */
+data class CampaignDefinition(
+    val name: String,
+    val goal: String,
+    val segmentRef: SegmentRef,
+    val steps: List<CampaignStep>,
+    val stopCondition: StopCondition? = null,
+    val conversionRule: String? = null,
+    val holdoutPercent: Int = 0,
+    val schedule: CampaignSchedule? = null,
+    val trigger: String? = null,
+)
+
+/**
  * Campaign aggregate (ADR-0200). A definition — steps, delays, stop conditions — that is executed
  * as one Temporal workflow per enrolled party. Content is composed from the notification-service
  * template catalogue with declared variables; free-form bodies are rejected by construction
@@ -57,6 +74,14 @@ data class Campaign(
         require(name.isNotBlank()) { "campaign name must not be blank" }
         require(steps.isNotEmpty()) { "campaign must have at least one step" }
         require(steps.size <= MAX_STEPS) { "journeys are capped at $MAX_STEPS steps in the first slice" }
+        require(steps.map { it.order }.distinct().size == steps.size) { "campaign step orders must be unique" }
+        steps.forEach { step ->
+            step.conditionSourceOrder?.let { sourceOrder ->
+                require(step.condition != null) { "a condition source requires a branch condition" }
+                require(sourceOrder < step.order) { "a condition source must be an earlier step" }
+                require(steps.any { it.order == sourceOrder }) { "a condition source must name a campaign step" }
+            }
+        }
         require(holdoutPercent in 0..MAX_HOLDOUT_PERCENT) {
             "holdoutPercent must be between 0 and $MAX_HOLDOUT_PERCENT"
         }
@@ -83,6 +108,27 @@ data class Campaign(
     fun submit(): Campaign {
         require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be submitted for approval" }
         return copy(state = CampaignState.PENDING_APPROVAL, updatedAt = Instant.now())
+    }
+
+    /**
+     * A maker may revise the definition while it is still a draft.  Once it enters approval, the
+     * exact reviewed definition is immutable: changing it afterwards would make the checker
+     * approve one journey while a different one is actually run.
+     */
+    fun revise(definition: CampaignDefinition): Campaign {
+        require(state == CampaignState.DRAFT) { "only a DRAFT campaign can be revised" }
+        return copy(
+            name = definition.name,
+            goal = definition.goal,
+            segmentRef = definition.segmentRef,
+            steps = definition.steps.sortedBy { it.order },
+            stopCondition = definition.stopCondition,
+            conversionRule = definition.conversionRule,
+            holdoutPercent = definition.holdoutPercent,
+            schedule = definition.schedule,
+            trigger = definition.trigger,
+            updatedAt = Instant.now(),
+        )
     }
 
     fun activate(approver: String): Campaign {
@@ -193,6 +239,12 @@ data class CampaignStep(
      * it took before. See [StepCondition].
      */
     val condition: StepCondition? = null,
+    /**
+     * Optional explicit source for [condition].  Absent preserves the original "latest earlier
+     * delivery" semantics.  When present, both arms of a decision can name the same source step,
+     * so a skipped arm can never accidentally become the other's predecessor.
+     */
+    val conditionSourceOrder: Int? = null,
     /**
      * Alternative declared values for the B arm of a campaign-wide A/B content experiment.
      * Null preserves the historical single-content step; when present every step must provide it
@@ -384,8 +436,8 @@ enum class MobileDestination(val deepLink: String) {
     PRODUCT_HUB("openbank://products"),
 }
 
-/** Closed app inventory a campaign may use; STORIES remains product-owned, not a campaign slot. */
-enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB }
+/** Closed authenticated-app inventory a campaign may use. */
+enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB }
 
 /**
  * Delivery channels a campaign step may use.

@@ -5,7 +5,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Users } from 'lucide-react'
+import Link from 'next/link'
+import { ArrowRight, Clock3, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
@@ -68,13 +69,30 @@ export default function SegmentsPage() {
       timeStyle: 'short',
     }).format(new Date(iso))
 
+  // The service owns the stable identifier and the actual rules. These names only translate the
+  // catalogue's current, known audience artifacts into a decision a marketer can scan. Unknown
+  // future catalogue entries retain their service name — hiding an unlabelled audience would be
+  // worse than showing its technical identity.
+  const audienceName = (s: Segment) => {
+    if (s.name === 'actives') return t('Aktivní zákazníci', 'Active customers')
+    if (s.name === 'actives-tenured-30d') return t('Aktivní zákazníci 30+ dní', 'Active customers for 30+ days')
+    return s.name
+  }
+
+  const audiencePurpose = (s: Segment) => {
+    if (s.name === 'actives') return t('Široký výchozí okruh pro ověřenou produktovou nabídku.', 'A broad default audience for a verified product offer.')
+    if (s.name === 'actives-tenured-30d') return t('Stabilnější publikum pro nabídky po prvním měsíci vztahu.', 'A more established audience for offers after the first month of a relationship.')
+    return t('Verzované publikum z katalogu kampaní.', 'A versioned audience from the campaign catalogue.')
+  }
+
   const renderPreview = (s: Segment) => {
     const p = previews[key(s)]
     if (!p) {
       return (
         <button
           onClick={() => loadPreview(s)}
-          className="rounded-md border px-2 py-1 text-xs hover:bg-muted"
+          className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50"
+          data-audience-count={key(s)}
         >
           {t('Spočítat', 'Count')}
         </button>
@@ -95,9 +113,9 @@ export default function SegmentsPage() {
       )
     }
     return (
-      <span className="text-sm">
-        <strong>{p.size?.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
-        <span className="text-muted-foreground">{t('lidí', 'people')}</span>
+      <span className="text-sm" data-audience-size={key(s)}>
+        <strong className="text-lg tracking-tight">{p.size?.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</strong>{' '}
+        <span className="text-muted-foreground">{t('lidí nyní odpovídá', 'people match now')}</span>
         {p.asOf && (
           // The cohort moves as the silver layer moves; a number without its timestamp is a claim
           // with no time attached, which is what ADR-0201 D1's "provably a different version" rules out.
@@ -110,10 +128,10 @@ export default function SegmentsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={t('Segmenty', 'Segments')}
+        title={t('Publika', 'Audiences')}
         subtitle={t(
-          'Na koho lze cílit. Definice jsou v kódu a verzované — nový segment je pull request.',
-          'Who can be targeted. Definitions live in code and are versioned — a new segment is a pull request.',
+          'Vyberte publikum podle jeho záměru, ověřte aktuální dosah a přejděte rovnou k návrhu cesty.',
+          'Choose an audience by intent, verify its current reach, then go straight to designing the journey.',
         )}
         icon={<Users className="h-6 w-6" />}
       />
@@ -129,34 +147,54 @@ export default function SegmentsPage() {
       )}
 
       {!loading && !unavailable && items.length > 0 && (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>{t('Segment', 'Segment')}</th>
-                <th>{t('Verze', 'Version')}</th>
-                <th>{t('Koho zahrnuje', 'Who it selects')}</th>
-                <th>{t('Velikost', 'Size')}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {items.map(s => (
-                <tr key={key(s)}>
-                  <td className="font-medium">{s.name}</td>
-                  <td className="tabular-nums text-muted-foreground">v{s.version}</td>
-                  <td>
-                    <ul className="list-inside list-disc text-muted-foreground">
-                      {s.rules.map(r => (
-                        <li key={r}>{r}</li>
-                      ))}
-                    </ul>
-                  </td>
-                  <td>{renderPreview(s)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <section className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
+            <div className="rounded-2xl border border-violet-100 bg-[radial-gradient(circle_at_top_left,_rgba(116,91,255,.18),_transparent_42%),linear-gradient(135deg,_#fff,_#f8f7ff)] p-5 shadow-sm">
+              <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[.12em] text-violet-700"><Sparkles className="h-3.5 w-3.5" /> {t('Audience library', 'Audience library')}</p>
+              <h2 className="mt-2 text-xl font-semibold tracking-tight text-slate-900">{t('Rozhodujte se nad skutečným dosahem, ne nad názvem segmentu.', 'Decide using real reach, not a segment name.')}</h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{t('Velikost se počítá stejným pravidlem, které následně zařazuje lidi do kampaně. Je to aktuální náhled, ne slib doručení.', 'Size uses the same rule that later enrols people into a campaign. It is a current preview, not a delivery promise.')}</p>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <ShieldCheck className="h-5 w-5 text-emerald-600" />
+              <p className="mt-3 text-sm font-semibold text-slate-900">{t('Bezpečné publikum', 'Safe audiences')}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{t('Definice jsou verzované a reviewované v kódu. Souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Definitions are versioned and reviewed in code. Consent and frequency protections are evaluated again at send time.')}</p>
+            </div>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2" aria-label={t('Katalog publik', 'Audience catalogue')}>
+            {items.map(s => (
+              <article key={key(s)} className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg hover:shadow-violet-950/5" data-audience-card={key(s)}>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-slate-400">{t('Verzované publikum', 'Versioned audience')} · v{s.version}</p>
+                    <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">{audienceName(s)}</h2>
+                    <p className="mt-1 text-sm leading-5 text-slate-500">{audiencePurpose(s)}</p>
+                  </div>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-violet-50 text-violet-700"><Users className="h-5 w-5" /></span>
+                </div>
+
+                <div className="mt-5 rounded-xl bg-slate-50 p-3">
+                  <p className="text-[.68rem] font-bold uppercase tracking-[.1em] text-slate-400">{t('Pravidla výběru', 'Selection rules')}</p>
+                  <ul className="mt-2 space-y-1.5 text-sm text-slate-600">
+                    {s.rules.map(rule => <li key={rule} className="flex gap-2"><span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-violet-500" />{rule}</li>)}
+                  </ul>
+                </div>
+
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="min-h-8">{renderPreview(s)}</div>
+                  <Link
+                    href={`/campaigns/new?audience=${encodeURIComponent(key(s))}`}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-700"
+                    data-use-audience={key(s)}
+                  >
+                    {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+                <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
+              </article>
+            ))}
+          </section>
+        </>
       )}
     </div>
   )

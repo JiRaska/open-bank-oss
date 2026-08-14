@@ -56,15 +56,20 @@ class CampaignJourneyWorkflowTest {
                 ),
             )
 
-        private fun step(order: Int, condition: StepCondition? = null, delaySeconds: Long = 0): CampaignStep =
-            CampaignStep(
-                order = order,
-                template = "MARKETING_PRODUCT_OFFER",
-                channel = Channel.EMAIL,
-                variables = emptyMap(),
-                delaySeconds = delaySeconds,
-                condition = condition,
-            )
+        private fun step(
+            order: Int,
+            condition: StepCondition? = null,
+            delaySeconds: Long = 0,
+            conditionSourceOrder: Int? = null,
+        ): CampaignStep = CampaignStep(
+            order = order,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = emptyMap(),
+            delaySeconds = delaySeconds,
+            condition = condition,
+            conditionSourceOrder = conditionSourceOrder,
+        )
     }
 
     @BeforeEach
@@ -88,6 +93,7 @@ class CampaignJourneyWorkflowTest {
             JourneyControlState(CampaignState.ACTIVE, goalReached = false)
         every { activities.deliverStep(any(), any(), any()) } returns StepOutcome.SENT
         every { activities.previousDeliveryStatus(any(), any(), any()) } returns null
+        every { activities.deliveryStatusForStep(any(), any(), any()) } returns null
         worker.registerActivitiesImplementations(activities)
         env.start()
     }
@@ -184,6 +190,29 @@ class CampaignJourneyWorkflowTest {
     }
 
     @Test
+    fun `complementary paths read their one explicit source, not a skipped sibling`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(
+            listOf(
+                step(0),
+                step(1, StepCondition.IF_PREVIOUS_CONFIRMED, conditionSourceOrder = 0),
+                step(2, StepCondition.IF_PREVIOUS_NOT_CONFIRMED, conditionSourceOrder = 0),
+            ),
+            null,
+        )
+        every { activities.deliveryStatusForStep(campaignId, partyId, 0) } returns DeliveryStatus.CONFIRMED
+
+        run()
+
+        verify { activities.deliverStep(campaignId, partyId, 0) }
+        verify { activities.deliverStep(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }
+        verify { activities.skipStep(campaignId, partyId, 2) }
+        verify(exactly = 2) { activities.deliveryStatusForStep(campaignId, partyId, 0) }
+        verify(exactly = 0) { activities.previousDeliveryStatus(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.previousDeliveryStatus(campaignId, partyId, 2) }
+    }
+
+    @Test
     fun `IF_PREVIOUS_CONFIRMED does not hold for a first step, which has no predecessor`() {
         every { activities.loadDefinition(campaignId) } returns
             JourneyDefinition(listOf(step(0, StepCondition.IF_PREVIOUS_CONFIRMED)), null)
@@ -206,6 +235,7 @@ class CampaignJourneyWorkflowTest {
         // the new activity is never invoked, so a journey started before this change emits no
         // command its recorded history lacks.
         verify(exactly = 0) { activities.previousDeliveryStatus(any(), any(), any()) }
+        verify(exactly = 0) { activities.deliveryStatusForStep(any(), any(), any()) }
     }
 
     // --- live campaign controls and goal exit ---------------------------------------------------

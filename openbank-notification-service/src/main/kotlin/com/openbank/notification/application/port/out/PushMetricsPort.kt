@@ -4,6 +4,7 @@
 
 package com.openbank.notification.application.port.out
 
+import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
@@ -47,4 +48,21 @@ interface PushMetricsPort {
      * label is bounded by construction and cannot become a cardinality problem.
      */
     fun recordFanOut(template: NotificationTemplate, outcome: NotificationOutcome, devices: Int)
+
+    /**
+     * Record that a terminal transition found **no row** to write it onto (issue #4512).
+     *
+     * The status writers locate the row by `notificationId` and update it through a null-safe
+     * `?.also { ... }`, then commit the outcome event regardless. When the row is missing that
+     * reads as a successful transition from every angle: the outbox row commits, the event is
+     * published, the consumer acks, and nothing logs. The service announces an outcome for a
+     * notification that has no durable record — the producer's funnel is told about a message the
+     * table cannot show, which is the state measured on 2026-08-09 (four `SCA_APPROVAL` PUSH
+     * fan-outs, four `NotificationOutcome` outbox rows, zero `notifications` rows, zero errors).
+     *
+     * This counter is the alertable form of that. It is a **success**-path signal by construction:
+     * there is no failure anywhere to alert on, so absence of errors is not evidence, and only an
+     * explicit count of the orphaned transition can make a recurrence visible.
+     */
+    fun recordMissingRow(channel: NotificationChannel, template: NotificationTemplate)
 }

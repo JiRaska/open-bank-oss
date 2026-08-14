@@ -52,6 +52,7 @@ class ProposalResource {
         val decidedAt: Instant?,
         val decisionReason: String?,
         val modelId: String?,
+        val metadata: Map<String, String>,
     )
 
     data class DecisionRequest(val approve: Boolean, val decidedBy: String, val reason: String? = null)
@@ -59,7 +60,7 @@ class ProposalResource {
     private fun AgentProposal.toDto() = ProposalDto(
         id = id.toString(), title = title, rationale = rationale, suggestedAction = suggestedAction,
         proposedBy = proposedBy, proposedAt = proposedAt, state = state.name, decidedBy = decidedBy,
-        decidedAt = decidedAt, decisionReason = decisionReason, modelId = modelId,
+        decidedAt = decidedAt, decisionReason = decisionReason, modelId = modelId, metadata = metadata,
     )
 
     @GET

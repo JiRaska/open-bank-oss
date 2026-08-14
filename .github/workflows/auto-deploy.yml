@@ -773,6 +773,11 @@ jobs:
       #
       # The daily schedule on `fleet-attestation.yml` stays, and is not made redundant: a latent
       # gap can appear with no deploy at all (a registry lifecycle rule, a hand-pushed image).
+      #
+      # Exit 2 ("the probe could not run", #1915) also fails this step, deliberately: on the
+      # deploy path an unchecked fleet must not open a gitops PR. The distinction still
+      # matters for the OPERATOR — a 2 is a registry/credential problem to re-run, never an
+      # image to rebuild — and the script says which one it is in its own last two lines.
       - name: Fleet SBOM attestation gate (issue #2947)
         timeout-minutes: 20  # measured max 198s on the same check in fleet-attestation.yml
         run: bash .github/scripts/check-fleet-attestations.sh

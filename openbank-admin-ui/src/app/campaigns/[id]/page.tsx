@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
@@ -14,6 +15,7 @@ import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCa
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
+import { CampaignAttentionFunnel, type CampaignAttentionMetric } from '@/components/campaigns/CampaignAttentionFunnel'
 
 interface Campaign {
   id: string
@@ -27,6 +29,9 @@ interface Campaign {
     order: number
     template: string
     delaySeconds: number
+    channel?: 'EMAIL' | 'PUSH' | 'BANNER'
+    condition?: 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
+    conditionSourceOrder?: number
     variantBVariables?: Record<string, string> | null
     fallbackToPush?: boolean
     mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null
@@ -96,14 +101,6 @@ interface ContentExperiment {
   }
 }
 
-interface CampaignEngagementMetric {
-  stepOrder: number
-  channel: 'PUSH' | 'BANNER'
-  surface: 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
-  type: 'IMPRESSION' | 'CLICK' | 'DISMISS'
-  count: number
-}
-
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -111,7 +108,7 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
-  engagement: CampaignEngagementMetric[]
+  engagement: CampaignAttentionMetric[]
   experiment: Experiment | null
   contentExperiment: ContentExperiment | null
   entryCatalogues?: {
@@ -154,6 +151,7 @@ function deliveryTone(status: string): Tone {
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { t, language } = useLanguage()
+  const router = useRouter()
   // Params are unwrapped in an effect rather than with React `use()`. `use()` suspends until the
   // promise settles, which forces every caller — including tests — to provide a Suspense boundary
   // and, in jsdom, leaves the tree on the fallback indefinitely. An effect keeps the page mountable
@@ -201,6 +199,34 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   // maker != checker on activate. The UI renders capability, the policy decides it.
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
+
+  /**
+   * Reuse does not change the source campaign. The server makes a separate DRAFT owned by this
+   * maker and Studio then reloads the real stored definition for review — never a browser copy of
+   * an ACTIVE journey or its history.
+   */
+  const duplicateAsDraft = () => {
+    if (!id) return
+    setDuplicating(true)
+    setActionError(null)
+    fetch(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, { method: 'POST' })
+      .then(r => r.json())
+      .then((d: { state: string; campaign?: { id: string }; error?: string }) => {
+        if (d.state === 'ok' && d.campaign?.id) {
+          router.push(`/campaigns/new?draft=${encodeURIComponent(d.campaign.id)}`)
+          return
+        }
+        setActionError(
+          d.error ??
+          (d.state === 'forbidden'
+            ? t('Nemáte oprávnění založit nový koncept z této kampaně.', 'You are not permitted to create a new draft from this campaign.')
+            : t('Koncept se nepodařilo založit. Zdrojová cesta se nezměnila.', 'The draft could not be created. The source journey is unchanged.')),
+        )
+      })
+      .catch(() => setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
+      .finally(() => setDuplicating(false))
+  }
 
   const runAction = (action: string) => {
     setActing(true)
@@ -482,6 +508,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           which is how a real refusal stops being read. */}
       {!loading && !unavailable && c && actionsFor(c.state).length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
+          {c.state === 'DRAFT' && (
+            <Link href={`/campaigns/new?draft=${encodeURIComponent(c.id)}`} className="rounded-md border px-3 py-1.5 text-sm">
+              {t('Upravit koncept', 'Edit draft')}
+            </Link>
+          )}
           {actionsFor(c.state).map(a => (
             <button
               key={a}
@@ -503,6 +534,25 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             </span>
           )}
         </div>
+      )}
+
+      {!loading && !unavailable && c && (
+        <aside className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm" data-testid="campaign-reuse-draft">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold text-foreground">{t('Použít cestu jako výchozí bod', 'Use this journey as a starting point')}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t(
+                  'Vznikne nový koncept k vaší úpravě. Stav, schválení, příjemci a výsledky této kampaně se nikdy nekopírují.',
+                  'A new draft opens for your edits. This campaign’s state, approval, recipients and results are never copied.',
+                )}
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={duplicateAsDraft} disabled={duplicating}>
+              {duplicating ? t('Zakládám koncept…', 'Creating draft…') : t('Vytvořit kopii jako koncept', 'Create draft copy')}
+            </button>
+          </div>
+        </aside>
       )}
 
       {actionError && <p className="text-sm text-red-600">{actionError}</p>}
@@ -735,6 +785,14 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
               </SectionBoundary>
             )}
           </section>
+
+          {detail?.sources?.engagement === 'ok' && (
+            <CampaignAttentionFunnel
+              metrics={engagement}
+              hasMeasuredOutcome={c.conversionRule !== null && c.conversionRule !== undefined}
+              hasHoldout={(c.holdoutPercent ?? 0) > 0}
+            />
+          )}
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
