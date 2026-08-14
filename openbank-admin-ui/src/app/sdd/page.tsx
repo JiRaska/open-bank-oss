@@ -12,7 +12,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { RefreshCw, Repeat } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { svcUrl } from '@/lib/services/bff'
+import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader, StatusBadge } from '@/components/ui'
 
 type Mandate = {
   id: string
@@ -27,19 +29,12 @@ type Mandate = {
 // Mirrors MandateStatus in sdd-service — an omitted member is a filter an operator cannot select.
 const STATUSES = ['', 'PENDING_CONFIRMATION', 'ACTIVE', 'SUSPENDED', 'CANCELLED', 'EXPIRED'] as const
 
-const STATUS_TONE: Record<string, { color: string; bg: string }> = {
-  ACTIVE: { color: '#059669', bg: '#ecfdf5' },
-  PENDING_CONFIRMATION: { color: '#d97706', bg: '#fffbeb' },
-  SUSPENDED: { color: '#6b7280', bg: '#f9fafb' },
-  CANCELLED: { color: '#dc2626', bg: '#fef2f2' },
-}
-
 export default function SddPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [status, setStatus] = useState('')
   const [rows, setRows] = useState<Mandate[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -47,11 +42,15 @@ export default function SddPage() {
       const res = await fetch(svcUrl('sdd-service', '/api/v1/sdd/mandates/recent', {
         limit: '50', ...(status ? { status } : {}),
       }), { cache: 'no-store' })
-      if (!res.ok) throw new Error(String(res.status))
-      setRows(await res.json())
-      setError(null)
+      if (!res.ok) {
+        setUnavailable({ kind: await classifyBffFailure(res) })
+        return
+      }
+      const data = await res.json() as unknown
+      setRows(Array.isArray(data) ? data as Mandate[] : [])
+      setUnavailable(null)
     } catch {
-      setError('unreachable')
+      setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
     }
@@ -61,35 +60,19 @@ export default function SddPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Inkasa (SDD)', 'Direct Debits (SDD)')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Repeat size={18} style={{ color: 'var(--accent)' }} />
-            {t('Mandáty inkas', 'Direct debit mandates')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
-              'Čtecí přehled mandátů (ADR-0230) včetně B2B fronty čekajících na potvrzení. Změny stavu patří do řízených toků, ne na klik.',
-              'Read-only mandate view (ADR-0230) incl. the B2B confirmation queue. Lifecycle changes belong to governed flows, not to a click.',
-            )}
-          </p>
-        </div>
-        <button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <PageHeader
+        title={t('Mandáty inkas', 'Direct debit mandates')}
+        subtitle={t(
+          'Čtecí přehled mandátů včetně B2B fronty čekajících na potvrzení. Změny stavu patří do řízených toků.',
+          'Read-only mandate view including the B2B confirmation queue. Lifecycle changes belong to governed flows.',
+        )}
+        icon={<Repeat size={20} style={{ color: 'var(--accent)' }} />}
+        actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
-      {error && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 13 }}>
-          {t('sdd-service je nedostupný.', 'sdd-service is unreachable.')}
-        </div>
-      )}
-
-      <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
+      {!unavailable && <div style={{ display: 'flex', gap: 4, marginBottom: 14 }}>
         <select
           value={status}
           onChange={e => setStatus(e.target.value)}
@@ -98,9 +81,10 @@ export default function SddPage() {
         >
           {STATUSES.map(s => <option key={s} value={s}>{s === '' ? t('Všechny stavy', 'All statuses') : s}</option>)}
         </select>
-      </div>
+      </div>}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        {unavailable ? <DataUnavailable kind={unavailable.kind} service="sdd-service" feature={t('Mandáty inkas', 'Direct debit mandates')} lang={language} dense /> : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -114,7 +98,6 @@ export default function SddPage() {
           </thead>
           <tbody>
             {rows.map(m => {
-              const tone = STATUS_TONE[m.status] ?? { color: 'var(--text-secondary)', bg: 'var(--surface-3)' }
               return (
                 <tr key={m.id} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{m.umr ?? m.id.slice(0, 8)}</td>
@@ -122,9 +105,7 @@ export default function SddPage() {
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{m.debtorIban ?? '—'}</td>
                   <td style={{ padding: '10px 14px' }}>{m.scheme ?? '—'}</td>
                   <td style={{ padding: '10px 14px' }}>
-                    <span style={{ fontWeight: 700, color: tone.color, background: tone.bg, padding: '2px 8px', borderRadius: 10, fontSize: 11 }}>
-                      {m.status}
-                    </span>
+                    <StatusBadge status={m.status} />
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
                     {m.createdAt ? new Date(m.createdAt).toLocaleString() : '—'}
@@ -139,6 +120,7 @@ export default function SddPage() {
             )}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   )

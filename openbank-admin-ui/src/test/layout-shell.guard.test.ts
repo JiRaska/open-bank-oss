@@ -12,7 +12,7 @@
 // gone" — and it had to be fixed page-by-page (FinOps/DevOps shipped without one).
 //
 // The rule: every operator page resolves an app-shell layout — a `layout.tsx`
-// in its own directory or an ancestor (below `app/`) that renders <Sidebar>.
+// in its own directory or an ancestor (below `app/`) that renders <AppShell>.
 // This test is the executable form of that rule: it fails CI if a NEW page is
 // added without a shell layout in its route subtree, so the footgun can't recur.
 //
@@ -47,12 +47,12 @@ function walk(dir: string): string[] {
   return out
 }
 
-// A shell layout is one that renders the Sidebar. We check the source for a
-// <Sidebar reference rather than importing/executing it (the file is a server
-// component tree we don't want to render here).
+// A shell layout composes the shared AppShell. We check source rather than
+// importing/executing it (the file is a server component tree we don't want
+// to render here).
 function isShellLayout(layoutPath: string): boolean {
   if (!existsSync(layoutPath)) return false
-  return /\bSidebar\b/.test(readFileSync(layoutPath, 'utf8'))
+  return /\bAppShell\b/.test(readFileSync(layoutPath, 'utf8'))
 }
 
 // Walk up from the page's directory to (but NOT including) app/, looking for a
@@ -70,6 +70,12 @@ function hasShellLayoutInChain(pageFile: string): boolean {
 describe('admin-ui app-shell rule', () => {
   const pages = walk(APP_DIR)
 
+  it('keeps navigation and header inside the shared app shell', () => {
+    const shell = readFileSync(path.resolve(__dirname, '../components/layout/AppShell.tsx'), 'utf8')
+    expect(shell).toMatch(/<Sidebar\s*\/>/)
+    expect(shell).toMatch(/<Header\s*\/>/)
+  })
+
   it('discovers page files', () => {
     expect(pages.length).toBeGreaterThan(10)
   })
@@ -81,7 +87,7 @@ describe('admin-ui app-shell rule', () => {
     it(`${rel} renders inside the app shell (Sidebar + Header)`, () => {
       expect(
         hasShellLayoutInChain(file),
-        `${rel} has no app-shell layout in its route subtree — it will render WITHOUT the Sidebar/Header.\n\nAdd a layout.tsx to your route directory (copy src/app/dashboard/layout.tsx):\n  Sidebar + Header + scrollable <main>.\nIf the page is intentionally shell-less (an auth screen), add it to EXEMPT in this test.`,
+        `${rel} has no app-shell layout in its route subtree — it will render WITHOUT the Sidebar/Header.\n\nAdd a layout.tsx to your route directory that composes <AppShell>.\nIf the page is intentionally shell-less (an auth screen), add it to EXEMPT in this test.`,
       ).toBe(true)
     })
   }
