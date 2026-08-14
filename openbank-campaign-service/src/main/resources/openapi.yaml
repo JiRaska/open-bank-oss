@@ -690,7 +690,8 @@ components:
           maxItems: 3
           description: >-
             Reviewed explicit delivery graph for this campaign. Empty or absent means the historic
-            linear journey. Every reference is a persisted one-based CampaignStep order.
+            linear journey. Every reference is the persisted CampaignStep order; clients that
+            renumber their editor cards must translate references with the actual stored order.
           items:
             $ref: '#/components/schemas/CampaignDecision'
         stopCondition:

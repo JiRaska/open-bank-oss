@@ -72,6 +72,11 @@ interface CampaignTemplate {
   inAppSurface?: EditorInAppSurface | null
 }
 
+/** Server definitions retain their own (potentially sparse) order; canvas cards do not. */
+interface StoredCampaignStep extends EditorStep {
+  order: number
+}
+
 type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
 
 // Notification providers acknowledge asynchronously.  A branch taken immediately after handoff
@@ -194,7 +199,7 @@ export default function NewCampaignPage() {
       .then(r => r.json())
       .then((d: { campaign?: {
         state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
-        steps?: EditorStep[]; decisions?: Array<{
+        steps?: StoredCampaignStep[]; decisions?: Array<{
           sourceStepOrder: number; evaluationDelaySeconds?: number
           confirmedStepOrder: number; notConfirmedStepOrder: number
         }>; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
@@ -213,23 +218,45 @@ export default function NewCampaignPage() {
           previewReach(ref)
         }
         if (campaign.steps?.length) {
-          // The campaign contract counts stored step orders from one. The editor counts cards
-          // from zero, so every graph reference must move with the cards in both directions.
-          setSteps(campaign.steps.map(step => ({
+          // The API permits zero-based and sparse order values. The Studio owns its contiguous
+          // card indexes, so map every stored edge through the actual ordered definition instead
+          // of assuming a value such as 4 refers to its fifth visual card.
+          const storedSteps = [...campaign.steps].sort((a, b) => a.order - b.order)
+          const editorIndexByOrder = new Map(storedSteps.map((step, index) => [step.order, index]))
+          const editorIndex = (order: number) => editorIndexByOrder.get(order)
+          const decisionsForEditor = (campaign.decisions ?? []).map(decision => ({
+            sourceStepOrder: editorIndex(decision.sourceStepOrder),
+            evaluationDelaySeconds: decision.evaluationDelaySeconds ?? DELIVERY_CONFIRMATION_DELAY_SECONDS,
+            confirmedStepOrder: editorIndex(decision.confirmedStepOrder),
+            notConfirmedStepOrder: editorIndex(decision.notConfirmedStepOrder),
+          }))
+          if (decisionsForEditor.some(decision =>
+            decision.sourceStepOrder === undefined ||
+            decision.confirmedStepOrder === undefined ||
+            decision.notConfirmedStepOrder === undefined,
+          )) {
+            setError(t('Koncept má neplatný odkaz v rozhodovací cestě.', 'This draft has an invalid decision-path reference.'))
+            return
+          }
+          setSteps(storedSteps.map(step => ({
             ...step,
             ...(step.conditionSourceOrder !== undefined && step.conditionSourceOrder !== null
-              ? { conditionSourceOrder: step.conditionSourceOrder - 1 } : {}),
+              ? { conditionSourceOrder: editorIndex(step.conditionSourceOrder) } : {}),
             ...(step.nextStepOrder !== undefined && step.nextStepOrder !== null
-              ? { nextStepOrder: step.nextStepOrder - 1 } : {}),
+              ? { nextStepOrder: editorIndex(step.nextStepOrder) } : {}),
           })))
+          if (storedSteps.some(step =>
+            (step.conditionSourceOrder !== undefined && step.conditionSourceOrder !== null && editorIndex(step.conditionSourceOrder) === undefined) ||
+            (step.nextStepOrder !== undefined && step.nextStepOrder !== null && editorIndex(step.nextStepOrder) === undefined),
+          )) {
+            setError(t('Koncept má neplatný odkaz mezi kroky.', 'This draft has an invalid step-path reference.'))
+            return
+          }
+          setDecisions(decisionsForEditor as EditorDecision[])
           setSelected(0)
+        } else {
+          setDecisions([])
         }
-        setDecisions((campaign.decisions ?? []).map(decision => ({
-          sourceStepOrder: decision.sourceStepOrder - 1,
-          evaluationDelaySeconds: decision.evaluationDelaySeconds ?? DELIVERY_CONFIRMATION_DELAY_SECONDS,
-          confirmedStepOrder: decision.confirmedStepOrder - 1,
-          notConfirmedStepOrder: decision.notConfirmedStepOrder - 1,
-        })))
         setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
         setConversionRule(campaign.conversionRule ?? null)
         setHoldoutPercent(campaign.holdoutPercent ?? 0)

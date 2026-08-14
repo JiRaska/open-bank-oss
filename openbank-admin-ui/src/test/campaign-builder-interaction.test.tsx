@@ -218,11 +218,11 @@ describe('campaign builder conditions', () => {
               state: 'DRAFT', name: 'Return to app', goal: 'Open savings',
               segmentRef: { name: 'active-clients', version: 1 },
               steps: [
-                { order: 1, template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: { offerTitle: 'Savings' }, delaySeconds: 0 },
-                { order: 2, template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: { offerTitle: 'Yes', offerText: 'Yes', ctaText: 'Open' }, delaySeconds: 0 },
-                { order: 3, template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: { offerTitle: 'No', offerText: 'No', ctaText: 'Learn' }, delaySeconds: 0 },
+                { order: 0, template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: { offerTitle: 'Savings' }, delaySeconds: 0 },
+                { order: 4, template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: { offerTitle: 'Yes', offerText: 'Yes', ctaText: 'Open' }, delaySeconds: 0 },
+                { order: 7, template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: { offerTitle: 'No', offerText: 'No', ctaText: 'Learn' }, delaySeconds: 0 },
               ],
-              decisions: [{ sourceStepOrder: 1, evaluationDelaySeconds: 86_400, confirmedStepOrder: 2, notConfirmedStepOrder: 3 }],
+              decisions: [{ sourceStepOrder: 0, evaluationDelaySeconds: 86_400, confirmedStepOrder: 4, notConfirmedStepOrder: 7 }],
             },
           }),
         }

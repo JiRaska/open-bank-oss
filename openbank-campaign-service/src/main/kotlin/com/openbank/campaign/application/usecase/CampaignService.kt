@@ -146,6 +146,7 @@ class CampaignService @Inject constructor(
             holdoutPercent = source.holdoutPercent,
             schedule = source.schedule,
             trigger = source.trigger,
+            decisions = source.decisions,
         )
     }
 
