@@ -34,9 +34,10 @@ export async function GET(req: NextRequest) {
       signal: ctrl.signal,
     })
     clearTimeout(timer)
+    if (!res.ok) return NextResponse.json({ error: 'upstream_error' }, { status: res.status })
     return NextResponse.json(await res.json(), { status: res.status })
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'agent_unreachable' }, { status: 502 })
+  } catch {
+    return NextResponse.json({ error: 'agent_unreachable' }, { status: 502 })
   }
 }
 
@@ -59,8 +60,9 @@ export async function POST(req: NextRequest) {
       cache: 'no-store',
     })
     clearTimeout(timer)
+    if (!res.ok) return NextResponse.json({ error: 'upstream_error' }, { status: res.status })
     return NextResponse.json(await res.json(), { status: res.status })
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'agent_unreachable' }, { status: 502 })
+  } catch {
+    return NextResponse.json({ error: 'agent_unreachable' }, { status: 502 })
   }
 }

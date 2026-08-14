@@ -281,6 +281,18 @@ jobs:
           # Boot with OIDC ENABLED (override the %dev oidc.enabled=false) pointed at
           # the throwaway Keycloak. authz.enforce stays false for this target, so no
           # OPA sidecar is needed — OIDC authN is the only gate being exercised.
+          #
+          # DEV SERVICES OFF (#3039). Dev mode starts containers for anything it thinks is
+          # unconfigured, and on a cold hosted runner the PULL is what blows the readiness
+          # window: run 31746030097 left account-service mid-`Extracting 250.7MB/638.7MB` of
+          # docker.io/grafana/otel-lgtm at the exact second the loop gave up, and pulled
+          # apache/kafka-native alongside it. Neither is reachable from the fuzzed surface.
+          # The backing services this lane actually needs are provisioned explicitly above
+          # (Postgres, Redis, Keycloak, Temporal) and are already suppressing their own dev
+          # service by explicit config — the log says so per component ("Not starting Dev
+          # Services for default datasource as it has explicit configuration"). Kafka is lazy
+          # behind the outbox, so no broker is needed to serve a request. What was left was an
+          # observability stack and a Kafka image, pulled on every one of 18 jobs, for nothing.
           echo "==> [${svc}] starting quarkusDev with OIDC on"
           ./gradlew ":${svc}:quarkusDev" \
             -Dquarkus.console.basic=true --console=plain --quiet \
@@ -291,18 +303,31 @@ jobs:
             -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
             -Dquarkus.oidc.client-id=openbank-services \
             -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
+            -Dquarkus.devservices.enabled=false \
             ${TEMPORAL_ARGS} \
             > "fuzz-reports/${svc}-boot.log" 2>&1 &
           DEV_PID=$!
           UP=0
-          for i in $(seq 1 90); do
+          # 90x2s=180s had to cover a cold Gradle build AND the boot; with dev-service pulls
+          # gone the boot is short, but the build is not, so keep real margin.
+          READY_ITERS=180; READY_TIMEOUT_S=$((READY_ITERS * 2))
+          for i in $(seq 1 "$READY_ITERS"); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
             if [ "$code" != "000" ]; then UP=1; break; fi
             kill -0 "$DEV_PID" 2>/dev/null || break
             sleep 2
           done
           if [ "$UP" != "1" ]; then
-            echo "::error::[${svc}] failed to boot"
+            # "failed to boot" is two different states and they need different fixes. A CRASH
+            # leaves a dead process and an error chain; a TIMEOUT leaves the JVM alive and
+            # still working, and its ERROR grep prints NOTHING — which is exactly how six
+            # triage passes on #3039 recorded "cause not determined" for a service that had
+            # not failed at all. Say which one happened.
+            if kill -0 "$DEV_PID" 2>/dev/null; then
+              echo "::error::[${svc}] did not become ready within ${READY_TIMEOUT_S}s — the process is STILL ALIVE (timeout, not a crash: look at what the log is doing at its end, not for an ERROR)"
+            else
+              echo "::error::[${svc}] failed to boot — the dev-mode process exited"
+            fi
             # A blind `tail` puts the root cause above the window — every ERROR and every
             # `Caused by:` is what actually identifies it (issue #3039: six of seven services
             # were "not determined" purely because of this).

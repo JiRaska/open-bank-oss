@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.2...notification-service-v0.23.0) (2026-08-14)
+
+
+### Features
+
+* **scheduler:** register workflow liveness on four retention and cleanup jobs (ADR-0237) ([#4739](https://github.com/JiRaska/open-bank-oss/issues/4739)) ([c2a2fa4](https://github.com/JiRaska/open-bank-oss/commit/c2a2fa4b788a172ef85c8babb439cecd10fbfe23)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
 ## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.1...notification-service-v0.22.2) (2026-08-13)
 
 

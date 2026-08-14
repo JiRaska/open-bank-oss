@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextResponse } from 'next/server'
+import { auth } from '@/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,8 +50,12 @@ function devopsBase(): string {
 }
 
 export async function GET() {
+  const accessToken = (await auth())?.user?.accessToken
+  if (!accessToken) return NextResponse.json({ findings: [], available: false, reason: 'unauthorized' }, { status: 401 })
+
   try {
     const res = await fetch(`${devopsBase()}/api/v1/devops/findings`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) return NextResponse.json({ findings: [], available: false })

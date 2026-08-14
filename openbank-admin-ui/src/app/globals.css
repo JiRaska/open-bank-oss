@@ -118,7 +118,11 @@
   --input: 214 32% 91%;
   --ring: 239 84% 67%;
   --radius: 8px;
-  --border: 214 32% 91%;
+  /* This token is consumed directly by 500+ application call sites
+   * (`border: 1px solid var(--border)`). It must consequently be a real CSS
+   * colour, not a Tailwind HSL triplet. The triplet silently makes those
+   * declarations invalid and leaves cards, fields and tables borderless. */
+  --border: #e2e8f0;
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -894,3 +898,108 @@ main {
 }
 .data-table tbody tr:last-child td { border-bottom: none; }
 .data-table tbody tr:hover td { background: var(--surface-2); }
+
+/* ── Operator workspace system ────────────────────────────────────────────
+ * These are deliberately global primitives: 102 operator routes already use
+ * the shared card, page-header, table, input and button vocabulary. Improving
+ * that vocabulary upgrades the whole console without inventing a competing
+ * stylesheet for every domain page (ADR-0208 D1/D2). */
+main {
+  background:
+    radial-gradient(circle at 88% -12%, rgba(129, 140, 248, .10), transparent 26rem),
+    linear-gradient(180deg, #fbfcff 0%, var(--bg) 34rem);
+  scroll-behavior: smooth;
+}
+
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid rgba(99, 102, 241, .42);
+  outline-offset: 2px;
+}
+
+.page-header {
+  gap: 20px;
+  margin-bottom: 24px;
+  padding: 22px 24px;
+  border: 1px solid rgba(203, 213, 225, .82);
+  border-radius: var(--r-xl);
+  background:
+    radial-gradient(circle at 96% 0%, rgba(129, 140, 248, .16), transparent 15rem),
+    linear-gradient(125deg, #ffffff 0%, #f8faff 100%);
+  box-shadow: 0 12px 28px rgba(30, 41, 59, .055);
+}
+.page-title { font-size: clamp(24px, 2.4vw, 31px); line-height: 1.15; letter-spacing: -.045em; }
+.page-subtitle { max-width: 760px; margin-top: 8px; line-height: 1.55; }
+.breadcrumb { margin-bottom: 12px; }
+
+.card,
+.stat-card {
+  border-color: rgba(203, 213, 225, .82);
+  box-shadow: 0 7px 18px rgba(15, 23, 42, .035), 0 1px 2px rgba(15, 23, 42, .025);
+}
+.card:hover,
+.stat-card:hover {
+  border-color: rgba(129, 140, 248, .38);
+  box-shadow: 0 14px 30px rgba(30, 41, 59, .08), 0 1px 2px rgba(15, 23, 42, .03);
+}
+.stat-card { padding: 20px; }
+.stat-value { font-size: clamp(27px, 2.3vw, 34px); line-height: 1.08; }
+.stat-label { font-weight: 650; letter-spacing: .01em; }
+.stat-hint { margin-top: 7px; line-height: 1.45; }
+
+.table,
+.data-table {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+.table th,
+.data-table th {
+  padding: 12px 16px;
+  color: #64748b;
+  background: #f8fafc;
+}
+.table td,
+.data-table td { padding: 15px 16px; }
+.table tbody tr,
+.data-table tbody tr { transition: background .16s ease; }
+.table tbody tr:hover,
+.data-table tbody tr:hover { background: #f8faff; }
+
+.input {
+  min-height: 40px;
+  border-color: #cbd5e1;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .94);
+}
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 4px rgba(99, 102, 241, .13); }
+
+.btn { min-height: 36px; border-radius: 9px; font-weight: 700; }
+.btn-primary { box-shadow: 0 5px 12px rgba(79, 70, 229, .20), inset 0 1px 0 rgba(255,255,255,.16); }
+.btn-secondary { border-color: #cbd5e1; }
+.badge,
+.pill { font-weight: 750; }
+
+.empty-state {
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--r-xl);
+  background: linear-gradient(135deg, rgba(255,255,255,.96), rgba(248,250,252,.9));
+}
+
+@media (max-width: 840px) {
+  .page-header { align-items: stretch; padding: 18px; }
+  .page-header > :last-child:not(:only-child) { align-self: flex-start; }
+  .table,
+  .data-table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+}
+
+@media (max-width: 560px) {
+  .page-header { display: block; }
+  .page-header > :last-child { margin-top: 14px; }
+  .stat-card { padding: 17px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

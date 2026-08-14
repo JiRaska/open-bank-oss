@@ -191,7 +191,11 @@ export default function CampaignsPage() {
     const sent = values.reduce((total, row) => total + row.sent, 0)
     const suppressed = values.reduce((total, row) => total + row.suppressed, 0)
     const failed = values.reduce((total, row) => total + row.failed, 0)
-    return { sent, suppressed, failed, affected: values.filter(row => row.failed > 0).length }
+    const converted = values.reduce(
+      (total, row) => total + (row.outcomes?.find(outcome => outcome.outcome === 'CONVERTED')?.count ?? 0),
+      0,
+    )
+    return { sent, suppressed, failed, converted, affected: values.filter(row => row.failed > 0).length }
   }, [summary])
 
   const decisionQueue = useMemo(
@@ -479,12 +483,13 @@ export default function CampaignsPage() {
                 </div>
                 {deliveryHealth.failed > 0 && <span className="rounded-full bg-rose-400/15 px-3 py-1 text-xs font-semibold text-rose-200">{deliveryHealth.affected} {t('kampaní s chybou', 'campaigns with failures')}</span>}
               </div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div className="mt-4 grid gap-3 sm:grid-cols-4">
                 <div className="rounded-lg bg-white/10 p-3"><p className="text-xs text-slate-300">{t('Odesláno', 'Sent')}</p><strong className="text-2xl">{deliveryHealth.sent}</strong></div>
                 <div className="rounded-lg bg-amber-300/10 p-3"><p className="text-xs text-amber-100">{t('Potlačeno politikou', 'Suppressed by policy')}</p><strong className="text-2xl">{deliveryHealth.suppressed}</strong></div>
                 <div className="rounded-lg bg-rose-400/10 p-3"><p className="text-xs text-rose-100">{t('Selhalo', 'Failed')}</p><strong className="text-2xl">{deliveryHealth.failed}</strong></div>
+                <div className="rounded-lg bg-emerald-300/10 p-3"><p className="text-xs text-emerald-100">{t('Potvrzené konverze', 'Confirmed conversions')}</p><strong className="text-2xl">{deliveryHealth.converted}</strong></div>
               </div>
-              <p className="mt-3 text-xs text-slate-300">{t('Potlačení chrání souhlas, klidové hodiny a frekvenční limit; není to nedoručený kontakt. Konverze zde nejsou odhadovány.', 'Suppression protects consent, quiet hours and frequency caps; it is not an undelivered contact. Conversions are not estimated here.')}</p>
+              <p className="mt-3 text-xs text-slate-300">{t('Potlačení chrání souhlas, klidové hodiny a frekvenční limit; není to nedoručený kontakt. Konverze jsou jen skutečné bankovní outcome události, nikdy kliky ani odhad.', 'Suppression protects consent, quiet hours and frequency caps; it is not an undelivered contact. Conversions are real banking outcome events only, never clicks or an estimate.')}</p>
             </section>
           )}
 

@@ -18,6 +18,23 @@
   Shards are wall-time buckets, not a taxonomy — rebalance `group:` when one gets slow, and note
   that the gate count no longer costs wall time linearly, which is the point (79 serial steps
   took `ci.yml`'s median 0.7 -> 2.4 min in four weeks on a REQUIRED check every PR pays).
+- **Run `run-gates.py --all` before pushing a gate change — `--only <mine>` and `--group <my shard>`
+  are structurally blind to the meta-gates.** A new `gates.yaml` entry is itself a SUBJECT of the
+  gates that check gates, and those live in the `lint` shard: `gate-lifecycle-metadata` wants
+  `rationale:` + `review_after:`, `gate-subject-floor` (#4339) wants `min_subjects:` **and** the gate
+  printing `SUBJECTS=<n>`, `gate-selftest-declaration` wants `selftest:` or a `selftest_exempt:` with
+  a category from the closed vocabulary. So a gate landing in any other shard can be green in every
+  local run its author thinks to make and red in CI — measured on #4807, where `--only` + `--group
+  supplychain` both passed and `gates (lint)` failed on two of the three. Both meta-gates had landed
+  on `main` while the branch was open, which is the normal case, not bad luck. The full run is ~340 s
+  CPU / ~50 s wall on 8 jobs; that is cheaper than one CI round trip.
+  **Six failures are environmental — know them or you will read them as your regression.** Five
+  diff-scoped gates (`api-contract`, `release-scope-mismatch`, `db-migration`, `schema-compat`,
+  `threat-model-updated-on-trust-boundary-change`) print `PR_DIFF_BASE is empty but this gate
+  requires it — refusing to run vacuously`, and `loki-rule-load-test` reports UNFALSIFIED on
+  `BASE_REF: unbound variable`. Both are variables only CI sets. Confirm rather than assume: run the
+  same ids in a throwaway `git worktree add --detach <tmp> origin/main` and check they fail
+  identically there. Anything that fails on your branch and passes on that control IS yours.
 - **A gate that has only ever passed is unfalsified.** Its failure path is code nobody has run, and
   it fails in ways a green/red signal cannot express. Three independent instances in one week: the
   ADR-0071 governance reporter crashed with a `TypeError` on *every* failure, so it had never once

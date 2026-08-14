@@ -582,6 +582,38 @@ gates:
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
   # ==== supplychain ====================================================
+  # The fleet SBOM-attestation gate lives in the path-filtered fleet-attestation.yml, which
+  # can never be a required check — so its own falsification must run somewhere
+  # unconditional, and this is it. The selftest needs no registry and no credentials: it
+  # drives the whole loop against a stub cosign and asserts the three exit codes, including
+  # the exit-2 ("the probe could not run") branch that no PR can produce on demand by
+  # summoning an ECR throttle. Without this entry the branch that #1915 added is exercised
+  # only when someone edits one of five paths.
+  - id: fleet-attestation-classifier
+    name: "fleet-attestation gate classifies a probe failure as UNKNOWN, not as a fleet gap (issue #1915, enforced)"
+    group: supplychain
+    mode: enforced
+    # The gate IS the harness: its `run:` is the checker's own falsification suite, so a
+    # separate `selftest:` would be the same command executed twice for one signal.
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the gate's whole loop
+      against a stub cosign and asserts exit 0, 1 and 2, so its red is reachable by
+      construction; falsified in both directions (see the run: comment).
+    budget_seconds: 30   # 0.3s locally — no network, no registry
+    rationale: "Without it the gate's exit-2 branch is unreachable on any PR that does not touch fleet-attestation.yml, and a probe failure silently reads as a fleet-wide supply-chain gap (#1915: one ECR throttle published as UNATTESTED against an image that verifies by hand)."
+    review_after: "2027-02-14"
+    # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
+    # the floor is the number of cases that must run. It drops the day someone deletes one.
+    min_subjects: 14   # 15 today: 9 classifier + 5 end-to-end + 1 retry-count (2026-08-14)
+    run: |
+      # The gate IS the selftest here: the artifact under test is the classifier + exit-code
+      # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
+      # not have, and fleet-attestation.yml + auto-deploy.yml both do that with them).
+      # Falsified in both directions before wiring in: reverting the classifier's fallback to
+      # the pre-#1915 shape reddens 7 cases, and changing the final `exit 2` to `exit 1`
+      # reddens exactly the one case that asserts the distinction.
+      .github/scripts/check-fleet-attestations.sh --self-test
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
@@ -1411,7 +1443,7 @@ gates:
     name: "the merged-past-red-check watch keeps its window, its key and its escalation (issue #4240, enforced)"
     group: registry
     mode: enforced
-    min_subjects: 6   # D1-D6, applied to the one watch workflow. 0 means the workflow moved.
+    min_subjects: 7   # D1-D7, applied to the one watch workflow. 0 means the workflow moved.
     selftest: |
       python3 .github/scripts/check-merged-past-red-check.py --self-test
     selftest_expect: pass
@@ -2286,7 +2318,10 @@ gates:
   #
   # Checks three agreements, each in BOTH directions: channel addresses vs the topics the service
   # actually produces, message names vs the event-type literals declared in its src/main, and
-  # payload properties vs the producing data class's primary-constructor properties. Names only —
+  # payload properties vs the producer's field names — the primary constructor where there is a
+  # data class, and the `mapOf`/`buildMap`/JSON-template construction site where there is not
+  # (that half was previously skipped, so a hand-built producer got no payload check at all).
+  # Names only —
   # types are deliberately out of scope (a Kotlin type maps to a JSON Schema type through Jackson,
   # and modelling that badly is worse than not modelling it); schema-compat-gate below owns types,
   # where it compares like against like across the PR base.
