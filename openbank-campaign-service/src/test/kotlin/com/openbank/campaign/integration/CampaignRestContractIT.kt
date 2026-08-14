@@ -113,6 +113,21 @@ class CampaignRestContractIT {
     }
 
     @Test
+    fun `create reports a missing segment as a configuration conflict`() {
+        val missingSegment = "missing-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody("missing-segment-${UUID.randomUUID()}", missingSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $missingSegment@1 not found"))
+        }
+    }
+
+    @Test
     fun `maker can revise an unsubmitted draft through the HTTP contract`() {
         val id = createDraft()
         val revisedName = "revised-${UUID.randomUUID()}"

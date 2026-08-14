@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.34.0
+  version: 1.35.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -116,6 +116,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Campaign'
+        '409':
+          description: A reviewed segment reference is no longer available
   /api/v1/campaigns/summary:
     get:
       tags: [Campaigns]
