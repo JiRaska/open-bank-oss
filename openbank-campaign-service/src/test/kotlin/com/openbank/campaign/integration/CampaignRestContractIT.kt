@@ -66,8 +66,8 @@ class CampaignRestContractIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private fun draftBody(name: String) = """
-        {"name":"$name","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+    private fun draftBody(name: String, segmentName: String = "actives") = """
+        {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
     """.trimIndent()
@@ -84,6 +84,33 @@ class CampaignRestContractIT {
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
+
+    private fun insertLegacySegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO segments (id, name, version, rules_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, name)
+                statement.setInt(3, 1)
+                statement.setString(4, """[{"type":"PartyStatusIs","status":"ACTIVE"}]""")
+                statement.setObject(5, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun deleteSegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("DELETE FROM segments WHERE name = ? AND version = 1").use { statement ->
+                statement.setString(1, name)
+                statement.executeUpdate()
+            }
+        }
+    }
 
     @Test
     fun `maker can revise an unsubmitted draft through the HTTP contract`() {
@@ -106,6 +133,60 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("name", equalTo(revisedName))
+        }
+    }
+
+    @Test
+    fun `operator can reuse a reviewed definition as an independent draft through the HTTP contract`() {
+        val sourceName = "source-${UUID.randomUUID()}"
+        val sourceId = createDraft(sourceName)
+        submit(sourceId)
+
+        val copiedId = When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(201)
+            body("name", equalTo("Copy of $sourceName"))
+            body("state", equalTo("DRAFT"))
+            // TestSecurity supplies the operator role but no JWT subject; the resource deliberately
+            // falls back to `unknown` rather than trusting a browser-provided maker field.
+            body("createdBy", equalTo("unknown"))
+            body("approvedBy", nullValue())
+        } Extract {
+            path<String>("id")
+        }
+
+        assertThat(copiedId).isNotEqualTo(sourceId)
+        When {
+            get("/api/v1/campaigns/$sourceId")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(sourceName))
+            body("state", equalTo("PENDING_APPROVAL"))
+        }
+    }
+
+    @Test
+    fun `reuse reports a stale source definition as conflict rather than source not found`() {
+        val staleSegment = "retired-${UUID.randomUUID()}"
+        insertLegacySegment(staleSegment)
+        val sourceId = Given {
+            contentType("application/json")
+            body(draftBody("stale-${UUID.randomUUID()}", staleSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        deleteSegment(staleSegment)
+
+        When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $staleSegment@1 not found"))
         }
     }
 

@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.infrastructure.rest
 
+import com.openbank.campaign.application.usecase.CampaignNotFoundException
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
@@ -203,6 +204,24 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             ),
         ).build()
     }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
+
+    /**
+     * Starts a new, maker-owned DRAFT from an existing campaign definition. The source is never
+     * edited or reactivated: authoring continues in Studio, where the marketer can review every
+     * copied surface and entry setting before a separate approver sees the new campaign.
+     */
+    @POST
+    @Path("/{id}/duplicate")
+    @Authorize(action = "campaign.create", resource = "#id")
+    suspend fun duplicate(@PathParam("id") id: UUID): Response = try {
+        Response.status(Response.Status.CREATED).entity(service.duplicateAsDraft(id, jwt.principalName())).build()
+    } catch (_: CampaignNotFoundException) {
+        Response.status(Response.Status.NOT_FOUND).build()
+    } catch (e: NoSuchElementException) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+    } catch (e: IllegalArgumentException) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+    }
 
     @POST
     @Path("/{id}/submit")
