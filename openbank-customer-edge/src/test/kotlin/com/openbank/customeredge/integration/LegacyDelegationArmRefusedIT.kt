@@ -65,7 +65,10 @@ import java.util.concurrent.atomic.AtomicInteger
  * this one's stub bodies are hand-written and that one cannot see the consequence.
  */
 @QuarkusTest
-@QuarkusTestResource(LegacyDelegationArmRefusedIT.StubUpstreams::class)
+// restrictToAnnotatedClass: without it a QuarkusTestResource applies to EVERY test in the
+// module, so these loopback stubs were also injected into CustomerEdgeContractProviderVerificationTest,
+// which then pointed at a stub that serves none of its routes and failed with ConnectException.
+@QuarkusTestResource(LegacyDelegationArmRefusedIT.StubUpstreams::class, restrictToAnnotatedClass = true)
 @TestSecurity(user = "customer:$DELEGATE_PARTY", roles = ["ROLE_CUSTOMER"])
 @OidcSecurity(claims = [Claim(key = "party_id", value = DELEGATE_PARTY)])
 class LegacyDelegationArmRefusedIT {
