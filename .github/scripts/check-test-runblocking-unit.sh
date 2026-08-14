@@ -35,7 +35,10 @@ if [ "${1:-}" = "--self-test" ]; then
   expect() { local label="$1" root="$2" want="$3" sub="${4:-}" out rc
     out=$(bash "$0" "$root" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    # With pipefail, grep -q may finish before printf drains a long captured diagnostic. That
+    # turns printf's SIGPIPE into a false negative even though the expected text was present.
+    # Feed grep directly instead, so the self-test proves the guard rather than the pipeline.
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<< "$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
 
   a="$td/bad"; put "$a/svc/src/test/kotlin/T.kt" '@Test\nfun `pays`() = runBlocking {\n  assertTrue(true)\n}\n'
@@ -68,7 +71,7 @@ ROOT="${1:-.}"
 
 # Match a function declaration whose body is `= runBlocking {` with no `: Unit`
 # return type. The leading `fun .*)` anchors it to a function (not a `val x =
-# runBlocking`), and `grep -v ': Unit'` drops the already-safe explicit form.
+# runBlocking`); the pattern itself excludes the explicit `: Unit` return form.
 violations="$(
   find "$ROOT" \
        \( -type d \( -name node_modules -o -name build -o -name .claude -o -name .git \) -prune \) -o \

@@ -10,6 +10,7 @@ import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.StepCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -94,6 +95,28 @@ class CampaignStateMachineTest {
         val sixSteps = (0..5).map { CampaignStep(it, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0) }
         assertThrows<IllegalArgumentException> {
             draft().copy(steps = sixSteps)
+        }
+    }
+
+    @Test
+    fun `a decision source must be an earlier existing step with a condition`() {
+        val source = CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)
+        val target = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = emptyMap(),
+            delaySeconds = 0,
+            condition = StepCondition.IF_PREVIOUS_CONFIRMED,
+            conditionSourceOrder = 0,
+        )
+        assertEquals(listOf(source, target), draft().copy(steps = listOf(source, target)).steps)
+
+        assertThrows<IllegalArgumentException> {
+            draft().copy(steps = listOf(source, target.copy(conditionSourceOrder = 1)))
+        }
+        assertThrows<IllegalArgumentException> {
+            draft().copy(steps = listOf(source, target.copy(condition = null)))
         }
     }
 

@@ -36,6 +36,8 @@ export interface StepFunnel {
   reached: number
   delivered: number
   failed: number
+  /** Present from campaign-service 1.32.0; absence during rollout must not invent a branch count. */
+  skipped?: number
   suppressed: SuppressionCount[]
 }
 
@@ -43,6 +45,9 @@ export interface JourneyStep {
   order: number
   template: string
   delaySeconds: number
+  channel?: 'EMAIL' | 'PUSH' | 'BANNER'
+  condition?: 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
+  conditionSourceOrder?: number
 }
 
 const NODE_W = 190
@@ -98,6 +103,19 @@ export function JourneyCanvas({
     return t(`čekat ${Math.floor(s / 60)} min`, `wait ${Math.floor(s / 60)} min`)
   }
 
+  const channelLabel = (channel?: JourneyStep['channel']): string =>
+    channel === 'PUSH' ? t('push', 'push') : channel === 'BANNER' ? t('banner', 'banner') : t('e-mail', 'email')
+
+  const conditionLabel = (step: JourneyStep): string | null => {
+    if (!step.condition) return null
+    const source = step.conditionSourceOrder === undefined
+      ? t('výsledek předchozího kroku', 'previous-step delivery')
+      : t(`krok ${step.conditionSourceOrder + 1}`, `step ${step.conditionSourceOrder + 1}`)
+    return step.condition === 'IF_PREVIOUS_CONFIRMED'
+      ? t(`${source} doručen`, `${source} delivered`)
+      : t(`${source} nedoručen`, `${source} not delivered`)
+  }
+
   const rows = Array.isArray(funnel) ? funnel : []
   const byStep = new Map(rows.map(f => [f.stepOrder, f]))
   const ordered = Array.isArray(steps) ? [...steps].sort((a, b) => a.order - b.order) : []
@@ -149,6 +167,11 @@ export function JourneyCanvas({
           const f = byStep.get(step.order)
           const reached = f?.reached ?? 0
           const delivered = f?.delivered ?? 0
+          const skipped = f?.skipped
+          // A skipped conditional record proves the *other* reviewed branch was chosen. It is not
+          // a delivery attempt, failure or policy suppression, and must not inflate this path.
+          const pathTaken = step.condition && skipped !== undefined ? Math.max(0, reached - skipped) : reached
+          const branch = conditionLabel(step)
           const drops: SuppressionCount[] = [
             ...(f?.suppressed ?? []),
             ...(f && f.failed > 0 ? [{ reason: 'FAILED', count: f.failed }] : []),
@@ -168,9 +191,14 @@ export function JourneyCanvas({
               <text x={midX} y={ROW_Y - 12} fontSize="11" textAnchor="middle" fill="var(--text-secondary)">
                 {delayLabel(step.delaySeconds)}
               </text>
-              {reached > 0 && (
+              {pathTaken > 0 && (
                 <text x={midX} y={ROW_Y + 20} fontSize="12" textAnchor="middle" fontWeight="600" fill="var(--text-primary)">
-                  {n(reached)}
+                  {n(pathTaken)}
+                </text>
+              )}
+              {branch && (
+                <text x={midX} y={ROW_Y + 34} fontSize="10" textAnchor="middle" fill="var(--text-secondary)" data-branch={step.condition}>
+                  {branch}
                 </text>
               )}
 
@@ -180,7 +208,7 @@ export function JourneyCanvas({
                   fill="var(--surface-2)" stroke="var(--border-strong)" strokeWidth="1.2"
                 />
                 <text x={x + 16} y={ROW_Y - 16} fontSize="11" fill="var(--text-secondary)">
-                  {t('KROK', 'STEP')} {step.order} · {t('e-mail', 'email')}
+                  {t('KROK', 'STEP')} {step.order} · {channelLabel(step.channel)}
                 </text>
                 <text x={x + 16} y={ROW_Y + 6} fontSize="14" fontWeight="600" fill="var(--text-primary)">
                   {templateLabel(step.template)}
@@ -191,6 +219,11 @@ export function JourneyCanvas({
                   </tspan>
                   {' '}{t('doručeno', 'delivered')}
                 </text>
+                {branch && skipped !== undefined && (
+                  <text x={x + 16} y={ROW_Y + 40} fontSize="10" fill="var(--text-secondary)">
+                    {n(skipped)} {t('jinou cestou', 'took another path')}
+                  </text>
+                )}
               </g>
 
               {/* Drop branches: one line per reason, labelled in words. A marketer reads "12 nemá

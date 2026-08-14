@@ -12,12 +12,14 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDefinition
+import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import com.openbank.campaign.domain.model.StopCondition
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -74,6 +76,40 @@ class CampaignDraftRevisionTest {
             )
         }
         coVerify(exactly = 1) { campaigns.save(any()) }
+    }
+
+    @Test
+    fun `reuse makes a fresh draft from a running definition without its lifecycle`(): Unit = runBlocking {
+        val source = draft.copy(
+            state = CampaignState.ACTIVE,
+            createdBy = "original-maker@openbank.test",
+            approvedBy = "checker@openbank.test",
+            stopCondition = StopCondition(maxSendsPerParty = 2),
+            conversionRule = "ACCOUNT_OPENED",
+            holdoutPercent = 10,
+            schedule = CampaignSchedule("DAILY_MORNING"),
+            trigger = "ACCOUNT_OPENED",
+        )
+        val campaigns = mockk<CampaignRepository>()
+        coEvery { campaigns.findById(campaignId) } returns source
+        coEvery { campaigns.save(any()) } answers { firstArg<Campaign>() }
+
+        val copied = service(campaigns).duplicateAsDraft(campaignId, "new-maker@openbank.test")
+
+        assertThat(copied.id).isNotEqualTo(source.id)
+        assertThat(copied.name).isEqualTo("Copy of Savings nudge")
+        assertThat(copied.state).isEqualTo(CampaignState.DRAFT)
+        assertThat(copied.createdBy).isEqualTo("new-maker@openbank.test")
+        assertThat(copied.approvedBy).isNull()
+        assertThat(copied.steps).isEqualTo(source.steps)
+        assertThat(copied.stopCondition).isEqualTo(source.stopCondition)
+        assertThat(copied.conversionRule).isEqualTo(source.conversionRule)
+        assertThat(copied.holdoutPercent).isEqualTo(source.holdoutPercent)
+        assertThat(copied.schedule).isEqualTo(source.schedule)
+        assertThat(copied.trigger).isEqualTo(source.trigger)
+        assertThat(source.state).isEqualTo(CampaignState.ACTIVE)
+        assertThat(source.approvedBy).isEqualTo("checker@openbank.test")
+        coVerify(exactly = 1) { campaigns.save(copied) }
     }
 
     private fun service(campaigns: CampaignRepository): CampaignService {

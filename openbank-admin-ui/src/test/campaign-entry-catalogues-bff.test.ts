@@ -16,6 +16,8 @@ describe('campaign entry catalogue BFF', () => {
       status: 200,
       json: async () => url.endsWith('/cadences')
         ? [{ cadence: 'DAILY_MORNING', humanForm: 'every day at 09:00', zone: 'Europe/Prague' }]
+        : url.endsWith('/guardrails')
+          ? { maxSendsPerParty: 2, sendWindowHours: 168, quietHoursStart: 21, quietHoursEnd: 8, timeZone: 'Europe/Prague' }
         : url.endsWith('/templates')
           ? [{ template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle'], inAppSurface: 'HOME_BANNER' }]
           : [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
@@ -25,6 +27,7 @@ describe('campaign entry catalogue BFF', () => {
     const { GET: cadences } = await import('@/app/api/campaigns/cadences/route')
     const { GET: triggers } = await import('@/app/api/campaigns/triggers/route')
     const { GET: templates } = await import('@/app/api/campaigns/templates/route')
+    const { GET: guardrails } = await import('@/app/api/campaigns/guardrails/route')
 
     await expect((await cadences()).json()).resolves.toEqual({
       items: [{ cadence: 'DAILY_MORNING', humanForm: 'every day at 09:00', zone: 'Europe/Prague' }],
@@ -38,6 +41,10 @@ describe('campaign entry catalogue BFF', () => {
       items: [{ template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle'], inAppSurface: 'HOME_BANNER' }],
       state: 'ok',
     })
+    await expect((await guardrails()).json()).resolves.toEqual({
+      guardrails: { maxSendsPerParty: 2, sendWindowHours: 168, quietHoursStart: 21, quietHoursEnd: 8, timeZone: 'Europe/Prague' },
+      state: 'ok',
+    })
     expect(fetchMock).toHaveBeenCalledWith(
       'http://campaign/api/v1/campaigns/cadences',
       expect.objectContaining({ headers: { authorization: 'Bearer token' } }),
@@ -48,6 +55,10 @@ describe('campaign entry catalogue BFF', () => {
     )
     expect(fetchMock).toHaveBeenCalledWith(
       'http://campaign/api/v1/campaigns/templates',
+      expect.objectContaining({ headers: { authorization: 'Bearer token' } }),
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://campaign/api/v1/campaigns/guardrails',
       expect.objectContaining({ headers: { authorization: 'Bearer token' } }),
     )
   })

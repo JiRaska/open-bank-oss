@@ -66,8 +66,8 @@ class CampaignRestContractIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private fun draftBody(name: String) = """
-        {"name":"$name","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+    private fun draftBody(name: String, segmentName: String = "actives") = """
+        {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
     """.trimIndent()
@@ -84,6 +84,33 @@ class CampaignRestContractIT {
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
+
+    private fun insertLegacySegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO segments (id, name, version, rules_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, name)
+                statement.setInt(3, 1)
+                statement.setString(4, """[{"type":"PartyStatusIs","status":"ACTIVE"}]""")
+                statement.setObject(5, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun deleteSegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("DELETE FROM segments WHERE name = ? AND version = 1").use { statement ->
+                statement.setString(1, name)
+                statement.executeUpdate()
+            }
+        }
+    }
 
     @Test
     fun `maker can revise an unsubmitted draft through the HTTP contract`() {
@@ -106,6 +133,60 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("name", equalTo(revisedName))
+        }
+    }
+
+    @Test
+    fun `operator can reuse a reviewed definition as an independent draft through the HTTP contract`() {
+        val sourceName = "source-${UUID.randomUUID()}"
+        val sourceId = createDraft(sourceName)
+        submit(sourceId)
+
+        val copiedId = When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(201)
+            body("name", equalTo("Copy of $sourceName"))
+            body("state", equalTo("DRAFT"))
+            // TestSecurity supplies the operator role but no JWT subject; the resource deliberately
+            // falls back to `unknown` rather than trusting a browser-provided maker field.
+            body("createdBy", equalTo("unknown"))
+            body("approvedBy", nullValue())
+        } Extract {
+            path<String>("id")
+        }
+
+        assertThat(copiedId).isNotEqualTo(sourceId)
+        When {
+            get("/api/v1/campaigns/$sourceId")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(sourceName))
+            body("state", equalTo("PENDING_APPROVAL"))
+        }
+    }
+
+    @Test
+    fun `reuse reports a stale source definition as conflict rather than source not found`() {
+        val staleSegment = "retired-${UUID.randomUUID()}"
+        insertLegacySegment(staleSegment)
+        val sourceId = Given {
+            contentType("application/json")
+            body(draftBody("stale-${UUID.randomUUID()}", staleSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        deleteSegment(staleSegment)
+
+        When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $staleSegment@1 not found"))
         }
     }
 
@@ -389,6 +470,45 @@ class CampaignRestContractIT {
         }
     }
 
+    @Test
+    fun `two decision paths can name the same explicit source step`() {
+        val body = """
+            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[
+               {"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":2,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_CONFIRMED","conditionSourceOrder":1},
+               {"order":3,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_NOT_CONFIRMED","conditionSourceOrder":1}
+             ]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        }
+    }
+
     /**
      * These terminal reasons are operator-visible contract values, not internal workflow detail.
      * Drive the real endpoint over rows that can only be produced by live journey control: a test
@@ -567,6 +687,21 @@ class CampaignRestContractIT {
                 "find { it.template == 'MARKETING_PRODUCT_OFFER_BANNER' }.inAppSurface",
                 org.hamcrest.Matchers.equalTo("HOME_BANNER"),
             )
+        }
+    }
+
+    /** Studio explains the live policy values but never turns them into a person-level delivery promise. */
+    @Test
+    fun `the contact guardrails are served with the active platform values`() {
+        When {
+            get("/api/v1/campaigns/guardrails")
+        } Then {
+            statusCode(200)
+            body("maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+            body("sendWindowHours", org.hamcrest.Matchers.equalTo(168))
+            body("quietHoursStart", org.hamcrest.Matchers.equalTo(21))
+            body("quietHoursEnd", org.hamcrest.Matchers.equalTo(8))
+            body("timeZone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
         }
     }
 

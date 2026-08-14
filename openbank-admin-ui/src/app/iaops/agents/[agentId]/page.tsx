@@ -15,6 +15,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentBodyAnalysis, AgentMeshMap } from '@/components/agent/AgentDiagnostics'
 import type { AgentDiagnostic, AgentMeshSummary } from '@/lib/governance/agentDiagnostics'
+import { OutcomeMetricsCard } from '@/components/agent/AgentOutcomes'
 
 // ── Types (mirror /api/iaops/agents/[agentId]) ─────────────────────────────
 interface Schedule { daily: string | null; reactive: string | null }
@@ -137,7 +138,6 @@ function Card({ children }: { children: React.ReactNode }) {
     </div>
   )
 }
-
 const STATE_PILL: Record<string, { color: string; bg: string }> = {
   PROPOSED: { color: '#d97706', bg: '#fef9c3' },
   APPROVED: { color: '#16a34a', bg: '#dcfce7' },
@@ -345,6 +345,9 @@ function AgentDetailContent() {
               </div>
             </Card>
           )}
+
+          {/* Outcome metrics (#4462) — every figure carries its own denominator. */}
+          {data.proposals.available && <OutcomeMetricsCard items={data.proposals.items} />}
 
           {/* Proposal history */}
           <Card>

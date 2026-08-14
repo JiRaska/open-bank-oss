@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/v0.28.0...v0.29.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** enable reusable campaign drafts ([#4756](https://github.com/JiRaska/open-bank-oss/issues/4756)) ([d59e6c5](https://github.com/JiRaska/open-bank-oss/commit/d59e6c5aaf134fc08fd0acac1af915bc43cb46c2))
+
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/v0.27.0...v0.28.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** explain live launch guardrails ([#4735](https://github.com/JiRaska/open-bank-oss/issues/4735)) ([0e70531](https://github.com/JiRaska/open-bank-oss/commit/0e7053135e57150016034eb6392f3fd7144d1b7b))
+
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/v0.26.0...v0.27.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add explicit decision sources ([#4690](https://github.com/JiRaska/open-bank-oss/issues/4690)) ([3296001](https://github.com/JiRaska/open-bank-oss/commit/3296001b81fda644c6ba8d0b4d7b8703b2f5bc22))
+
 ## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/v0.25.0...v0.26.0) (2026-08-13)
 
 

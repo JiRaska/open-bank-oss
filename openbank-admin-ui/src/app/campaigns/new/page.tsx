@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Clock3, Megaphone, Send, Sparkles, Users } from 'lucide-react'
+import { ArrowLeft, BellRing, Clock3, Mail, Megaphone, PanelsTopLeft, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
 import {
@@ -19,7 +19,7 @@ import {
 } from '@/components/campaigns/JourneyEditor'
 import { StepEditor } from '@/components/campaigns/StepEditor'
 import { CampaignExperiencePreview } from '@/components/campaigns/CampaignExperiencePreview'
-import { CampaignLaunchReadiness } from '@/components/campaigns/CampaignLaunchReadiness'
+import { CampaignLaunchReadiness, type CampaignContactGuardrails } from '@/components/campaigns/CampaignLaunchReadiness'
 import {
   JourneyRecipePicker,
   type JourneyRecipe,
@@ -99,6 +99,7 @@ export default function NewCampaignPage() {
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
   const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
   const [contentCatalogueState, setContentCatalogueState] = useState<'loading' | 'ok' | 'unavailable'>('loading')
+  const [guardrails, setGuardrails] = useState<CampaignContactGuardrails | null>(null)
   const [entryMode, setEntryMode] = useState<EntryMode>('MANUAL')
   const [cadence, setCadence] = useState('')
   const [trigger, setTrigger] = useState('')
@@ -246,11 +247,13 @@ export default function NewCampaignPage() {
       fetch('/api/campaigns/cadences').then(r => r.json()),
       fetch('/api/campaigns/triggers').then(r => r.json()),
       fetch('/api/campaigns/templates').then(r => r.json()),
+      fetch('/api/campaigns/guardrails').then(r => r.json()),
     ])
-      .then(([cadenceResponse, triggerResponse, templateResponse]: [
+      .then(([cadenceResponse, triggerResponse, templateResponse, guardrailResponse]: [
         { items?: Cadence[]; state?: string },
         { items?: CampaignTrigger[]; state?: string },
         { items?: CampaignTemplate[]; state?: string },
+        { guardrails?: CampaignContactGuardrails | null; state?: string },
       ]) => {
         if (cadenceResponse.state === 'ok') setCadences(cadenceResponse.items ?? [])
         if (triggerResponse.state === 'ok') setTriggers(triggerResponse.items ?? [])
@@ -261,6 +264,7 @@ export default function NewCampaignPage() {
         } else {
           setContentCatalogueState('unavailable')
         }
+        if (guardrailResponse.state === 'ok' && guardrailResponse.guardrails) setGuardrails(guardrailResponse.guardrails)
       })
       .catch(() => {
         setEntryUnavailable(true)
@@ -297,9 +301,8 @@ export default function NewCampaignPage() {
 
   /**
    * A binary decision is an authoring shortcut over the service's two complementary, observable
-   * delivery conditions. Keeping both steps adjacent makes their shared predecessor unambiguous:
-   * when the first path is skipped, the second still evaluates that predecessor; when it sends,
-   * the second condition is false. The workflow has covered this replay-safe semantics since #3585.
+   * delivery conditions. Both generated paths explicitly point at the same source step: a skipped
+   * first path can therefore never become the second path's input.
    */
   const addDeliveryDecision = () =>
     setSteps(prev => {
@@ -309,6 +312,7 @@ export default function NewCampaignPage() {
       const decisionStep = (condition: EditorStep['condition']): EditorStep => ({
         ...newStep(first),
         condition,
+        conditionSourceOrder: prev.length - 1,
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       })
       setSelected(prev.length)
@@ -357,6 +361,12 @@ export default function NewCampaignPage() {
     (entryMode === 'TRIGGER' && trigger !== '')
   const ready = name.trim() !== '' && goal.trim() !== '' && segment !== '' && steps.length > 0 &&
     contentCatalogueState === 'ok' && !incomplete && entryConfigured && (!contentExperiment || conversionRule !== null)
+  // A campaign is an experience across surfaces, not a list of transport rows. Keep this compact
+  // overview next to the canvas so a marketer can scan the whole customer footprint without
+  // opening every node. It is derived solely from the steps that will be sent to campaign-service.
+  const experienceSurfaces = (['PUSH', 'BANNER', 'EMAIL'] as EditorChannel[])
+    .map(channel => ({ channel, count: steps.filter(step => step.channel === channel).length }))
+    .filter(({ count }) => count > 0)
 
   const setContentExperimentEnabled = (enabled: boolean) => {
     setContentExperiment(enabled)
@@ -395,6 +405,7 @@ export default function NewCampaignPage() {
           template: s.template,
           channel: s.channel,
           ...(s.condition ? { condition: s.condition } : {}),
+          ...(s.conditionSourceOrder !== undefined ? { conditionSourceOrder: s.conditionSourceOrder + 1 } : {}),
           variables: s.variables,
           ...(contentExperiment ? { variantBVariables: s.variantBVariables ?? {} } : {}),
           ...(contentExperiment && s.variantBTemplate ? { variantBTemplate: s.variantBTemplate } : {}),
@@ -684,6 +695,23 @@ export default function NewCampaignPage() {
 
         </div>
 
+        <aside className="campaign-surface-map" aria-label={t('Přehled zákaznických ploch', 'Customer surface overview')}>
+          <div>
+            <p className="campaign-composer-eyebrow"><PanelsTopLeft className="h-3.5 w-3.5" /> {t('Zážitek napříč aplikací', 'Experience across the app')}</p>
+            <h3>{t('Co lidé skutečně uvidí', 'What people will actually see')}</h3>
+            <p>{t('Jen plochy z této cesty. Nic se nedoplňuje domněnkou.', 'Only surfaces in this journey. Nothing is inferred.')}</p>
+          </div>
+          <div className="campaign-surface-map-items" data-testid="campaign-surface-map">
+            {experienceSurfaces.length === 0 ? (
+              <span className="campaign-surface-map-empty">{t('Přidejte první ověřený krok.', 'Add the first reviewed step.')}</span>
+            ) : experienceSurfaces.map(({ channel, count }) => {
+              const Icon = channel === 'PUSH' ? BellRing : channel === 'BANNER' ? PanelsTopLeft : Mail
+              const label = channel === 'PUSH' ? t('Push', 'Push') : channel === 'BANNER' ? t('Banner v aplikaci', 'In-app banner') : t('E-mail', 'Email')
+              return <span key={channel} data-surface={channel}><Icon className="h-3.5 w-3.5" /> {label}<strong>{count}</strong></span>
+            })}
+          </div>
+        </aside>
+
         <div className="campaign-studio-companion-grid">
           <CampaignExperiencePreview step={selected === null ? undefined : steps[selected]} campaignName={name} />
           <CampaignLaunchReadiness
@@ -694,6 +722,8 @@ export default function NewCampaignPage() {
             conversionRule={conversionRule}
             contentExperiment={contentExperiment}
             steps={steps}
+            stopAfter={stopAfter}
+            guardrails={guardrails}
           />
         </div>
 

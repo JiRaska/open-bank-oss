@@ -682,6 +682,7 @@ class NotificationConsumer {
             deviceTokenRepo.invalidate(invalidIds).chain { _ ->
                 notificationRepo.find("notificationId", entity.notificationId).firstResult()
                     .map { e ->
+                        if (e == null) reportMissingRow(req, entity, outcome)
                         e?.also {
                             it.status = outcome.name
                             // ADR-0252's counters answer "how is the channel doing"; this answers
@@ -714,6 +715,7 @@ class NotificationConsumer {
     ): Uni<Void> = Panache.withTransaction {
         notificationRepo.find("notificationId", entity.notificationId).firstResult()
             .map { e ->
+                if (e == null) reportMissingRow(req, entity, status)
                 e?.also {
                     it.status = status.name
                     // Persist the reason alongside the status (V13): the outcome event below
@@ -725,6 +727,36 @@ class NotificationConsumer {
             }
             .chain { _ -> outboxRepo.persistInTransaction(outcomeMessage(req, entity, status, reason)) }
     }.replaceWithVoid()
+
+    /**
+     * The row a terminal transition was supposed to land on is not there (issue #4512).
+     *
+     * Both status writers locate the row by `notificationId` and apply the transition through a
+     * null-safe `?.also { ... }`, then commit the outcome event in the same transaction whether or
+     * not a row was found. That was silent by construction: the outbox row commits, the event is
+     * published, the message is acked, and no branch anywhere logs. On 2026-08-09 four
+     * `SCA_APPROVAL` PUSH fan-outs ran that way — four `NotificationOutcome` rows in
+     * `notification_outbox`, zero `notifications` rows, and not one error line in the pod.
+     *
+     * This does not repair the row; by the time it runs the insert is already lost, and inventing
+     * one here would fabricate a `created_at` and a body the service no longer holds. What it does
+     * is stop the state from being unobservable — an ERROR with the identifiers needed to
+     * reconstruct the message, and a counter an alert can read. Deliberately loud: an outcome
+     * event announcing a notification that has no durable record is an evidence gap under DORA
+     * Art. 17-19, not a housekeeping detail.
+     */
+    private fun reportMissingRow(req: NotificationRequest, entity: NotificationEntity, outcome: NotificationOutcome) {
+        pushMetrics.recordMissingRow(req.channel, req.template)
+        log.errorf(
+            "notification.status.row_missing notificationId=%s party=%s channel=%s template=%s outcome=%s " +
+                "— the outcome event will be published for a notification that has no row",
+            entity.notificationId,
+            req.partyId,
+            req.channel,
+            req.template,
+            outcome,
+        )
+    }
 
     /**
      * The outbox row for one terminal transition.

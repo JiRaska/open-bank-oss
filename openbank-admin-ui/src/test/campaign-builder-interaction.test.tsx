@@ -192,6 +192,7 @@ describe('campaign builder conditions', () => {
     expect(container.querySelector('[data-step-editor="1"]')).toBeTruthy()
     expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
     expect(container.querySelector('[data-edge-condition="IF_PREVIOUS_NOT_CONFIRMED"]')).toBeTruthy()
+    expect(container.textContent).toMatch(/step 1 delivered|kroku 1 doručen/)
   }, 25000)
 
   it('warns that a condition on the first step has nothing to test', async () => {
