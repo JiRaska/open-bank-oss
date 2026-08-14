@@ -702,6 +702,10 @@ class CampaignRestContractIT {
                 "find { it.template == 'MARKETING_PRODUCT_OFFER_BANNER' }.inAppSurface",
                 org.hamcrest.Matchers.equalTo("HOME_BANNER"),
             )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_STORY' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("STORIES"),
+            )
         }
     }
 

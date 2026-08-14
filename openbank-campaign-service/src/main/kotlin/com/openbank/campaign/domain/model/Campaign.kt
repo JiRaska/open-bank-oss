@@ -436,8 +436,8 @@ enum class MobileDestination(val deepLink: String) {
     PRODUCT_HUB("openbank://products"),
 }
 
-/** Closed app inventory a campaign may use; STORIES remains product-owned, not a campaign slot. */
-enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB }
+/** Closed authenticated-app inventory a campaign may use. */
+enum class InAppSurface { HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB }
 
 /**
  * Delivery channels a campaign step may use.

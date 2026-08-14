@@ -20,6 +20,7 @@ const destinationCopy: Record<Destination, { cs: string; en: string; eyebrowCs: 
 const surfaceCopy: Record<EditorInAppSurface, { cs: string; en: string; metaCs: string; metaEn: string }> = {
   HOME_BANNER: { cs: 'Banner na domovské obrazovce', en: 'Home banner', metaCs: 'DOMOVSKÁ OBRAZOVKA', metaEn: 'HOME SCREEN' },
   HOME_CAROUSEL: { cs: 'Carousel na domovské obrazovce', en: 'Home carousel', metaCs: 'DOMOVSKÝ CAROUSEL', metaEn: 'HOME CAROUSEL' },
+  STORIES: { cs: 'Příběh v aplikaci', en: 'In-app story', metaCs: 'PŘÍBĚHY', metaEn: 'STORIES' },
   PRODUCT_FEED: { cs: 'Feed produktů', en: 'Product feed', metaCs: 'FEED PRODUKTŮ', metaEn: 'PRODUCT FEED' },
   REWARDS_HUB: { cs: 'Centrum odměn', en: 'Rewards hub', metaCs: 'CENTRUM ODMĚN', metaEn: 'REWARDS HUB' },
 }

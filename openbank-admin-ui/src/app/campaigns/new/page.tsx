@@ -133,6 +133,7 @@ export default function NewCampaignPage() {
     MARKETING_PRODUCT_OFFER_PUSH: t('Nabídka produktu', 'Product offer'),
     MARKETING_PRODUCT_OFFER_BANNER: t('Nabídka v banneru', 'Banner offer'),
     MARKETING_PRODUCT_OFFER_CAROUSEL: t('Nabídka v carouselu', 'Carousel offer'),
+    MARKETING_PRODUCT_OFFER_STORY: t('Nabídka v příběhu', 'Story offer'),
     MARKETING_PRODUCT_OFFER_PRODUCT_FEED: t('Nabídka ve feedu produktů', 'Product feed offer'),
     MARKETING_PRODUCT_OFFER_REWARDS_HUB: t('Nabídka v centru odměn', 'Rewards hub offer'),
   }
