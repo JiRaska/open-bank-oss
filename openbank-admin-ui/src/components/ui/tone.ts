@@ -96,6 +96,7 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   IN_PROGRESS: 'warning',
   PENDING: 'warning',
   PENDING_APPROVAL: 'warning',
+  PENDING_CONFIRMATION: 'warning',
   PENDING_EVIDENCE: 'warning',
   PENDING_REVIEW: 'warning',
   PENDING_SCA: 'warning',
