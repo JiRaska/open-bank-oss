@@ -6,6 +6,8 @@ package com.openbank.ledger.application.port.out
 
 import com.openbank.ledger.domain.model.AccountingPeriod
 import com.openbank.ledger.domain.model.ClosedPeriodRecord
+import com.openbank.ledger.domain.model.PeriodTrialBalance
+import com.openbank.ledger.domain.model.TrialBalanceLine
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import java.time.LocalDate
 
@@ -26,6 +28,9 @@ interface ClosedPeriodRepository {
     /** Closed-period records overlapping `[from, to]`, ascending by period start. */
     suspend fun findRange(from: LocalDate, to: LocalDate): List<ClosedPeriodRecord>
 
+    /** Exact lines persisted atomically with a FROZEN close; never recompute attested evidence. */
+    suspend fun findFrozenLines(periodId: java.util.UUID): List<TrialBalanceLine>
+
     /** Insert a new DRAFT, or refresh an existing DRAFT for the same period (upsert). */
     suspend fun saveDraft(record: ClosedPeriodRecord): ClosedPeriodRecord
 
@@ -35,5 +40,9 @@ interface ClosedPeriodRepository {
      * is queued, or neither happens. A frozen period that nobody was told about is exactly as bad
      * as an event for a period that did not freeze.
      */
-    suspend fun saveFrozen(record: ClosedPeriodRecord, outbox: OutboxMessage): ClosedPeriodRecord
+    suspend fun saveFrozen(
+        record: ClosedPeriodRecord,
+        reverifiedTrialBalance: PeriodTrialBalance,
+        outbox: OutboxMessage,
+    ): ClosedPeriodRecord
 }

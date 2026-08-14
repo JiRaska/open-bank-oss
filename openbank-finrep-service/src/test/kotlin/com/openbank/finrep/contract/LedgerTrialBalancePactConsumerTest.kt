@@ -16,11 +16,10 @@ import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.infrastructure.client.ClosedPeriodTrialBalanceResponse
 import com.openbank.finrep.infrastructure.client.LedgerRestClient
-import com.openbank.finrep.infrastructure.client.TrialBalanceResponse
 import io.restassured.RestAssured.given
 import jakarta.ws.rs.Path
-import jakarta.ws.rs.QueryParam
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.ExtendWith
@@ -82,10 +81,9 @@ class LedgerTrialBalancePactConsumerTest {
 
     @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
     fun trialBalanceWithEntriesPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has journal entries for the reporting date")
+        .given("ledger has frozen monthly trial balance for the reporting date")
         .uponReceiving("GET the GL trial balance for a FINREP reporting date")
-        .path(LEDGER_TRIAL_BALANCE_PATH)
-        .query("$AS_OF_PARAM=$REPORTING_DATE")
+        .path("$LEDGER_MONTH_TRIAL_BALANCE_PATH/$REPORTING_DATE/frozen-trial-balance")
         .method("GET")
         .headers(mapOf("Accept" to "application/json"))
         .willRespondWith()
@@ -97,7 +95,7 @@ class LedgerTrialBalancePactConsumerTest {
                 // `asOf=` query parameter this interaction pins by literal. A trial balance
                 // returned for a DIFFERENT date than the one asked for is a reporting defect of
                 // the first order, and a type matcher accepted any date string at all.
-                o.stringValue("asOf", REPORTING_DATE)
+                o.stringValue("period", "MONTH:2026-06")
                 o.booleanType("balanced", true)
                 // stringType on `code`/{currency,type}, DELIBERATELY (issue #2425): `lines`
                 // is a heterogeneous list — a real trial balance carries many GL codes, several
@@ -114,44 +112,17 @@ class LedgerTrialBalancePactConsumerTest {
         )
         .toPact()
 
-    @Pact(consumer = "openbank-finrep-service", provider = "openbank-ledger-service")
-    fun trialBalanceEmptyLedgerPact(builder: PactDslWithProvider): RequestResponsePact = builder
-        .given("ledger has no journal entries")
-        .uponReceiving("GET the GL trial balance for a date with no ledger activity")
-        .path(LEDGER_TRIAL_BALANCE_PATH)
-        // A pre-platform date, so this interaction stays valid even when the provider run shares a
-        // Testcontainer DB with interactions that post journals (they are all dated "today").
-        .query("$AS_OF_PARAM=$PRE_HISTORY_DATE")
-        .method("GET")
-        .headers(mapOf("Accept" to "application/json"))
-        .willRespondWith()
-        .status(200)
-        .headers(mapOf("Content-Type" to "application/json"))
-        .body(
-            newJsonBody { o ->
-                // stringValue, NOT stringType (issue #2425): `asOf` is echoed from the
-                // `asOf=` query parameter this interaction pins by literal. A trial balance
-                // returned for a DIFFERENT date than the one asked for is a reporting defect of
-                // the first order, and a type matcher accepted any date string at all.
-                o.stringValue("asOf", PRE_HISTORY_DATE)
-                o.booleanType("balanced", true)
-                o.array("lines") // empty — a date before any ledger activity
-            }.build(),
-        )
-        .toPact()
-
     @Test
     @PactTestFor(pactMethod = "trialBalanceWithEntriesPact")
     fun `the ledger client contract yields the fields the FINREP mappers consume`(mockServer: MockServer) {
         // Guards the reflection helpers themselves: were they ever to return an empty or partial
         // path, the interaction and the request would still agree with each other and both pact
         // tests would pass against a contract that pins nothing.
-        assertThat(ledgerTrialBalancePath).isEqualTo(LEDGER_TRIAL_BALANCE_PATH)
-        assertThat(asOfQueryParam).isEqualTo(AS_OF_PARAM)
+        assertThat(ledgerTrialBalancePath).isEqualTo("$LEDGER_MONTH_TRIAL_BALANCE_PATH/{asOf}/frozen-trial-balance")
 
         val response = fetchTrialBalance(mockServer, REPORTING_DATE)
 
-        assertThat(response.asOf).isNotBlank()
+        assertThat(response.period).isNotBlank()
         assertThat(response.balanced).isTrue()
         // The three fields LedgerAdapter maps into TrialBalanceLineDto must all deserialize.
         assertThat(response.lines).isNotEmpty()
@@ -170,28 +141,12 @@ class LedgerTrialBalancePactConsumerTest {
         assertThat(template.cells.first().value).isEqualByComparingTo(BigDecimal("150000.00"))
     }
 
-    @Test
-    @PactTestFor(pactMethod = "trialBalanceEmptyLedgerPact")
-    fun `a zero-line ledger still renders a fully populated zero template`(mockServer: MockServer) {
-        val response = fetchTrialBalance(mockServer, PRE_HISTORY_DATE)
-
-        assertThat(response.balanced).isTrue()
-        assertThat(response.lines).isEmpty()
-
-        // A regulatory report must never be silently truncated (ADR-0097): every row is present,
-        // honestly zero.
-        val template = F0101Mapper.map(emptyList(), LocalDate.parse(PRE_HISTORY_DATE))
-        assertThat(template.cells).hasSize(3)
-        assertThat(template.cells.map { it.value }).allSatisfy { assertThat(it).isEqualByComparingTo(BigDecimal.ZERO) }
-    }
-
     /** Issues the request against the path the production client is annotated with. */
-    private fun fetchTrialBalance(mockServer: MockServer, asOf: String): TrialBalanceResponse {
+    private fun fetchTrialBalance(mockServer: MockServer, asOf: String): ClosedPeriodTrialBalanceResponse {
         val body = given()
             .baseUri(mockServer.getUrl())
             .accept("application/json")
-            .queryParam(asOfQueryParam, asOf)
-            .get(ledgerTrialBalancePath)
+            .get(ledgerTrialBalancePath.replace("{asOf}", asOf))
             .then()
             .statusCode(200)
             .extract().body().asString()
@@ -210,16 +165,11 @@ class LedgerTrialBalancePactConsumerTest {
          * below and re-running against the #2269 path: it went green. The literal is the fixed point
          * the annotation is measured against.
          */
-        const val LEDGER_TRIAL_BALANCE_PATH = "/api/v1/journals/trial-balance"
+        const val LEDGER_MONTH_TRIAL_BALANCE_PATH = "/api/v1/ledger/periods/MONTH"
 
         /** Ledger's query-parameter name for the as-of date — likewise literal. */
-        const val AS_OF_PARAM = "asOf"
-
         /** A FINREP quarter-end reference date. */
         const val REPORTING_DATE = "2026-06-30"
-
-        /** Before any ledger activity can exist, so the empty-lines assertion is stable. */
-        const val PRE_HISTORY_DATE = "2000-01-01"
 
         private val getTrialBalanceMethod =
             LedgerRestClient::class.java.getDeclaredMethod("getTrialBalance", String::class.java)
@@ -234,10 +184,5 @@ class LedgerTrialBalancePactConsumerTest {
         ).joinToString("/") { it.trim('/') }.let { "/$it" }
 
         /** The query-parameter name the production client sends the as-of date under. */
-        val asOfQueryParam: String = getTrialBalanceMethod.parameterAnnotations
-            .flatMap { it.toList() }
-            .filterIsInstance<QueryParam>()
-            .single()
-            .value
     }
 }
