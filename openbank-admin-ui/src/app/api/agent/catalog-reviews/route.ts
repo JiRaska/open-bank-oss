@@ -37,10 +37,20 @@ export async function POST(request: NextRequest) {
       signal: AbortSignal.timeout(35_000),
       cache: 'no-store',
     })
+    if (!response.ok) {
+      // A missing/offline model is an intentional operator state, not an
+      // infrastructure detail. Preserve only this narrow, documented contract;
+      // every other agent error stays behind the generic BFF envelope.
+      const failure = await response.json().catch(() => null) as { error?: unknown } | null
+      if (response.status === 503 && failure?.error === 'model unavailable') {
+        return NextResponse.json({ error: 'model unavailable' }, { status: 503 })
+      }
+      return NextResponse.json({ error: 'upstream_error' }, { status: response.status })
+    }
     return NextResponse.json(await response.json(), { status: response.status })
-  } catch (error) {
+  } catch {
     return NextResponse.json(
-      { error: error instanceof Error ? error.message : 'agent_unreachable' },
+      { error: 'agent_unreachable' },
       { status: 502 },
     )
   }

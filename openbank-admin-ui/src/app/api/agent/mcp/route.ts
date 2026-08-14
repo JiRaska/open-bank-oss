@@ -53,11 +53,17 @@ export async function POST(req: NextRequest) {
       cache: 'no-store',
     })
     clearTimeout(timer)
+    if (!res.ok) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'agent_unreachable' } },
+        { status: res.status },
+      )
+    }
     const data = await res.json()
     return NextResponse.json(data, { status: res.status })
-  } catch (e) {
+  } catch {
     return NextResponse.json(
-      { jsonrpc: '2.0', id: null, error: { code: -32603, message: e instanceof Error ? e.message : 'agent_unreachable' } },
+      { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'agent_unreachable' } },
       { status: 502 },
     )
   }

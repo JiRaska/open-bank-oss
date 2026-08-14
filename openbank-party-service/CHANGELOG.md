@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.6...party-service-v0.16.0) (2026-08-14)
+
+
+### Features
+
+* **party:** declare materiality on PARTY_UPDATED events ([#4751](https://github.com/JiRaska/open-bank-oss/issues/4751)) ([cf3a545](https://github.com/JiRaska/open-bank-oss/commit/cf3a545a2f9835ce65e3c8fc38a361c679fde5b8))
+
+
+### Bug Fixes
+
+* **party:** point the merge refusal at the real balance-sweep endpoint ([#4753](https://github.com/JiRaska/open-bank-oss/issues/4753)) ([46932fc](https://github.com/JiRaska/open-bank-oss/commit/46932fc578df7fedc33cc45491f14e6ce1a29b04))
+
 ## [0.15.6](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.5...party-service-v0.15.6) (2026-08-10)
 
 

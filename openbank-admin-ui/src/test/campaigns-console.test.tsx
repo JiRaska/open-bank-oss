@@ -22,7 +22,7 @@ const CAMPAIGN_ID = '019fb939-3e0a-7716-a1ed-7854754c8786'
 
 const LIST = {
   state: 'ok',
-  summary: [{ campaignId: CAMPAIGN_ID, enrolled: 80, sent: 40, suppressed: 32, failed: 3 }],
+  summary: [{ campaignId: CAMPAIGN_ID, enrolled: 80, sent: 40, suppressed: 32, failed: 3, outcomes: [{ outcome: 'CONVERTED', count: 5 }] }],
   items: [
     {
       id: CAMPAIGN_ID,
@@ -110,7 +110,8 @@ describe('campaign console', () => {
     expect(panel.textContent).toMatch(/Sent.*40/)
     expect(panel.textContent).toMatch(/Suppressed by policy.*32/)
     expect(panel.textContent).toMatch(/Failed.*3/)
-    expect(panel.textContent).toMatch(/Conversions are not estimated/i)
+    expect(panel.textContent).toMatch(/Confirmed conversions.*5/)
+    expect(panel.textContent).toMatch(/never clicks or an estimate/i)
   })
 
   it('a refused read does not render as an empty estate', async () => {

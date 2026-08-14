@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.131.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.130.0...admin-ui-v0.131.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** show confirmed campaign outcomes ([#4789](https://github.com/JiRaska/open-bank-oss/issues/4789)) ([93ecf96](https://github.com/JiRaska/open-bank-oss/commit/93ecf96c51f8529a9466ccf0d0da2bb908a23c81))
+
 ## [0.130.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.129.0...admin-ui-v0.130.0) (2026-08-14)
 
 
