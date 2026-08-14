@@ -49,6 +49,7 @@ class CaseOpenServiceTest {
 
     companion object {
         private const val COORDINATOR = "case-coordinator"
+        private const val PRINCIPAL = "svc-operator-1"
     }
 
     @BeforeEach
@@ -75,8 +76,11 @@ class CaseOpenServiceTest {
         service = CaseOpenService(workflowClient, temporalConfig, gate, config, clock)
     }
 
-    private fun open(agent: String = COORDINATOR, subject: String = "ingest-1"): CaseOpenResult =
-        service.open(agent, CaseClass.INCIDENT_RESPONSE, subject, "hitl-incident-queue")
+    private fun open(
+        agent: String = COORDINATOR,
+        subject: String = "ingest-1",
+        principal: String = PRINCIPAL,
+    ): CaseOpenResult = service.open(principal, agent, CaseClass.INCIDENT_RESPONSE, subject, "hitl-incident-queue")
 
     @Test
     fun `temporal disabled means unavailable without touching the gate`() {
@@ -95,7 +99,7 @@ class CaseOpenServiceTest {
     @Test
     fun `a disabled case class is denied even for the coordinator`() {
         assertThat(
-            service.open(COORDINATOR, CaseClass.FRAUD_INVESTIGATION, "case-7", "hitl-fraud-queue"),
+            service.open(PRINCIPAL, COORDINATOR, CaseClass.FRAUD_INVESTIGATION, "case-7", "hitl-fraud-queue"),
         ).isEqualTo(CaseOpenResult.Denied)
     }
 
@@ -104,6 +108,37 @@ class CaseOpenServiceTest {
         assertThat(open()).isInstanceOf(CaseOpenResult.Opened::class.java)
 
         assertThat(open(subject = "ingest-2")).isEqualTo(CaseOpenResult.RateLimited)
+    }
+
+    /**
+     * #4834: the open-rate quota must key on the AUTHENTICATED caller, not on the agent identity
+     * the request claims. Keyed on the claim, a caller splits its own ceiling into one bucket per
+     * string it invents.
+     *
+     * Driven through two DIFFERENT allow-listed agent ids from ONE principal: under the old
+     * keying those are two buckets and both opens succeed; under principal keying the second is
+     * rate-limited. `maxOpensPerAgentPerHour` is 1 in this fixture.
+     */
+    @Test
+    fun `the quota is keyed on the caller, not on the agent identity it claims`() {
+        every { gate.canOpenCase(any()) } returns true
+
+        assertThat(open(agent = "case-coordinator", subject = "a")).isInstanceOf(CaseOpenResult.Opened::class.java)
+        assertThat(open(agent = "some-other-agent", subject = "b"))
+            .describedAs("a second open from the SAME principal must not get a fresh bucket by renaming the agent")
+            .isEqualTo(CaseOpenResult.RateLimited)
+    }
+
+    /** The flip side: two genuinely different callers keep their own ceilings. */
+    @Test
+    fun `separate principals keep separate quotas`() {
+        every { gate.canOpenCase(any()) } returns true
+
+        assertThat(open(subject = "a", principal = "svc-operator-1"))
+            .isInstanceOf(CaseOpenResult.Opened::class.java)
+        assertThat(open(subject = "b", principal = "svc-operator-2"))
+            .describedAs("a different authenticated caller has its own ceiling")
+            .isInstanceOf(CaseOpenResult.Opened::class.java)
     }
 
     @Test
@@ -142,7 +177,7 @@ class CaseOpenServiceTest {
         jul.level = Level.ALL
         try {
             every { gate.canOpenCase(any()) } returns true
-            service.open("evil\r\nFATAL: forged entry", CaseClass.INCIDENT_RESPONSE, "acct-1", "ops")
+            service.open(PRINCIPAL, "evil\r\nFATAL: forged entry", CaseClass.INCIDENT_RESPONSE, "acct-1", "ops")
         } finally {
             jul.removeHandler(handler)
         }
