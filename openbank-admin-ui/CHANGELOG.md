@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.133.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.132.0...admin-ui-v0.133.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** unify operator surfaces ([#4842](https://github.com/JiRaska/open-bank-oss/issues/4842)) ([519f1e4](https://github.com/JiRaska/open-bank-oss/commit/519f1e406201fdbe7d5df999faa8da91423bfdcb))
+
 ## [0.132.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.131.0...admin-ui-v0.132.0) (2026-08-14)
 
 
