@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.126.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.0...admin-ui-v0.126.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** stage readiness policy in image build ([#4763](https://github.com/JiRaska/open-bank-oss/issues/4763)) ([d961079](https://github.com/JiRaska/open-bank-oss/commit/d96107933baf09ac324eb19720e6565cc7d2571c))
+
 ## [0.126.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.125.0...admin-ui-v0.126.0) (2026-08-14)
 
 
