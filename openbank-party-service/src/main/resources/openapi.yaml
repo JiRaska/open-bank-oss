@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.14.0
+  version: 1.14.1
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -157,8 +157,9 @@ paths:
         Retires {id} as a duplicate of mergedIntoPartyId, setting status MERGED. All PII and
         history are preserved and a PARTY_MERGED event is emitted — this is NOT GDPR Art. 17
         erasure (DELETE /api/v1/parties/{id}), which anonymizes instead. Refused with 409 while
-        the duplicate still owns an open account: sweep the balances with a ledger ADJUSTMENT
-        journal entry and close the account first.
+        the duplicate still owns an open account: sweep the balances with POST
+        /api/v1/transactions/merge-sweep (transaction-service, ADR-0179) and close the account
+        first.
       operationId: mergeParty
       parameters:
         - $ref: '#/components/parameters/partyId'
@@ -652,8 +653,8 @@ components:
           type: string
           nullable: true
           description: >-
-            The ledger approval that authorised the balance sweep, linking the ADJUSTMENT journal
-            entries to this identity retirement.
+            The mergeReference passed to POST /api/v1/transactions/merge-sweep, linking the
+            balance-sweep ADJUSTMENT transaction to this identity retirement.
 
     DirectoryLookupRequest:
       type: object
