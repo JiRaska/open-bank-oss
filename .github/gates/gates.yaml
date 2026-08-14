@@ -1411,7 +1411,7 @@ gates:
     name: "the merged-past-red-check watch keeps its window, its key and its escalation (issue #4240, enforced)"
     group: registry
     mode: enforced
-    min_subjects: 6   # D1-D6, applied to the one watch workflow. 0 means the workflow moved.
+    min_subjects: 7   # D1-D7, applied to the one watch workflow. 0 means the workflow moved.
     selftest: |
       python3 .github/scripts/check-merged-past-red-check.py --self-test
     selftest_expect: pass
