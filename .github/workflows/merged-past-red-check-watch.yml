@@ -16,11 +16,21 @@
 # ESCALATION, not redness (#4019): a red scheduled workflow is addressed to
 # nobody, which is the very blind spot this closes. One issue, refreshed in place.
 #
-# TOKEN. rule-suites needs Administration:read. The Actions `permissions:` block
-# has no `administration:` key, so a job's GITHUB_TOKEN can NEVER read it — the
-# runtime lane uses secrets.RULESET_AUDIT_TOKEN and skips loudly without it. The
-# `capability` step measures that claim under the CI identity on every PR instead
+# TOKEN. rule-suites needs Administration:read, and the Actions `permissions:`
+# block has no `administration:` key, so a job's GITHUB_TOKEN can NEVER read it.
+# The `capability` step measures that under the CI identity on every PR instead
 # of asserting it from documentation.
+#
+# The permission is necessary and NOT sufficient: the REPOSITORY-level rule-suites
+# endpoint does not accept fine-grained PATs at all. GitHub's own
+# "endpoints available for fine-grained personal access tokens" lists the ORG-level
+# `/orgs/{org}/rulesets/rule-suites` and not this one. Measured both ways (#4791):
+# a fine-grained token scoped to this repo WITH `Read access to administration and
+# metadata` still answers 403 `Resource not accessible by personal access token`,
+# while a classic PAT carrying `repo` returns the rows. So RULESET_AUDIT_TOKEN must
+# be a CLASSIC PAT with `repo`, or a GitHub App installation token with
+# Administration:read — granting more permission to a fine-grained token cannot
+# work, and the 403 says nothing about which permissions it holds.
 #
 # WHY IT IS NOT A REQUIRED CHECK. Scheduled and paths-filtered workflows cannot be
 # required contexts here. The BINDING copy of the declaration half is the
@@ -127,7 +137,10 @@ jobs:
             0) : ;;
             1) echo "::error::The watch could not answer. That is a failure of THIS WATCH,"
                echo "::error::not a 'nothing was bypassed' verdict. Most likely"
-               echo "::error::secrets.RULESET_AUDIT_TOKEN is unset or lacks Administration:read."
+               echo "::error::secrets.RULESET_AUDIT_TOKEN is unset, or is a FINE-GRAINED PAT."
+               echo "::error::The repo-level rule-suites endpoint does not accept fine-grained"
+               echo "::error::tokens no matter what permissions they carry (#4791) — use a classic"
+               echo "::error::PAT with 'repo', or a GitHub App token with Administration:read."
                exit 1 ;;
             2) echo "::warning::a merge past an actively failing required check — escalating." ;;
             *) echo "::error::Unexpected exit $code."; exit "$code" ;;
@@ -177,9 +190,20 @@ jobs:
                 'clean nor dirty. For as long as this holds, nothing is checking whether a PR was',
                 'merged past an actively failing required check (#4240).',
                 '',
-                'Most likely `secrets.RULESET_AUDIT_TOKEN` is unset or lacks **Administration: read**.',
-                'A workflow `GITHUB_TOKEN` cannot hold that permission — `permissions:` has no',
-                '`administration:` key — so this needs a PAT or GitHub App token that does.',
+                'Either `secrets.RULESET_AUDIT_TOKEN` is unset, or it is a **fine-grained** PAT.',
+                '',
+                'The permission is not the usual culprit, and the 403 does not report one: the',
+                '**repository**-level rule-suites endpoint does not accept fine-grained tokens at',
+                'all. GitHub lists only the org-level `/orgs/{org}/rulesets/rule-suites` as',
+                'available to them. Measured both ways (#4791) — a fine-grained token scoped to',
+                'this repo *with* `Read access to administration and metadata` still answers',
+                '`403 Resource not accessible by personal access token`, while a classic PAT with',
+                '`repo` returns the rows.',
+                '',
+                'So this needs a **classic PAT with `repo`**, or a GitHub App installation token',
+                'with Administration:read. Adding permissions to a fine-grained token cannot fix it.',
+                'A workflow `GITHUB_TOKEN` cannot be used either — `permissions:` has no',
+                '`administration:` key.',
                 '',
                 'This issue is refreshed while the watch stays blind and is closed by the watch',
                 'itself on the first run that produces a verdict.',

@@ -75,10 +75,22 @@ TOKEN IDENTITY -- read this before assuming the runtime lane works
 `rulesets/rule-suites` requires the repository **Administration: read** permission. The Actions
 `permissions:` block has no `administration:` key at all -- there is no way to grant a job's
 `GITHUB_TOKEN` that scope, so the workflow token CANNOT read this endpoint no matter how the job
-is written. The runtime lane therefore needs a PAT (or GitHub App token) in
-`secrets.RULESET_AUDIT_TOKEN`, and the workflow's `capability` step probes the endpoint with the
-plain `GITHUB_TOKEN` on every PR so that this claim is measured under the identity CI actually
-uses, not asserted from documentation. When the secret is absent the runtime lane SKIPS loudly
+is written. The runtime lane therefore needs a token in `secrets.RULESET_AUDIT_TOKEN`, and the
+workflow's `capability` step probes the endpoint with the plain `GITHUB_TOKEN` on every PR so that
+this claim is measured under the identity CI actually uses, not asserted from documentation.
+
+That permission is necessary and NOT sufficient, and the 403 does not tell you so (#4791). The
+REPOSITORY-level endpoint does not accept fine-grained PATs at all: GitHub's "endpoints available
+for fine-grained personal access tokens" lists the ORG-level `/orgs/{org}/rulesets/rule-suites`
+and not this one. Measured both ways -- a fine-grained token scoped to this repo WITH `Read access
+to administration and metadata` answers `403 Resource not accessible by personal access token`,
+while a classic PAT carrying `repo` returns the rows. So the secret must hold a CLASSIC PAT with
+`repo`, or a GitHub App installation token with Administration:read.
+
+This cost real time: the error text used to say "unset or lacks Administration:read", which reads
+as a permissions problem and sends the reader to grant a permission the token already had. A
+diagnostic that names the WRONG cause confidently is worse than one that says only "I could not
+read it" -- the message now names what the 403 can and cannot distinguish. When the secret is absent the runtime lane SKIPS loudly
 rather than reporting a clean window -- a permission-shaped absence is indistinguishable from a
 real one, and it always fails in the direction of a confident wrong answer.
 
