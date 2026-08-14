@@ -74,8 +74,8 @@ openbank:
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
-    decision-task-queue: ${OPENBANK_TEMPORAL_DECISION_TASK_QUEUE:openbank-campaign-decision}
   campaign:
+    decision-task-queue: ${OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE:openbank-campaign-decision}
     worker:
       enabled: ${CAMPAIGN_WORKER_ENABLED:true}
     # ADR-0200 D6: suppression defaults. Evaluated before consent, per party per window.

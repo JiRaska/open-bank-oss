@@ -24,7 +24,7 @@ class TemporalJourneySignaller(
     private val workflowClient: WorkflowClient,
     @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-campaign")
     private val taskQueue: String,
-    @ConfigProperty(name = "openbank.temporal.decision-task-queue", defaultValue = "openbank-campaign-decision")
+    @ConfigProperty(name = "openbank.campaign.decision-task-queue", defaultValue = "openbank-campaign-decision")
     private val decisionTaskQueue: String,
 ) : JourneySignaller {
 

@@ -121,7 +121,7 @@ spec:
             # Graph runs are isolated from the replay-compatible legacy workflow queue. A rollback
             # cannot hand their new command sequence to a legacy worker; it only pauses the graph
             # queue until the compatible image is restored.
-            - name: OPENBANK_TEMPORAL_DECISION_TASK_QUEUE
+            - name: OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE
               value: openbank-campaign-decision
             # Expand first: deploy and observe the isolated graph worker before a separately
             # reviewed GitOps change enables graph-campaign activation.
