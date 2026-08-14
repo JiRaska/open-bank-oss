@@ -75,6 +75,7 @@ export function StepEditor({
     switch (surface) {
       case 'HOME_BANNER': return t('Banner na domovské obrazovce', 'Home banner')
       case 'HOME_CAROUSEL': return t('Carousel na domovské obrazovce', 'Home carousel')
+      case 'STORIES': return t('Příběhy v aplikaci', 'In-app stories')
       case 'PRODUCT_FEED': return t('Feed produktů', 'Product feed')
       case 'REWARDS_HUB': return t('Centrum odměn', 'Rewards hub')
     }

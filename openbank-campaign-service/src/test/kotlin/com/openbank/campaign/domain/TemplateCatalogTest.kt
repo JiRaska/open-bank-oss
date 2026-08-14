@@ -92,6 +92,22 @@ class TemplateCatalogTest {
 class CampaignStepChannelTest {
 
     @Test
+    fun `a story step keeps the reviewed story template and app surface together`() {
+        val step = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER_STORY",
+            channel = Channel.BANNER,
+            variables = mapOf("offerTitle" to "Savings", "offerText" to "Four percent", "ctaText" to "Explore"),
+            delaySeconds = 0,
+            inAppSurface = InAppSurface.STORIES,
+            mobileDestination = MobileDestination.SAVINGS,
+        )
+
+        assertEquals(InAppSurface.STORIES, step.primaryDelivery(ContentVariant.A).inAppSurface)
+        assertEquals("MARKETING_PRODUCT_OFFER_STORY", step.primaryDelivery(ContentVariant.A).template)
+    }
+
+    @Test
     fun `a B cohort can take a different delivery path without changing its assigned treatment`() {
         val step = CampaignStep(
             order = 1,
@@ -176,6 +192,7 @@ class CampaignStepChannelTest {
             setOf(
                 "MARKETING_PRODUCT_OFFER_BANNER",
                 "MARKETING_PRODUCT_OFFER_CAROUSEL",
+                "MARKETING_PRODUCT_OFFER_STORY",
                 "MARKETING_PRODUCT_OFFER_PRODUCT_FEED",
                 "MARKETING_PRODUCT_OFFER_REWARDS_HUB",
             ),

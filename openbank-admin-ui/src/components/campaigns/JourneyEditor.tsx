@@ -31,7 +31,7 @@ export type EditorChannel = 'EMAIL' | 'PUSH' | 'BANNER'
 
 export type EditorMobileDestination = 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB'
 
-export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
+export type EditorInAppSurface = 'HOME_BANNER' | 'HOME_CAROUSEL' | 'STORIES' | 'PRODUCT_FEED' | 'REWARDS_HUB'
 
 export type EditorCondition = 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
 

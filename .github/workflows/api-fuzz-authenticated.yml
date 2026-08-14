@@ -94,6 +94,48 @@ jobs:
           for svc, why in skipped:
               print(f"::warning::api-fuzz-authenticated: {svc} EXCLUDED — {why}")
           print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
+
+          # A run's CONCLUSION is not a coverage statement, and this lane proved it: run
+          # 31688625829 (2026-08-13) is the first green this workflow ever produced, and it
+          # fuzzed ONE service — a `services:` override narrowed the matrix and nothing in the
+          # run name, conclusion or log said so. "API fuzz (authenticated): success" read
+          # identically to a full 18-service pass (#3039). So the scope is stated as a fraction
+          # of the money path, in the step summary where a reader lands, and an override is
+          # labelled as one instead of silently replacing the derived set.
+          denom = len(money)
+          summary = [
+              "## Authenticated fuzz scope",
+              "",
+              f"**{len(keep)} of {denom} money-path services actually fuzzed.**",
+              "",
+          ]
+          if override:
+              summary += [
+                  f"> ⚠️ **Scope was OVERRIDDEN by dispatch input** to {len(override)} requested "
+                  f"service(s) — this run does NOT measure the money path. "
+                  f"Requested: `{' '.join(override)}`",
+                  "",
+              ]
+              print(
+                  "::warning::api-fuzz-authenticated: scope OVERRIDDEN by dispatch input "
+                  f"({len(keep)} of {denom} money-path services) — this run is not a coverage measurement"
+              )
+          if skipped:
+              summary += ["| Excluded | Why |", "|---|---|"]
+              summary += [f"| `{svc}` | {why} |" for svc, why in skipped]
+              summary += [""]
+          summary += [f"Fuzzed: {', '.join(f'`{s}`' for s in keep) or '_none_'}"]
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a") as fh:
+              fh.write("\n".join(summary) + "\n")
+
+          # An empty scope must never read as a pass. Every candidate being excluded is the one
+          # state where this lane fuzzes nothing at all, and a zero-length matrix is precisely
+          # the shape that produces a green run about no subject — the failure mode this repo
+          # keeps rediscovering. Fail here, where the reason is still in hand.
+          if not keep:
+              print("::error::api-fuzz-authenticated: derived scope is EMPTY — nothing would be fuzzed")
+              raise SystemExit(1)
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("services=" + json.dumps(keep) + "\n")
           PY

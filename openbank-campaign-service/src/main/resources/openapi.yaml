@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.32.0
+  version: 1.37.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -116,6 +116,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Campaign'
+        '409':
+          description: A reviewed segment reference is no longer available
   /api/v1/campaigns/summary:
     get:
       tags: [Campaigns]
@@ -136,6 +138,25 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/CampaignSummary' }
+  /api/v1/campaigns/planning:
+    get:
+      tags: [Campaigns]
+      operationId: campaignPlanning
+      summary: Declared campaign entry plan
+      description: >-
+        Portfolio planning projection for scheduled, event-driven and manual campaigns. A scheduled
+        entry's nextScheduledWindowAt is calculated from the reviewed cadence in Europe/Prague; it
+        is not a delivery promise, audience-overlap estimate, or proof that Temporal started it.
+        Inactive schedules intentionally return no next window. NOTE the literal segment must keep
+        matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Planned campaign entries without party-level data
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CampaignPlan' }
   /api/v1/campaigns/cadences:
     get:
       tags: [Campaigns]
@@ -216,7 +237,25 @@ paths:
                     inAppSurface:
                       type: string
                       nullable: true
-                      enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+                      enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+  /api/v1/campaigns/guardrails:
+    get:
+      tags: [Campaigns]
+      summary: Current outbound-contact guardrails for Campaign Studio
+      operationId: campaignContactGuardrails
+      description: >-
+        The active platform limit and quiet period for outbound campaign contacts. This is not a
+        forecast of the audience that will be allowed: consent, suppression and rolling counts are
+        evaluated live for each person immediately before delivery. In-app placements have their
+        own rendering-time impression policy and are not counted as outbound sends here.
+        NOTE the literal path segment: it must keep matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Current platform contact policy, safe to explain but not override from Studio
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignContactGuardrails'
   /api/v1/campaigns/{id}:
     get:
       tags: [Campaigns]
@@ -257,6 +296,29 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         '409':
           description: Campaign is not a draft, caller is not its maker, or the definition is invalid
+  /api/v1/campaigns/{id}/duplicate:
+    post:
+      tags: [Campaigns]
+      summary: Reuse a campaign definition as a fresh draft
+      description: >-
+        Creates a new maker-owned DRAFT from the source definition. It does not copy lifecycle
+        state, approval, enrolments, sends, outcomes or other runtime history; the new campaign
+        must pass its own four-eyes approval before it can run. Current catalogues are validated
+        again so an obsolete segment, trigger or conversion rule cannot be copied into a draft.
+      operationId: duplicateCampaignAsDraft
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '201':
+          description: New reusable campaign draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          description: Source campaign not found
+        '409':
+          description: Source definition cannot be used with the current reviewed catalogues
   /api/v1/campaigns/{id}/submit:
     post:
       tags: [Campaigns]
@@ -630,6 +692,26 @@ components:
           format: int64
           description: Sum of the ADR-0200 D6 suppression outcomes (cap, quiet hours, consent).
         failed: { type: integer, format: int64 }
+    CampaignPlan:
+      type: object
+      required: [campaignId, name, state, entry]
+      properties:
+        campaignId: { type: string, format: uuid }
+        name: { type: string }
+        state: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED] }
+        entry: { type: string, enum: [SCHEDULED, EVENT, MANUAL] }
+        cadence: { type: string, nullable: true }
+        cadenceHumanForm: { type: string, nullable: true }
+        zone: { type: string, nullable: true, example: Europe/Prague }
+        nextScheduledWindowAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Next declared schedule window only for an ACTIVE scheduled campaign. Null is explicit
+            for inactive, expired, event-driven and manual entries; it is never a zero timestamp.
+        endAt: { type: string, format: date-time, nullable: true }
+        trigger: { type: string, nullable: true }
     Campaign:
       type: object
       properties:
@@ -708,7 +790,8 @@ components:
             Optional on create; absent means EMAIL. Must agree with the template's own channel —
             MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH and
             MARKETING_PRODUCT_OFFER_BANNER, MARKETING_PRODUCT_OFFER_CAROUSEL,
-            MARKETING_PRODUCT_OFFER_PRODUCT_FEED and MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
+            MARKETING_PRODUCT_OFFER_STORY, MARKETING_PRODUCT_OFFER_PRODUCT_FEED and
+            MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
             mismatch is rejected with 400.
         variables:
           type: object
@@ -762,7 +845,7 @@ components:
         inAppSurface:
           type: string
           nullable: true
-          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
           description: >-
             Closed authenticated-app inventory for a BANNER step. Absent retains HOME_BANNER for
             backwards-compatible placements. Each surface has its own reviewed template shape;
@@ -869,6 +952,19 @@ components:
         cap ends the journey as STOPPED_MAX_SENDS. Absent means the journey runs every step.
       properties:
         maxSendsPerParty: { type: integer, minimum: 1 }
+    CampaignContactGuardrails:
+      type: object
+      required: [maxSendsPerParty, sendWindowHours, quietHoursStart, quietHoursEnd, timeZone]
+      description: >-
+        Platform-wide rules currently applied to every e-mail or push handoff. They are observable
+        to explain a launch, never author-editable. Consent and party-specific counts remain live
+        checks at delivery, so this object never claims how many people will receive a campaign.
+      properties:
+        maxSendsPerParty: { type: integer, minimum: 1, example: 2 }
+        sendWindowHours: { type: integer, minimum: 1, example: 168 }
+        quietHoursStart: { type: integer, minimum: 0, maximum: 23, example: 21 }
+        quietHoursEnd: { type: integer, minimum: 0, maximum: 23, example: 8 }
+        timeZone: { type: string, example: Europe/Prague }
     ApprovalRequest:
       type: object
       deprecated: true
@@ -1008,7 +1104,7 @@ components:
           enum: [PUSH, BANNER]
         surface:
           type: string
-          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
         type:
           type: string
           enum: [IMPRESSION, CLICK, DISMISS]

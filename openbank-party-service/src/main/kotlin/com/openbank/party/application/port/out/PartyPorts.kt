@@ -5,6 +5,7 @@
 package com.openbank.party.application.port.out
 
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyChangeMateriality
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
@@ -175,3 +176,16 @@ interface PartyAccountGuardPort {
 // events are now written to `party_outbox` inside the state-change transaction (see
 // [PartyRepository.save] with a [PartyEvent]) and relayed by `PartyOutboxDispatcher`. Two
 // publishers on the same topic would race, and only one of them can be atomic.
+
+/**
+ * Counts party master-data changes by their materiality classification (ADR-0256 D1, #4458).
+ *
+ * A port rather than a direct `MeterRegistry` call so the use case stays framework-free, and a
+ * dedicated counter rather than a flag on an existing one because the whole point of the
+ * classification is that its three outcomes are separable: an environment where every update is
+ * `NO_CHANGE`, and one where a name edit path exists but never fires `MATERIAL`, look identical
+ * on any success/failure metric and different on this one.
+ */
+interface PartyChangeMetricsPort {
+    fun changeClassified(materiality: PartyChangeMateriality)
+}

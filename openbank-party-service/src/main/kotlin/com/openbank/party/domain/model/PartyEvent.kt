@@ -76,7 +76,24 @@ object PartyEvents {
 
     fun created(party: Party, at: Instant, actor: PartyActor): PartyEvent = lifecycle("PARTY_CREATED", party, at, actor)
 
-    fun updated(party: Party, at: Instant, actor: PartyActor): PartyEvent = lifecycle("PARTY_UPDATED", party, at, actor)
+    /**
+     * A master-data update, carrying its own materiality classification (ADR-0256 D1, #4458).
+     *
+     * [before] is the record as it was; the classification is computed here rather than taken as
+     * a parameter so no call site can declare a materiality the diff does not support. The two
+     * added keys (`materiality`, `materialFields`) are ADDITIVE — existing consumers parse the
+     * same fields they always did, and the wire schema version is a minor bump.
+     */
+    fun updated(before: Party, party: Party, at: Instant, actor: PartyActor): PartyEvent {
+        val classification = PartyChange.classify(before, party)
+        val base = lifecycle("PARTY_UPDATED", party, at, actor)
+        return base.copy(
+            envelope = LinkedHashMap(base.envelope).apply {
+                put("materiality", classification.materiality.name)
+                put("materialFields", classification.materialFields)
+            },
+        )
+    }
 
     fun kycStatusChanged(party: Party, at: Instant, actor: PartyActor): PartyEvent =
         lifecycle("KYC_STATUS_CHANGED", party, at, actor)

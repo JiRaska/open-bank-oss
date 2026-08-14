@@ -108,11 +108,75 @@ jobs:
       - name: Re-run only if the runner was reclaimed
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Belt AND braces with the `-R` on every call (see the header note): this job has no
+          # actions/checkout, so without one of the two `gh` exits 1 with "failed to determine
+          # base repo" — the defect behind 208 silent failures (#2898). `-R` stays because it
+          # is the explicit one; GH_REPO covers any `gh` call added later that forgets it, and
+          # is what check-gh-repo-context.py reads at PR time.
+          GH_REPO: ${{ github.repository }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_URL: ${{ github.event.workflow_run.html_url }}
           CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
           set -euo pipefail
+
+          # ── EVIDENCE (issue #4595) ──────────────────────────────────────────────────
+          # Every exit path records ONE line saying what was examined and what was decided,
+          # into the job summary as well as the log. Before this, a no-op and a success were
+          # both "green with a notice buried in a log nobody opens", so the only observable
+          # difference between "the control ran and correctly declined" and "the control ran
+          # and did nothing because it could not tell" was a log download. `decision=` is the
+          # field to read; it is one of skipped-queue-cancel / rerun-cancelled /
+          # no-spot-kill-signature / jobs-unreadable / rerun-partial.
+          decide() { # decide <decision> <human sentence>
+            echo "spot-kill-auto-retry run=${RUN_ID} conclusion=${CONCLUSION} decision=$1"
+            echo "| \`${CONCLUSION}\` | [${RUN_ID}](${RUN_URL}) | \`$1\` | $2 |" \
+              >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+          }
+          printf '%s\n' \
+            '| triggering conclusion | run | decision | detail |' \
+            '|---|---|---|---|' >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+
+          # ── TRANSIENT-FAILURE RETRY (issue #4595) ───────────────────────────────────
+          # The re-run API call itself can fail transiently, and when it does the whole point
+          # of this workflow is lost: the reclaimed run stays red and waits for the human
+          # round-trip #2330 removed. Measured on run 31710803432 — detection was correct
+          # ("1 job(s) interrupted mid-flight"), and `gh run rerun` answered
+          #   failed to rerun: HTTP 502: Server Error
+          # with no retry, so the step exited 1, raise-issue filed #4595, and the target run
+          # (31710216158) only reached attempt 2 seventeen minutes later by a human hand.
+          # Note what that failure was NOT: not "never triggered" and not "never detected" —
+          # 3 of 10 sampled runs the same day issued a real re-run that landed as attempt 2.
+          # Only 5xx / 429 / a transport error are retried. A 403/404/422 is a real answer
+          # (run too old, already re-running, no permission); retrying those just burns the
+          # budget and delays the alarm, so they fail immediately.
+          rerun_with_retry() {
+            # Written with `if ... fi`, never `[ x ] && cmd`, because a trailing AND-list that
+            # evaluates false is a FAILING last command and `set -e` would exit the whole step
+            # from inside the success path — the shape that turns a retry helper into a new
+            # silent failure.
+            local out
+            for attempt in 1 2 3; do
+              if out="$(gh run rerun -R "${GITHUB_REPOSITORY}" "$@" 2>&1)"; then
+                echo "${out}"
+                if [ "${attempt}" -gt 1 ]; then
+                  echo "gh run rerun succeeded on attempt ${attempt}/3 after a transient error"
+                fi
+                return 0
+              fi
+              echo "gh run rerun attempt ${attempt}/3 failed: ${out}"
+              case "${out}" in
+                *"HTTP 5"*|*"HTTP 429"*|*"Server Error"*|*"connection reset"*|*"EOF"*|*"timeout"*) ;;
+                *) echo "::error title=spot-kill auto-retry::Non-transient error from gh run rerun; not retrying: ${out}"
+                   return 1 ;;
+              esac
+              if [ "${attempt}" -lt 3 ]; then
+                sleep $((attempt * 15))
+              fi
+            done
+            echo "::error title=spot-kill auto-retry::gh run rerun failed 3/3 times on ${RUN_URL} (last: ${out}). Needs a manual re-run."
+            return 1
+          }
 
           if [ "${CONCLUSION}" = "cancelled" ]; then
             # A reclaim kills a RUNNING job. So if not one cancelled job ever started a step,
@@ -135,14 +199,16 @@ jobs:
                         --jq '[.jobs[] | select(.conclusion == "cancelled") | select((.steps | length) > 0)] | length')"
             if [ "${RUNNING:-0}" -eq 0 ]; then
               echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL} — no cancelled job had started a step, so no runner was reclaimed. Treating it as a deliberate cancel (#3208)."
+              decide skipped-queue-cancel "0 cancelled jobs had started a step — deliberate cancel, not a reclaim (#3208)"
               exit 0
             fi
 
             # At least one job was interrupted mid-flight: a reclaim is possible, so retry once.
             # `--failed` is a no-op against `cancelled`, so this is always the full re-run.
             echo "Re-running cancelled run ${RUN_URL} (${RUNNING} job(s) interrupted mid-flight; issue #2330)"
-            gh run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}"
+            rerun_with_retry "${RUN_ID}"
             echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
+            decide rerun-cancelled "${RUNNING} job(s) interrupted mid-flight — full re-run issued (attempt 2 of max 2)"
             exit 0
           fi
 
@@ -162,17 +228,20 @@ jobs:
 
           if [ -z "${killed}" ]; then
             echo "::warning title=spot-kill auto-retry::Could not read jobs for ${RUN_URL}; not re-running. A genuine reclaim will need a manual re-run."
+            decide jobs-unreadable "the jobs API could not be read — a genuine reclaim here needs a MANUAL re-run"
             exit 0
           fi
 
           if [ "${killed}" -eq 0 ]; then
             echo "::notice title=spot-kill auto-retry::${RUN_URL} failed with no spot-kill signature (no job has a cancelled step and no failed step) — treating it as a real failure and NOT re-running."
+            decide no-spot-kill-signature "no failed job has a cancelled step and no failed step — a real build failure"
             exit 0
           fi
 
           echo "Re-running ${RUN_URL}: ${killed} job(s) killed mid-step by a runner reclaim (issue #2841)"
-          gh run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed
+          rerun_with_retry "${RUN_ID}" --failed
           echo "::notice title=spot-kill auto-retry::Re-ran ${killed} spot-killed job(s) in ${RUN_URL} (attempt 2 of max 2; a second kill stays for a human)"
+          decide rerun-partial "${killed} job(s) carry the spot-kill signature — failed jobs re-run (attempt 2 of max 2)"
 
   # ── The alarm (issue #2901) ───────────────────────────────────────────────────
   # Why this exists: this workflow failed 208 times without anyone noticing. It is
@@ -248,6 +317,13 @@ jobs:
           repo\`, fixed in #2898). If the log says that, something dropped the \`-R\` or the
           \`GH_REPO\` env — \`.github/scripts/check-gh-repo-context.py\` should have caught it
           at PR time, so check that gate too.
+
+          **If instead the log says \`HTTP 5xx\` / \`Server Error\`, detection worked and only
+          the API call lost.** Since #4595 that call is retried 3x with backoff, so reaching
+          this issue on a 5xx means all three attempts lost — re-run the triggering run by
+          hand and check GitHub's status page. The \`decision=\` line in the retry job's log
+          and step summary says what was examined and what was decided on every path,
+          including the no-op ones.
 
           Read the step output from **after the last** \`##[endgroup]\`: GitHub prints the
           step's own script into the log header, so grepping the whole log matches strings

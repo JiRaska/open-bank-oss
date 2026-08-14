@@ -107,16 +107,55 @@ exactly the worklist you need for §4.
    older envelope.
 3. Remove any §3a exception you added in the same change, or it silently outlives the incident.
 
-**Do not treat a single red `Verify fleet attestations` run as the answer.**
-`.github/scripts/check-fleet-attestations.sh` special-cases only `NAME_UNKNOWN|MANIFEST_UNKNOWN|404`
-as "absent"; **every other** non-zero `cosign verify-attestation` exit — including a transient ECR
-throttle or 5xx — is counted and printed as `UNATTESTED`, i.e. a probe failure is reported as a
-supply-chain verdict. Measured 2026-08-13: run `31729895636` reported
+**Read the gate's EXIT CODE, not just its colour.**
+`.github/scripts/check-fleet-attestations.sh` exits `0` (every declared image attested), `1` (a real
+gap: `UNATTESTED` and/or `ABSENT`) or `2` (`UNKNOWN` — the probe could not run for at least one
+image: ECR throttle, 5xx, expired credentials, a cosign crash). **A 2 is not a verdict about any
+image**: re-run it, and if it persists treat it as a registry/credential problem, never as an image
+to rebuild. `Verify fleet attestations` prints a `could not run` warning annotation in that case, and
+the scheduled run deliberately does NOT open a fleet-gap issue for it.
+
+That distinction was paid for once. Until #1915 the loop special-cased only
+`NAME_UNKNOWN|MANIFEST_UNKNOWN|404` as absent and let **every other** non-zero cosign exit fall
+through to `UNATTESTED`, so a transient failure was published as a supply-chain verdict: run
+`31729895636` (2026-08-13) reported
 `UNATTESTED openbank-release-steward:sandbox-e80f4bc7 … 61 attested / 1 unattested / 62 total`,
 while the **24 other runs of that same gate that day passed on the identical, unchanged image**, and
 `cosign verify-attestation --key awskms:///alias/openbank-cosign-signing --type cyclonedx` against
-its digest `sha256:31d626…` returns *"The signatures were verified against the specified public
-key"*. Before acting on a red gate, re-run it and verify the named image by digest by hand.
+its digest `sha256:31d626…` returned *"The signatures were verified against the specified public
+key"*. Classification is now positive in both directions (an image is called `UNATTESTED` only when
+cosign says so in words) and each candidate failure is retried `VERIFY_ATTEMPTS` times first — but a
+red `1` still deserves the hand check: verify the named image by digest before rebuilding anything.
+
+### What to copy from this into the next probe
+
+Four rules, each of which this gate broke:
+
+1. **A checker that knows the difference must ENCODE the difference in the one thing its caller
+   reads.** Knowing "this was a throttle, not a gap" is worth nothing if both outcomes exit `1`:
+   the workflow's `if: failure()` fires either way and files the same supply-chain ticket. Give
+   "could not run" its own exit code (`2`) and branch on it in the caller —
+   `.github/scripts/check-verification-metadata-complete.py` had already paid for this once
+   (#4162, three shards dead of `Java heap space` reported as dependency drift). The reasoning
+   generalizes past exit codes: it is the same defect as a skipped/disabled adapter sharing a
+   `success` boolean with a real success — a distinct state needs a distinct value, not prose in
+   a log nobody parses.
+2. **Classify positively in both directions; never let the alarming verdict be the fallback
+   branch.** Every failure mode nobody enumerated lands in the fallback, and the set of ways a
+   registry call can fail is open-ended while the set of ways cosign says "not attested" is
+   closed. Match the closed sets — absence, and an explicit attestation verdict — and route the
+   remainder to "unknown". Written the other way round, the gate is guaranteed to manufacture a
+   false supply-chain finding eventually; that is not bad luck, it is the structure.
+3. **Retry only the class that is not a verdict.** Retrying a real `UNATTESTED` would slow a true
+   gap down and, worse, invites the next author to widen the retry until a verdict is retried
+   into existence. A verdict is final on the first attempt that produces one.
+4. **A "could not run" path is unfalsifiable by CI here — prove it another way or it is code
+   nobody has run.** No PR can summon an ECR throttle on demand, so the green run of this gate on
+   the fixing PR says nothing about the branch that matters. Prove it with a stubbed `COSIGN_BIN`
+   (a script that fails per-image the four ways) plus `check-fleet-attestations.sh --selftest`,
+   which needs no registry and runs in the lint job on every PR. Falsify the selftest itself by
+   reverting the classifier to the old fallback and confirming exactly the transient cases go
+   red — a classifier that has only ever agreed with you is unfalsified.
 
 ## 5. Related
 

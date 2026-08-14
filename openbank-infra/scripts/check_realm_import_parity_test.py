@@ -9,11 +9,14 @@ The script's own `--self-test` proves the COMPARISON is falsifiable: it feeds sy
 documents that must be flagged and one pair that must not. That is run here so a change
 to the script cannot land without it.
 
-What synthetic fixtures cannot check is whether KNOWN_STALE still describes the REAL
-committed templates. A baseline entry naming a role no template declares can never clear
-— the gap it describes does not exist, so the reconcile can never close it and the entry
-is permanent dead weight that also silences the dimension it sits in. That check has to
-read the actual files in the repo, so it lives here.
+What synthetic fixtures cannot check is whether IMPORT_BASELINE still describes the REAL
+committed templates. The baseline records what the deployed import artifact CARRIES, and
+that artifact is a strict ancestor of the template, so every baselined name must also be
+declared by a committed template. A name that is not is either a mis-transcribed baseline
+or an artifact entry git never reviewed — and in the second case the checker's own
+`importedNotDeclared` leg should have raised it, so the entry would be masking exactly the
+finding it exists to preserve. That check has to read the actual files in the repo, so it
+lives here.
 """
 
 import json
@@ -45,36 +48,39 @@ class SelfTest(unittest.TestCase):
 
 
 class BaselineDescribesRealTemplates(unittest.TestCase):
-    """Every KNOWN_STALE name must be declared by a committed template for that realm."""
+    """Every IMPORT_BASELINE name must be declared by a committed template for that realm."""
 
     def setUp(self):
         self.mod = _load_module()
         self.declared = self.mod.template_names(REPO)
 
     def test_every_baselined_realm_has_a_template(self):
-        for realm in self.mod.KNOWN_STALE:
+        for realm in self.mod.IMPORT_BASELINE:
             self.assertIn(
                 realm, self.declared,
-                f"KNOWN_STALE names realm {realm!r} but no *realm-template*.json declares it",
+                f"IMPORT_BASELINE names realm {realm!r} but no *realm-template*.json declares it",
             )
 
     def test_every_baselined_name_is_declared(self):
-        for realm, dims in self.mod.KNOWN_STALE.items():
+        for realm, dims in self.mod.IMPORT_BASELINE.items():
             for dim, names in dims.items():
                 unknown = sorted(set(names) - self.declared[realm][dim])
                 self.assertEqual(
                     unknown, [],
-                    f"KNOWN_STALE[{realm!r}][{dim!r}] names {unknown}, which the committed "
-                    f"template does not declare. Such an entry can never clear — the gap it "
-                    f"claims does not exist — and it silences a real gap of the same name.",
+                    f"IMPORT_BASELINE[{realm!r}][{dim!r}] names {unknown}, which the committed "
+                    f"template does not declare. The import artifact is a strict ancestor of "
+                    f"the template, so either the baseline was mis-transcribed, or the artifact "
+                    f"holds a name nobody reviewed — and that second case is one this checker's "
+                    f"importedNotDeclared leg must raise, not one the baseline may absorb.",
                 )
 
     def test_dimensions_are_the_ones_the_checker_compares(self):
-        for realm, dims in self.mod.KNOWN_STALE.items():
+        for realm, dims in self.mod.IMPORT_BASELINE.items():
             self.assertEqual(
                 sorted(dims), sorted(self.mod.DIMENSIONS),
-                f"KNOWN_STALE[{realm!r}] must declare every dimension explicitly (an omitted "
-                f"one reads as 'no known gap' and is indistinguishable from a decision",
+                f"IMPORT_BASELINE[{realm!r}] must declare every dimension explicitly (an omitted "
+                f"one reads as 'the artifact carries nothing in this dimension', which is a much "
+                f"stronger claim than the silence it looks like)",
             )
 
 

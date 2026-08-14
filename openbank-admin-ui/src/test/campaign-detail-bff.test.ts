@@ -132,4 +132,29 @@ describe('campaign detail bundle', () => {
       }),
     )
   })
+
+  it('creates a reusable campaign draft with the caller token and no browser-supplied identity', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      text: async () => JSON.stringify({ id: 'copy-123', state: 'DRAFT', name: 'Copy of spring offer' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { POST } = await import('@/app/api/campaigns/[id]/duplicate/route')
+    const res = await POST(
+      new Request('http://x/api/campaigns/abc/duplicate', { method: 'POST' }),
+      { params: Promise.resolve({ id: 'abc' }) },
+    )
+
+    expect(await res.json()).toMatchObject({ state: 'ok', campaign: { id: 'copy-123', state: 'DRAFT' } })
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/v1/campaigns/abc/duplicate'),
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ authorization: 'Bearer tok' }),
+      }),
+    )
+    expect(fetchMock.mock.calls[0]?.[1]).not.toHaveProperty('body')
+  })
 })

@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["replicaCount", "image", "oidc", "database", "catalogPacks", "bankV1CompatibilityEnabled", "service", "studio", "resources"],
+  "properties": {
+    "replicaCount": {"type": "integer", "minimum": 1},
+    "image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "tag", "pullPolicy"],
+      "properties": {
+        "repository": {"type": "string", "minLength": 1},
+        "tag": {"type": "string"},
+        "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+      }
+    },
+    "oidc": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["issuer", "scopeClaim", "readScope", "authorScope", "publishScope"],
+      "properties": {
+        "issuer": {"type": "string", "pattern": "^https://"},
+        "scopeClaim": {"type": "string", "minLength": 1},
+        "readScope": {"type": "string", "minLength": 1},
+        "authorScope": {"type": "string", "minLength": 1},
+        "publishScope": {"type": "string", "minLength": 1}
+      }
+    },
+    "database": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port", "name", "existingSecret", "usernameKey", "passwordKey"],
+      "properties": {
+        "host": {"type": "string"},
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "name": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"},
+        "existingSecret": {"type": "string"},
+        "usernameKey": {"type": "string", "minLength": 1},
+        "passwordKey": {"type": "string", "minLength": 1}
+      }
+    },
+    "catalogPacks": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["banking", "insurance"]}
+    },
+    "bankV1CompatibilityEnabled": {"type": "boolean"},
+    "service": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["port"],
+      "properties": {"port": {"type": "integer", "minimum": 1, "maximum": 65535}}
+    },
+    "studio": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "image", "publicUrl", "keycloak", "port"],
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "image": {
+          "type": "object", "additionalProperties": false,
+          "required": ["repository", "tag", "pullPolicy"],
+          "properties": {
+            "repository": {"type": "string"},
+            "tag": {"type": "string"},
+            "pullPolicy": {"enum": ["Always", "IfNotPresent", "Never"]}
+          }
+        },
+        "publicUrl": {"type": "string", "anyOf": [{"const": ""}, {"pattern": "^https://"}]},
+        "keycloak": {
+          "type": "object", "additionalProperties": false,
+          "required": ["publicUrl", "realm", "clientId", "existingSecret", "clientSecretKey", "authSecretKey"],
+          "properties": {
+            "publicUrl": {"type": "string", "anyOf": [{"const": ""}, {"pattern": "^https://"}]},
+            "realm": {"type": "string", "minLength": 1},
+            "clientId": {"type": "string", "minLength": 1},
+            "existingSecret": {"type": "string"},
+            "clientSecretKey": {"type": "string", "minLength": 1},
+            "authSecretKey": {"type": "string", "minLength": 1}
+          }
+        },
+        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+      }
+    },
+    "resources": {"type": "object"},
+    "podAnnotations": {"type": "object"},
+    "nodeSelector": {"type": "object"},
+    "tolerations": {"type": "array"},
+    "affinity": {"type": "object"}
+  }
+}

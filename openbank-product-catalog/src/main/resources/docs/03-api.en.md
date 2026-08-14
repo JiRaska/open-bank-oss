@@ -2,25 +2,33 @@
 
 ## Base path
 
-- **In-cluster base:** `http://openbank-product-catalog:8104/api/v1`
-- **Local dev:** `http://localhost:8104/api/v1`
-- **OpenAPI spec:** [`/q/openapi`](http://localhost:8104/q/openapi) (source of truth: `openapi.yaml`, `info.version` 0.1.0, OpenAPI 3.1.0)
-- **Swagger UI:** `/api/docs` (configured via `quarkus.swagger-ui.path`, `always-include: true`)
+- **In-cluster bases:** `http://openbank-product-catalog:8104/api/v1` and `/api/v2`
+- **Local dev:** `http://localhost:8104/api/v1` and `/api/v2`
+- **OpenAPI spec:** [`/q/openapi`](http://localhost:8085/q/openapi) on the management port (source of truth: `openapi.yaml`, `info.version` 2.0.0, OpenAPI 3.1.0)
+- **Swagger UI:** `http://localhost:8085/api/docs` (configured via `quarkus.swagger-ui.path`, `always-include: true`)
 
-The major of `openapi.yaml:info.version` equals `openbank.api.version` equals the URL `/api/v1` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)). The release version (`version.txt`) is a separate axis.
+The newest served major of `openapi.yaml:info.version` equals `openbank.api.version` and `/api/v2`.
+The same contract preserves `/api/v1`; the response filter reports the major of the actual request
+path. The release version (`version.txt`) is a separate axis ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+OpenAPI Generator 7.24.0 produces the coroutine JAX-RS v2 resource interfaces during compilation;
+the runtime resources implement those interfaces. Product Studio generates its operation-typed
+TypeScript client from the same contract before build, type-check and contract tests.
 
 ## Authentication
 
-There is **no service-level authentication wired in the code today** — the resources are not annotated with `@RolesAllowed`, and no Keycloak/OIDC extension is on the classpath. The service relies on:
+The service is an OIDC resource server. Reads require an authenticated bearer token. OpenBank
+deployments may use `ROLE_OPERATOR` / `ROLE_ADMIN`; provider-neutral deployments map configurable
+OAuth scopes (defaults `catalog:read`, `catalog:author`, `catalog:publish`) to the same core
+permissions. The service itself enforces maker != checker; OPA is defense in depth. Browser traffic
+still goes through the authenticated BFF (ADR-0056).
 
-- the API gateway / in-cluster network boundary for access control, and
-- CORS + security response headers configured in `application.yaml` (`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Content-Security-Policy: default-src 'self'`, HSTS, `Permissions-Policy`, `Referrer-Policy`).
-
-CORS origins are restricted to `http://localhost:3000` and `http://openbank-admin-ui:3000`. Adding role-gated mutations (e.g. a `ROLE_PRODUCT_ADMIN` for create/update/activate) is a sensible hardening follow-up — see [06 — Compliance](./06-compliance.md).
+CORS origins are restricted to the configured admin UI origins and expose `ETag`; `If-Match` is allowed for optimistic writes.
 
 ## Idempotency
 
-No `Idempotency-Key` mechanism is implemented. Create is naturally guarded by **unique product `code`**: a duplicate code returns `409 Conflict`. Updates and lifecycle transitions are by `id` and are effectively idempotent (repeating an activate yields the same ACTIVE state).
+No `Idempotency-Key` mechanism is implemented. Create is guarded by unique codes. v1 keeps its
+optional legacy revision and 409 behavior for compatibility. v2 draft updates and publication require
+a strong numeric `If-Match`: missing is 428 and stale/concurrent is 412.
 
 ## Endpoints
 
@@ -30,10 +38,10 @@ No `Idempotency-Key` mechanism is implemented. Create is naturally guarded by **
 |---|---|---|---|---|
 | GET | `/api/v1/products` | List products; optional `?type=&status=&currency=` filters | 200 array | — |
 | GET | `/api/v1/products/{id}` | Get one product | 200 | 404 |
-| POST | `/api/v1/products` | Create a product (`ProductRequest`) | 201 | 409 duplicate code |
-| PUT | `/api/v1/products/{id}` | Update a product (`ProductRequest`) | 200 | 404 |
-| POST | `/api/v1/products/{id}/activate` | Set status ACTIVE | 200 | 404 |
-| POST | `/api/v1/products/{id}/deactivate` | Set status INACTIVE | 200 | 404 |
+| POST | `/api/v1/products` | Create a product (`ProductRequest`) | 201 + ETag | 400 validation, 409 duplicate code |
+| PUT | `/api/v1/products/{id}` | Update a product (`ProductRequest`, optional `If-Match`) | 200 + ETag | 400, 404, 409 stale revision |
+| POST | `/api/v1/products/{id}/activate` | Legal transition to ACTIVE | 200 + ETag | 404, 409, 422 |
+| POST | `/api/v1/products/{id}/deactivate` | Legal transition to INACTIVE | 200 + ETag | 404, 409, 422 |
 | GET | `/api/v1/products/{id}/fees` | Fees attached to one product | 200 array | 404 |
 
 ### Fees
@@ -41,6 +49,22 @@ No `Idempotency-Key` mechanism is implemented. Create is naturally guarded by **
 | Method | Path | Purpose | Success |
 |---|---|---|---|
 | GET | `/api/v1/fees` | Bank-wide flattened fee schedule; optional `?type=&currency=&productCode=` | 200 array |
+
+### Generic governed catalog (v2)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v2/product-types` | List immutable trusted schemas |
+| GET | `/api/v2/product-types/{id}/versions/{version}` | Get one exact schema |
+| POST | `/api/v2/product-types/{id}/versions/{version}/validate` | Validate attributes with ordered violations |
+| POST / GET | `/api/v2/specifications[/{id}]` | Create/list/read canonical product identity |
+| POST / GET | `/api/v2/offerings[/{id}]` | Create/list/read a market context |
+| POST | `/api/v2/offerings/{id}/revisions` | Author a DRAFT revision |
+| GET | `/api/v2/offerings/{id}/revisions` | List immutable revision history |
+| GET / PUT | `/api/v2/offerings/{id}/revisions/{revisionId}` | Read/update a draft; PUT requires `If-Match` |
+| POST | `/api/v2/offerings/{id}/revisions/{revisionId}/publish` | Four-eyes publish with reason and `If-Match` |
+| GET | `/api/v2/products/{offeringId}?effectiveAt=` | Resolve published effective content for one deterministic offering |
+| GET | `/api/v2/events?after=&limit=` | Poll ordered durable change envelopes with an opaque cursor |
 
 ### Example — create a product
 
@@ -65,6 +89,7 @@ Content-Type: application/json
 ```http
 201 Created
 Content-Type: application/json
+ETag: "0"
 
 {
   "id": "5e9f8b6a-7c3d-4e1f-9a2b-1c8f7e6d5a4b",
@@ -73,6 +98,7 @@ Content-Type: application/json
   "type": "SAVINGS",
   "currency": "EUR",
   "status": "DRAFT",
+  "revision": 0,
   "fees": [ … ],
   "updatedAt": "2026-06-09T10:00:00Z"
 }
@@ -89,14 +115,14 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 ```json
 [
   {
-    "id": "prod-003:<feeId>",
+    "id": "<canonical-product-uuid>:<feeId>",
     "code": "CURRENT_PERSONAL_FX_CONVERSION",
     "name": "FX Conversion",
     "type": "TRANSACTION",
     "amount": 1.5,
     "currency": "EUR",
     "frequency": "PERCENTAGE",
-    "productId": "prod-003",
+    "productId": "<canonical-product-uuid>",
     "productCode": "CURRENT_PERSONAL",
     "productName": "Personal Current Account",
     "status": "ACTIVE",
@@ -107,9 +133,10 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Errors are returned as a minimal JSON object `{ "error": "<message>" }` with the appropriate HTTP status (`404` not found, `409` duplicate code). This is the `Error` schema in `openapi.yaml`. There is no shared RFC-7807 problem+json envelope wired here yet — aligning on the platform error envelope is a follow-up.
+Legacy v1 wire shapes remain compatible with the existing Pacts. v2 returns `ApiError`; schema
+validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
-- URL versioning: `/api/v1`.
+- URL versioning: preserved `/api/v1`, newest `/api/v2`.
 - The OpenAPI contract version (`openapi.yaml:info.version`) is the API-contract axis; any breaking change must bump it per `oasdiff` classification and update the contract + a contract test ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).

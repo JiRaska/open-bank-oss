@@ -69,6 +69,21 @@ describe('campaign customer experience preview', () => {
     expect(container.querySelector('[data-preview-surface="HOME_CAROUSEL"]')).toBeTruthy()
     expect(screen.getAllByText(/Home carousel/)).toHaveLength(2)
   })
+
+  it('renders a story as a first-party app surface, not a push notification', () => {
+    const { container } = render(
+      <LanguageProvider>
+        <CampaignExperiencePreview
+          step={{ ...push, channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_STORY', inAppSurface: 'STORIES' }}
+          campaignName="Summer saving"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(container.querySelector('[data-preview-surface="STORIES"]')).toBeTruthy()
+    expect(screen.getAllByText(/In-app story/)).toHaveLength(2)
+    expect(screen.getByText(/No interruption, no lock screen/)).toBeTruthy()
+  })
 })
 
 describe('campaign launch readiness', () => {
@@ -83,6 +98,8 @@ describe('campaign launch readiness', () => {
           conversionRule={null}
           contentExperiment={false}
           steps={[{ ...push, channel: 'EMAIL', mobileDestination: undefined }]}
+          stopAfter={null}
+          guardrails={{ maxSendsPerParty: 2, sendWindowHours: 168, quietHoursStart: 21, quietHoursEnd: 8, timeZone: 'Europe/Prague' }}
         />
       </LanguageProvider>,
     )
@@ -90,6 +107,7 @@ describe('campaign launch readiness', () => {
     expect(container.querySelector('[data-readiness="audience"][data-state="waiting"]')).toBeTruthy()
     expect(container.querySelector('[data-readiness="content"][data-state="waiting"]')).toBeTruthy()
     expect(container.querySelector('[data-readiness="policy"][data-state="ready"]')).toBeTruthy()
+    expect(screen.getByText(/max 2 contacts per person in 168 h/)).toBeTruthy()
     expect(screen.getByText(/Journey has no in-app step/)).toBeTruthy()
   })
 })

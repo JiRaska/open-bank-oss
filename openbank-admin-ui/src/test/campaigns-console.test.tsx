@@ -14,10 +14,15 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import CampaignsPage from '@/app/campaigns/page'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 
+// CampaignDetailPage can now take an operator to the newly created draft. The console tests render
+// that client page outside Next's App Router, so provide exactly the router capability it uses.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+
 const CAMPAIGN_ID = '019fb939-3e0a-7716-a1ed-7854754c8786'
 
 const LIST = {
   state: 'ok',
+  summary: [{ campaignId: CAMPAIGN_ID, enrolled: 80, sent: 40, suppressed: 32, failed: 3 }],
   items: [
     {
       id: CAMPAIGN_ID,
@@ -94,6 +99,18 @@ describe('campaign console', () => {
     // The checker is shown next to the maker: for an ACTIVE campaign that pair is the
     // audit-relevant fact, and a console that hides it makes four-eyes unverifiable by eye.
     expect(screen.getByText('ops-checker@openbank.local')).toBeTruthy()
+  })
+
+  it('makes portfolio delivery evidence actionable without calling suppression a failure', async () => {
+    vi.stubGlobal('fetch', mockFetch(LIST, DETAIL))
+    render(React.createElement(Providers, null, React.createElement(CampaignsPage)))
+
+    await waitFor(() => expect(screen.getByTestId('campaign-delivery-health')).toBeTruthy())
+    const panel = screen.getByTestId('campaign-delivery-health')
+    expect(panel.textContent).toMatch(/Sent.*40/)
+    expect(panel.textContent).toMatch(/Suppressed by policy.*32/)
+    expect(panel.textContent).toMatch(/Failed.*3/)
+    expect(panel.textContent).toMatch(/Conversions are not estimated/i)
   })
 
   it('a refused read does not render as an empty estate', async () => {

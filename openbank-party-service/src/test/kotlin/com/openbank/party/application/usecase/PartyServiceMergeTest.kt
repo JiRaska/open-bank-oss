@@ -40,6 +40,7 @@ class PartyServiceMergeTest {
         gdprAggregation = mockk(relaxed = true)
         accountGuard = mockk()
         metrics = mockk(relaxed = true)
+        changeMetrics = mockk(relaxed = true)
         rcPepper = Optional.empty()
         clock = Clock.fixed(now, ZoneOffset.UTC)
     }
