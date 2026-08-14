@@ -38,6 +38,9 @@ import java.util.UUID
  */
 data class EnrolmentOutcome(val enrolled: Int, val failed: Int)
 
+/** A missing campaign is distinct from a source definition that is no longer reusable. */
+class CampaignNotFoundException(id: UUID) : NoSuchElementException("campaign $id not found")
+
 /**
  * Campaign lifecycle use cases (ADR-0200). State transitions are deterministic domain operations;
  * four-eyes approval for activation is enforced at the REST layer (`campaign.activate`,
@@ -104,6 +107,30 @@ class CampaignService(
         )
         return campaigns.save(
             existing.revise(definition.copy(segmentRef = resolvedSegment)),
+        )
+    }
+
+    /**
+     * Reuses a reviewed journey as a fresh maker-owned draft.  It deliberately delegates to
+     * [createDraft] instead of copying the aggregate: a reusable campaign must pass today's
+     * segment, conversion-rule and trigger catalogues again, and may never inherit an approval, lifecycle
+     * state, enrolment, delivery record or active Temporal schedule.  A recurring schedule remains a
+     * visible DRAFT setting only; it still cannot exist in Temporal until the new draft passes
+     * its own four-eyes activation.
+     */
+    suspend fun duplicateAsDraft(id: UUID, createdBy: String): Campaign {
+        val source = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
+        return createDraft(
+            name = "Copy of ${source.name}",
+            goal = source.goal,
+            segmentRef = source.segmentRef,
+            steps = source.steps,
+            createdBy = createdBy,
+            stopCondition = source.stopCondition,
+            conversionRule = source.conversionRule,
+            holdoutPercent = source.holdoutPercent,
+            schedule = source.schedule,
+            trigger = source.trigger,
         )
     }
 

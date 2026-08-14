@@ -10,7 +10,9 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 import NewCampaignPage from '@/app/campaigns/new/page'
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
+const routerPush = vi.hoisted(() => vi.fn())
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPush }), useSearchParams: () => new URLSearchParams() }))
 
 const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
 
@@ -84,7 +86,10 @@ function renderDetail() {
 }
 
 describe('campaign studio', () => {
-  beforeEach(() => vi.unstubAllGlobals())
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    routerPush.mockReset()
+  })
 
   /**
    * ADR-0221 D1 step 2: the audience is a picker over versioned segment artifacts, and ADR-0201 D1
@@ -239,6 +244,27 @@ describe('campaign studio', () => {
     await waitFor(() => expect(screen.getByText('Submit for approval')).toBeTruthy(), { timeout: 8000 })
     // The whole point of four eyes: the author never sees the button that would let them skip it.
     expect(screen.queryByText('Approve and activate')).toBeNull()
+  }, 15000)
+
+  it('reuses a campaign as a new editable draft without changing the viewed campaign', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes(`/api/campaigns/${CAMPAIGN_ID}/duplicate`)) {
+        expect(init?.method).toBe('POST')
+        return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: 'draft-copy-123' } }) }
+      }
+      return { ok: true, status: 200, json: async () => detail('ACTIVE') }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-reuse-draft')).toBeTruthy(), { timeout: 8000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft copy' }))
+
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith('/campaigns/new?draft=draft-copy-123'))
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/campaigns/${CAMPAIGN_ID}/duplicate`,
+      { method: 'POST' },
+    )
   }, 15000)
 
   it('turns server-attributed app attention into a per-surface campaign funnel', async () => {
