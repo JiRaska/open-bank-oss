@@ -658,7 +658,8 @@ class CatalogPlatformResourceTest {
                 )
                 statement.execute(
                     """CREATE TRIGGER trg_fail_test_catalog_outbox BEFORE INSERT ON catalog_outbox """ +
-                        """FOR EACH ROW WHEN (NEW.event_type = 'com.openbank.catalog.revision_drafted') """ +
+                        """FOR EACH ROW WHEN (NEW.event_type = 'com.openbank.catalog.revision_drafted' """ +
+                        """AND NEW.payload ->> 'actorId' = 'test-operator') """ +
                         """EXECUTE FUNCTION fail_test_catalog_outbox()""",
                 )
             }
