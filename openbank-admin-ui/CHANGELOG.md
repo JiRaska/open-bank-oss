@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.127.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.1...admin-ui-v0.127.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** add app story campaign surface ([#4771](https://github.com/JiRaska/open-bank-oss/issues/4771)) ([2f9aa3e](https://github.com/JiRaska/open-bank-oss/commit/2f9aa3e6943eed6f95df1ae4bc1dac5be4c12c64))
+
 ## [0.126.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.0...admin-ui-v0.126.1) (2026-08-14)
 
 
