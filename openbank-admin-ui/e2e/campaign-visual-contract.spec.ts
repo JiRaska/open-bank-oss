@@ -77,6 +77,16 @@ test('keeps app-first authoring decisions visibly paired on a desktop canvas', a
   await expect(preview).toContainText(/Domovská obrazovka|Home/)
   await expect(readiness).toContainText(/12[ ,]480/)
 
+  // The entry explanation must sit below its title rather than consuming the title's width. This
+  // keeps a marketer's first decision legible at normal desktop widths and lets a narrow card
+  // turn its entry choices into readable rows rather than three crushed form controls.
+  const entry = page.locator('.campaign-entry-card')
+  await expect(entry.getByRole('heading', { name: /When the journey starts/ })).toBeVisible()
+  expect((await entry.getByRole('heading', { name: /When the journey starts/ }).boundingBox())?.width).toBeGreaterThan(250)
+  await page.setViewportSize({ width: 1280, height: 1050 })
+  expect(await entry.locator('.campaign-entry-options').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length)).toBeGreaterThanOrEqual(1)
+  expect(await entry.evaluate(el => el.scrollWidth)).toBeLessThanOrEqual(await entry.evaluate(el => el.clientWidth))
+
   // The companion panels are an intentional two-up composition on desktop. If a CSS regression
   // collapses either panel to a sliver or a stacked mobile layout, a marketer loses the immediate
   // "what will people see / is it safe to launch" feedback loop.

@@ -431,6 +431,15 @@ main {
 .campaign-section-heading p { margin: .03rem 0 .18rem; color: #8190a6; font-size: .64rem; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .campaign-section-heading h2 { color: var(--campaign-ink); font-size: .95rem; font-weight: 780; letter-spacing: -.025em; }
 .campaign-section-heading > p { margin: .08rem 0 0 auto; max-width: 19rem; color: var(--campaign-muted); line-height: 1.4; }
+.campaign-entry-card { container-type: inline-size; }
+.campaign-entry-card .campaign-section-heading { display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: .65rem; }
+.campaign-entry-card .campaign-section-heading > p { grid-column: 2; margin: .34rem 0 0; max-width: none; }
+.campaign-entry-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin-top: .75rem; }
+@container (max-width: 28rem) {
+  .campaign-entry-options { grid-template-columns: 1fr; }
+  .campaign-entry-options [data-entry-pick] { align-items: start; display: grid; gap: .45rem; grid-template-columns: minmax(7rem, .72fr) minmax(0, 1.28fr); }
+  .campaign-entry-options [data-entry-pick] > span:last-child { margin-top: 0 !important; }
+}
 .campaign-audience-card [data-segment],
 .campaign-entry-card [data-entry-pick] { transition: border-color .16s ease, box-shadow .16s ease, transform .16s ease, background .16s ease; }
 .campaign-audience-card [data-segment]:hover,

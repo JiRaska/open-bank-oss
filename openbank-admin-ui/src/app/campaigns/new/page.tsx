@@ -559,7 +559,7 @@ export default function NewCampaignPage() {
               )}
             </p>
           </div>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="campaign-entry-options">
             <button
               type="button"
               data-entry-pick="MANUAL"
