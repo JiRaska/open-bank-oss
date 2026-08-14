@@ -22,9 +22,21 @@ its own public repository**, that any bank can drop into its existing mobile app
 - Conformance testability: golden vectors + a test harness, so "QRlessPay-v1
   conformant" (spec §9) is checkable, not aspirational.
 
+**The governing invariant — QRlessPay is an extension of SPAYD, and SPAYD has no backend.**
+A SPAYD string is a payment descriptor that any bank's app parses from the bytes
+alone; there is no registry, no directory, no trust anchor to consult. QRlessPay
+carries that same descriptor over BLE instead of a QR image, and adds only things
+that keep the property: a signature, a session binding, an expiry, a proximity
+gate. The test any future addition has to pass is therefore **"can the payer
+verify this from the bytes in hand?"** — if it needs a lookup, it is no longer a
+SPAYD extension, and it is what makes two banks' apps stop interoperating off the
+profile alone. The SDK must not ship an API that invites one.
+
 **Non-goals**
 
 - No backend components. Settlement stays on each bank's IBAN/instant rail.
+- No trust anchor, registry, participant list or key-directory lookup, in any
+  binding — see the invariant above.
 - No UI kit in v0 (optional add-on later; it must stay separable).
 - No custody of long-term keys — session keys are in-memory only, per spec §4.
 - Web/PWA payee role — Web Bluetooth has no peripheral/advertising API. Out of
@@ -93,7 +105,7 @@ so interop and security review cover them for free.
 // Payee — "Receive nearby" screen scope
 val session = QrlessPayee.start(
     spayd = SpaydRequest(iban, amount, currency, name, message),
-    config = PayeeConfig(bankAttestation = null /* optional JWS */),
+    config = PayeeConfig(),
 )   // advertises + serves GATT; auto-stops on close()
 session.events  // Flow<PayeeEvent>: Advertising, BundleServed, SasRequested(code), Error
 
