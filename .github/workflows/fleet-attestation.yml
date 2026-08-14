@@ -144,13 +144,16 @@ jobs:
   # unread red schedule is how sbom-drift-scanner's `no-pod-found` sat unactioned. On the
   # scheduled run only (a PR failure is already visible to its author), file/refresh an
   # issue so the gap has an owner and a paper trail.
-  # `status != '2'` is the whole point of the exit-code split: a probe that could not run must
-  # not open (or bump) an issue asserting a latent admission failure. A 2 still leaves the
-  # scheduled run red, which is the honest signal for "unchecked".
+  # `status == '1'` — a POSITIVE condition, not `!= '2'`. The difference is what happens when
+  # the job dies without reporting at all (timeout, runner loss, an OOM): `status` is then the
+  # empty string, which satisfies `!= '2'` and would file a latent-admission-failure issue on
+  # the strength of no verdict whatsoever — the exact defect this whole PR is about, one layer
+  # up. Only an explicit 1 means "the gate reached a verdict and it is a gap"; every other
+  # failure is routed to raise-probe-issue below.
   raise-issue:
     name: Raise issue on gap
     needs: verify
-    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status != '2' }}
+    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5  # API calls only
     permissions:
@@ -200,7 +203,10 @@ jobs:
   raise-probe-issue:
     name: Raise issue on probe failure
     needs: verify
-    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status == '2' }}
+    # `!= '1'` is the complement of raise-issue above, so no failure mode falls between the
+    # two: an explicit 2, and also an empty status (the job died before it could report).
+    # An unchecked fleet needs an owner even when the reason is that nothing reported.
+    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status != '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5  # API calls only
     permissions:
@@ -212,15 +218,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GATE_STATUS: ${{ needs.verify.outputs.status }}
         # Body written to a file, never passed via --body: backticks inside a double-quoted
         # string are command substitution, and the failure is silent in the published text.
         run: |
           set -euo pipefail
           TITLE="Fleet attestation gate could not run (probe failure, not a fleet gap)"
           cat > "${RUNNER_TEMP}/body.md" <<EOF
-          The daily fleet-attestation gate exited **2**: for at least one image the probe could
-          not reach a verdict — an ECR throttle, a 5xx, expired credentials, DNS, or a cosign
-          failure — after its bounded retries.
+          The daily fleet-attestation gate did not return a verdict. Either it exited **2** — for
+          at least one image the probe could not reach a verdict (ECR throttle, 5xx, expired
+          credentials, DNS, a cosign failure) after its bounded retries — or the job died before
+          it could report at all (timeout, runner loss). Exit code as reported by the job:
+          \`${GATE_STATUS:-<none — the job did not report>}\`.
 
           **This is not a supply-chain finding.** It says nothing about whether any image is
           attested. Do not rebuild or re-attest anything on the strength of it.

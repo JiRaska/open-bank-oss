@@ -170,8 +170,12 @@ STUB
     for img in "$@"; do
       printf 'image: %s/%s\n' "$reg" "$img" >> "$tmp/gitops/images.yaml"
     done
+    # The threshold is passed EXPLICITLY rather than inherited: `VAR=x run_fixture` sets it on
+    # the function, not on the grandchild process, so an inherited value would silently be the
+    # default and the systemic case would prove nothing.
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
            VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
+           SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
     if [ "$code" != "$expected_exit" ]; then
@@ -185,6 +189,7 @@ STUB
       failures=$((failures + 1))
       return
     fi
+    LAST_OUT="$out"
     printf '  ok: %s (exit %s)\n' "$name" "$code"
   }
 
@@ -206,6 +211,26 @@ STUB
   run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \
     "0 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-bare:t" "openbank-fixture-flaky:t"
+  # A TOTAL outage must short-circuit the retries rather than multiply them past the job
+  # timeout — a killed job reports no exit code at all, and the caller then cannot tell a gap
+  # from a probe failure, which is the whole distinction this file exists to keep.
+  fixture_threshold=3
+  run_fixture "systemic outage -> retries off, still exit 2" 2 \
+    "images in a row could not be probed: this is systemic" \
+    "openbank-fixture-flaky:1" "openbank-fixture-flaky:2" "openbank-fixture-flaky:3" \
+    "openbank-fixture-flaky:4"
+  # ...and the SHORT-CIRCUIT itself, which the message above cannot prove: with the threshold
+  # at 3, the first three images retry once each and the fourth must not retry at all. Asserted
+  # as a count, because a fixture that only greps the banner passes with the retry suppression
+  # deleted — measured, not assumed.
+  retries="$(printf '%s' "${LAST_OUT:-}" | grep -c '  retry ' || true)"
+  if [ "$retries" -eq 3 ]; then
+    printf '  ok: systemic outage stops retrying (3 retries, not 4)\n'
+  else
+    printf '  FAIL: systemic outage stops retrying — expected 3 retry lines, got %s\n' "$retries"
+    failures=$((failures + 1))
+  fi
+  fixture_threshold=""
 
   rm -rf "$tmp"
 
@@ -353,6 +378,16 @@ UNKNOWN=0
 UNATTESTED_IMAGES=()
 ABSENT_IMAGES=()
 UNKNOWN_IMAGES=()
+CONSECUTIVE_UNKNOWN=0
+RETRIES_DISABLED=0
+
+# Retry is per-image, so a TOTAL registry outage would multiply: 62 images x (attempts-1) x
+# sleep, on top of every call's own latency, which overruns the job timeout — and a killed
+# job produces no exit code at all, so the careful 1-vs-2 distinction is lost exactly when it
+# matters most. Retrying is worth it for a flaky registry and worthless for a dead one, so
+# after this many images in a row have failed the probe, stop retrying and let the run finish
+# and report exit 2 honestly.
+SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
 for image in "${IMAGES[@]}"; do
   short="${image#"${ECR_REGISTRY}"/}"
@@ -371,6 +406,7 @@ for image in "${IMAGES[@]}"; do
     fi
     verdict="$(classify_failure "$err")"
     [ "$verdict" != "UNKNOWN" ] && break
+    [ "$RETRIES_DISABLED" -eq 1 ] && break
     [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
     printf '  retry %s/%s  %s  (probe failed, not a verdict)\n' \
       "$attempt" "$VERIFY_ATTEMPTS" "$short"
@@ -406,6 +442,19 @@ for image in "${IMAGES[@]}"; do
       UNKNOWN_IMAGES+=("$image")
       ;;
   esac
+
+  if [ "$verdict" = "UNKNOWN" ]; then
+    CONSECUTIVE_UNKNOWN=$((CONSECUTIVE_UNKNOWN + 1))
+    if [ "$RETRIES_DISABLED" -eq 0 ] && [ "$CONSECUTIVE_UNKNOWN" -ge "$SYSTEMIC_UNKNOWN_THRESHOLD" ]; then
+      RETRIES_DISABLED=1
+      printf '  ---- %s images in a row could not be probed: this is systemic, not flaky.\n' \
+        "$CONSECUTIVE_UNKNOWN"
+      printf '       Retries OFF for the rest of the run so it finishes inside the job timeout —\n'
+      printf '       a killed job reports NO exit code, which loses the gap-vs-probe distinction.\n'
+    fi
+  else
+    CONSECUTIVE_UNKNOWN=0
+  fi
 done
 
 FAIL=$((UNATTESTED + ABSENT))
