@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.14.0
+  version: 1.15.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -627,8 +627,24 @@ components:
 
     UpdatePartyRequest:
       type: object
+      description: >-
+        PATCH body — every field is optional and an omitted field leaves the stored value alone.
+        legalName, dateOfBirth and nationality are MATERIAL master data (ADR-0256 D1): changing
+        one classifies the emitted PARTY_UPDATED event as MATERIAL, which is a KYC re-screening
+        trigger. email, phone, tradingName and address are NON_MATERIAL.
       properties:
         legalName:
+          type: string
+        dateOfBirth:
+          type: string
+          format: date
+        nationality:
+          type: string
+          description: ISO 3166-1 alpha-2 residency/nationality country code.
+        email:
+          type: string
+          format: email
+        phone:
           type: string
         tradingName:
           type: string

@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Kafka event streams across all OpenBank services.
     All topics follow the naming convention: openbank.{domain}.{aggregate}.{event}
@@ -616,6 +616,25 @@ components:
               type: string
             legalName:
               type: string
+            materiality:
+              type: string
+              enum: [MATERIAL, NON_MATERIAL, NO_CHANGE]
+              description: >-
+                PARTY_UPDATED only. Publisher-declared materiality of the master-data change
+                (ADR-0256 D1, issue #4458) — never inferred by a consumer from the payload.
+                MATERIAL is the only value that is a KYC re-screening trigger
+                (PARTY_DATA_CHANGED); NON_MATERIAL covers contact details, trading name, address
+                and preferences; NO_CHANGE is an update that moved no compared field and is
+                deliberately NOT folded into NON_MATERIAL. Additive since party-service
+                openapi 1.15.0 — absent on events published before it, and on every event type
+                other than PARTY_UPDATED.
+            materialFields:
+              type: array
+              items:
+                type: string
+              description: >-
+                The changed fields that made the event MATERIAL (subset of legalName,
+                dateOfBirth, nationality, partyType). Empty for NON_MATERIAL and NO_CHANGE.
 
     ConsentEventPayload:
       allOf:
