@@ -14,6 +14,10 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import CampaignsPage from '@/app/campaigns/page'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 
+// CampaignDetailPage can now take an operator to the newly created draft. The console tests render
+// that client page outside Next's App Router, so provide exactly the router capability it uses.
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }))
+
 const CAMPAIGN_ID = '019fb939-3e0a-7716-a1ed-7854754c8786'
 
 const LIST = {
