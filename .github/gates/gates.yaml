@@ -87,6 +87,7 @@ gates:
   # rigged to fail in each distinct way (and to pass in the ways that must still pass, so a
   # fail-everything runner does not satisfy it either) and asserts the classification.
   - id: gate-runner-self-test
+    selftest_exempt: "is-a-test-suite — the run: IS run-gates.py --self-test"
     name: "gate runner self-test (the runner must be falsifiable too)"
     group: lint
     mode: enforced
@@ -94,6 +95,7 @@ gates:
       python3 .github/scripts/run-gates.py --self-test
 
   - id: yamllint
+    selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
     name: "yamllint"
     group: lint
     mode: enforced
@@ -152,6 +154,7 @@ gates:
         | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
+    selftest_exempt: "third-party — shellcheck's own test suite is not ours to run"
     name: "shellcheck"
     group: lint
     mode: enforced
@@ -320,6 +323,8 @@ gates:
     group: gitops
     mode: enforced
     budget_seconds: 30   # 7.6s in CI
+    selftest: python3 openbank-infra/scripts/gen-network-policies.py --self-test
+    selftest_expect: pass
     run: |
       # PyYAML is a SHARD prerequisite, not this gate's: run-gates.py imports it, so the
       # hash-pinned install that used to sit here now runs once per shard in ci.yml before
@@ -419,6 +424,8 @@ gates:
     name: "service runbook drift (issue #2255, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 openbank-infra/scripts/generate-service-runbooks.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/generate-service-runbooks.py --force
       git add -A --intent-to-add docs/runbooks/
@@ -544,6 +551,8 @@ gates:
     name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 openbank-infra/scripts/check-db-backup-associations.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
@@ -573,6 +582,38 @@ gates:
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
   # ==== supplychain ====================================================
+  # The fleet SBOM-attestation gate lives in the path-filtered fleet-attestation.yml, which
+  # can never be a required check — so its own falsification must run somewhere
+  # unconditional, and this is it. The selftest needs no registry and no credentials: it
+  # drives the whole loop against a stub cosign and asserts the three exit codes, including
+  # the exit-2 ("the probe could not run") branch that no PR can produce on demand by
+  # summoning an ECR throttle. Without this entry the branch that #1915 added is exercised
+  # only when someone edits one of five paths.
+  - id: fleet-attestation-classifier
+    name: "fleet-attestation gate classifies a probe failure as UNKNOWN, not as a fleet gap (issue #1915, enforced)"
+    group: supplychain
+    mode: enforced
+    # The gate IS the harness: its `run:` is the checker's own falsification suite, so a
+    # separate `selftest:` would be the same command executed twice for one signal.
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the gate's whole loop
+      against a stub cosign and asserts exit 0, 1 and 2, so its red is reachable by
+      construction; falsified in both directions (see the run: comment).
+    budget_seconds: 30   # 0.3s locally — no network, no registry
+    rationale: "Without it the gate's exit-2 branch is unreachable on any PR that does not touch fleet-attestation.yml, and a probe failure silently reads as a fleet-wide supply-chain gap (#1915: one ECR throttle published as UNATTESTED against an image that verifies by hand)."
+    review_after: "2027-02-14"
+    # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
+    # the floor is the number of cases that must run. It drops the day someone deletes one.
+    min_subjects: 14   # 15 today: 9 classifier + 5 end-to-end + 1 retry-count (2026-08-14)
+    run: |
+      # The gate IS the selftest here: the artifact under test is the classifier + exit-code
+      # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
+      # not have, and fleet-attestation.yml + auto-deploy.yml both do that with them).
+      # Falsified in both directions before wiring in: reverting the classifier's fallback to
+      # the pre-#1915 shape reddens 7 cases, and changing the final `exit 2` to `exit 1`
+      # reddens exactly the one case that asserts the distinction.
+      .github/scripts/check-fleet-attestations.sh --self-test
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
@@ -628,6 +669,7 @@ gates:
   # separately from the artifacts it covers — the exact shape that let 16 pacts go
   # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
   - id: governance-script-unit-tests
+    selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
@@ -718,6 +760,7 @@ gates:
   # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
   # jq against a throwaway fixture repo — no Gradle, no network.
   - id: auto-deploy-reconcile-probe-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "auto-deploy reconcile probe unit test"
     group: supplychain
     mode: enforced
@@ -730,6 +773,7 @@ gates:
   # (never self-clearing, and therefore something the scheduled tick must NOT silence).
   # Its ordering case is the load-bearing one — see the file's header.
   - id: can-i-deploy-block-classifier-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy block classifier unit test"
     group: supplychain
     mode: enforced
@@ -741,6 +785,7 @@ gates:
   # quieter than any block: `--latest main` on a push routinely answers about the PREVIOUS
   # build, so a green can be inherited from a commit that is not the one being deployed.
   - id: can-i-deploy-version-selector-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy version selector unit test"
     group: supplychain
     mode: enforced
@@ -754,6 +799,7 @@ gates:
   # one thing standing between a justified verdict and a borrowed one, and it is a pure function
   # with no network, which is exactly why its failure path can be exercised here.
   - id: pact-version-tree-equivalence-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "pact version tree-equivalence unit test (issue #3432, enforced)"
     group: supplychain
     mode: enforced
@@ -768,6 +814,7 @@ gates:
   # degrade to `no`, which on a dispatch is #3318's REFUSE. A reconcile that cannot verify must
   # not deploy.
   - id: pact-version-probe-fail-closed-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "pact version probe fails closed (issue #3432, enforced)"
     group: supplychain
     mode: enforced
@@ -783,6 +830,7 @@ gates:
   # exercised: a contentless counterpart dominating a healthy one, and every probe failure
   # degrading to `unknown` rather than to the reassuring answer.
   - id: blocking-counterpart-probe-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
     group: supplychain
     mode: enforced
@@ -830,6 +878,7 @@ gates:
   # case is the parser one: the CLI's matrix table TRUNCATES service names, so a parser
   # that reads it names a co-deploy set no dispatch can satisfy.
   - id: co-deploy-set-derivation-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "co-deploy set derivation unit test"
     group: supplychain
     mode: enforced
@@ -1083,6 +1132,8 @@ gates:
     group: registry
     mode: enforced
     budget_seconds: 90   # the registry shard is 20s in CI end to end
+    selftest: bash .github/scripts/check-adr-registry.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-adr-registry.sh
 
@@ -1183,6 +1234,8 @@ gates:
     name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
     group: registry
     mode: enforced
+    selftest: bash .github/scripts/check-eu-ai-act.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-eu-ai-act.sh
 
@@ -1227,6 +1280,7 @@ gates:
   # absent+creatable, absent+refused — and validates the stub first, so a stub that fell through to
   # the real `aws` cannot report a pass. Reintroducing the #3453 defect makes it go red.
   - id: ensure-ecr-repository
+    selftest_exempt: "is-a-test-suite — the deploy path needs AWS, so the classification harness is the whole gate"
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
@@ -1389,7 +1443,7 @@ gates:
     name: "the merged-past-red-check watch keeps its window, its key and its escalation (issue #4240, enforced)"
     group: registry
     mode: enforced
-    min_subjects: 6   # D1-D6, applied to the one watch workflow. 0 means the workflow moved.
+    min_subjects: 7   # D1-D7, applied to the one watch workflow. 0 means the workflow moved.
     selftest: |
       python3 .github/scripts/check-merged-past-red-check.py --self-test
     selftest_expect: pass
@@ -1595,6 +1649,8 @@ gates:
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/gen-ai-governance-snapshot.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
@@ -1889,6 +1945,7 @@ gates:
   # "no exclude-paths declared" case, where src/test must COUNT rather than be assumed excluded.
   # Falsified both ways before wiring in: breaking the exclusion makes it exit 1 with 4 failures.
   - id: record-deployment-version-resolver
+    selftest_exempt: "is-a-test-suite"
     name: "record-deployment version resolver (issue #3223, enforced)"
     group: api
     mode: enforced
@@ -1907,6 +1964,7 @@ gates:
   # claims keyed by directory name, so nine real findings were silently skipped. Both are now
   # self-test cases.
   - id: runtime-conformance-comparators
+    selftest_exempt: "is-a-test-suite"
     name: "runtime conformance: claim-vs-cluster comparators (enforced)"
     group: gitops
     mode: enforced
@@ -2020,6 +2078,8 @@ gates:
     name: "openapi-route-conformance — published contract vs served routes (enforced)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-openapi-route-conformance.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-openapi-route-conformance.py --enforce \
         --baseline .github/openapi-route-conformance-baseline.txt
@@ -2092,6 +2152,7 @@ gates:
   # rebuilt zero consumers and left services running pre-fix images while their pods read green.
   # The self-test pins the declaration matcher and both path matchers in both directions.
   - id: libs-change-dependents
+    selftest_exempt: "is-a-test-suite"
     name: "libs change fan-out is derived (issue #2983, enforced)"
     group: gitops
     mode: enforced
@@ -2257,7 +2318,10 @@ gates:
   #
   # Checks three agreements, each in BOTH directions: channel addresses vs the topics the service
   # actually produces, message names vs the event-type literals declared in its src/main, and
-  # payload properties vs the producing data class's primary-constructor properties. Names only —
+  # payload properties vs the producer's field names — the primary constructor where there is a
+  # data class, and the `mapOf`/`buildMap`/JSON-template construction site where there is not
+  # (that half was previously skipped, so a hand-built producer got no payload check at all).
+  # Names only —
   # types are deliberately out of scope (a Kotlin type maps to a JSON Schema type through Jackson,
   # and modelling that badly is worse than not modelling it); schema-compat-gate below owns types,
   # where it compares like against like across the PR base.
@@ -2355,6 +2419,30 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-critical-alert-egress.py
+
+  # A Helm valuesObject key the chart does not read is discarded silently — no error, no
+  # ArgoCD diff — so the manifest keeps asserting configuration that was never applied.
+  # apps/argo-rollouts.yaml put `metrics` at the top level instead of `controller.metrics`;
+  # no ServiceMonitor was created, Prometheus held zero rollout_* series, and three Rollout
+  # readiness alerts covered 0 of 21 Rollouts while evaluating `health: ok` (#4584).
+  # Decides by RENDERING with and without each top-level key, not by comparing against the
+  # chart's values.yaml — the schema comparison was built first and false-positived on 15 of
+  # 20 apps (charts read undeclared values, and accept free-form sub-trees). ENFORCED.
+  # Needs `helm` (preinstalled on ubuntu-latest) and egress to the public chart repos; the
+  # checker exits non-zero rather than passing if either is missing, because "could not
+  # check" and "checked and clean" must not render the same. ~35s for the 20 sources.
+  - id: helm-values-key-effect
+    name: "helm valuesObject keys have effect (rules.yaml: alerting, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "Helm discards an unknown top-level values key silently — no error and no ArgoCD diff — so a mis-nested key reads as applied while doing nothing; three such keys in argo-rollouts.yaml left all 21 Rollouts with zero Prometheus series and three alerts structurally unable to fire."
+    review_after: "2027-02-13"
+    selftest: python3 .github/scripts/check-helm-values-keys.py --self-test
+    selftest_expect: pass
+    min_subjects: 15   # 20 Helm sources with a valuesObject today (2026-08-13)
+    budget_seconds: 180
+    run: |
+      python3 .github/scripts/check-helm-values-keys.py
 
   # ADR-0030 D2: every money-path service must ship a structured STRIDE/DFD
   # threat model. stdlib-only gate, ratchets coverage (a new money-path
@@ -2487,6 +2575,8 @@ gates:
     name: "MCP real-port requires caller auth first (BLOCKER #2206, enforced)"
     group: security
     mode: enforced
+    selftest: bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh .
 
@@ -2730,6 +2820,7 @@ gates:
   # verdict made the earlier one unfalsifiable — inside the very script whose job is to make
   # a non-review impossible to mistake for a clean one.
   - id: agent-review-proof-falsifiable
+    selftest_exempt: "is-a-test-suite"
     name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
     group: lint
     mode: enforced
@@ -2750,6 +2841,7 @@ gates:
   # built the normalised set inline and stayed green when that function was gutted, the
   # counter-example never reaching the code under test.
   - id: agent-review-scope-falsifiable
+    selftest_exempt: "is-a-test-suite"
     name: "ADR-0251 review scope rule is falsifiable (enforced)"
     group: lint
     mode: enforced
@@ -2842,6 +2934,7 @@ gates:
   # whose whole thesis is checking things. See the config comment for what is selected and why
   # the style rules are not.
   - id: python-lint
+    selftest_exempt: "third-party — ruff's own test suite is not ours to run"
     name: "ruff over the governance scripts (#4339, enforced)"
     group: lint
     mode: enforced

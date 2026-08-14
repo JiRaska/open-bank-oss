@@ -50,6 +50,12 @@ jobs:
       - name: shellcheck
         run: shellcheck -S warning .github/scripts/check-fleet-attestations.sh
 
+      # The classifier decides whether a cosign failure is published as a supply-chain
+      # verdict or as "the probe could not run" (#1915). It needs no registry, so it is
+      # proven here on every PR — against inputs it must classify each of the three ways.
+      - name: Classifier selftest
+        run: .github/scripts/check-fleet-attestations.sh --selftest
+
   verify:
     name: Verify fleet attestations
     runs-on: ubuntu-latest
@@ -60,6 +66,10 @@ jobs:
     permissions:
       contents: read
       id-token: write # AWS OIDC
+    outputs:
+      # 0 = clean, 1 = a real fleet gap, 2 = the probe could not run (#1915). `raise-issue`
+      # reads this so a registry throttle never files a supply-chain gap ticket.
+      status: ${{ steps.gate.outputs.status }}
     env:
       AWS_REGION: eu-north-1
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
@@ -75,6 +85,15 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
 
+      # The one control the offline selftest cannot give. UNATTESTED is matched on cosign's
+      # own wording, so if a future cosign rewords it, every real gap silently re-routes to
+      # UNKNOWN: the gate would exit 2 forever, never file a gap, and read as an infra
+      # problem. This asks the real binary for a verdict we know is negative — a real fleet
+      # image with an attestation type it has never carried — and fails loudly if that stops
+      # reading as UNATTESTED. Read-only; verifies nothing about the fleet itself.
+      - name: Vocabulary control (cosign still says "not attested" the way we parse)
+        run: .github/scripts/check-fleet-attestations.sh --vocabulary-control
+
       - name: Verify every declared openbank-* image is attested
         id: gate
         env:
@@ -85,9 +104,21 @@ jobs:
         # pipeline below exits with `tee`'s status, so the gate printed
         # "FLEET ATTESTATION GATE: FAIL" and the step still went green. Verified against
         # run 29488481556, which reported FAIL on an absent image and concluded success.
+        #
+        # The exit code is captured rather than propagated straight through, because 1 and 2
+        # mean different things: 1 is a fleet gap, 2 is "the probe could not run" and is NOT a
+        # verdict about any image (#1915). Both still fail the step — an unchecked fleet is not
+        # a pass — but the code is published so `raise-issue` can refuse to file a supply-chain
+        # ticket for a registry throttle.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           .github/scripts/check-fleet-attestations.sh | tee "${RUNNER_TEMP}/gate.log"
+          status="${PIPESTATUS[0]}"
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 2 ]; then
+            echo "::warning title=Fleet attestation gate could not run::The probe failed for at least one image (registry/credential/tooling). This says nothing about whether the fleet is attested — do not report it as a gap."
+          fi
+          exit "$status"
 
       - name: Job summary
         if: always()
@@ -113,10 +144,16 @@ jobs:
   # unread red schedule is how sbom-drift-scanner's `no-pod-found` sat unactioned. On the
   # scheduled run only (a PR failure is already visible to its author), file/refresh an
   # issue so the gap has an owner and a paper trail.
+  # `status == '1'` — a POSITIVE condition, not `!= '2'`. The difference is what happens when
+  # the job dies without reporting at all (timeout, runner loss, an OOM): `status` is then the
+  # empty string, which satisfies `!= '2'` and would file a latent-admission-failure issue on
+  # the strength of no verdict whatsoever — the exact defect this whole PR is about, one layer
+  # up. Only an explicit 1 means "the gate reached a verdict and it is a gap"; every other
+  # failure is routed to raise-probe-issue below.
   raise-issue:
     name: Raise issue on gap
     needs: verify
-    if: ${{ failure() && github.event_name == 'schedule' }}
+    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status == '1' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5  # API calls only
     permissions:
@@ -154,4 +191,93 @@ jobs:
             gh issue comment "$existing" --body "$BODY"
           else
             gh issue create --title "$TITLE" --body "$BODY" --label fleet-health --label "severity:high"
+          fi
+
+  # Exit 2 is NOT a fleet gap, so it must not reach `raise-issue` above — but it must not
+  # vanish either. A registry or credential failure that persists is how the gate stops
+  # covering anything at all, and the whole point of the exit-code split is lost if the only
+  # consequence is a red schedule nobody reads (this repo's own lesson: a red push/schedule
+  # run is addressed to nobody). Separate issue, separate title, lower severity: an
+  # infrastructure ticket, never a supply-chain one. Recurrence is visible as comments on the
+  # same issue; a clean scheduled run closes it below.
+  raise-probe-issue:
+    name: Raise issue on probe failure
+    needs: verify
+    # `!= '1'` is the complement of raise-issue above, so no failure mode falls between the
+    # two: an explicit 2, and also an empty status (the job died before it could report).
+    # An unchecked fleet needs an owner even when the reason is that nothing reported.
+    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status != '1' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # API calls only
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Open or refresh the probe-failure issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GATE_STATUS: ${{ needs.verify.outputs.status }}
+        # Body written to a file, never passed via --body: backticks inside a double-quoted
+        # string are command substitution, and the failure is silent in the published text.
+        run: |
+          set -euo pipefail
+          TITLE="Fleet attestation gate could not run (probe failure, not a fleet gap)"
+          cat > "${RUNNER_TEMP}/body.md" <<EOF
+          The daily fleet-attestation gate did not return a verdict. Either it exited **2** — for
+          at least one image the probe could not reach a verdict (ECR throttle, 5xx, expired
+          credentials, DNS, a cosign failure) after its bounded retries — or the job died before
+          it could report at all (timeout, runner loss). Exit code as reported by the job:
+          \`${GATE_STATUS:-<none — the job did not report>}\`.
+
+          **This is not a supply-chain finding.** It says nothing about whether any image is
+          attested. Do not rebuild or re-attest anything on the strength of it.
+
+          What it DOES mean: for as long as it persists, the fleet is **unchecked**. A real gap
+          appearing now would not be reported, because the gate never reached the images.
+
+          Run: ${RUN_URL} — the job summary and the fleet-attestation-report artifact name the
+          images the probe could not reach.
+
+          Triage: re-run the workflow. If it recurs, treat it as an infrastructure problem
+          (ECR limits, the OIDC role, cosign availability). If instead EVERY image reports
+          UNKNOWN, suspect the classifier's vocabulary rather than the registry — the
+          Vocabulary control step in the same job is the discriminator, and it fails on its own
+          when cosign's not-attested wording moves.
+
+          This issue is closed automatically by the next clean scheduled run.
+          EOF
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file "${RUNNER_TEMP}/body.md"
+          else
+            gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/body.md" \
+              --label fleet-health --label "severity:medium"
+          fi
+
+  # A probe-failure issue that outlives the probe failure is the same disease as the red
+  # schedule nobody reads: it decays into background noise and the next one is ignored.
+  close-probe-issue:
+    name: Close probe-failure issue on a clean run
+    needs: verify
+    if: ${{ success() && github.event_name == 'schedule' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # API calls only
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Close it if one is open
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Fleet attestation gate could not run (probe failure, not a fleet gap)"
+          existing=$(gh issue list -R "${GITHUB_REPOSITORY}" --state open --search "$TITLE in:title" \
+            --json number --jq '.[0].number' || true)
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" -R "${GITHUB_REPOSITORY}" \
+              --comment "The gate ran clean: ${RUN_URL}. The probe is reaching the registry again."
           fi

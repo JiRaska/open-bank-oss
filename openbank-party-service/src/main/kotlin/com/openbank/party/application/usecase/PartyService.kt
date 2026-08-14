@@ -52,6 +52,8 @@ class PartyService : PartyUseCase {
 
     @Inject lateinit var metrics: DomainMetrics
 
+    @Inject lateinit var changeMetrics: PartyChangeMetricsPort
+
     @Inject lateinit var clock: Clock
 
     /** ADR-0072: pepper for RČ blind index. Optional — dedup is silently skipped when absent. */
@@ -185,11 +187,18 @@ class PartyService : PartyUseCase {
             phone = cmd.phone ?: party.phone,
             address = cmd.address ?: party.address,
             tradingName = cmd.tradingName ?: party.tradingName,
+            legalName = cmd.legalName ?: party.legalName,
+            dateOfBirth = cmd.dateOfBirth ?: party.dateOfBirth,
+            nationality = cmd.nationality ?: party.nationality,
             updatedAt = Instant.now(clock),
         )
+        // ADR-0256 D1 / #4458: the publisher declares materiality, computed from this diff. The
+        // event is published either way — account-service reconciles on PARTY_UPDATED regardless
+        // — but only MATERIAL is a KYC re-screening trigger, and NO_CHANGE is its own outcome.
+        changeMetrics.changeClassified(PartyChange.classify(party, updated).materiality)
         val saved = partyRepo.update(
             updated,
-            PartyEvents.updated(updated, Instant.now(clock), PartyActor.system("party-api")),
+            PartyEvents.updated(party, updated, Instant.now(clock), PartyActor.system("party-api")),
         )
         return saved
     }

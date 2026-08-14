@@ -138,6 +138,25 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/CampaignSummary' }
+  /api/v1/campaigns/planning:
+    get:
+      tags: [Campaigns]
+      operationId: campaignPlanning
+      summary: Declared campaign entry plan
+      description: >-
+        Portfolio planning projection for scheduled, event-driven and manual campaigns. A scheduled
+        entry's nextScheduledWindowAt is calculated from the reviewed cadence in Europe/Prague; it
+        is not a delivery promise, audience-overlap estimate, or proof that Temporal started it.
+        Inactive schedules intentionally return no next window. NOTE the literal segment must keep
+        matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Planned campaign entries without party-level data
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/CampaignPlan' }
   /api/v1/campaigns/cadences:
     get:
       tags: [Campaigns]
@@ -673,6 +692,26 @@ components:
           format: int64
           description: Sum of the ADR-0200 D6 suppression outcomes (cap, quiet hours, consent).
         failed: { type: integer, format: int64 }
+    CampaignPlan:
+      type: object
+      required: [campaignId, name, state, entry]
+      properties:
+        campaignId: { type: string, format: uuid }
+        name: { type: string }
+        state: { type: string, enum: [DRAFT, PENDING_APPROVAL, ACTIVE, PAUSED, CLOSED] }
+        entry: { type: string, enum: [SCHEDULED, EVENT, MANUAL] }
+        cadence: { type: string, nullable: true }
+        cadenceHumanForm: { type: string, nullable: true }
+        zone: { type: string, nullable: true, example: Europe/Prague }
+        nextScheduledWindowAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: >-
+            Next declared schedule window only for an ACTIVE scheduled campaign. Null is explicit
+            for inactive, expired, event-driven and manual entries; it is never a zero timestamp.
+        endAt: { type: string, format: date-time, nullable: true }
+        trigger: { type: string, nullable: true }
     Campaign:
       type: object
       properties:

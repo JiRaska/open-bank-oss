@@ -13,8 +13,11 @@ import com.openbank.productcatalog.domain.ProductSeed
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
+import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.interceptor.Interceptor
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
 import java.util.UUID
@@ -29,14 +32,20 @@ import java.util.UUID
  * reactive Panache synchronously at startup), so it completes before the service serves traffic.
  */
 @ApplicationScoped
-class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val mapper: ObjectMapper) {
+class ProductCatalogSeeder(
+    private val sf: Mutiny.SessionFactory,
+    private val mapper: ObjectMapper,
+    @ConfigProperty(name = "openbank.catalog.bank-v1-compatibility-enabled", defaultValue = "true")
+    private val bankCompatibilityEnabled: Boolean,
+) {
     private val log = Logger.getLogger(ProductCatalogSeeder::class.java)
 
     // The broad catch is deliberate: subscribeAndAwait wraps the reactive failure in an opaque
     // RuntimeException, so we inspect the cause chain (isUniqueViolation) and rethrow everything
     // that is NOT a lost seed race — a genuine DB fault must still fail the boot.
-    @Suppress("TooGenericExceptionCaught")
-    fun onStart(@Observes ev: StartupEvent) {
+    @Suppress("TooGenericExceptionCaught", "UnusedParameter")
+    fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION) ev: StartupEvent) {
+        if (!bankCompatibilityEnabled) return
         val inserted = try {
             seed()
         } catch (e: RuntimeException) {
@@ -45,7 +54,7 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
             // (code / legacy_code) constraints — its whole transaction rolls back. That is success, not
             // failure: the catalogue is seeded. Swallow only the unique-violation; rethrow anything else
             // so a genuine DB fault still fails the boot (a StartupEvent throwing crashloops the pod).
-            if (isUniqueViolation(e)) {
+            if (PostgresConflicts.isUniqueViolation(e)) {
                 log.info("Catalogue already seeded by another replica (concurrent first boot) — skipping.")
                 0
             } else {
@@ -58,7 +67,7 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
         val patched = try {
             backfillFees()
         } catch (e: RuntimeException) {
-            if (isUniqueViolation(e)) 0 else throw e
+            if (PostgresConflicts.isUniqueViolation(e)) 0 else throw e
         }
         if (patched > 0) log.info("Backfilled fee schedules for $patched catalogue product(s) from the seed.")
     }
@@ -126,22 +135,5 @@ class ProductCatalogSeeder(private val sf: Mutiny.SessionFactory, private val ma
                     }
                 }
         }
-    }
-
-    /** True if [e] (or any cause) is a Postgres unique-violation (SQLState 23505) — a lost seed race. */
-    private fun isUniqueViolation(e: Throwable): Boolean {
-        var cur: Throwable? = e
-        while (cur != null) {
-            val msg = cur.message.orEmpty()
-            val byMessage = "23505" in msg || "duplicate key value" in msg
-            if ((cur as? java.sql.SQLException)?.sqlState == "23505" ||
-                cur is org.hibernate.exception.ConstraintViolationException ||
-                byMessage
-            ) {
-                return true
-            }
-            cur = cur.cause
-        }
-        return false
     }
 }

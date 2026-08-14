@@ -23,7 +23,6 @@ function Card({ children }: { children: React.ReactNode }) {
   )
 }
 
-
 // ── Outcome metrics (#4462) ────────────────────────────────────────────────
 // Acceptance rate and review latency for one charter, from the ADR-0031 D4 proposal
 // store. Every figure is rendered WITH its denominator, and the denominators differ:
@@ -122,4 +121,3 @@ export function OutcomeMetricsCard({ items }: { items: ProposalOutcomeInput[] })
     </Card>
   )
 }
-

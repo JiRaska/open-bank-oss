@@ -24,6 +24,7 @@ object ToolServiceCatalog {
         "list_products" to "product-catalog",
         "get_product" to "product-catalog",
         "get_product_fees" to "product-catalog",
+        "get_catalog_revision" to "product-catalog",
         "list_ledger_journals" to "ledger-service",
         "get_trial_balance" to "ledger-service",
         "aml_list_cases" to "aml-service",

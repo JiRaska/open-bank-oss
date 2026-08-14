@@ -114,6 +114,52 @@ class PartyOutboxWriteIT {
         assertThat(payload).doesNotContain("\"aggregateId\"")
     }
 
+    private fun patchParty(id: UUID, body: String) {
+        Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            patch("/api/v1/parties/$id")
+        } Then {
+            statusCode(200)
+        }
+    }
+
+    /**
+     * ADR-0256 D1 / #4458. The claim is about the PAYLOAD, not the row's columns: sca-service
+     * wrote `eventType` to `sca_outbox.event_type` and not into the body, its test asserted the
+     * column, and the consumer's parser silently read `""` for 15 SENT events. A consumer of
+     * `openbank.party.events` sees these bytes and nothing else.
+     */
+    @Test
+    @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN", "ROLE_OPERATOR"])
+    fun `a material master-data edit is declared MATERIAL in the serialized outbox payload`() {
+        val id = createParty("outbox-material-${UUID.randomUUID()}@example.cz")
+
+        patchParty(id, """{"legalName":"Renamed Probe"}""")
+
+        val updated = outboxRows(id).single { it.first == "PARTY_UPDATED" }
+        assertThat(updated.second).contains("\"materiality\":\"MATERIAL\"")
+        assertThat(updated.second).contains("\"materialFields\":[\"legalName\"]")
+        assertThat(updated.second).contains("\"legalName\":\"Renamed Probe\"")
+        // `occurredAt` (never `timestamp`), and it must render with a `Z` offset: AuditConsumer
+        // parses with Instant.parse, which rejects any other offset and silently falls back to
+        // ingest time. This is the REAL producer mapper, not a test-local one.
+        assertThat(updated.second).containsPattern("\"occurredAt\":\"[0-9T:.\\-]+Z\"")
+    }
+
+    @Test
+    @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN", "ROLE_OPERATOR"])
+    fun `a contact-only edit is declared NON_MATERIAL and is not a re-screening trigger`() {
+        val id = createParty("outbox-nonmaterial-${UUID.randomUUID()}@example.cz")
+
+        patchParty(id, """{"phone":"+420999888777"}""")
+
+        val updated = outboxRows(id).single { it.first == "PARTY_UPDATED" }
+        assertThat(updated.second).contains("\"materiality\":\"NON_MATERIAL\"")
+        assertThat(updated.second).contains("\"materialFields\":[]")
+    }
+
     @Test
     @TestSecurity(user = "outbox-it", roles = ["ROLE_ADMIN", "ROLE_KYC"])
     fun `a KYC status change writes KYC_STATUS_CHANGED alongside the updated row`() {

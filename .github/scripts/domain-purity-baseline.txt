@@ -28,4 +28,3 @@ openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/identifiers/Lendin
 openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/identifiers/LendingIds.kt:import com.fasterxml.jackson.annotation.JsonValue
 openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/Money.kt:import com.fasterxml.jackson.annotation.JsonCreator
 openbank-libs-domain/src/main/kotlin/com/openbank/libs/domain/money/Money.kt:import com.fasterxml.jackson.annotation.JsonProperty
-openbank-product-catalog/src/main/kotlin/com/openbank/productcatalog/domain/Product.kt:import io.quarkus.runtime.annotations.RegisterForReflection

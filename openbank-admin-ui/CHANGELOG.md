@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.131.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.130.0...admin-ui-v0.131.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** show confirmed campaign outcomes ([#4789](https://github.com/JiRaska/open-bank-oss/issues/4789)) ([93ecf96](https://github.com/JiRaska/open-bank-oss/commit/93ecf96c51f8529a9466ccf0d0da2bb908a23c81))
+
+## [0.130.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.129.0...admin-ui-v0.130.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** add campaign delivery health ([#4788](https://github.com/JiRaska/open-bank-oss/issues/4788)) ([5c14837](https://github.com/JiRaska/open-bank-oss/commit/5c14837f1c90e8b097775ebcc1a55be5f5f0e2a7))
+* **campaign:** add planning radar ([#4787](https://github.com/JiRaska/open-bank-oss/issues/4787)) ([8e88e85](https://github.com/JiRaska/open-bank-oss/commit/8e88e851200173644f4c93dd1891ad18964c1fa4))
+
+## [0.129.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.128.0...admin-ui-v0.129.0) (2026-08-14)
+
+
+### Features
+
+* **product-catalog:** ship standalone platform and intelligence studio ([#4501](https://github.com/JiRaska/open-bank-oss/issues/4501)) ([cdd4af2](https://github.com/JiRaska/open-bank-oss/commit/cdd4af291b1f88500cdbcfdd3cf55dc316f94029))
+
+## [0.128.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.127.0...admin-ui-v0.128.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** add campaign touchpoint rail ([#4782](https://github.com/JiRaska/open-bank-oss/issues/4782)) ([0905941](https://github.com/JiRaska/open-bank-oss/commit/09059417a608440ee25c425c83141162445f1261))
+
 ## [0.127.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.1...admin-ui-v0.127.0) (2026-08-14)
 
 

@@ -172,6 +172,45 @@ class AgentChatServiceTest {
     }
 
     @Test
+    fun `a caller may narrow an agent to no tools but can never add one`() {
+        runBlocking {
+            coEvery { gateway.complete(any(), any(), any(), any()) } answers {
+                ModelResponse(content = "review complete", stopReason = StopReason.END, modelId = "mock-echo")
+            }
+            val service = AgentChatService().apply {
+                this.gateway = this@AgentChatServiceTest.gateway
+                this.registry = this@AgentChatServiceTest.registry
+                this.policyGate = mockk()
+                this.rateLimiter = mockk<CharterRateLimiter>().also {
+                    every { it.checkRunsPerDay(any()) } returns null
+                    every { it.checkTokensPerRun(any(), any()) } returns null
+                }
+                this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
+                this.runAuditor = this@AgentChatServiceTest.runAuditor
+                this.injectionGuard = passThroughGuard
+                this.killSwitch = noHaltKillSwitch
+            }
+
+            val result = service.run(
+                identity = com.openbank.agent.domain.policy.AgentIdentity("ui-assistant", plane = "control"),
+                systemPrompt = "review",
+                history = listOf(ChatMessage(ChatRole.USER, "snapshot")),
+                modelId = null,
+                trigger = "catalog_review",
+                offeredToolNames = emptySet(),
+                sensitive = true,
+                proposalExpected = true,
+            )
+
+            assertThat(result.toolCalls).isEmpty()
+            assertThat(result.isProposal).isTrue()
+            coVerify(exactly = 1) {
+                gateway.complete(any(), match { it.tools.isEmpty() }, true, "ui-assistant")
+            }
+        }
+    }
+
+    @Test
     fun `a rate-limited run never touches the model and audits DENIED`() {
         runBlocking {
             val service = AgentChatService().apply {

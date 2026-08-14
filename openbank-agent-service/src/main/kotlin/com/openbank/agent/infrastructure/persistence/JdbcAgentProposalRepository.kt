@@ -5,12 +5,15 @@
 
 package com.openbank.agent.infrastructure.persistence
 
+import com.fasterxml.jackson.core.type.TypeReference
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.agent.application.port.out.AgentProposalRepository
 import com.openbank.agent.domain.proposal.AgentProposal
 import com.openbank.agent.domain.proposal.ProposalState
 import jakarta.enterprise.context.ApplicationScoped
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.sql.Types
 import java.time.Instant
 import java.util.UUID
 import javax.sql.DataSource
@@ -24,7 +27,8 @@ import javax.sql.DataSource
  * path also cannot drive reactive Panache — so sync, immediate-consistency CRUD it is.
  */
 @ApplicationScoped
-class JdbcAgentProposalRepository(private val dataSource: DataSource) : AgentProposalRepository {
+class JdbcAgentProposalRepository(private val dataSource: DataSource, private val objectMapper: ObjectMapper) :
+    AgentProposalRepository {
 
     @Suppress("MagicNumber") // positional JDBC bind indexes
     override fun insert(proposal: AgentProposal) {
@@ -32,8 +36,8 @@ class JdbcAgentProposalRepository(private val dataSource: DataSource) : AgentPro
             c.prepareStatement(
                 """
                 INSERT INTO agent_proposal
-                  (id, title, rationale, suggested_action, proposed_by, proposed_at, state, model_id, correlation_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (id, title, rationale, suggested_action, proposed_by, proposed_at, state, model_id, correlation_id, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """.trimIndent(),
             ).use { ps ->
                 ps.setObject(1, proposal.id)
@@ -45,6 +49,7 @@ class JdbcAgentProposalRepository(private val dataSource: DataSource) : AgentPro
                 ps.setString(7, proposal.state.name)
                 ps.setString(8, proposal.modelId)
                 ps.setString(9, proposal.correlationId)
+                ps.setObject(10, objectMapper.writeValueAsString(proposal.metadata), Types.OTHER)
                 ps.executeUpdate()
             }
         }
@@ -127,6 +132,10 @@ class JdbcAgentProposalRepository(private val dataSource: DataSource) : AgentPro
         decisionReason = getString("decision_reason"),
         modelId = getString("model_id"),
         correlationId = getString("correlation_id"),
+        metadata = objectMapper.readValue(
+            getString("metadata") ?: "{}",
+            object : TypeReference<Map<String, String>>() {},
+        ),
     )
 
     private companion object {

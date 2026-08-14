@@ -49,6 +49,17 @@ class CampaignEngagementConsumerTest {
     }
 
     @Test
+    fun `projects a server-attributed story without treating it as a generic banner`(): Unit = runBlocking {
+        coEvery { repository.record(any()) } returns true
+
+        consumer().onEvent(attributedEvent().replace("HOME_CAROUSEL", "STORIES"))
+
+        val event = slot<CampaignEngagementEvent>()
+        coVerify(exactly = 1) { repository.record(capture(event)) }
+        assertThat(event.captured.surface).isEqualTo(InAppSurface.STORIES)
+    }
+
+    @Test
     fun `organic and client-forbidden conversion events never enter campaign reporting`(): Unit = runBlocking {
         consumer().onEvent("""{"eventId":"$eventId","type":"IMPRESSION","slot":"HOME_BANNER"}""")
         consumer().onEvent(attributedEvent().replace("IMPRESSION", "CONVERSION"))

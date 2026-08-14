@@ -30,6 +30,20 @@
 #     — argo-rollouts controller/metrics/prommetrics.go @ v1.9.0 (chart 2.41.0,
 #       apps/argo-rollouts.yaml). NOTE the label is `name`, NOT `rollout`.
 #
+# "VERIFIED" ABOVE MEANT VERIFIED AGAINST THE EXPORTER'S SOURCE, NOT AGAINST PROMETHEUS —
+# and those are different claims (#4584). The rollout_* names and labels were read off
+# prommetrics.go and are correct; nothing scraped the controller, so Prometheus held ZERO
+# rollout_* series and RolloutNoAvailableReplicas covered 0 of 21 Rollouts from the day it
+# was written. It never alerted and never errored: an expression over a metric that does not
+# exist is not an error in Prometheus, it is an empty result, which is indistinguishable
+# from "everything is fine" in the API, the UI, and `health: ok`. Root cause was a Helm
+# valuesObject key nested at the wrong level in apps/argo-rollouts.yaml, now fixed there and
+# gated by check-helm-values-keys.py.
+#
+# So: before trusting any rule in this file, ask Prometheus whether its metric family has
+# series — `count(<metric>)` — and read a non-empty answer, not the rule's `health` field.
+# A rule whose subject set is empty is the quietest possible failure.
+#
 # Each expression aggregates with `max by (...)` BEFORE the `and on (...)` join, rather
 # than comparing the raw series. That is not cosmetic: both exporters run a single replica
 # today, but argo-rollouts is documented right in apps/argo-rollouts.yaml as "scale to 2
@@ -88,6 +102,63 @@ spec:
               a Kyverno policy (see KyvernoAdmissionDenied), ImagePullBackOff, CrashLoopBackOff,
               OOMKilled, missing secret/configmap, or unschedulable.
               Check: kubectl -n {{ $labels.namespace }} describe deploy {{ $labels.deployment }}
+        # Deployments, STUCK MID-ROLLOUT — the gap DeploymentNoAvailableReplicas above
+        # cannot close, and the one that cost 5h40m on document-service (#4584).
+        #
+        # `availableReplicas` counts ready pods across ALL ReplicaSets the Deployment owns,
+        # old ones included. So a Deployment whose NEW pod never starts — ContainerCreating
+        # on a missing secret, ImagePullBackOff, CrashLoopBackOff — keeps the OLD pod ready,
+        # reports `available = 1`, and is correctly NOT "down": it is still serving. The
+        # availability alert above stays silent, and it is right to. What is wrong is that
+        # nothing else spoke: the deploy had failed, the new code was not running, and
+        # document-service published no pacts for 5h40m, which took `can-i-deploy` with it
+        # (13 of 30 auto-deploy runs failed, money-path sepa-payment left behind main).
+        #
+        # DO NOT write this against the `Available` condition. Measured during that outage:
+        # `Available=True / MinimumReplicasAvailable` while zero NEW replicas were ready —
+        # the obvious field, and the one that lies. `Progressing` told the truth.
+        #
+        # The Deployment controller sets Progressing=False for exactly two reasons —
+        # ProgressDeadlineExceeded and ReplicaSetCreateError — both of which mean a rollout
+        # that has given up. It is never False during a healthy rollout (that is
+        # True/ReplicaSetUpdated) and never False while parked at zero replicas (that is
+        # True/NewReplicaSetAvailable), so the scale-to-zero guard the other rules need is
+        # not load-bearing here; it is kept only for symmetry and to survive a future
+        # controller that reports otherwise.
+        #
+        # COLD-POD BEHAVIOUR AT t=0 — checked, because a boot-time reading is a fourth state
+        # next to healthy/degraded/absent, and this repo has already shipped an alert that
+        # fired 15m after every deploy because a gauge read decades on a fresh pod. A freshly
+        # created Deployment is Progressing=True/ReplicaSetUpdated from its first status
+        # write, and before that write the series is simply absent; `== 1` matches neither.
+        # So this rule reads QUIET on a cold pod and cannot fire on a deploy that is merely
+        # young — it can only fire after the workload's own progressDeadlineSeconds (600s,
+        # uniform across all 127 Deployments) has already elapsed. Measured on the live
+        # fleet: 127/127 currently Progressing=True, 0/127 false. The `for: 10m` on top puts
+        # time-to-page at ~20m, in the same band as the 15m siblings, with the extra dwell
+        # absorbing a slow-but-recovering rollout.
+        - alert: DeploymentProgressStalled
+          expr: |
+            max by (namespace, deployment) (
+              kube_deployment_status_condition{condition="Progressing", status="false"}
+            ) == 1
+              and on (namespace, deployment)
+            max by (namespace, deployment) (kube_deployment_spec_replicas) > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Deployment {{ $labels.deployment }} is stuck mid-rollout ({{ $labels.namespace }})"
+            description: >-
+              Deployment {{ $labels.deployment }} in namespace {{ $labels.namespace }} has
+              Progressing=False — it blew through progressDeadlineSeconds without its new pods
+              becoming ready. The service may still be SERVING on the previous ReplicaSet, so
+              this is not necessarily an outage; it IS a failed deploy, and the code you think
+              you shipped is not running. Do not trust the Available condition here — it reads
+              True in exactly this state. Likely causes: missing secret/configmap
+              (ContainerCreating), ImagePullBackOff, CrashLoopBackOff, OOMKilled, or
+              unschedulable. Check: kubectl -n {{ $labels.namespace }} rollout status deploy
+              {{ $labels.deployment }} and kubectl -n {{ $labels.namespace }} get pods.
         # StatefulSets — postgres/kafka and friends. Same class of gap.
         - alert: StatefulSetNoReadyReplicas
           expr: |

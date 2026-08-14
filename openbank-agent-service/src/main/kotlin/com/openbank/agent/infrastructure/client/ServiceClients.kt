@@ -117,6 +117,26 @@ interface ProductCatalogClient {
     fun getProductFees(@PathParam("id") id: String): JsonNode
 }
 
+/**
+ * Exact v2 revision read used by the governed catalog-review workflow (ADR-0259).
+ *
+ * This is deliberately a separate client from the legacy [ProductCatalogClient]: `/api/v1` and
+ * `/api/v2` are distinct compatibility surfaces, and a method-level `@Path("/api/v2/...")` on
+ * the v1 client would concatenate both prefixes. The service-to-service bearer is attached by the
+ * same OIDC filter, and the interface exposes no mutation method.
+ */
+@RegisterRestClient(configKey = "product-catalog")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v2")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+interface GenericCatalogReadClient {
+
+    @GET
+    @Path("/offerings/{offeringId}/revisions/{revisionId}")
+    fun getRevision(@PathParam("offeringId") offeringId: String, @PathParam("revisionId") revisionId: String): JsonNode
+}
+
 @RegisterRestClient(configKey = "ledger-service")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")

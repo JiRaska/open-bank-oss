@@ -299,6 +299,32 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * Real Flyway-backed projection fixture.  This deliberately writes the closed `STORIES` value
+     * through PostgreSQL rather than only mocking the Kafka consumer: a stale CHECK constraint
+     * otherwise keeps unit tests green while every live story event retries at the consumer.
+     */
+    private fun insertStoryEngagement(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_engagement_event
+                    (event_id, campaign_id, step_order, channel, surface, type, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setInt(3, 0)
+                statement.setString(4, "BANNER")
+                statement.setString(5, "STORIES")
+                statement.setString(6, "IMPRESSION")
+                statement.setObject(7, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `interaction validation resolves only server-owned context for the owning party`() {
@@ -336,6 +362,24 @@ class CampaignRestContractIT {
             get("/api/v1/campaigns/interactions/$interactionRef")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    fun `campaign engagement reports attributable story attention through the HTTP contract`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertStoryEngagement(campaignId)
+
+        When {
+            get("/api/v1/campaigns/$campaignId/engagement")
+        } Then {
+            statusCode(200)
+            body("[0].stepOrder", equalTo(0))
+            body("[0].channel", equalTo("BANNER"))
+            body("[0].surface", equalTo("STORIES"))
+            body("[0].type", equalTo("IMPRESSION"))
+            body("[0].count", equalTo(1))
         }
     }
 
@@ -717,6 +761,39 @@ class CampaignRestContractIT {
             body("find { it.cadence == 'DAILY_MORNING' }.humanForm", org.hamcrest.Matchers.containsString("09:00"))
             // Never UTC: a cron without a zone fires an hour or two off the customer's morning.
             body("find { it.cadence == 'DAILY_MORNING' }.zone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
+    @Test
+    fun `planning keeps a submitted recurring campaign visibly unplanned until activation`() {
+        val name = "planned-${UUID.randomUUID()}"
+        val id = Given {
+            contentType("application/json")
+            body(
+                draftBody(name).replace(
+                    "\"steps\":[",
+                    "\"schedule\":{\"cadence\":\"DAILY_MORNING\"},\"steps\":[",
+                ),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        submit(id)
+
+        When {
+            get("/api/v1/campaigns/planning")
+        } Then {
+            statusCode(200)
+            body("find { it.campaignId == '$id' }.entry", equalTo("SCHEDULED"))
+            body("find { it.campaignId == '$id' }.cadence", equalTo("DAILY_MORNING"))
+            body("find { it.campaignId == '$id' }.zone", equalTo("Europe/Prague"))
+            // A schedule is created only after four-eyes activation. Rendering a date here would
+            // make an unapproved campaign look operationally live.
+            body("find { it.campaignId == '$id' }.nextScheduledWindowAt", nullValue())
         }
     }
 

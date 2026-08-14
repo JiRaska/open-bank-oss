@@ -62,5 +62,6 @@ class CardPiiRetentionSchedulerTest {
             retentionYears = retentionYears,
             dryRun = dryRun,
             enabled = enabled,
+            domainMetrics = mockk(relaxed = true),
         )
 }

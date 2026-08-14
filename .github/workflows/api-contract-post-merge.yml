@@ -23,8 +23,14 @@
 # turns a silent contract break into an addressed issue.
 #
 # This does NOT block the bad merge — it has already happened. That is the trade:
-# immediate detection over a fleet-wide delay. Fix forward by bumping
-# info.version (the API axis is independent of version.txt — ADR-0048).
+# immediate detection over a fleet-wide delay.
+#
+# Fix forward, but re-classify the CURRENT tip first: because detection is post-merge,
+# a later spec merge can move the version before anyone reads the issue, and then a
+# further bump OVERSTATES the contract — the ADR-0048 defect in the opposite direction.
+# Measured on the first occurrence (#4620): #4194 left customer-edge at 1.34.0 with a new
+# endpoint, #4641 took 1.35.0 74 minutes later, and the tip was honest with no action.
+# The issue body carries the exact re-check command.
 # -----------------------------------------------------------------------------
 name: API contract post-merge guard
 
@@ -49,6 +55,15 @@ jobs:
     name: Classify the merged spec change
     runs-on: ubuntu-latest # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 10
+    outputs:
+      # Carries the classifier's own finding lines into the issue. A job output set by a
+      # step that then fails still reaches `needs` — which is the whole point here: the
+      # issue must name the spec and the versions itself, because the run log it used to
+      # defer to expires (90 days) and takes the only copy of them with it.
+      findings: ${{ steps.classify.outputs.findings }}
+      # The last-good sha. The remediation below needs it as the --base to re-classify the
+      # CURRENT tip against, and deriving it later from the issue text is guesswork.
+      base_sha: ${{ steps.base.outputs.base }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -80,6 +95,7 @@ jobs:
           echo "Classifying ${PUSH_BEFORE_SHA}..${GITHUB_SHA}"
 
       - name: "api-contract classification (ADR-0048 D5, enforced)"
+        id: classify
         if: steps.base.outputs.skip == 'false'
         # Same pinned + checksummed oasdiff as ci.yml's PR-time gate, and the same
         # script with the same flags — only the base differs. A second implementation
@@ -94,7 +110,22 @@ jobs:
           echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
           tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
           sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
-          python3 .github/scripts/check-api-contract.py --base "${{ steps.base.outputs.base }}" --enforce
+
+          # Capture the findings before failing, so the issue can quote them. `set +e` around
+          # the run only — the installs above must still abort on error, or a failed download
+          # would reach the classifier and report "no findings" for a check that never ran.
+          set +e
+          python3 .github/scripts/check-api-contract.py --base "${{ steps.base.outputs.base }}" --enforce \
+            2>&1 | tee "${RUNNER_TEMP}/classification.txt"
+          rc=${PIPESTATUS[0]}
+          set -e
+          {
+            echo "findings<<CLASSIFICATION_EOF"
+            # `|| true`: grep exits 1 on no match, which is the GREEN case, not an error.
+            grep '^::error::' "${RUNNER_TEMP}/classification.txt" | sed 's/^::error:://' || true
+            echo "CLASSIFICATION_EOF"
+          } >> "$GITHUB_OUTPUT"
+          exit "$rc"
 
   raise-issue:
     name: Raise issue on a mis-versioned spec
@@ -116,6 +147,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MERGED_SHA: ${{ github.sha }}
+          BASE_SHA: ${{ needs.classify.outputs.base_sha }}
+          # Via env, never interpolated into the run: body — the classifier's output is
+          # derived from repository content and has no business being parsed as shell.
+          FINDINGS: ${{ needs.classify.outputs.findings }}
         run: |
           set -euo pipefail
           TITLE="A spec merged to main with a mis-classified info.version"
@@ -135,15 +170,39 @@ jobs:
           at this repo's ~93 s median merge gap, to close a race that needs two PRs on one
           spec while only 1 in 60 PRs touches a spec at all).
 
-          Run: ${RUN_URL} — the log names the spec and the versions.
+          What the classifier found (verbatim — the run log expires, this does not):
 
-          **Fix forward.** Bump \`info.version\` to the next free version on a new PR; the API
-          axis is independent of \`version.txt\` (ADR-0048), and whoever lands second takes the
-          next version. Do not rewrite main. Re-check the version against the CURRENT main
-          before pushing — that is the same trap that produced this issue.
+          \`\`\`
+          ${FINDINGS:-(no findings captured — see the run log)}
+          \`\`\`
 
-          This issue is refreshed on each further occurrence; close it once a spec merge is
-          green again.
+          Run: ${RUN_URL}. Last-good base: \`${BASE_SHA}\`.
+
+          **Fix forward — but re-classify the CURRENT tip of main FIRST.** A later spec merge
+          may already have moved this version, and then the tip is correct and a further bump
+          would OVERSTATE the contract: a version consumers cannot distinguish from a real
+          change. That is the same defect in the opposite direction, and ADR-0048 forbids it
+          just as firmly. This is not hypothetical — it is what happened to the commit that
+          first raised this issue (#4620): \`25bd631\` (#4194) left \`openbank-customer-edge\` at
+          1.34.0 while adding \`POST /cards/delegated\`, and 74 minutes later an unrelated
+          additive change (#4641) took 1.35.0, making the tip honest with no action at all.
+          Bumping "to the next free version" as this issue used to instruct would have burned
+          1.36.0 on an empty diff and created the overstatement.
+
+          \`\`\`
+          git fetch origin main && git checkout origin/main
+          python3 .github/scripts/check-api-contract.py --base ${BASE_SHA} --enforce
+          \`\`\`
+
+          Bump only if that STILL reports the spec, and then to the next number free on LIVE
+          main — the API axis is independent of \`version.txt\` (ADR-0048), and whoever lands
+          second takes the next number. Never rewrite main.
+
+          **Close this issue when the command above reports the flagged spec clean** — not
+          when "a spec merge is green again". Those are different questions: the next green
+          spec merge is very often a DIFFERENT service, and its greenness says nothing about
+          whether this spec was ever remediated. This issue is refreshed on each further
+          occurrence, so re-check every spec named above before closing.
           EOF
           existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
           if [ -n "$existing" ]; then

@@ -90,6 +90,9 @@ async function resolveInCluster(svcKey: string): Promise<ResolvedService | null>
 }
 
 async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
+  if (svcKey === 'product-catalog' && process.env.CATALOG_STANDALONE_SIDECAR === 'true') {
+    return { url: 'http://127.0.0.1:8104', scaledToZero: false }
+  }
   if (inCluster()) {
     // Only proxy to services the cluster actually exposes; an undeployed service
     // resolves to null → 404 rather than a misleading hang.
@@ -107,7 +110,7 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
 
 const FORWARD_HEADERS = [
   'content-type', 'accept', 'authorization',
-  'idempotency-key', 'x-request-id', 'x-correlation-id',
+  'idempotency-key', 'if-match', 'x-request-id', 'x-correlation-id',
   // ADR-0155/ADR-0176: the maker's four-eyes retry carries this header once a checker has
   // approved (AuthorizeInterceptor). Without forwarding it, every retry looks identical to the
   // original request and gets 202'd again forever.
@@ -197,6 +200,8 @@ async function proxy(
     const responseHeaders = new Headers()
     const ct = upstream.headers.get('content-type')
     if (ct) responseHeaders.set('content-type', ct)
+    const etag = upstream.headers.get('etag')
+    if (etag) responseHeaders.set('etag', etag)
     responseHeaders.set('cache-control', 'no-store')
 
     const data = await upstream.arrayBuffer()
