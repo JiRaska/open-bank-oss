@@ -299,6 +299,32 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * Real Flyway-backed projection fixture.  This deliberately writes the closed `STORIES` value
+     * through PostgreSQL rather than only mocking the Kafka consumer: a stale CHECK constraint
+     * otherwise keeps unit tests green while every live story event retries at the consumer.
+     */
+    private fun insertStoryEngagement(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_engagement_event
+                    (event_id, campaign_id, step_order, channel, surface, type, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setInt(3, 0)
+                statement.setString(4, "BANNER")
+                statement.setString(5, "STORIES")
+                statement.setString(6, "IMPRESSION")
+                statement.setObject(7, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `interaction validation resolves only server-owned context for the owning party`() {
@@ -336,6 +362,24 @@ class CampaignRestContractIT {
             get("/api/v1/campaigns/interactions/$interactionRef")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    fun `campaign engagement reports attributable story attention through the HTTP contract`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertStoryEngagement(campaignId)
+
+        When {
+            get("/api/v1/campaigns/$campaignId/engagement")
+        } Then {
+            statusCode(200)
+            body("[0].stepOrder", equalTo(0))
+            body("[0].channel", equalTo("BANNER"))
+            body("[0].surface", equalTo("STORIES"))
+            body("[0].type", equalTo("IMPRESSION"))
+            body("[0].count", equalTo(1))
         }
     }
 
