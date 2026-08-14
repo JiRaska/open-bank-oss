@@ -28,9 +28,10 @@ alone; there is no registry, no directory, no trust anchor to consult. QRlessPay
 carries that same descriptor over BLE instead of a QR image, and adds only things
 that keep the property: a signature, a session binding, an expiry, a proximity
 gate. The test any future addition has to pass is therefore **"can the payer
-verify this from the bytes in hand?"** — if it needs a lookup, it is no longer a
-SPAYD extension, and it is what makes two banks' apps stop interoperating off the
-profile alone. The SDK must not ship an API that invites one.
+decide this from the bytes in hand and its own device state?"** — if it needs a
+lookup, it is no longer a SPAYD extension, and the lookup is what makes two
+banks' apps stop interoperating off the profile alone. The SDK must not ship an
+API that invites one. Normative statement: wire spec §11.
 
 **Non-goals**
 
