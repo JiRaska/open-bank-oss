@@ -358,6 +358,7 @@ class CatalogPlatformResourceTest {
     }
 
     @Test
+    @TestSecurity(user = OUTBOX_FAILURE_ACTOR, roles = ["ROLE_OPERATOR"])
     fun rollsBackDomainAuditAndOutboxTogether() {
         val specificationId = createSpecification("INS_TERM_LIFE_ROLLBACK")
         val offeringId = createOffering(specificationId, "INS_TERM_LIFE_ROLLBACK_CZ")
@@ -659,7 +660,7 @@ class CatalogPlatformResourceTest {
                 statement.execute(
                     """CREATE TRIGGER trg_fail_test_catalog_outbox BEFORE INSERT ON catalog_outbox """ +
                         """FOR EACH ROW WHEN (NEW.event_type = 'com.openbank.catalog.revision_drafted' """ +
-                        """AND NEW.payload ->> 'actorId' = 'test-operator') """ +
+                        """AND NEW.payload ->> 'actorId' = '$OUTBOX_FAILURE_ACTOR') """ +
                         """EXECUTE FUNCTION fail_test_catalog_outbox()""",
                 )
             }
@@ -749,6 +750,7 @@ class CatalogPlatformResourceTest {
     }
 
     private companion object {
+        const val OUTBOX_FAILURE_ACTOR = "outbox-rollback-test-operator"
         const val EXACT_PRICE = "10000000000000000000.10"
         const val LEGACY_INSURANCE_ATTRIBUTES =
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"CALCULATED"}"""
