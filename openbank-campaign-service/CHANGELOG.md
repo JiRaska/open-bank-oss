@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/v0.30.0...v0.31.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** add planning radar ([#4787](https://github.com/JiRaska/open-bank-oss/issues/4787)) ([8e88e85](https://github.com/JiRaska/open-bank-oss/commit/8e88e851200173644f4c93dd1891ad18964c1fa4))
+
+
+### Bug Fixes
+
+* **campaign:** project story engagement ([#4783](https://github.com/JiRaska/open-bank-oss/issues/4783)) ([de344a5](https://github.com/JiRaska/open-bank-oss/commit/de344a5446ced7ed61df4318cdbf608de34f8232))
+
 ## [0.30.0](https://github.com/JiRaska/open-bank-oss/compare/v0.29.1...v0.30.0) (2026-08-14)
 
 
