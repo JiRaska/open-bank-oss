@@ -273,6 +273,13 @@ class CampaignRestContractIT {
         return interactionRef
     }
 
+    /**
+     * A campaign row written straight through JDBC so a send-log / engagement row has something to
+     * hang off. It must still be a campaign the aggregate can hydrate: `steps_json` of `[]` violates
+     * `require(steps.isNotEmpty())`, and every read that loads the whole table — `GET
+     * /api/v1/campaigns/planning` — then answers 400 for the entire portfolio because of one row the
+     * HTTP API could never have created (#4825).
+     */
     private fun insertCampaignForSendLog(campaignId: UUID) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
@@ -288,13 +295,7 @@ class CampaignRestContractIT {
                 statement.setString(3, "prove private ownership validation")
                 statement.setString(4, "actives")
                 statement.setInt(5, 1)
-                // This parent is also visible to portfolio reads in the shared HTTP test database.
-                // Keep it a valid aggregate rather than a send-log-only shape, otherwise any list
-                // projection that reconstructs Campaign rejects the fixture before it can answer.
-                statement.setString(
-                    6,
-                    """[{"order":1,"template":"MARKETING_PRODUCT_OFFER","channel":"EMAIL","variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]""",
-                )
+                statement.setString(6, FIXTURE_STEPS_JSON)
                 statement.setInt(7, 0)
                 statement.setString(8, "ACTIVE")
                 statement.setString(9, "fixture")
@@ -1150,5 +1151,15 @@ class CampaignRestContractIT {
             statusCode(200)
             body("stopCondition", org.hamcrest.Matchers.nullValue())
         }
+    }
+
+    companion object {
+        /**
+         * The same single step [draftBody] posts. A JDBC-written fixture has to be a campaign the
+         * aggregate can hydrate, or it poisons every endpoint that lists the whole table.
+         */
+        private const val FIXTURE_STEPS_JSON =
+            "[{\"order\":1,\"template\":\"MARKETING_PRODUCT_OFFER\",\"channel\":\"EMAIL\"," +
+                "\"variables\":{\"offerTitle\":\"T\",\"offerText\":\"X\",\"ctaText\":\"Go\"},\"delaySeconds\":0}]"
     }
 }
