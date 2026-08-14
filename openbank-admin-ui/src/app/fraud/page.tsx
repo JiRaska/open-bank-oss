@@ -9,9 +9,11 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
-import { RefreshCw, ShieldAlert } from 'lucide-react'
+import { RefreshCw, ShieldAlert, CircleAlert, Clock3 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { svcUrl } from '@/lib/services/bff'
+import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
+import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 
 type ScoredRecord = {
   scoreId: string
@@ -26,27 +28,31 @@ type ScoredRecord = {
   createdAt: string
 }
 
-function scoreTone(score: number): { color: string; bg: string } {
-  if (score >= 80) return { color: '#dc2626', bg: '#fef2f2' }
-  if (score >= 50) return { color: '#d97706', bg: '#fffbeb' }
-  return { color: '#059669', bg: '#ecfdf5' }
+function scoreTone(score: number): Tone {
+  if (score >= 80) return 'danger'
+  if (score >= 50) return 'warning'
+  return 'success'
 }
 
 export default function FraudPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const [rows, setRows] = useState<ScoredRecord[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch(svcUrl('fraud-service', '/api/v1/fraud/review-queue', { limit: '50' }), { cache: 'no-store' })
-      if (!res.ok) throw new Error(String(res.status))
-      setRows(await res.json())
-      setError(null)
+      if (!res.ok) {
+        setUnavailable({ kind: await classifyBffFailure(res) })
+        return
+      }
+      const data = await res.json() as unknown
+      setRows(Array.isArray(data) ? data as ScoredRecord[] : [])
+      setUnavailable(null)
     } catch {
-      setError('unreachable')
+      setUnavailable({ kind: 'unreachable' })
     } finally {
       setLoading(false)
     }
@@ -54,37 +60,31 @@ export default function FraudPage() {
 
   useEffect(() => { void load() }, [load])
 
+  const critical = rows.filter(row => row.score >= 80).length
+  const elevated = rows.filter(row => row.score >= 50 && row.score < 80).length
+
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Fraud', 'Fraud')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ShieldAlert size={18} style={{ color: 'var(--accent)' }} />
-            {t('Fraud review fronta', 'Fraud review queue')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
-              'Platby označené enginem jako REVIEW (ADR-0230). Čtecí přehled — rozhodnutí patří do compliance toku, ne na klik.',
-              'Payments flagged REVIEW by the engine (ADR-0230). Read-only — resolution belongs to the compliance flow, not to a click.',
-            )}
-          </p>
-        </div>
-        <button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <PageHeader
+        title={t('Fraud review fronta', 'Fraud review queue')}
+        subtitle={t(
+          'Platby označené enginem jako REVIEW. Rozhodnutí zůstává ve čtyřočkovém compliance toku.',
+          'Payments flagged REVIEW by the engine. Resolution remains in the four-eyes compliance flow.',
+        )}
+        icon={<ShieldAlert size={20} style={{ color: 'var(--accent)' }} />}
+        actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
-      {error && (
-        <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--danger)', color: 'var(--danger)', fontSize: 13 }}>
-          {t('fraud-service je nedostupný.', 'fraud-service is unreachable.')}
-        </div>
-      )}
+      {!unavailable && <section style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 16, marginBottom: 16 }} aria-label={t('Souhrn fronty', 'Queue summary')}>
+        <StatCard label={t('Čeká na posouzení', 'Awaiting review')} value={rows.length} hint={t('maximálně 50 nejnovějších záznamů', 'up to 50 most recent records')} icon={<Clock3 size={15} />} tone={rows.length ? 'warning' : 'neutral'} />
+        <StatCard label={t('Kritické skóre', 'Critical score')} value={critical} hint={t('skóre 80 a více', 'score 80 and above')} icon={<CircleAlert size={15} />} tone={critical ? 'danger' : 'neutral'} />
+        <StatCard label={t('Zvýšené skóre', 'Elevated score')} value={elevated} hint={t('skóre 50–79', 'score 50–79')} icon={<ShieldAlert size={15} />} tone={elevated ? 'warning' : 'neutral'} />
+      </section>}
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        {unavailable ? <DataUnavailable kind={unavailable.kind} service="fraud-service" feature={t('Fraud review fronta', 'Fraud review queue')} lang={language} dense /> : (
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
@@ -109,9 +109,7 @@ export default function FraudPage() {
                     {r.accountId ? `${r.accountId.slice(0, 8)}…` : '—'}
                   </td>
                   <td style={{ padding: '10px 14px' }}>
-                    <span style={{ fontWeight: 800, color: tone.color, background: tone.bg, padding: '2px 8px', borderRadius: 10, fontSize: 12 }}>
-                      {r.score}
-                    </span>
+                    <StatusBadge status={String(r.score)} label={String(r.score)} tone={tone} />
                   </td>
                   <td style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>
                     {r.ruleVersion}
@@ -129,6 +127,7 @@ export default function FraudPage() {
             )}
           </tbody>
         </table>
+        )}
       </div>
     </div>
   )

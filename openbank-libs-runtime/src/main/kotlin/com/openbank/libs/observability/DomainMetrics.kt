@@ -298,6 +298,30 @@ class DomainMetrics {
         counter("openbank.authz.four_eyes", "action", action, "outcome", outcome)
     }
 
+    /**
+     * Increment when two authorization stores that are meant to hold the same grant give
+     * DIFFERENT answers to one access question (ADR-0232 D1 dual-run, issue #2993).
+     *
+     * A dual-run's risk is not "is each store written" but "can they disagree, and does anyone
+     * find out". Nothing in this fleet answers the second half: a grant revoked in one store and
+     * still live in the other is invisible, because the guards OR the two together and an OR
+     * cannot report which arm carried it. This counter is that report, sampled at the decision
+     * itself rather than by a nightly diff — so it observes the state the guard actually acted on.
+     *
+     * Emitting it is never a decision: the caller records the disagreement and then returns the
+     * same verdict it would have returned anyway. A metric that changed the answer would make the
+     * observation the thing being observed.
+     *
+     * @param question  the access question being answered, low-cardinality, e.g.
+     *                  `account_delegated_payment`
+     * @param direction which store was the permissive one — `legacy_only` (the store being
+     *                  migrated FROM permits, the new one does not) or `delegation_only` (the
+     *                  reverse). Never a store pair, an id, or a party: two values per question.
+     */
+    fun authorizationStoreDisagreement(question: String, direction: String) {
+        counter("openbank.authz.store_disagreement", "question", question, "direction", direction)
+    }
+
     // ── Outbox ────────────────────────────────────────────────────────────────
 
     /**

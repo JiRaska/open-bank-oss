@@ -21,7 +21,7 @@ describe('statusTone (ADR-0208 D2)', () => {
   })
 
   it('maps in-flight statuses to warning', () => {
-    for (const s of ['PENDING', 'PENDING_SCA', 'PENDING_APPROVAL', 'PROCESSING', 'QUEUED', 'DRAFT']) {
+    for (const s of ['PENDING', 'PENDING_SCA', 'PENDING_APPROVAL', 'PENDING_CONFIRMATION', 'PROCESSING', 'QUEUED', 'DRAFT']) {
       expect(statusTone(s), s).toBe('warning')
     }
   })

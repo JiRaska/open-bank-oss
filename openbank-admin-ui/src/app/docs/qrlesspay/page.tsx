@@ -39,7 +39,8 @@ export default function QrlessPayPage() {
       {/* Status strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
         <Pill color="#059669" bg="#ecfdf5" border="#6ee7b7" Icon={CheckCircle} label={t('QR SPAYD: živé v app', 'QR SPAYD: live in app')} />
-        <Pill color="#94a3b8" bg="#f8fafc" border="#cbd5e1" Icon={Circle} label={t('BLE proximity: navrženo', 'BLE proximity: planned')} />
+        <Pill color="#d97706" bg="#fffbeb" border="#fcd34d" Icon={Circle} label={t('BLE proximity: v app, spící (čeká na security gates)', 'BLE proximity: in app, dormant (awaiting security gates)')} />
+        <Pill color="#94a3b8" bg="#f8fafc" border="#cbd5e1" Icon={Radio} label={t('UWB: volitelné zesílení', 'UWB: optional enhancement')} />
         <Link href="/docs/adr/0095-qrlesspay-ble-proximity-spayd-payments" style={{ textDecoration: 'none' }}>
           <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
         </Link>
@@ -127,8 +128,8 @@ export default function QrlessPayPage() {
           <Info size={16} style={{ color: ACCENT, flexShrink: 0, marginTop: 1 }} />
           <div style={{ fontSize: 13, color: INK, lineHeight: 1.55 }}>
             {t(
-              'Závěr: QRlessPay není automaticky bezpečnější než QR. Inovace je UX (bez kamery, výběr ze seznamu, předvyplněno) a soukromí (IBAN není ve vzduchu). Aby byl prokazatelně bezpečnější, musí přijít volitelné vrstvy — bank atestace, VOP (až pro CZ), silná proximita (UWB) nebo ověřovací kód. Pozicujeme ho jako „stejně bezpečné jako QR, soukromější, příjemnější“.',
-              'Bottom line: QRlessPay is not automatically safer than QR. The innovation is UX (no camera, pick-from-list, prefilled) and privacy (no IBAN on air). To be provably safer it needs the optional layers — bank attestation, VOP (once available for CZ), strong proximity (UWB) or a verification code. We position it as “as safe as QR, more private, nicer to use”.',
+              'Závěr: QRlessPay není automaticky bezpečnější než QR — a v ose identity ani být nemůže, protože udělal stejnou volbu jako SPAYD: ověřitelnost ze samotných bajtů, žádný registr, žádný lookup. Proto je bank atestace mimo protokol (potřebovala by trust anchor). Inovace je UX (bez kamery, výběr ze seznamu, předvyplněno) a soukromí (IBAN není ve vzduchu). Zbývající vrstvy: VOP (až pro CZ), silná proximita (UWB), ověřovací kód a varování na zařízení plátce. Pozicujeme ho jako „stejně bezpečné jako QR, soukromější, příjemnější“.',
+              'Bottom line: QRlessPay is not automatically safer than QR — and on the identity axis it cannot be, because it made the same choice SPAYD did: verifiable from the bytes alone, no registry, no lookup. That is why bank attestation is out of the protocol (it would need a trust anchor). The innovation is UX (no camera, pick-from-list, prefilled) and privacy (no IBAN on air). The layers that remain: VOP (once available for CZ), strong proximity (UWB), a verification code, and payer-device warnings. We position it as “as safe as QR, more private, nicer to use”.',
             )}
           </div>
         </div>
@@ -182,15 +183,17 @@ export default function QrlessPayPage() {
           </div>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
-              'SDK pro Android (Kotlin) a iOS (Swift) pod Apache-2.0 pokryje: BLE scanning/advertising, GATT přenos, Ed25519 podepisování/ověřování a SPAYD parser. Banky doplní pouze svůj platební backend (IBAN rail). Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
-              'SDK for Android (Kotlin) and iOS (Swift) under Apache-2.0 will cover: BLE scanning/advertising, GATT transfer, Ed25519 signing/verification and SPAYD parser. Banks need only plug in their own payment backend (IBAN rail). Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
+              'Jádro protokolu je Kotlin Multiplatform (jedna auditovaná implementace ověřování), nad ním tenké idiomatické vazby: Android (Kotlin, Maven), iOS (Swift, SPM), React Native (TypeScript, npm) a Flutter (Dart, pub.dev) — obě mobilní cross-platform vazby delegují na stejná nativní jádra. Web není podporován (Web Bluetooth neumí roli příjemce). Banky doplní pouze svůj platební backend (IBAN rail) a vlastní potvrzovací UI + SCA. Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
+              'The protocol core is Kotlin Multiplatform (one audited verification implementation) with thin idiomatic bindings on top: Android (Kotlin, Maven), iOS (Swift, SPM), React Native (TypeScript, npm) and Flutter (Dart, pub.dev) — both cross-platform bindings delegate to the same native cores. Web is unsupported (Web Bluetooth cannot do the payee role). Banks plug in only their own payment backend (IBAN rail) plus their own confirmation UI + SCA. Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <Tag>KMP / Apache-2.0</Tag>
+            <Tag>{t('Swift · Kotlin · TypeScript · Dart', 'Swift · Kotlin · TypeScript · Dart')}</Tag>
             <Tag>ČBA / EPC</Tag>
             <Tag>{t('Otevřený protokol', 'Open protocol')}</Tag>
             <Tag>{t('Mezibankovní', 'Interbank')}</Tag>
+            <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-sdk.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Návrh SDK (spec)', 'SDK proposal (spec)')}</a>
           </div>
         </div>
       </Section>
@@ -270,7 +273,8 @@ const LAYERS: { Icon: React.ElementType; req: boolean; threatCs: string; threatE
   { Icon: KeyRound, req: true, threatCs: 'Integrita + vazba advert↔balík', threatEn: 'Integrity + advert↔bundle binding', mitCs: 'Ed25519 podpis nad SPAYD+nonce+exp+sid; hash pubkey v advertu sváže advert s GATT balíkem (nelze podstrčit).', mitEn: 'Ed25519 signature over SPAYD+nonce+exp+sid; the advert carries a pubkey hash binding it to the GATT bundle (no payload swap).' },
   { Icon: Radio, req: true, threatCs: 'Replay / odposlech', threatEn: 'Replay / eavesdrop', mitCs: 'nonce + exp ≤ 90 s + jednorázové session-id; zachycený balík nelze přehrát.', mitEn: 'nonce + exp ≤ 90 s + single-use session-id; a captured bundle cannot be replayed.' },
   { Icon: ArrowLeftRight, req: true, threatCs: 'Relay (vzdálený podvod)', threatEn: 'Relay (distance fraud)', mitCs: 'Baseline RSSI gate („přilož telefony“); UWB / BT6 secure ranging jako volitelné zesílení tam, kde je HW.', mitEn: 'Baseline RSSI gate (“hold phones close”); UWB / BT6 secure ranging as optional enhancement where hardware exists.' },
-  { Icon: ScanLine, req: true, threatCs: 'Záměna IBANu / identita', threatEn: 'IBAN substitution / identity', mitCs: 'Povinné potvrzení plátce (jméno + maskovaný IBAN). Volitelně VOP (CZ zatím ne) a bank atestace (JWS).', mitEn: 'Mandatory payer confirmation (name + masked IBAN). Optionally VOP (not CZ yet) and bank attestation (JWS).' },
+  { Icon: ScanLine, req: true, threatCs: 'Záměna IBANu / identita', threatEn: 'IBAN substitution / identity', mitCs: 'Povinné potvrzení plátce (jméno + maskovaný IBAN). Volitelně VOP (CZ zatím ne). Bank atestace je mimo protokol — vyžadovala by trust anchor, tedy mezibankovní koordinaci.', mitEn: 'Mandatory payer confirmation (name + masked IBAN). Optionally VOP (not CZ yet). Bank attestation is out of the protocol — it would need a trust anchor, i.e. interbank coordination.' },
+  { Icon: ArrowLeftRight, req: false, threatCs: 'Dvojitá platba / dva stejní odesílatelé', threatEn: 'Duplicate payment / two identical senders', mitCs: 'Varování na zařízení plátce: „tohle jsi zaplatil před chvílí“ a upozornění, když dvě dlaždice nesou stejné jméno (maskovaný IBAN už při výběru). Bez serveru.', mitEn: 'Payer-device warnings: “you paid this a moment ago”, and an alert when two tiles share a display name (masked IBAN shown at the point of choice). No server involved.' },
   { Icon: EyeOff, req: true, threatCs: 'Soukromí', threatEn: 'Privacy', mitCs: 'Po vzduchu jen křestní jméno + efemérní id; IBAN jen přes GATT read, který plátce aktivně vyvolá; rotující id + privacy MAC.', mitEn: 'Only first name + ephemeral id on air; IBAN only via the payer-initiated GATT read; rotating id + privacy MAC.' },
   { Icon: ShieldCheck, req: false, threatCs: 'Vysoká částka / MITM', threatEn: 'High value / MITM', mitCs: 'Volitelný SAS — 4-místný kód z efemérního DH, lidé ho porovnají; defeats MITM bez PKI.', mitEn: 'Optional SAS — a 4-digit code from an ephemeral DH that the humans compare; defeats MITM without PKI.' },
 ]

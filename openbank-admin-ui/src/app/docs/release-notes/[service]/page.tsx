@@ -14,6 +14,7 @@ import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { fetchReleaseNotes, SERVICE_RE } from '@/lib/docs/releases'
 import { prettyLabel } from '@/lib/discovery'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
+import styles from './ReleaseNotes.module.css'
 
 interface PageProps {
   params: Promise<{ service: string }>
@@ -90,34 +91,29 @@ export default async function ReleaseNotesPage({ params }: PageProps) {
           )}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div className={styles.releaseList}>
           {releases.map(rel => (
-            <div key={rel.tag} className="card" style={{ padding: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px', flexWrap: 'wrap' }}>
-                <span style={{
-                  fontFamily: 'JetBrains Mono, monospace', fontSize: '13px', fontWeight: 700,
-                  color: 'var(--accent)', background: 'var(--accent-bg)', padding: '2px 8px',
-                  borderRadius: '6px',
-                }}>{rel.tag}</span>
-                <span style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>{rel.name}</span>
-                {rel.publishedAt && (
-                  <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                    {formatDate(rel.publishedAt, lang)}
-                  </span>
-                )}
-                <a href={rel.url} target="_blank" rel="noreferrer"
-                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  <ExternalLink size={11} /> GitHub
-                </a>
+            <article key={rel.tag} className={styles.releaseCard}>
+              <div className={styles.releaseHead}>
+                <span className={styles.releaseTag}>{rel.tag}</span>
+                <span className={styles.releaseName}>{rel.name}</span>
+                <div className={styles.releaseMeta}>
+                  {rel.publishedAt && <span>{formatDate(rel.publishedAt, lang)}</span>}
+                  <a href={rel.url} target="_blank" rel="noreferrer" className={styles.sourceLink}>
+                    <ExternalLink size={12} /> GitHub
+                  </a>
+                </div>
               </div>
               {rel.body
                 ? (
-                  <MermaidEnhancer contentKey={`release-${service}-${rel.tag}`}>
-                    <MarkdownView markdown={rel.body} serviceName={service} />
-                  </MermaidEnhancer>
+                  <div className={styles.releaseBody}>
+                    <MermaidEnhancer contentKey={`release-${service}-${rel.tag}`}>
+                      <MarkdownView markdown={rel.body} serviceName={service} />
+                    </MermaidEnhancer>
+                  </div>
                 )
                 : <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Bez popisu.', 'No description.')}</p>}
-            </div>
+            </article>
           ))}
         </div>
       )}

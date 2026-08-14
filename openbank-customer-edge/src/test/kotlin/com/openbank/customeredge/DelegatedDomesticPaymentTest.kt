@@ -286,6 +286,37 @@ class DelegatedDomesticPaymentTest {
         ).isEqualTo(403)
     }
 
+    /**
+     * The legacy `account_authorizations` arm of the ADR-0232 D1 dual-run cannot move money
+     * (issue #2993), and this is the only place that says so.
+     *
+     * The test above covers a grantor-less `DELEGATED`, which is an upstream *bug*. This is the
+     * different and more dangerous case: `LEGACY_AUTHORIZATION` is the response account-service is
+     * SPECIFIED to send — `authorized: true`, and `grantorPartyId` deliberately omitted, because
+     * the endpoint emits grant evidence only for `DELEGATED`. So a legacy row authorises at
+     * account-service and is refused here, and that fail-closed outcome is incidental: it falls
+     * out of the edge needing a grantor to re-fetch the account, not out of any decision that the
+     * legacy store should not carry a debit.
+     *
+     * Which makes it exactly one field away from becoming a live over-grant — a second consumer
+     * reading `authorized` alone, or `grantorPartyId` being added to that branch for tidiness,
+     * would silently put the un-reconciled legacy store on the money path. Pinning it means such a
+     * change has to argue with a red test instead of shipping as a cleanup.
+     */
+    @Test
+    fun `a legacy-only authorization cannot move money`() {
+        val upstream = upstreamWith(
+            Response.ok("""{"authorized":true,"outcome":"LEGACY_AUTHORIZATION"}""").build(),
+        )
+
+        val resp = resource(upstream, mockk(relaxed = true))
+            .createDomesticPayment(body(), "idem-legacy", SCA_ID)
+
+        assertThat(resp.status).isEqualTo(403)
+        // The refusal must be a refusal all the way down: no payment may reach the rail.
+        verify(exactly = 0) { upstream.post(match { it.contains("/domestic-payments") }, any(), any(), any()) }
+    }
+
     /** The delegate still authenticates as themselves: no grant substitutes for SCA. */
     @Test
     fun `a delegated payment without SCA is refused`() {
