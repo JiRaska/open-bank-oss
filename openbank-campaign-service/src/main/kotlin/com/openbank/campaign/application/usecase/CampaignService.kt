@@ -8,6 +8,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
@@ -63,9 +64,9 @@ class CampaignService @Inject constructor(
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
     /**
-     * A Temporal workflow code change must not be activated until the rollback worker can replay
-     * its histories. Explicit graphs add markers and activity commands that pre-graph workers do
-     * not understand, so this remains off until the worker-versioning rollout has that guarantee.
+     * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
+     * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
+     * graph work rather than replaying its new commands in an older binary.
      */
     @ConfigProperty(name = "openbank.campaign.explicit-graph-activation-enabled", defaultValue = "false")
     private val explicitGraphActivationEnabled: Boolean,
@@ -293,7 +294,7 @@ class CampaignService @Inject constructor(
                     // next `enrol` completes the pair. The reverse order costs a party: the row is
                     // already committed, the skip below sees it, and that party is never contacted and
                     // never retried (#2953).
-                    journeys.startJourney(id, partyId)
+                    journeys.startJourney(id, partyId, campaign.journeyType())
                     val contentVariant = ContentVariant.assign(campaign.id, partyId)
                         .takeIf { campaign.hasContentExperiment }
                     enrolments.save(
@@ -324,6 +325,9 @@ class CampaignService @Inject constructor(
 
     suspend fun listEnrolments(id: UUID): List<Enrolment> = enrolments.listByCampaign(id)
 }
+
+private fun Campaign.journeyType(): JourneyType =
+    if (decisions.isEmpty()) JourneyType.LINEAR else JourneyType.DECISION_GRAPH
 
 /**
  * Campaign control targets only live journeys. Completed enrolments have no workflow to wake and

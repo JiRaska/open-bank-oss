@@ -9,6 +9,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
@@ -82,7 +83,7 @@ class CampaignScheduleLifecycleTest {
             calls += "close:$partyId"
         }
         override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
-        override fun startJourney(campaignId: UUID, partyId: UUID) = Unit
+        override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) = Unit
     }
 
     private fun campaign(state: CampaignState, schedule: CampaignSchedule?) = Campaign(
@@ -173,25 +174,24 @@ class CampaignScheduleLifecycleTest {
     }
 
     @Test
-    fun `an explicit graph remains inactive until its rollback-compatible worker rollout is enabled`(): Unit =
-        runBlocking {
-            val scheduler = RecordingScheduler()
-            val graph = campaign(CampaignState.PENDING_APPROVAL, null).copy(
-                steps = listOf(
-                    CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
-                    CampaignStep(2, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
-                    CampaignStep(3, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
-                ),
-                decisions = listOf(CampaignDecision(1, 86_400, 2, 3)),
-            )
+    fun `an explicit graph remains inactive until its isolated worker rollout is enabled`(): Unit = runBlocking {
+        val scheduler = RecordingScheduler()
+        val graph = campaign(CampaignState.PENDING_APPROVAL, null).copy(
+            steps = listOf(
+                CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(2, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(3, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+            ),
+            decisions = listOf(CampaignDecision(1, 86_400, 2, 3)),
+        )
 
-            assertThatThrownBy {
-                runBlocking { service(graph, scheduler).activate(campaignId, "checker@openbank.test") }
-            }
-                .isInstanceOf(IllegalArgumentException::class.java)
-                .hasMessageContaining("rollback-compatible Temporal worker")
-            assertThat(scheduler.calls).isEmpty()
+        assertThatThrownBy {
+            runBlocking { service(graph, scheduler).activate(campaignId, "checker@openbank.test") }
         }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("explicit decision journeys are held")
+        assertThat(scheduler.calls).isEmpty()
+    }
 
     @Test
     fun `submitting a scheduled draft does not start it enrolling`(): Unit = runBlocking {

@@ -74,6 +74,7 @@ openbank:
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
+    decision-task-queue: ${OPENBANK_TEMPORAL_DECISION_TASK_QUEUE:openbank-campaign-decision}
   campaign:
     worker:
       enabled: ${CAMPAIGN_WORKER_ENABLED:true}

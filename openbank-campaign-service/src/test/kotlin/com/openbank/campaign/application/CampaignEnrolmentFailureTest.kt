@@ -9,6 +9,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
@@ -92,7 +93,7 @@ class CampaignEnrolmentFailureTest {
         override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) = Unit
         override fun signalCampaignClosed(campaignId: UUID, partyId: UUID) = Unit
         override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
-        override fun startJourney(campaignId: UUID, partyId: UUID) {
+        override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) {
             check(partyId !in failFor) { "Namespace default is not found" }
             started += partyId
         }

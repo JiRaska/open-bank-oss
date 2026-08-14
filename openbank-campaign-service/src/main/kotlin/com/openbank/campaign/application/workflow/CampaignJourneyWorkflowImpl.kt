@@ -21,7 +21,7 @@ import java.util.UUID
  * before the send — pull and push together, per D2.
  */
 @Suppress("MagicNumber", "TooManyFunctions") // Six methods are required signal/workflow entry points.
-class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
+abstract class CampaignJourneyWorkflowSupport {
 
     private val activityOptions: ActivityOptions = ActivityOptions.newBuilder()
         .setScheduleToCloseTimeout(Duration.ofMinutes(SCHEDULE_TO_CLOSE_MINUTES))
@@ -49,7 +49,8 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
     @Volatile
     private var converted = false
 
-    override fun run(campaignId: UUID, partyId: UUID) {
+    /** The original workflow type. Its command sequence must remain replayable by an older worker. */
+    protected fun runLinear(campaignId: UUID, partyId: UUID) {
         // Existing workflow histories did not call controlState. Temporal versioning keeps their
         // replay command-for-command identical; new signals still protect them immediately.
         val controlVersion = Workflow.getVersion(CONTROL_STATE_CHANGE_ID, Workflow.DEFAULT_VERSION, CONTROL_STATE_V1)
@@ -58,19 +59,7 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
             Workflow.DEFAULT_VERSION,
             DECISION_SOURCE_V1,
         )
-        // The graph branch emits new activities (path evidence and targeted progress).  Gate the
-        // entire branch so histories started before explicit decisions replay their original
-        // linear command sequence byte-for-byte.
-        val graphVersion = Workflow.getVersion(
-            EXPLICIT_GRAPH_CHANGE_ID,
-            Workflow.DEFAULT_VERSION,
-            EXPLICIT_GRAPH_V1,
-        )
         val definition = activities.loadDefinition(campaignId)
-        if (graphVersion >= EXPLICIT_GRAPH_V1 && definition.decisions.isNotEmpty()) {
-            executeGraph(campaignId, partyId, definition, controlVersion, decisionSourceVersion)
-            return
-        }
         for (step in definition.steps.sortedBy { it.order }) {
             executeStep(campaignId, partyId, definition, step, controlVersion, decisionSourceVersion)?.let {
                 activities.markTerminated(campaignId, partyId, it)
@@ -78,6 +67,22 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
             }
         }
         activities.markCompleted(campaignId, partyId)
+    }
+
+    /**
+     * Explicit graph journeys are deliberately a separate Temporal workflow type and task queue.
+     * That keeps their new activity commands away from a legacy worker during a rollback.
+     */
+    protected fun runDecisionGraph(campaignId: UUID, partyId: UUID) {
+        val controlVersion = Workflow.getVersion(CONTROL_STATE_CHANGE_ID, Workflow.DEFAULT_VERSION, CONTROL_STATE_V1)
+        val decisionSourceVersion = Workflow.getVersion(
+            DECISION_SOURCE_CHANGE_ID,
+            Workflow.DEFAULT_VERSION,
+            DECISION_SOURCE_V1,
+        )
+        val definition = activities.loadDefinition(campaignId)
+        require(definition.decisions.isNotEmpty()) { "decision workflow requires an explicit decision graph" }
+        executeGraph(campaignId, partyId, definition, controlVersion, decisionSourceVersion)
     }
 
     /** Execute the bounded, forward-only decision graph that a maker and checker reviewed. */
@@ -249,23 +254,23 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         else -> null
     }
 
-    override fun consentRevoked() {
+    fun consentRevoked() {
         revoked = true
     }
 
-    override fun campaignPaused() {
+    fun campaignPaused() {
         paused = true
     }
 
-    override fun campaignResumed() {
+    fun campaignResumed() {
         paused = false
     }
 
-    override fun campaignClosed() {
+    fun campaignClosed() {
         closed = true
     }
 
-    override fun goalReached() {
+    fun goalReached() {
         converted = true
     }
 
@@ -280,8 +285,23 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         private const val DECISION_SOURCE_V1 = 1
         private const val PATH_EXPERIMENT_DELAY_CHANGE_ID = "campaign-path-experiment-delay-v1"
         private const val PATH_EXPERIMENT_DELAY_V1 = 1
-        private const val EXPLICIT_GRAPH_CHANGE_ID = "campaign-explicit-decision-graph-v1"
-        private const val EXPLICIT_GRAPH_V1 = 1
         private val CONTROL_RECHECK_INTERVAL: Duration = Duration.ofMinutes(1)
     }
+}
+
+/** The legacy workflow type remains on the existing task queue for replay compatibility. */
+class CampaignJourneyWorkflowImpl :
+    CampaignJourneyWorkflowSupport(),
+    CampaignJourneyWorkflow {
+    override fun run(campaignId: UUID, partyId: UUID) = runLinear(campaignId, partyId)
+}
+
+/**
+ * New decision graphs never share a workflow type with [CampaignJourneyWorkflowImpl]. A rollback
+ * therefore leaves them queued until this binary returns instead of replaying them incorrectly.
+ */
+class DecisionJourneyWorkflowImpl :
+    CampaignJourneyWorkflowSupport(),
+    DecisionJourneyWorkflow {
+    override fun run(campaignId: UUID, partyId: UUID) = runDecisionGraph(campaignId, partyId)
 }

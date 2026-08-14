@@ -5,7 +5,9 @@
 package com.openbank.campaign.infrastructure.temporal
 
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.workflow.CampaignJourneyWorkflow
+import com.openbank.campaign.application.workflow.DecisionJourneyWorkflow
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import jakarta.enterprise.context.ApplicationScoped
@@ -22,26 +24,45 @@ class TemporalJourneySignaller(
     private val workflowClient: WorkflowClient,
     @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-campaign")
     private val taskQueue: String,
+    @ConfigProperty(name = "openbank.temporal.decision-task-queue", defaultValue = "openbank-campaign-decision")
+    private val decisionTaskQueue: String,
 ) : JourneySignaller {
 
     private val log = Logger.getLogger(TemporalJourneySignaller::class.java)
 
-    override fun startJourney(campaignId: UUID, partyId: UUID) {
+    override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) {
         val workflowId = workflowId(campaignId, partyId)
-        val workflow = workflowClient.newWorkflowStub(
-            CampaignJourneyWorkflow::class.java,
-            WorkflowOptions.newBuilder()
-                .setWorkflowId(workflowId)
-                .setTaskQueue(taskQueue)
-                .build(),
-        )
         try {
-            WorkflowClient.start(workflow::run, campaignId, partyId)
-            log.infof("Started journey %s", workflowId)
+            when (type) {
+                JourneyType.LINEAR -> startLinear(workflowId, campaignId, partyId)
+                JourneyType.DECISION_GRAPH -> startDecisionGraph(workflowId, campaignId, partyId)
+            }
+            log.infof("Started %s journey %s", type, workflowId)
         } catch (e: io.temporal.client.WorkflowExecutionAlreadyStarted) {
             log.debugf(e, "Journey %s already running — idempotent no-op", workflowId)
         }
     }
+
+    private fun startLinear(workflowId: String, campaignId: UUID, partyId: UUID) {
+        val workflow = workflowClient.newWorkflowStub(
+            CampaignJourneyWorkflow::class.java,
+            workflowOptions(workflowId, taskQueue),
+        )
+        WorkflowClient.start(workflow::run, campaignId, partyId)
+    }
+
+    private fun startDecisionGraph(workflowId: String, campaignId: UUID, partyId: UUID) {
+        val workflow = workflowClient.newWorkflowStub(
+            DecisionJourneyWorkflow::class.java,
+            workflowOptions(workflowId, decisionTaskQueue),
+        )
+        WorkflowClient.start(workflow::run, campaignId, partyId)
+    }
+
+    private fun workflowOptions(workflowId: String, queue: String): WorkflowOptions = WorkflowOptions.newBuilder()
+        .setWorkflowId(workflowId)
+        .setTaskQueue(queue)
+        .build()
 
     override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) {
         signal(campaignId, partyId, "consent revocation") { it.consentRevoked() }

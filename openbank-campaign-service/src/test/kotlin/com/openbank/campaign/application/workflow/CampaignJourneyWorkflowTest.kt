@@ -42,6 +42,7 @@ class CampaignJourneyWorkflowTest {
 
     private lateinit var env: TestWorkflowEnvironment
     private lateinit var worker: Worker
+    private lateinit var decisionWorker: Worker
     private lateinit var activities: CampaignJourneyActivities
 
     private val campaignId: UUID = UUID.randomUUID()
@@ -49,6 +50,7 @@ class CampaignJourneyWorkflowTest {
 
     companion object {
         private const val TASK_QUEUE = "test-campaign-journey"
+        private const val DECISION_TASK_QUEUE = "test-campaign-decision-journey"
 
         internal fun kotlinAwareDataConverter(): DataConverter = DefaultDataConverter
             .newDefaultInstance()
@@ -90,6 +92,8 @@ class CampaignJourneyWorkflowTest {
         )
         worker = env.newWorker(TASK_QUEUE)
         worker.registerWorkflowImplementationTypes(CampaignJourneyWorkflowImpl::class.java)
+        decisionWorker = env.newWorker(DECISION_TASK_QUEUE)
+        decisionWorker.registerWorkflowImplementationTypes(DecisionJourneyWorkflowImpl::class.java)
         activities = mockk(relaxed = true)
         every { activities.controlState(campaignId, partyId) } returns
             JourneyControlState(CampaignState.ACTIVE, goalReached = false)
@@ -97,6 +101,7 @@ class CampaignJourneyWorkflowTest {
         every { activities.previousDeliveryStatus(any(), any(), any()) } returns null
         every { activities.deliveryStatusForStep(any(), any(), any()) } returns null
         worker.registerActivitiesImplementations(activities)
+        decisionWorker.registerActivitiesImplementations(activities)
         env.start()
     }
 
@@ -107,6 +112,14 @@ class CampaignJourneyWorkflowTest {
         env.workflowClient.newWorkflowStub(
             CampaignJourneyWorkflow::class.java,
             WorkflowOptions.newBuilder().setTaskQueue(TASK_QUEUE).build(),
+        ).run(campaignId, partyId)
+    }
+
+    /** Graph histories are served only by their dedicated workflow type and task queue. */
+    private fun runDecisionGraph() {
+        env.workflowClient.newWorkflowStub(
+            DecisionJourneyWorkflow::class.java,
+            WorkflowOptions.newBuilder().setTaskQueue(DECISION_TASK_QUEUE).build(),
         ).run(campaignId, partyId)
     }
 
@@ -230,7 +243,7 @@ class CampaignJourneyWorkflowTest {
         )
         every { activities.deliveryStatusForStep(campaignId, partyId, 0) } returns DeliveryStatus.CONFIRMED
 
-        run()
+        runDecisionGraph()
 
         verify { activities.deliverStep(campaignId, partyId, 0) }
         verify { activities.deliverStep(campaignId, partyId, 1) }
@@ -268,7 +281,7 @@ class CampaignJourneyWorkflowTest {
             }
         }
 
-        run()
+        runDecisionGraph()
 
         verify { activities.deliverStep(campaignId, partyId, 1) }
         verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }

@@ -118,6 +118,11 @@ spec:
               value: openbank-campaign
             - name: OPENBANK_TEMPORAL_TASK_QUEUE
               value: openbank-campaign
+            # Graph runs are isolated from the replay-compatible legacy workflow queue. A rollback
+            # cannot hand their new command sequence to a legacy worker; it only pauses the graph
+            # queue until the compatible image is restored.
+            - name: OPENBANK_TEMPORAL_DECISION_TASK_QUEUE
+              value: openbank-campaign-decision
             - name: CAMPAIGN_WORKER_ENABLED
               value: "true"
             # ADR-0198: live per-send consent check (fail-closed). Declared as an
