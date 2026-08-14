@@ -25,6 +25,11 @@ data class CampaignDefinition(
     val holdoutPercent: Int = 0,
     val schedule: CampaignSchedule? = null,
     val trigger: String? = null,
+    /**
+     * Explicit, reviewed delivery decisions.  An empty list preserves the original linear
+     * journey exactly; a non-empty list opts the draft into the bounded graph model below.
+     */
+    val decisions: List<CampaignDecision> = emptyList(),
 )
 
 /**
@@ -69,6 +74,8 @@ data class Campaign(
     val approvedBy: String?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Explicit graph nodes; persisted separately from legacy step JSON for reversible rollout. */
+    val decisions: List<CampaignDecision> = emptyList(),
 ) {
     init {
         require(name.isNotBlank()) { "campaign name must not be blank" }
@@ -82,6 +89,7 @@ data class Campaign(
                 require(steps.any { it.order == sourceOrder }) { "a condition source must name a campaign step" }
             }
         }
+        validateDecisionGraph(steps, decisions)
         require(holdoutPercent in 0..MAX_HOLDOUT_PERCENT) {
             "holdoutPercent must be between 0 and $MAX_HOLDOUT_PERCENT"
         }
@@ -127,6 +135,7 @@ data class Campaign(
             holdoutPercent = definition.holdoutPercent,
             schedule = definition.schedule,
             trigger = definition.trigger,
+            decisions = definition.decisions,
             updatedAt = Instant.now(),
         )
     }
@@ -156,8 +165,82 @@ data class Campaign(
 
     companion object {
         const val MAX_STEPS = 5
+
+        /** A deliberate ceiling: rich marketer paths, never an unreviewable arbitrary DAG. */
+        const val MAX_DECISIONS = 3
         const val MAX_HOLDOUT_PERCENT = 50
     }
+}
+
+/**
+ * A reviewable binary branch after one delivery step.  The predicate is deliberately fixed to
+ * notification-service's durable delivery fact: `confirmed` versus `not confirmed`.  The latter
+ * is not an invented open/click signal and includes PENDING, FAILED and a still-absent receipt.
+ *
+ * Both edges point only forward.  This makes the graph acyclic by construction, keeps a five-step
+ * campaign legible, and lets a workflow recover the exact selected path from durable records.
+ */
+data class CampaignDecision(
+    val sourceStepOrder: Int,
+    val evaluationDelaySeconds: Long = 0,
+    val confirmedStepOrder: Int,
+    val notConfirmedStepOrder: Int,
+) {
+    init {
+        require(sourceStepOrder >= 0) { "a decision source must be >= 0" }
+        require(evaluationDelaySeconds >= 0) { "a decision delay must be >= 0" }
+        require(confirmedStepOrder > sourceStepOrder) { "a confirmed path must point forward" }
+        require(notConfirmedStepOrder > sourceStepOrder) { "a not-confirmed path must point forward" }
+        require(confirmedStepOrder != notConfirmedStepOrder) { "decision paths must have different targets" }
+    }
+}
+
+/**
+ * Validate the small, directed journey topology.  Legacy conditional steps remain executable but
+ * cannot be mixed with a graph: otherwise a branch may look explicit in Studio while Temporal is
+ * still silently walking the legacy order-based condition path.
+ */
+private fun validateDecisionGraph(steps: List<CampaignStep>, decisions: List<CampaignDecision>) {
+    if (decisions.isEmpty()) return
+    require(decisions.size <= Campaign.MAX_DECISIONS) {
+        "journeys are capped at ${Campaign.MAX_DECISIONS} explicit decisions"
+    }
+    require(steps.none { it.condition != null || it.conditionSourceOrder != null }) {
+        "legacy conditions and explicit decisions cannot be mixed"
+    }
+    val orders = steps.map { it.order }.toSet()
+    require(steps.any { it.order == 0 }) { "an explicit decision journey must start at step 0" }
+    require(decisions.map { it.sourceStepOrder }.distinct().size == decisions.size) {
+        "a step may have only one explicit decision"
+    }
+    decisions.forEach { decision ->
+        require(decision.sourceStepOrder in orders) { "a decision source must name a campaign step" }
+        require(decision.confirmedStepOrder in orders) { "a confirmed path must name a campaign step" }
+        require(decision.notConfirmedStepOrder in orders) { "a not-confirmed path must name a campaign step" }
+    }
+    // A node that is not the source of an explicit decision has one deterministic forward edge.
+    // Absent nextStepOrder is terminal; that is intentional, not a hidden linear fallback.
+    val decisionsBySource = decisions.associateBy { it.sourceStepOrder }
+    steps.forEach { step ->
+        step.nextStepOrder?.let { next ->
+            require(step.order !in decisionsBySource) { "a decision source cannot also have a direct next step" }
+            require(next in orders) { "a direct path must name a campaign step" }
+            require(next > step.order) { "a direct path must point forward" }
+        }
+    }
+    val reachable = mutableSetOf<Int>()
+    fun visit(order: Int) {
+        if (!reachable.add(order)) return
+        val decision = decisionsBySource[order]
+        if (decision != null) {
+            visit(decision.confirmedStepOrder)
+            visit(decision.notConfirmedStepOrder)
+        } else {
+            steps.first { it.order == order }.nextStepOrder?.let(::visit)
+        }
+    }
+    visit(0)
+    require(reachable == orders) { "every campaign step must be reachable from step 0" }
 }
 
 /**
@@ -275,6 +358,12 @@ data class CampaignStep(
     val variantBTemplate: String? = null,
     val variantBChannel: Channel? = null,
     val variantBDelaySeconds: Long? = null,
+    /**
+     * The one deterministic edge out of this delivery node in an explicit decision journey.
+     * Null is a deliberate terminal.  It is ignored for legacy linear definitions, which keeps
+     * rows written before graph support byte-for-byte compatible.
+     */
+    val nextStepOrder: Int? = null,
 ) {
     init {
         require(order >= 0) { "step order must be >= 0" }

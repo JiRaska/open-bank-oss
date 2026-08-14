@@ -4,9 +4,11 @@
 package com.openbank.campaign.application.workflow
 
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DecisionPath
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition
@@ -210,6 +212,33 @@ class CampaignJourneyWorkflowTest {
         verify(exactly = 2) { activities.deliveryStatusForStep(campaignId, partyId, 0) }
         verify(exactly = 0) { activities.previousDeliveryStatus(campaignId, partyId, 1) }
         verify(exactly = 0) { activities.previousDeliveryStatus(campaignId, partyId, 2) }
+    }
+
+    @Test
+    fun `an explicit decision records and executes only its confirmed path`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(
+            steps = listOf(step(0), step(1), step(2)),
+            stopCondition = null,
+            decisions = listOf(
+                CampaignDecision(
+                    sourceStepOrder = 0,
+                    evaluationDelaySeconds = 0,
+                    confirmedStepOrder = 1,
+                    notConfirmedStepOrder = 2,
+                ),
+            ),
+        )
+        every { activities.deliveryStatusForStep(campaignId, partyId, 0) } returns DeliveryStatus.CONFIRMED
+
+        run()
+
+        verify { activities.deliverStep(campaignId, partyId, 0) }
+        verify { activities.deliverStep(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }
+        verify {
+            activities.recordDecisionPath(campaignId, partyId, 0, DecisionPath.CONFIRMED, 1)
+        }
+        verify { activities.markCompleted(campaignId, partyId) }
     }
 
     @Test

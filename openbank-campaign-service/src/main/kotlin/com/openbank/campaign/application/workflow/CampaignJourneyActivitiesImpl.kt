@@ -16,6 +16,8 @@ import com.openbank.campaign.domain.model.CampaignDelivery
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DecisionPath
+import com.openbank.campaign.domain.model.DecisionPathSelection
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SendOutcome
@@ -67,7 +69,7 @@ open class CampaignJourneyActivitiesImpl(
 
     override fun loadDefinition(campaignId: UUID): JourneyDefinition = runBlockingOnWorker {
         val campaign = campaigns.findById(campaignId)
-        JourneyDefinition(campaign?.steps ?: emptyList(), campaign?.stopCondition)
+        JourneyDefinition(campaign?.steps ?: emptyList(), campaign?.stopCondition, campaign?.decisions ?: emptyList())
     }
 
     override fun controlState(campaignId: UUID, partyId: UUID): JourneyControlState = runBlockingOnWorker {
@@ -246,6 +248,30 @@ open class CampaignJourneyActivitiesImpl(
     override fun advanceStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
             enrolments.save(it.copy(currentStep = stepOrder + 1))
+        }
+        Unit
+    }
+
+    override fun advanceToStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
+        enrolments.findByCampaignAndParty(campaignId, partyId)?.let {
+            enrolments.save(it.copy(currentStep = stepOrder))
+        }
+        Unit
+    }
+
+    override fun recordDecisionPath(
+        campaignId: UUID,
+        partyId: UUID,
+        sourceStepOrder: Int,
+        path: DecisionPath,
+        nextStepOrder: Int,
+    ) = runBlockingOnWorker {
+        enrolments.findByCampaignAndParty(campaignId, partyId)?.let { enrolment ->
+            // Temporal retries an activity at least once. Source order is a graph-node identity,
+            // so replacing the same record is idempotent and cannot inflate a person's path.
+            val selection = DecisionPathSelection(sourceStepOrder, path, nextStepOrder, Instant.now())
+            val updatedPath = enrolment.decisionPath.filterNot { it.sourceStepOrder == sourceStepOrder } + selection
+            enrolments.save(enrolment.copy(currentStep = nextStepOrder, decisionPath = updatedPath))
         }
         Unit
     }

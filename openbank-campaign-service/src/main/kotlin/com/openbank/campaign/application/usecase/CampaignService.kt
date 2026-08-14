@@ -11,6 +11,7 @@ import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
@@ -74,6 +75,7 @@ class CampaignService(
         holdoutPercent: Int = 0,
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
+        decisions: List<CampaignDecision> = emptyList(),
     ): Campaign {
         val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
         val campaign = Campaign(
@@ -90,6 +92,7 @@ class CampaignService(
             // an unapproved journey (ADR-0200 D5).
             schedule = schedule,
             trigger = trigger,
+            decisions = decisions,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,

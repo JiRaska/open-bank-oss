@@ -6,6 +6,8 @@ package com.openbank.campaign.application.workflow
 
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.DecisionPath
+import com.openbank.campaign.domain.model.DeliveryStatus
 import io.temporal.activity.ActivityOptions
 import io.temporal.common.RetryOptions
 import io.temporal.workflow.Workflow
@@ -56,12 +58,72 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
             Workflow.DEFAULT_VERSION,
             DECISION_SOURCE_V1,
         )
+        // The graph branch emits new activities (path evidence and targeted progress).  Gate the
+        // entire branch so histories started before explicit decisions replay their original
+        // linear command sequence byte-for-byte.
+        val graphVersion = Workflow.getVersion(
+            EXPLICIT_GRAPH_CHANGE_ID,
+            Workflow.DEFAULT_VERSION,
+            EXPLICIT_GRAPH_V1,
+        )
         val definition = activities.loadDefinition(campaignId)
+        if (graphVersion >= EXPLICIT_GRAPH_V1 && definition.decisions.isNotEmpty()) {
+            executeGraph(campaignId, partyId, definition, controlVersion, decisionSourceVersion)
+            return
+        }
         for (step in definition.steps.sortedBy { it.order }) {
             executeStep(campaignId, partyId, definition, step, controlVersion, decisionSourceVersion)?.let {
                 activities.markTerminated(campaignId, partyId, it)
                 return
             }
+        }
+        activities.markCompleted(campaignId, partyId)
+    }
+
+    /** Execute the bounded, forward-only decision graph that a maker and checker reviewed. */
+    private fun executeGraph(
+        campaignId: UUID,
+        partyId: UUID,
+        definition: JourneyDefinition,
+        controlVersion: Int,
+        decisionSourceVersion: Int,
+    ) {
+        val steps = definition.steps.associateBy { it.order }
+        val decisions = definition.decisions.associateBy { it.sourceStepOrder }
+        var currentStepOrder: Int? = 0
+        while (currentStepOrder != null) {
+            val stepOrder = currentStepOrder
+            val step = requireNotNull(steps[stepOrder]) { "graph references absent step $stepOrder" }
+            executeStep(campaignId, partyId, definition, step, controlVersion, decisionSourceVersion)?.let {
+                activities.markTerminated(campaignId, partyId, it)
+                return
+            }
+            val decision = decisions[stepOrder]
+            if (decision == null) {
+                currentStepOrder = step.nextStepOrder
+                currentStepOrder?.let { activities.advanceToStep(campaignId, partyId, it) }
+                continue
+            }
+            if (decision.evaluationDelaySeconds > 0) {
+                waitThroughDelay(campaignId, partyId, controlVersion, decision.evaluationDelaySeconds)?.let {
+                    activities.markTerminated(campaignId, partyId, it)
+                    return
+                }
+            }
+            val path = if (activities.deliveryStatusForStep(campaignId, partyId, stepOrder) ==
+                DeliveryStatus.CONFIRMED
+            ) {
+                DecisionPath.CONFIRMED
+            } else {
+                DecisionPath.NOT_CONFIRMED
+            }
+            val next = if (path == DecisionPath.CONFIRMED) {
+                decision.confirmedStepOrder
+            } else {
+                decision.notConfirmedStepOrder
+            }
+            activities.recordDecisionPath(campaignId, partyId, stepOrder, path, next)
+            currentStepOrder = next
         }
         activities.markCompleted(campaignId, partyId)
     }
@@ -218,6 +280,8 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         private const val DECISION_SOURCE_V1 = 1
         private const val PATH_EXPERIMENT_DELAY_CHANGE_ID = "campaign-path-experiment-delay-v1"
         private const val PATH_EXPERIMENT_DELAY_V1 = 1
+        private const val EXPLICIT_GRAPH_CHANGE_ID = "campaign-explicit-decision-graph-v1"
+        private const val EXPLICIT_GRAPH_V1 = 1
         private val CONTROL_RECHECK_INTERVAL: Duration = Duration.ofMinutes(1)
     }
 }
