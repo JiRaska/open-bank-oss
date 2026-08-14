@@ -41,6 +41,9 @@ data class EnrolmentOutcome(val enrolled: Int, val failed: Int)
 /** A missing campaign is distinct from a source definition that is no longer reusable. */
 class CampaignNotFoundException(id: UUID) : NoSuchElementException("campaign $id not found")
 
+/** A reviewed catalogue entry required by a draft is missing or no longer available. */
+class CampaignReferenceNotFoundException(message: String) : NoSuchElementException(message)
+
 /**
  * Campaign lifecycle use cases (ADR-0200). State transitions are deterministic domain operations;
  * four-eyes approval for activation is enforced at the REST layer (`campaign.activate`,
@@ -141,7 +144,7 @@ class CampaignService(
         trigger: String?,
     ): SegmentRef {
         val segment = segments.load(segmentRef.name, segmentRef.version)
-            ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
+            ?: throw CampaignReferenceNotFoundException("segment ${segmentRef.name}@${segmentRef.version} not found")
         // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
         // be approved, run, and report nothing, and the first person to notice would be whoever
         // asked why it converted zero people (ADR-0245 D1).

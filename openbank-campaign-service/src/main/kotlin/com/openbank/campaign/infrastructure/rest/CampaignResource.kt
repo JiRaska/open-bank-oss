@@ -5,6 +5,7 @@
 package com.openbank.campaign.infrastructure.rest
 
 import com.openbank.campaign.application.usecase.CampaignNotFoundException
+import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundException
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
@@ -174,7 +175,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
 
     @POST
     @Authorize(action = "campaign.create", resource = "#request.name")
-    suspend fun create(request: CreateCampaignRequest): Response {
+    suspend fun create(request: CreateCampaignRequest): Response = try {
         val createdBy = jwt.principalName()
         val campaign = service.createDraft(
             request.name,
@@ -188,7 +189,9 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
             request.trigger,
         )
-        return Response.status(Response.Status.CREATED).entity(campaign).build()
+        Response.status(Response.Status.CREATED).entity(campaign).build()
+    } catch (e: CampaignReferenceNotFoundException) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
     }
 
     /** The authenticated maker may revise only the unsubmitted definition. */
