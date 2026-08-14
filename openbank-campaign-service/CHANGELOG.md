@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.1](https://github.com/JiRaska/open-bank-oss/compare/v0.29.0...v0.29.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **campaign:** report stale segment drafts as conflicts ([#4772](https://github.com/JiRaska/open-bank-oss/issues/4772)) ([169b4ab](https://github.com/JiRaska/open-bank-oss/commit/169b4abf91f524e6cc80721f985c38bd2692f07f))
+
 ## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/v0.28.0...v0.29.0) (2026-08-14)
 
 
