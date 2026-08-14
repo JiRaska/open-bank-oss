@@ -127,6 +127,36 @@ key"*. Classification is now positive in both directions (an image is called `UN
 cosign says so in words) and each candidate failure is retried `VERIFY_ATTEMPTS` times first — but a
 red `1` still deserves the hand check: verify the named image by digest before rebuilding anything.
 
+### What to copy from this into the next probe
+
+Four rules, each of which this gate broke:
+
+1. **A checker that knows the difference must ENCODE the difference in the one thing its caller
+   reads.** Knowing "this was a throttle, not a gap" is worth nothing if both outcomes exit `1`:
+   the workflow's `if: failure()` fires either way and files the same supply-chain ticket. Give
+   "could not run" its own exit code (`2`) and branch on it in the caller —
+   `.github/scripts/check-verification-metadata-complete.py` had already paid for this once
+   (#4162, three shards dead of `Java heap space` reported as dependency drift). The reasoning
+   generalizes past exit codes: it is the same defect as a skipped/disabled adapter sharing a
+   `success` boolean with a real success — a distinct state needs a distinct value, not prose in
+   a log nobody parses.
+2. **Classify positively in both directions; never let the alarming verdict be the fallback
+   branch.** Every failure mode nobody enumerated lands in the fallback, and the set of ways a
+   registry call can fail is open-ended while the set of ways cosign says "not attested" is
+   closed. Match the closed sets — absence, and an explicit attestation verdict — and route the
+   remainder to "unknown". Written the other way round, the gate is guaranteed to manufacture a
+   false supply-chain finding eventually; that is not bad luck, it is the structure.
+3. **Retry only the class that is not a verdict.** Retrying a real `UNATTESTED` would slow a true
+   gap down and, worse, invites the next author to widen the retry until a verdict is retried
+   into existence. A verdict is final on the first attempt that produces one.
+4. **A "could not run" path is unfalsifiable by CI here — prove it another way or it is code
+   nobody has run.** No PR can summon an ECR throttle on demand, so the green run of this gate on
+   the fixing PR says nothing about the branch that matters. Prove it with a stubbed `COSIGN_BIN`
+   (a script that fails per-image the four ways) plus `check-fleet-attestations.sh --selftest`,
+   which needs no registry and runs in the lint job on every PR. Falsify the selftest itself by
+   reverting the classifier to the old fallback and confirming exactly the transient cases go
+   red — a classifier that has only ever agreed with you is unfalsified.
+
 ## 5. Related
 
 - ADR-0030 D4 (supply-chain verification), ADR-0144 (graduation criteria)
