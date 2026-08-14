@@ -124,6 +124,7 @@ class CampaignEnrolmentFailureTest {
         // Enrolment never touches the scheduler — a stub that throws proves it, and would fail
         // loudly if a future change started scheduling from inside the enrol path.
         scheduler = ThrowingScheduler,
+        explicitGraphActivationEnabled = false,
     )
 
     /** Any call is a bug in the code under test: `enrol` has no business creating schedules. */

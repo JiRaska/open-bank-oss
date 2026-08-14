@@ -140,6 +140,7 @@ class CampaignScheduleLifecycleTest {
             },
             journeys = journeys,
             scheduler = scheduler,
+            explicitGraphActivationEnabled = false,
         )
     }
 

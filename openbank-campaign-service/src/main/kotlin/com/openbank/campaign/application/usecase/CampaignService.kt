@@ -68,7 +68,7 @@ class CampaignService @Inject constructor(
      * not understand, so this remains off until the worker-versioning rollout has that guarantee.
      */
     @ConfigProperty(name = "openbank.campaign.explicit-graph-activation-enabled", defaultValue = "false")
-    private val explicitGraphActivationEnabled: Boolean = false,
+    private val explicitGraphActivationEnabled: Boolean,
 ) {
 
     private val log = Logger.getLogger(CampaignService::class.java)
