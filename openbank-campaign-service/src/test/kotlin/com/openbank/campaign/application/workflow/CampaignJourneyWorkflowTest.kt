@@ -242,6 +242,40 @@ class CampaignJourneyWorkflowTest {
     }
 
     @Test
+    fun `a delivery that is pending at handoff can take the confirmed path after its observation window`() {
+        val observationSeconds = 60L
+        val startedAt = env.currentTimeMillis()
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(
+            steps = listOf(step(0), step(1), step(2)),
+            stopCondition = null,
+            decisions = listOf(
+                CampaignDecision(
+                    sourceStepOrder = 0,
+                    evaluationDelaySeconds = observationSeconds,
+                    confirmedStepOrder = 1,
+                    notConfirmedStepOrder = 2,
+                ),
+            ),
+        )
+        // The activity models a provider receipt that arrives after handoff. TestWorkflowEnvironment
+        // advances its virtual clock through Workflow.sleep, so this proves the decision reads the
+        // post-window durable state instead of committing PENDING at the initial send.
+        every { activities.deliveryStatusForStep(campaignId, partyId, 0) } answers {
+            if (env.currentTimeMillis() >= startedAt + observationSeconds * 1_000) {
+                DeliveryStatus.CONFIRMED
+            } else {
+                DeliveryStatus.PENDING
+            }
+        }
+
+        run()
+
+        verify { activities.deliverStep(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }
+        verify { activities.recordDecisionPath(campaignId, partyId, 0, DecisionPath.CONFIRMED, 1) }
+    }
+
+    @Test
     fun `IF_PREVIOUS_CONFIRMED does not hold for a first step, which has no predecessor`() {
         every { activities.loadDefinition(campaignId) } returns
             JourneyDefinition(listOf(step(0, StepCondition.IF_PREVIOUS_CONFIRMED)), null)

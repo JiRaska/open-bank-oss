@@ -685,6 +685,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CampaignStep'
+        decisions:
+          type: array
+          maxItems: 3
+          description: >-
+            Reviewed explicit delivery graph for this campaign. Empty or absent means the historic
+            linear journey. Every reference is a persisted one-based CampaignStep order.
+          items:
+            $ref: '#/components/schemas/CampaignDecision'
         stopCondition:
           $ref: '#/components/schemas/StopCondition'
         schedule:

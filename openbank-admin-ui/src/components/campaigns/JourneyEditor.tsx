@@ -393,7 +393,10 @@ export function JourneyEditor({
               <path d={diamond} fill="var(--accent)" opacity="0.16" stroke="var(--accent)" strokeWidth="1.5" />
               <text x={sourceX} y={decisionY + 4} fontSize="12" textAnchor="middle" fill="var(--accent)" fontWeight="700">?</text>
               <text x={sourceX} y={decisionY + 37} fontSize="10.5" textAnchor="middle" fill="var(--text-secondary)">
-                {t('doručeno?', 'delivered?')}
+                {t(
+                  `doručeno? ověřit ${delayLabel(decision.evaluationDelaySeconds)}`,
+                  `delivered? check ${delayLabel(decision.evaluationDelaySeconds)}`,
+                )}
               </text>
               <path
                 d={`M ${sourceX + 26} ${decisionY} L ${confirmedX} ${ROW_Y + NODE_H / 2 + 24}`}

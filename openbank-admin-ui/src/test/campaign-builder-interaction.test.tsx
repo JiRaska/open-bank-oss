@@ -16,7 +16,12 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import NewCampaignPage from '@/app/campaigns/new/page'
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
+
+let searchParams = ''
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(searchParams),
+}))
 
 const TEMPLATES = {
   state: 'ok',
@@ -194,6 +199,55 @@ describe('campaign builder conditions', () => {
     expect(container.querySelector('[data-decision-node="0"]')).toBeTruthy()
     expect(container.querySelector('[data-edge-condition]')).toBeNull()
     expect(container.textContent).toMatch(/delivered\?|doručeno\?/)
+  }, 25000)
+
+  it('hydrates a graph draft and saves its exact reviewed edges back to the API', async () => {
+    searchParams = 'draft=11111111-1111-1111-1111-111111111111'
+    let saved: Record<string, unknown> | undefined
+    vi.stubGlobal('fetch', vi.fn(async (u: string, init?: RequestInit) => {
+      if (String(u).includes('/templates')) return { ok: true, json: async () => TEMPLATES }
+      if (String(u).includes('/api/campaigns/11111111-1111-1111-1111-111111111111')) {
+        if (init?.method === 'PUT') {
+          saved = JSON.parse(String(init.body))
+          return { ok: true, json: async () => ({ state: 'ok', campaign: { id: '11111111-1111-1111-1111-111111111111' } }) }
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            state: 'ok', sources: { campaign: 'ok' }, campaign: {
+              state: 'DRAFT', name: 'Return to app', goal: 'Open savings',
+              segmentRef: { name: 'active-clients', version: 1 },
+              steps: [
+                { order: 1, template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: { offerTitle: 'Savings' }, delaySeconds: 0 },
+                { order: 2, template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: { offerTitle: 'Yes', offerText: 'Yes', ctaText: 'Open' }, delaySeconds: 0 },
+                { order: 3, template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: { offerTitle: 'No', offerText: 'No', ctaText: 'Learn' }, delaySeconds: 0 },
+              ],
+              decisions: [{ sourceStepOrder: 1, evaluationDelaySeconds: 86_400, confirmedStepOrder: 2, notConfirmedStepOrder: 3 }],
+            },
+          }),
+        }
+      }
+      return { ok: true, json: async () => ({ state: 'ok', items: [{ name: 'active-clients', version: 1, rules: ['party status is ACTIVE'] }] }) }
+    }))
+
+    try {
+      const { container, getByText } = render(
+        React.createElement(LanguageProvider, null, React.createElement(NewCampaignPage)))
+      await waitFor(() => expect(container.querySelector('[data-decision-node="0"]')).toBeTruthy())
+      await waitFor(() => expect(getByText('Save draft')).toBeTruthy())
+
+      fireEvent.click(getByText('Save draft'))
+      await waitFor(() => expect(saved).toBeDefined())
+
+      expect(saved?.decisions).toEqual([
+        { sourceStepOrder: 1, evaluationDelaySeconds: 86_400, confirmedStepOrder: 2, notConfirmedStepOrder: 3 },
+      ])
+      expect(saved?.steps).toEqual(expect.arrayContaining([
+        expect.objectContaining({ order: 1, template: 'MARKETING_PRODUCT_OFFER_PUSH' }),
+      ]))
+    } finally {
+      searchParams = ''
+    }
   }, 25000)
 
   it('warns that a condition on the first step has nothing to test', async () => {

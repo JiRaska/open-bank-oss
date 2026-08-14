@@ -27,6 +27,8 @@ import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.campaign.domain.model.TriggerCatalog
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
@@ -53,13 +55,20 @@ class CampaignReferenceNotFoundException(message: String) : NoSuchElementExcepti
  */
 @ApplicationScoped
 @Suppress("TooManyFunctions") // Lifecycle actions are separate authenticated use cases, not helpers.
-class CampaignService(
+class CampaignService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
     private val segments: SegmentRegistry,
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
+    /**
+     * A Temporal workflow code change must not be activated until the rollback worker can replay
+     * its histories. Explicit graphs add markers and activity commands that pre-graph workers do
+     * not understand, so this remains off until the worker-versioning rollout has that guarantee.
+     */
+    @ConfigProperty(name = "openbank.campaign.explicit-graph-activation-enabled", defaultValue = "false")
+    private val explicitGraphActivationEnabled: Boolean = false,
 ) {
 
     private val log = Logger.getLogger(CampaignService::class.java)
@@ -183,6 +192,9 @@ class CampaignService(
      */
     suspend fun activate(id: UUID, approver: String): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
+        require(campaign.decisions.isEmpty() || explicitGraphActivationEnabled) {
+            "explicit decision journeys are held until the rollback-compatible Temporal worker rollout is enabled"
+        }
         val activated = campaigns.save(campaign.activate(approver))
         activated.schedule?.let { schedule ->
             val cadence = ScheduleCatalog[schedule.cadence]

@@ -32,6 +32,7 @@ interface Campaign {
     channel?: 'EMAIL' | 'PUSH' | 'BANNER'
     condition?: 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
     conditionSourceOrder?: number
+    nextStepOrder?: number
     variantBVariables?: Record<string, string> | null
     fallbackToPush?: boolean
     mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null
@@ -786,6 +787,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
                   decisions={c.decisions ?? []}
                   decisionPaths={decisionPaths}
+                  decisionPathsKnown={detail?.sources?.enrolments === 'ok'}
                 />
               </SectionBoundary>
             )}

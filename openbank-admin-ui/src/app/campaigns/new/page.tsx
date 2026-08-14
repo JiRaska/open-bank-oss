@@ -74,6 +74,11 @@ interface CampaignTemplate {
 
 type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
 
+// Notification providers acknowledge asynchronously.  A branch taken immediately after handoff
+// would almost always see PENDING and turn a real delivery question into a disguised "no" path.
+// One day is the reviewed default window; the API still records the exact value with the decision.
+const DELIVERY_CONFIRMATION_DELAY_SECONDS = 86_400
+
 const newStep = (choice: CampaignTemplate): EditorStep => ({
   // The studio starts with the primary owned surface: the bank app. E-mail remains a supported
   // channel, but leading an app-first campaign with it made the canvas teach the wrong product.
@@ -189,7 +194,10 @@ export default function NewCampaignPage() {
       .then(r => r.json())
       .then((d: { campaign?: {
         state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
-        steps?: EditorStep[]; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
+        steps?: EditorStep[]; decisions?: Array<{
+          sourceStepOrder: number; evaluationDelaySeconds?: number
+          confirmedStepOrder: number; notConfirmedStepOrder: number
+        }>; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
         holdoutPercent?: number; schedule?: { cadence: string } | null; trigger?: string | null
       }; sources?: { campaign?: string } }) => {
         const campaign = d.campaign
@@ -205,9 +213,23 @@ export default function NewCampaignPage() {
           previewReach(ref)
         }
         if (campaign.steps?.length) {
-          setSteps(campaign.steps)
+          // The campaign contract counts stored step orders from one. The editor counts cards
+          // from zero, so every graph reference must move with the cards in both directions.
+          setSteps(campaign.steps.map(step => ({
+            ...step,
+            ...(step.conditionSourceOrder !== undefined && step.conditionSourceOrder !== null
+              ? { conditionSourceOrder: step.conditionSourceOrder - 1 } : {}),
+            ...(step.nextStepOrder !== undefined && step.nextStepOrder !== null
+              ? { nextStepOrder: step.nextStepOrder - 1 } : {}),
+          })))
           setSelected(0)
         }
+        setDecisions((campaign.decisions ?? []).map(decision => ({
+          sourceStepOrder: decision.sourceStepOrder - 1,
+          evaluationDelaySeconds: decision.evaluationDelaySeconds ?? DELIVERY_CONFIRMATION_DELAY_SECONDS,
+          confirmedStepOrder: decision.confirmedStepOrder - 1,
+          notConfirmedStepOrder: decision.notConfirmedStepOrder - 1,
+        })))
         setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
         setConversionRule(campaign.conversionRule ?? null)
         setHoldoutPercent(campaign.holdoutPercent ?? 0)
@@ -315,7 +337,7 @@ export default function NewCampaignPage() {
       setSelected(prev.length)
       setDecisions(current => [...current, {
         sourceStepOrder: prev.length - 1,
-        evaluationDelaySeconds: 0,
+        evaluationDelaySeconds: DELIVERY_CONFIRMATION_DELAY_SECONDS,
         confirmedStepOrder: prev.length,
         notConfirmedStepOrder: prev.length + 1,
       }])

@@ -120,4 +120,32 @@ describe('journey canvas', () => {
     expect(screen.getByText(/STEP 1 · push/)).toBeTruthy()
     expect(screen.getByText(/STEP 2 · banner/)).toBeTruthy()
   })
+
+  it('draws declared graph edges rather than inventing a linear path, and keeps missing evidence unknown', () => {
+    const graphSteps = [
+      { order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'PUSH' as const },
+      { order: 2, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'BANNER' as const },
+      { order: 3, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'BANNER' as const },
+    ]
+    const { container } = render(
+      React.createElement(
+        LanguageProvider,
+        null,
+        React.createElement(JourneyCanvas, {
+          steps: graphSteps,
+          funnel: [],
+          audienceSize: null,
+          decisions: [{ sourceStepOrder: 1, evaluationDelaySeconds: 86_400, confirmedStepOrder: 2, notConfirmedStepOrder: 3 }],
+          decisionPaths: [],
+          decisionPathsKnown: false,
+        }),
+      ),
+    )
+
+    expect(container.querySelector('[data-graph-edge="1-confirmed"]')).toBeTruthy()
+    expect(container.querySelector('[data-graph-edge="1-not-confirmed"]')).toBeTruthy()
+    expect(container.querySelector('[data-linear-edge]')).toBeNull()
+    expect(screen.getByText(/Branch outcomes are unavailable right now/)).toBeTruthy()
+    expect(screen.queryByText(/0× confirmed/)).toBeNull()
+  })
 })
