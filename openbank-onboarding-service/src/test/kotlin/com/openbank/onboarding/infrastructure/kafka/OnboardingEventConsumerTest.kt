@@ -9,11 +9,13 @@ import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.infrastructure.observability.ProjectionOutcomeMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.just
 import io.mockk.mockk
 import io.mockk.runs
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -30,6 +32,7 @@ class OnboardingEventConsumerTest {
 
     private val projection = mockk<OnboardingProjectionService>()
     private val objectMapper = ObjectMapper()
+    private val metrics = mockk<ProjectionOutcomeMetrics>(relaxed = true)
     private lateinit var consumer: OnboardingEventConsumer
 
     @BeforeEach
@@ -37,7 +40,54 @@ class OnboardingEventConsumerTest {
         consumer = OnboardingEventConsumer(Clock.systemUTC()).also {
             it.projection = projection
             it.objectMapper = objectMapper
+            it.metrics = metrics
         }
+    }
+
+    // ── DEVICE_ENROLLED (#4353) ───────────────────────────────────────────────
+
+    /**
+     * The payload is copied verbatim from a real `openbank.sca.events` message on the sandbox
+     * (2026-08-13), with the `eventType` this PR adds to the producer. Writing the JSON by hand
+     * from the parser's expectations is what let this diverge for the whole life of the topic:
+     * every unit test on both sides was green while the two artifacts disagreed on the wire.
+     */
+    @Test
+    fun `consumeScaEvent projects DEVICE_ENROLLED from the real sca-service payload`(): Unit = runBlocking {
+        val partyId = UUID.fromString("d03712b8-8814-40a7-a683-ac0c6a307204")
+        val payload = """{"eventType":"DEVICE_ENROLLED",""" +
+            """"deviceId":"78823928-36a6-44c3-bf4d-2ceb657cd623",""" +
+            """"partyId":"$partyId",""" +
+            """"credentialId":"e2e-1c0a4767-aed7-4e9a-9f91-ea8ba3e0493e",""" +
+            """"algorithm":"ES256","occurredAt":"2026-08-08T03:20:23.835301445Z"}"""
+        coEvery { projection.applyEvent(any()) } just runs
+
+        consumer.consumeScaEvent(payload)
+
+        coVerify(exactly = 1) {
+            projection.applyEvent(
+                match { it is OnboardingEvent.DeviceEnrolled && it.partyId == partyId },
+            )
+        }
+        verify(exactly = 1) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.PROJECTED) }
+    }
+
+    /**
+     * The shape as it actually shipped: no `eventType` in the body. The consumer must not throw
+     * and must not project — but it must now SAY so, because this drop was previously
+     * indistinguishable from an idle topic.
+     */
+    @Test
+    fun `consumeScaEvent counts a payload with no eventType as UNRECOGNISED`(): Unit = runBlocking {
+        val payload = """{"deviceId":"78823928-36a6-44c3-bf4d-2ceb657cd623",""" +
+            """"partyId":"d03712b8-8814-40a7-a683-ac0c6a307204",""" +
+            """"credentialId":"e2e-1","algorithm":"ES256",""" +
+            """"occurredAt":"2026-08-08T03:20:23.835301445Z"}"""
+
+        consumer.consumeScaEvent(payload)
+
+        coVerify(exactly = 0) { projection.applyEvent(any()) }
+        verify(exactly = 1) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.UNRECOGNISED) }
     }
 
     // ── PARTY_ERASED ──────────────────────────────────────────────────────────

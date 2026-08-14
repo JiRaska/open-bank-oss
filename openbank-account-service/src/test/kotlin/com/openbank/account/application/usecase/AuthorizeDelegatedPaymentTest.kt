@@ -50,7 +50,14 @@ class AuthorizeDelegatedPaymentTest {
 
     @BeforeEach
     fun setUp() {
-        service = AuthorizationService(accountRepository, authorizationRepository, projectionRepository, clock)
+        service =
+            AuthorizationService(
+                accountRepository,
+                authorizationRepository,
+                projectionRepository,
+                mockk(relaxed = true),
+                clock,
+            )
         coEvery { accountRepository.findById(accountId) } returns account()
         coEvery { authorizationRepository.findActiveByAccountAndParty(any(), any()) } returns emptyList()
         coEvery { projectionRepository.findActiveByAccountAndParty(any(), any()) } returns emptyList()
