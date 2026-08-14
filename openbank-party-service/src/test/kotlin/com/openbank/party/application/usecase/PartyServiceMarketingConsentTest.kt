@@ -47,6 +47,7 @@ class PartyServiceMarketingConsentTest {
         documentRepo = mockk()
         documentFileRepo = mockk()
         metrics = mockk(relaxed = true)
+        changeMetrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         marketingConsentForwarding = mockk()
         marketingConsentTracking = mockk()

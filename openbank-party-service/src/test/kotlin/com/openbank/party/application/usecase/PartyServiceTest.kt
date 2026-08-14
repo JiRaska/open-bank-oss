@@ -55,13 +55,7 @@ class PartyServiceTest {
 
     @Test
     fun `createParty saves and publishes event`(): Unit = runBlocking {
-        val service = PartyService().apply {
-            partyRepo = mockk()
-            documentRepo = mockk()
-            metrics = mockk(relaxed = true)
-            rcPepper = Optional.empty()
-            clock = Clock.fixed(now, ZoneOffset.UTC)
-        }
+        val service = newService()
 
         val savedPartySlot = slot<Party>()
         coEvery { service.partyRepo.findByEmail("alice@example.com") } returns null
@@ -126,13 +120,7 @@ class PartyServiceTest {
 
     @Test
     fun `createParty throws PartyAlreadyExistsException when email exists`(): Unit = runBlocking {
-        val service = PartyService().apply {
-            partyRepo = mockk()
-            documentRepo = mockk()
-            metrics = mockk(relaxed = true)
-            rcPepper = Optional.empty()
-            clock = Clock.fixed(now, ZoneOffset.UTC)
-        }
+        val service = newService()
 
         coEvery { service.partyRepo.findByEmail("alice@example.com") } returns sampleParty()
 
@@ -725,6 +713,7 @@ class PartyServiceTest {
         documentRepo = mockk()
         documentFileRepo = mockk()
         metrics = mockk(relaxed = true)
+        changeMetrics = mockk(relaxed = true)
         gdprAggregation = mockk(relaxed = true)
         rcPepper = Optional.empty()
         clock = Clock.fixed(now, ZoneOffset.UTC)

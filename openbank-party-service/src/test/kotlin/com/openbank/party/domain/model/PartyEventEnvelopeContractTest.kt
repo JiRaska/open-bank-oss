@@ -78,6 +78,7 @@ class PartyEventEnvelopeContractTest {
     @Test
     fun `PARTY_UPDATED to ACTIVE carries the status field account-service reconciles on`() {
         val event = PartyEvents.updated(
+            individual(),
             individual().copy(status = PartyStatus.ACTIVE),
             at,
             PartyActor.system("party-api"),

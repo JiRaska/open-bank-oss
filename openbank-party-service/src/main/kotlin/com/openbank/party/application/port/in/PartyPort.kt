@@ -70,12 +70,25 @@ data class MergePartyCommand(
     val approvalReference: String?,
 )
 
+/**
+ * A PATCH of a party record: every field is optional and null means "leave as it is".
+ *
+ * [legalName], [dateOfBirth] and [nationality] are the MATERIAL master-data fields (ADR-0256 D1,
+ * #4458). They are here — and were not before — because the materiality classification on
+ * `PARTY_UPDATED` is otherwise a branch nothing can reach: the only editable fields were contact
+ * details, so every event this service could ever emit would be `NON_MATERIAL` while the contract
+ * advertised a trigger. `legalName` was already documented in `openapi.yaml` and silently ignored
+ * by the handler; this makes the spec true.
+ */
 data class UpdatePartyCommand(
     val id: UUID,
     val email: String?,
     val phone: String?,
     val address: Address?,
     val tradingName: String?,
+    val legalName: String? = null,
+    val dateOfBirth: String? = null,
+    val nationality: String? = null,
 )
 
 /**

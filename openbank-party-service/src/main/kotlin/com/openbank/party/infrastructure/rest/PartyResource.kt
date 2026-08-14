@@ -174,10 +174,19 @@ class PartyResource {
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "party.update", resource = "#id")
-    @Operation(summary = "Update party contact details")
+    @Operation(summary = "Update party contact details or material master data")
     suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
         val party = partyUseCase.updateParty(
-            UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName),
+            UpdatePartyCommand(
+                id = id,
+                email = req.email,
+                phone = req.phone,
+                address = req.address?.toDomain(),
+                tradingName = req.tradingName,
+                legalName = req.legalName,
+                dateOfBirth = req.dateOfBirth,
+                nationality = req.nationality,
+            ),
         )
         return Response.ok(party.toResponse()).build()
     }
@@ -585,11 +594,19 @@ data class CreatePartyRequest(
     }
 }
 
+/**
+ * All fields optional; null leaves the stored value alone. `legalName`, `dateOfBirth` and
+ * `nationality` are the MATERIAL master-data fields — editing one classifies the emitted
+ * `PARTY_UPDATED` as MATERIAL (ADR-0256 D1, #4458).
+ */
 data class UpdatePartyRequest(
     val email: String?,
     val phone: String?,
     val tradingName: String?,
     val address: AddressRequest?,
+    val legalName: String? = null,
+    val dateOfBirth: String? = null,
+    val nationality: String? = null,
 )
 
 /** ADR-0179. [approvalReference] links the ledger ADJUSTMENT journal that swept the balances. */
