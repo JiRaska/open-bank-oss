@@ -59,16 +59,35 @@ class CaseOpenService(
     private val log = Logger.getLogger(CaseOpenService::class.java)
     private val openTimes = mutableMapOf<String, ArrayDeque<Long>>()
 
+    /**
+     * [callerPrincipal] is the AUTHENTICATED caller (SecurityIdentity), [openedBy] the agent
+     * identity the call claims to act as. They are different things and only one of them is
+     * evidence (#4834).
+     *
+     * The open-rate quota is keyed on [callerPrincipal] for exactly that reason. Keyed on
+     * [openedBy] it was keyed on a value the caller chooses, so the per-agent ceiling would be
+     * split into one fresh bucket per string the caller invents. That is inert today only because
+     * `openAgents()` holds a single entry, so one value passes the gate and there is one bucket —
+     * and the config comment says the list is expected to grow ("swarm join/contribute grants are
+     * deliberate follow-up charter work"). A ceiling that stops holding when a config list grows,
+     * with nothing to notice, is the defect; the allow-list size is not the fix.
+     */
     @Synchronized
-    fun open(openedBy: String, caseClass: CaseClass, subjectRef: String, dispositionTarget: String): CaseOpenResult {
+    fun open(
+        callerPrincipal: String,
+        openedBy: String,
+        caseClass: CaseClass,
+        subjectRef: String,
+        dispositionTarget: String,
+    ): CaseOpenResult {
         if (!temporalConfig.enabled()) return CaseOpenResult.Unavailable
         if (!gate.canOpenCase(openedBy) || caseClass !in config.case().enabledClasses()) {
             return CaseOpenResult.Denied
         }
         val now = clock.millis()
-        if (!consumeOpenQuota(openedBy, now)) return CaseOpenResult.RateLimited
+        if (!consumeOpenQuota(callerPrincipal, now)) return CaseOpenResult.RateLimited
         if (countRunningCases() >= config.case().maxConcurrent()) {
-            refundOpenQuota(openedBy, now)
+            refundOpenQuota(callerPrincipal, now)
             return CaseOpenResult.RateLimited
         }
 
@@ -97,14 +116,23 @@ class CaseOpenService(
             // workflowIdFor already strips everything outside [A-Za-z0-9_-], so it cannot carry a
             // newline, while openedBy arrives verbatim from the request body. CodeQL flagged both
             // arguments on this line; only this one was ever injectable.
-            log.infof("case opened: %s by %s (class %s)", workflowId, openedBy.sanitizeForLog(), caseClass)
+            // Both identities on the record: the agent the call CLAIMS to act as, and the
+            // principal that actually authenticated. Attribution that names only the claim cannot
+            // answer "who did this" when the two diverge (#4834).
+            log.infof(
+                "case opened: %s claimed-by %s principal %s (class %s)",
+                workflowId,
+                openedBy.sanitizeForLog(),
+                callerPrincipal.sanitizeForLog(),
+                caseClass,
+            )
             CaseOpenResult.Opened(workflowId)
         } catch (e: WorkflowExecutionAlreadyStarted) {
-            refundOpenQuota(openedBy, now)
+            refundOpenQuota(callerPrincipal, now)
             log.debugf(e, "case open dedup: %s already running on the server", workflowId)
             CaseOpenResult.Duplicate
         } catch (e: WorkflowServiceException) {
-            refundOpenQuota(openedBy, now)
+            refundOpenQuota(callerPrincipal, now)
             log.warnf(e, "Temporal start failed for %s", workflowId)
             CaseOpenResult.Unavailable
         }
@@ -113,8 +141,8 @@ class CaseOpenService(
     fun workflowIdFor(caseClass: CaseClass, subjectRef: String): String =
         "case-${caseClass.name.lowercase().replace('_', '-')}-${subjectRef.replace(Regex("[^A-Za-z0-9_-]"), "-")}"
 
-    private fun consumeOpenQuota(agentId: String, now: Long): Boolean {
-        val deque = openTimes.getOrPut(agentId) { ArrayDeque() }
+    private fun consumeOpenQuota(quotaKey: String, now: Long): Boolean {
+        val deque = openTimes.getOrPut(quotaKey) { ArrayDeque() }
         val windowStart = now - OPEN_WINDOW_MS
         while (deque.isNotEmpty() && deque.first() < windowStart) deque.removeFirst()
         if (deque.size >= config.case().maxOpensPerAgentPerHour()) return false
@@ -122,8 +150,8 @@ class CaseOpenService(
         return true
     }
 
-    private fun refundOpenQuota(agentId: String, now: Long) {
-        openTimes[agentId]?.remove(now)
+    private fun refundOpenQuota(quotaKey: String, now: Long) {
+        openTimes[quotaKey]?.remove(now)
     }
 
     private fun countRunningCases(): Int = try {

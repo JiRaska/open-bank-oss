@@ -17,6 +17,7 @@ import com.openbank.casecoordinator.domain.model.JoinSignal
 import com.openbank.casecoordinator.domain.model.SupersedeSignal
 import com.openbank.casecoordinator.domain.model.SynthesisRequest
 import com.openbank.libs.temporal.TemporalConfig
+import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.common.annotation.Blocking
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowNotFoundException
@@ -45,6 +46,7 @@ class CaseCoordinatorResource(
     private val gate: CaseCapabilityGate,
     private val workflowClient: WorkflowClient,
     private val temporalConfig: TemporalConfig,
+    private val identity: SecurityIdentity,
 ) {
 
     data class Status(val service: String, val status: String)
@@ -113,7 +115,16 @@ class CaseCoordinatorResource(
         val openedBy = requireNotNull(request.openedBy) { "openedBy is required" }
         val dispositionTarget = requireNotNull(request.dispositionTarget) { "dispositionTarget is required" }
 
-        return when (val result = openService.open(openedBy, caseClass, subjectRef, dispositionTarget)) {
+        // The authenticated caller, not the body's claim. `openedBy` still names WHICH agent
+        // identity the call acts as (ADR-0244 D9 charter capability), but the open-rate quota is
+        // keyed on this instead — a ceiling keyed on a value the caller picks is not a ceiling
+        // (#4834). Same separation McpEndpoint documents for X-Agent-Id: the bearer proves who,
+        // the header only names which.
+        val callerPrincipal = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "anonymous"
+
+        return when (
+            val result = openService.open(callerPrincipal, openedBy, caseClass, subjectRef, dispositionTarget)
+        ) {
             is CaseOpenResult.Opened -> Response.status(Response.Status.CREATED)
                 .entity(OpenCaseResponse(result.caseId)).build()
             CaseOpenResult.Denied -> Response.status(Response.Status.FORBIDDEN)
