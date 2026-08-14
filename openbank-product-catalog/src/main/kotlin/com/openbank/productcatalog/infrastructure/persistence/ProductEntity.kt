@@ -10,6 +10,7 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.util.UUID
 
 /**
@@ -49,4 +50,8 @@ class ProductEntity : PanacheEntityBase {
 
     @Column(name = "doc", columnDefinition = "jsonb", nullable = false)
     lateinit var doc: String
+
+    @Version
+    @Column(name = "row_version", nullable = false)
+    var revision: Long = 0
 }

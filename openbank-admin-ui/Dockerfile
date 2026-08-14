@@ -227,6 +227,9 @@ COPY openbank-admin-ui/ ./
 # The origination Kotlin, at the repo-relative path the generator expects (#3283). It resolves
 # against --repo, which defaults to the parent of the admin-ui directory — here, /.
 COPY --from=origination-collector /origination-src/openbank-libs-domain /openbank-libs-domain
+# Product Studio types are generated from the provider's committed design-first contract. Stage
+# exactly that contract at the same repo-relative path used by local builds; never duplicate DTOs.
+COPY --from=openapi-collector /openapi-bundle/openbank-product-catalog/openapi.yaml /openbank-product-catalog/src/main/resources/openapi.yaml
 # The readiness collector derives money-path policy from this authoritative source. Keep the
 # single file it reads at its repo-relative path; otherwise prebuild cannot distinguish a missing
 # policy from an empty policy and correctly refuses to produce a misleading scorecard.

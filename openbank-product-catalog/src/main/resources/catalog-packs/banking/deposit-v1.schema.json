@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.banking.deposit:1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["currency", "productType"],
+  "properties": {
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "productType": { "type": "string", "enum": ["SAVINGS", "CURRENT", "TERM_DEPOSIT"] },
+    "baseRate": { "type": "string", "pattern": "^-?(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "minimumBalance": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" }
+  }
+}

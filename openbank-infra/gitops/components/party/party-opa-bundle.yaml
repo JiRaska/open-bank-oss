@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "0082477025d7efc9"
+    openbank.tech/policy-checksum: "e6cb9dddd43ad0de"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1238,6 +1238,8 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
+                                             # core also enforces maker != checker for standalone installs.
         - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                              # Confirmed no M2M caller — the only allow rule for this
                                              # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and

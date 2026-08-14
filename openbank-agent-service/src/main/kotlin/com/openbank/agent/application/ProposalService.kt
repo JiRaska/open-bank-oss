@@ -50,6 +50,7 @@ class ProposalService(
         proposedBy: String,
         modelId: String?,
         correlationId: String?,
+        metadata: Map<String, String>,
     ): AgentProposal {
         val row = AgentProposal(
             id = UUID.randomUUID(),
@@ -64,6 +65,7 @@ class ProposalService(
             decisionReason = null,
             modelId = modelId,
             correlationId = correlationId,
+            metadata = metadata.toMap(),
         )
         repository.insert(row)
         runBlocking {
@@ -84,6 +86,7 @@ class ProposalService(
                         // "unknown" is evidence, an absent key is a gap in the evidence chain.
                         put("model_id", modelId ?: CharterRegistry.UNKNOWN_MODEL)
                         correlationId?.let { put("correlation_id", it) }
+                        metadata["context_hash"]?.let { put("context_hash", it) }
                     },
                 ),
             )
