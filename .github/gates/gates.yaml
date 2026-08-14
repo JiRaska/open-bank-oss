@@ -87,6 +87,7 @@ gates:
   # rigged to fail in each distinct way (and to pass in the ways that must still pass, so a
   # fail-everything runner does not satisfy it either) and asserts the classification.
   - id: gate-runner-self-test
+    selftest_exempt: "is-a-test-suite — the run: IS run-gates.py --self-test"
     name: "gate runner self-test (the runner must be falsifiable too)"
     group: lint
     mode: enforced
@@ -94,6 +95,7 @@ gates:
       python3 .github/scripts/run-gates.py --self-test
 
   - id: yamllint
+    selftest_exempt: "third-party — yamllint's own test suite is not ours to run"
     name: "yamllint"
     group: lint
     mode: enforced
@@ -152,6 +154,7 @@ gates:
         | xargs -0 -P 4 -n 40 yamllint -f github -c "${RUNNER_TEMP:-/tmp}/yamllint-ci.yml"
 
   - id: shellcheck
+    selftest_exempt: "third-party — shellcheck's own test suite is not ours to run"
     name: "shellcheck"
     group: lint
     mode: enforced
@@ -634,6 +637,7 @@ gates:
   # separately from the artifacts it covers — the exact shape that let 16 pacts go
   # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
   - id: governance-script-unit-tests
+    selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
@@ -724,6 +728,7 @@ gates:
   # auto-deploy run is blocked by a transient can-i-deploy verification lag. Pure git +
   # jq against a throwaway fixture repo — no Gradle, no network.
   - id: auto-deploy-reconcile-probe-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "auto-deploy reconcile probe unit test"
     group: supplychain
     mode: enforced
@@ -736,6 +741,7 @@ gates:
   # (never self-clearing, and therefore something the scheduled tick must NOT silence).
   # Its ordering case is the load-bearing one — see the file's header.
   - id: can-i-deploy-block-classifier-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy block classifier unit test"
     group: supplychain
     mode: enforced
@@ -747,6 +753,7 @@ gates:
   # quieter than any block: `--latest main` on a push routinely answers about the PREVIOUS
   # build, so a green can be inherited from a commit that is not the one being deployed.
   - id: can-i-deploy-version-selector-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy version selector unit test"
     group: supplychain
     mode: enforced
@@ -760,6 +767,7 @@ gates:
   # one thing standing between a justified verdict and a borrowed one, and it is a pure function
   # with no network, which is exactly why its failure path can be exercised here.
   - id: pact-version-tree-equivalence-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "pact version tree-equivalence unit test (issue #3432, enforced)"
     group: supplychain
     mode: enforced
@@ -774,6 +782,7 @@ gates:
   # degrade to `no`, which on a dispatch is #3318's REFUSE. A reconcile that cannot verify must
   # not deploy.
   - id: pact-version-probe-fail-closed-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "pact version probe fails closed (issue #3432, enforced)"
     group: supplychain
     mode: enforced
@@ -789,6 +798,7 @@ gates:
   # exercised: a contentless counterpart dominating a healthy one, and every probe failure
   # degrading to `unknown` rather than to the reassuring answer.
   - id: blocking-counterpart-probe-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "can-i-deploy counterpart verifiability probe (issue #3223, enforced)"
     group: supplychain
     mode: enforced
@@ -836,6 +846,7 @@ gates:
   # case is the parser one: the CLI's matrix table TRUNCATES service names, so a parser
   # that reads it names a co-deploy set no dispatch can satisfy.
   - id: co-deploy-set-derivation-unit-test
+    selftest_exempt: "is-a-test-suite"
     name: "co-deploy set derivation unit test"
     group: supplychain
     mode: enforced
@@ -1237,6 +1248,7 @@ gates:
   # absent+creatable, absent+refused — and validates the stub first, so a stub that fell through to
   # the real `aws` cannot report a pass. Reintroducing the #3453 defect makes it go red.
   - id: ensure-ecr-repository
+    selftest_exempt: "is-a-test-suite — the deploy path needs AWS, so the classification harness is the whole gate"
     name: "ensure-ecr-repository classification (#3423/#3453, enforced)"
     group: supplychain
     mode: enforced
@@ -1901,6 +1913,7 @@ gates:
   # "no exclude-paths declared" case, where src/test must COUNT rather than be assumed excluded.
   # Falsified both ways before wiring in: breaking the exclusion makes it exit 1 with 4 failures.
   - id: record-deployment-version-resolver
+    selftest_exempt: "is-a-test-suite"
     name: "record-deployment version resolver (issue #3223, enforced)"
     group: api
     mode: enforced
@@ -1919,6 +1932,7 @@ gates:
   # claims keyed by directory name, so nine real findings were silently skipped. Both are now
   # self-test cases.
   - id: runtime-conformance-comparators
+    selftest_exempt: "is-a-test-suite"
     name: "runtime conformance: claim-vs-cluster comparators (enforced)"
     group: gitops
     mode: enforced
@@ -2106,6 +2120,7 @@ gates:
   # rebuilt zero consumers and left services running pre-fix images while their pods read green.
   # The self-test pins the declaration matcher and both path matchers in both directions.
   - id: libs-change-dependents
+    selftest_exempt: "is-a-test-suite"
     name: "libs change fan-out is derived (issue #2983, enforced)"
     group: gitops
     mode: enforced
@@ -2770,6 +2785,7 @@ gates:
   # verdict made the earlier one unfalsifiable — inside the very script whose job is to make
   # a non-review impossible to mistake for a clean one.
   - id: agent-review-proof-falsifiable
+    selftest_exempt: "is-a-test-suite"
     name: "proof-of-review script is falsifiable (ADR-0251, enforced)"
     group: lint
     mode: enforced
@@ -2790,6 +2806,7 @@ gates:
   # built the normalised set inline and stayed green when that function was gutted, the
   # counter-example never reaching the code under test.
   - id: agent-review-scope-falsifiable
+    selftest_exempt: "is-a-test-suite"
     name: "ADR-0251 review scope rule is falsifiable (enforced)"
     group: lint
     mode: enforced
@@ -2882,6 +2899,7 @@ gates:
   # whose whole thesis is checking things. See the config comment for what is selected and why
   # the style rules are not.
   - id: python-lint
+    selftest_exempt: "third-party — ruff's own test suite is not ours to run"
     name: "ruff over the governance scripts (#4339, enforced)"
     group: lint
     mode: enforced
