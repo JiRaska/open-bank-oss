@@ -4,6 +4,13 @@
 
 package com.openbank.campaign.domain.model
 
+import java.time.DayOfWeek
+import java.time.Instant
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.ZonedDateTime
+import java.time.temporal.TemporalAdjusters
+
 /**
  * When a recurring campaign re-evaluates its segment and enrols whoever newly qualifies.
  *
@@ -39,7 +46,9 @@ object ScheduleCatalog {
      *   derived from it: a rendered cron is a different sentence in every library, and this string
      *   is what a marketer approves.
      */
-    data class Cadence(val cron: String, val humanForm: String)
+    enum class Recurrence { DAILY, WEEKLY_MONDAY, MONTHLY_FIRST }
+
+    data class Cadence(val cron: String, val humanForm: String, val recurrence: Recurrence)
 
     /**
      * The catalogue. Deliberately coarse — nothing finer than daily.
@@ -49,12 +58,39 @@ object ScheduleCatalog {
      * party. The cheapest way to keep that honest is to not offer the frequency in the first place.
      */
     val ALL: Map<String, Cadence> = mapOf(
-        "DAILY_MORNING" to Cadence("0 9 * * *", "every day at 09:00"),
-        "WEEKLY_MONDAY_MORNING" to Cadence("0 9 * * MON", "every Monday at 09:00"),
-        "MONTHLY_FIRST_MORNING" to Cadence("0 9 1 * *", "on the 1st of each month at 09:00"),
+        "DAILY_MORNING" to Cadence("0 9 * * *", "every day at 09:00", Recurrence.DAILY),
+        "WEEKLY_MONDAY_MORNING" to Cadence("0 9 * * MON", "every Monday at 09:00", Recurrence.WEEKLY_MONDAY),
+        "MONTHLY_FIRST_MORNING" to Cadence("0 9 1 * *", "on the 1st of each month at 09:00", Recurrence.MONTHLY_FIRST),
     )
 
     fun exists(cadence: String): Boolean = cadence in ALL
 
     operator fun get(cadence: String): Cadence? = ALL[cadence]
+
+    /**
+     * The next declared marketing window, calculated from the same closed cadence the Temporal
+     * scheduler receives. This is a planning projection, not a delivery promise: Temporal remains
+     * the authority for whether a run starts and whether anybody is eligible when it does.
+     */
+    fun nextWindowAfter(cadence: String, after: Instant): Instant {
+        val rule = requireNotNull(this[cadence]) { "unknown cadence '$cadence'" }
+        val now = after.atZone(ZoneId.of(ZONE))
+        val atNine = LocalTime.of(MORNING_HOUR, 0)
+        fun candidate(day: ZonedDateTime): ZonedDateTime = day.with(atNine)
+        val next = when (rule.recurrence) {
+            Recurrence.DAILY -> candidate(now).takeIf { it.isAfter(now) } ?: candidate(now.plusDays(1))
+            Recurrence.WEEKLY_MONDAY -> {
+                val monday = now.with(TemporalAdjusters.nextOrSame(DayOfWeek.MONDAY))
+                candidate(monday).takeIf { it.isAfter(now) } ?: candidate(monday.plusWeeks(1))
+            }
+            Recurrence.MONTHLY_FIRST -> {
+                val first = now.with(TemporalAdjusters.firstDayOfMonth())
+                candidate(first).takeIf { it.isAfter(now) }
+                    ?: candidate(now.plusMonths(1).with(TemporalAdjusters.firstDayOfMonth()))
+            }
+        }
+        return next.toInstant()
+    }
+
+    private const val MORNING_HOUR = 9
 }

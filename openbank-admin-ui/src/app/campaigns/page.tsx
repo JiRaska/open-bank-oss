@@ -45,6 +45,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { StageBoard, summariseBy, type StageDef } from '@/components/flow/StageBoard'
+import { CampaignPlanningBoard, type CampaignPlan } from '@/components/campaigns/CampaignPlanningBoard'
 
 /** `/api/v1/campaigns/summary` (#3296). Null when the deployed service predates the endpoint —
  *  the page then keeps saying reach is not available rather than showing zeros that look like
@@ -105,6 +106,8 @@ export default function CampaignsPage() {
   const [summary, setSummary] = useState<Record<string, CampaignSummary> | null>(null)
   const [engagement, setEngagement] = useState<Record<string, CampaignEngagement>>({})
   const [engagementState, setEngagementState] = useState<'ok' | 'unavailable'>('unavailable')
+  const [planning, setPlanning] = useState<CampaignPlan[]>([])
+  const [planningState, setPlanningState] = useState<'loading' | 'ok' | 'unavailable'>('loading')
   const [unavailable, setUnavailable] = useState<UnavailableKind | null>(null)
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -136,6 +139,20 @@ export default function CampaignsPage() {
       })
       .catch(() => setUnavailable('unreachable'))
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/campaigns/planning')
+      .then(r => r.json())
+      .then((d: { items?: CampaignPlan[]; state?: string }) => {
+        if (d.state === 'ok') {
+          setPlanning(d.items ?? [])
+          setPlanningState('ok')
+        } else {
+          setPlanningState('unavailable')
+        }
+      })
+      .catch(() => setPlanningState('unavailable'))
   }, [])
 
   const fmtDate = (iso: string | null | undefined) =>
@@ -343,6 +360,8 @@ export default function CampaignsPage() {
               </div>
             </div>
           </section>
+
+          <CampaignPlanningBoard items={planning} state={planningState} />
 
           <section className="campaign-decision-desk" aria-label={t('Dnešní priority kampaní', 'Today’s campaign priorities')} data-testid="campaign-decision-desk">
             <div className="campaign-decision-queue">
