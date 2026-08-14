@@ -251,13 +251,96 @@ def load_baseline(path: Path) -> set[str]:
     return entries
 
 
+def self_test() -> int:
+    """Falsify the path normaliser, the server-prefix resolver and the served/published split.
+
+    #2358: a route can be published in openapi.yaml and served nowhere, or served and
+    published nowhere. Both are silent — the spec is a document, so nothing at runtime
+    disagrees with it, and the failure surfaces as a client 404 against an endpoint the
+    documentation promises.
+
+    Every helper here compares STRINGS across two very different sources, and the ways they go
+    wrong are asymmetric: a normaliser that is too eager makes real drift disappear (two
+    different routes collapse to one), and one that is too literal manufactures drift out of a
+    trailing slash. The externally_served exemption is the sharpest — widen it and genuine
+    unserved routes become invisible.
+    """
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want!r}, got {got!r}")
+
+    # --- normalisation: must remove NOISE, never distinctions -----------------------------
+    case("duplicate slashes collapse", normalize("/a//b"), "/a/b")
+    case("a trailing slash is dropped", normalize("/a/b/"), "/a/b")
+    case("root survives", normalize("/"), "/")
+    # A path parameter is part of the route's identity — collapsing {id} would merge
+    # /accounts/{id} with /accounts/{iban} and hide a real difference.
+    case("path parameters are preserved", normalize("/a/{id}/b"), "/a/{id}/b")
+    case("distinct routes stay distinct", normalize("/a/b") == normalize("/a/c"), False)
+
+    # --- the server prefix, which decides what ABSOLUTE means ------------------------------
+    case("an absolute server url yields its path",
+         server_prefix('servers:\n  - url: http://localhost:8101/api/v1\n'), "/api/v1")
+    case("a prefix-only server url yields itself",
+         server_prefix('servers:\n  - url: /api/v1\n'), "/api/v1")
+    case("a host-only url yields no prefix",
+         server_prefix('servers:\n  - url: http://localhost:8101\n'), "")
+    case("no servers block yields no prefix", server_prefix("paths:\n  /x:\n"), "")
+    # A trailing slash on the server url must not double up when routes are joined to it.
+    case("a trailing slash on the server url is dropped",
+         server_prefix('servers:\n  - url: http://localhost:8101/api/v1/\n'), "/api/v1")
+
+    # --- published routes, resolved against the prefix ------------------------------------
+    spec = ('servers:\n  - url: /api/v1\n'
+            'paths:\n'
+            '  /accounts:\n'
+            '    get:\n'
+            '      summary: list\n'
+            '    post:\n'
+            '      summary: create\n'
+            '  /accounts/{id}:\n'
+            '    get:\n'
+            '      summary: one\n')
+    got = spec_routes(spec)
+    want = {"GET /api/v1/accounts", "POST /api/v1/accounts", "GET /api/v1/accounts/{id}"}
+    case("every verb under every path is published, prefixed", got, want)
+
+    # --- the exemption, which is where over-widening hides real drift ----------------------
+    shared = {"GET /api/v1/info"}
+    case("a quarkus management route is externally served",
+         externally_served("GET /q/health/live", set()), True)
+    case("a libs-runtime shared route is externally served",
+         externally_served("GET /api/v1/info", shared), True)
+    # THE ONE THAT MATTERS: an ordinary business route is NOT externally served. If it were,
+    # a published-but-unimplemented endpoint would be silently exempted — the gate's whole
+    # subject.
+    case("an ordinary route is NOT externally served",
+         externally_served("GET /api/v1/accounts", shared), False)
+    case("a route merely resembling the shared one is not exempt",
+         externally_served("GET /api/v1/information", shared), False)
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: openapi route conformance is falsifiable (16 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--enforce", action="store_true")
+    ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--service", help="check a single openbank-* module (default: the whole fleet)")
     ap.add_argument("--baseline", help="file of declared, already-known findings (see module docstring)")
     ap.add_argument("--write-baseline", help="rewrite the baseline file from the current findings")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     level = "error" if args.enforce else "warning"
     specs = sorted(Path(".").glob("openbank-*/src/main/resources/openapi.yaml"))
