@@ -59,9 +59,10 @@ data class CreatePartyCommand(
 /**
  * ADR-0179: retire [id] as a duplicate of [mergedIntoPartyId]. Both parties must be live, distinct,
  * and the target must not itself be merged (the caller resolves chains to the final survivor).
- * [reason] is free text for the audit trail; [approvalReference] links the ledger ADJUSTMENT
- * journal entries that swept the balances, so the money movement and the identity retirement are
- * traceable to one another.
+ * [reason] is free text for the audit trail; [approvalReference] is the `mergeReference` passed to
+ * POST /api/v1/transactions/merge-sweep (transaction-service), which posts the balance sweep as an
+ * ADJUSTMENT transaction, so the money movement and the identity retirement are traceable to one
+ * another from either end.
  */
 data class MergePartyCommand(
     val id: UUID,
