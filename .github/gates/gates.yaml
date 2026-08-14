@@ -582,6 +582,33 @@ gates:
       python3 .github/scripts/check-probe-port-listener.py --enforce
 
   # ==== supplychain ====================================================
+  # The fleet SBOM-attestation gate lives in the path-filtered fleet-attestation.yml, which
+  # can never be a required check — so its own falsification must run somewhere
+  # unconditional, and this is it. The selftest needs no registry and no credentials: it
+  # drives the whole loop against a stub cosign and asserts the three exit codes, including
+  # the exit-2 ("the probe could not run") branch that no PR can produce on demand by
+  # summoning an ECR throttle. Without this entry the branch that #1915 added is exercised
+  # only when someone edits one of five paths.
+  - id: fleet-attestation-classifier
+    name: "fleet-attestation gate classifies a probe failure as UNKNOWN, not as a fleet gap (issue #1915, enforced)"
+    group: supplychain
+    mode: enforced
+    # The gate IS the harness: its `run:` is the checker's own falsification suite, so a
+    # separate `selftest:` would be the same command executed twice for one signal.
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the gate's whole loop
+      against a stub cosign and asserts exit 0, 1 and 2, so its red is reachable by
+      construction; falsified in both directions (see the run: comment).
+    budget_seconds: 30   # 0.3s locally — no network, no registry
+    run: |
+      # The gate IS the selftest here: the artifact under test is the classifier + exit-code
+      # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
+      # not have, and fleet-attestation.yml + auto-deploy.yml both do that with them).
+      # Falsified in both directions before wiring in: reverting the classifier's fallback to
+      # the pre-#1915 shape reddens 7 cases, and changing the final `exit 2` to `exit 1`
+      # reddens exactly the one case that asserts the distinction.
+      .github/scripts/check-fleet-attestations.sh --self-test
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
