@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.126.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.125.0...admin-ui-v0.126.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** enable reusable campaign drafts ([#4756](https://github.com/JiRaska/open-bank-oss/issues/4756)) ([d59e6c5](https://github.com/JiRaska/open-bank-oss/commit/d59e6c5aaf134fc08fd0acac1af915bc43cb46c2))
+
 ## [0.125.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.124.0...admin-ui-v0.125.0) (2026-08-14)
 
 
