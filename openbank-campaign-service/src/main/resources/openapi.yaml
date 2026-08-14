@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.35.0
+  version: 1.36.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -218,7 +218,7 @@ paths:
                     inAppSurface:
                       type: string
                       nullable: true
-                      enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+                      enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
   /api/v1/campaigns/guardrails:
     get:
       tags: [Campaigns]
@@ -751,7 +751,8 @@ components:
             Optional on create; absent means EMAIL. Must agree with the template's own channel —
             MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH and
             MARKETING_PRODUCT_OFFER_BANNER, MARKETING_PRODUCT_OFFER_CAROUSEL,
-            MARKETING_PRODUCT_OFFER_PRODUCT_FEED and MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
+            MARKETING_PRODUCT_OFFER_STORY, MARKETING_PRODUCT_OFFER_PRODUCT_FEED and
+            MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
             mismatch is rejected with 400.
         variables:
           type: object
@@ -805,7 +806,7 @@ components:
         inAppSurface:
           type: string
           nullable: true
-          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
           description: >-
             Closed authenticated-app inventory for a BANNER step. Absent retains HOME_BANNER for
             backwards-compatible placements. Each surface has its own reviewed template shape;
@@ -1064,7 +1065,7 @@ components:
           enum: [PUSH, BANNER]
         surface:
           type: string
-          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
         type:
           type: string
           enum: [IMPRESSION, CLICK, DISMISS]

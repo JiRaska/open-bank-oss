@@ -69,6 +69,21 @@ describe('campaign customer experience preview', () => {
     expect(container.querySelector('[data-preview-surface="HOME_CAROUSEL"]')).toBeTruthy()
     expect(screen.getAllByText(/Home carousel/)).toHaveLength(2)
   })
+
+  it('renders a story as a first-party app surface, not a push notification', () => {
+    const { container } = render(
+      <LanguageProvider>
+        <CampaignExperiencePreview
+          step={{ ...push, channel: 'BANNER', template: 'MARKETING_PRODUCT_OFFER_STORY', inAppSurface: 'STORIES' }}
+          campaignName="Summer saving"
+        />
+      </LanguageProvider>,
+    )
+
+    expect(container.querySelector('[data-preview-surface="STORIES"]')).toBeTruthy()
+    expect(screen.getAllByText(/In-app story/)).toHaveLength(2)
+    expect(screen.getByText(/No interruption, no lock screen/)).toBeTruthy()
+  })
 })
 
 describe('campaign launch readiness', () => {

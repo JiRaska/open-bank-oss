@@ -7,7 +7,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 export type CampaignAttentionMetric = {
   stepOrder: number
   channel: 'PUSH' | 'BANNER'
-  surface: 'HOME_BANNER' | 'HOME_CAROUSEL' | 'PRODUCT_FEED' | 'REWARDS_HUB'
+  surface: 'HOME_BANNER' | 'HOME_CAROUSEL' | 'STORIES' | 'PRODUCT_FEED' | 'REWARDS_HUB'
   type: 'IMPRESSION' | 'CLICK' | 'DISMISS'
   count: number
 }
@@ -33,6 +33,7 @@ function labels(t: (cs: string, en: string) => string) {
     surface: {
       HOME_BANNER: t('Domovský banner', 'Home banner'),
       HOME_CAROUSEL: t('Domovský carousel', 'Home carousel'),
+      STORIES: t('Příběhy', 'Stories'),
       PRODUCT_FEED: t('Feed produktů', 'Product feed'),
       REWARDS_HUB: t('Centrum odměn', 'Rewards hub'),
     },
