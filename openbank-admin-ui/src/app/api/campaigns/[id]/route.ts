@@ -204,3 +204,38 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     },
   })
 }
+
+/**
+ * Revise a definition before it enters four-eyes review.  The BFF deliberately forwards no maker
+ * identity: campaign-service derives that from the access token and rejects anyone other than the
+ * original maker, so a browser cannot turn an edit into an impersonation claim.
+ */
+export async function PUT(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  const session = await auth()
+  if (!session?.user?.accessToken) {
+    return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+  }
+  const { id } = await ctx.params
+  try {
+    const raw = await req.json() as Record<string, unknown>
+    // These fields are server-owned.  Dropping them at the BFF keeps an accidental stale detail
+    // payload from looking like an editable audit record; campaign-service independently derives
+    // and verifies the maker from the token.
+    const { id: _id, state: _state, createdBy: _createdBy, approvedBy: _approvedBy, createdAt: _createdAt, updatedAt: _updatedAt, ...draft } = raw
+    const res = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, `/api/v1/campaigns/${encodeURIComponent(id)}`), {
+      method: 'PUT',
+      headers: { authorization: `Bearer ${session.user.accessToken}`, 'content-type': 'application/json' },
+      body: JSON.stringify(draft),
+      signal: AbortSignal.timeout(8000),
+      cache: 'no-store',
+    })
+    const text = await res.text()
+    const payload = text ? JSON.parse(text) : {}
+    return NextResponse.json(
+      res.ok ? { state: 'ok', campaign: payload } : { state: res.status === 401 || res.status === 403 ? 'forbidden' : 'rejected', ...payload },
+      { status: 200 },
+    )
+  } catch {
+    return NextResponse.json({ state: 'unreachable' }, { status: 200 })
+  }
+}

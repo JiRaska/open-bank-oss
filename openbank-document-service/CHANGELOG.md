@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.0...document-service-v0.11.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **document-service:** a stub delivery must not record the statement as delivered ([#4659](https://github.com/JiRaska/open-bank-oss/issues/4659)) ([77ebab0](https://github.com/JiRaska/open-bank-oss/commit/77ebab08e3cafc0c99fa0480595d417fa6c3bf03)), closes [#4109](https://github.com/JiRaska/open-bank-oss/issues/4109)
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.10.1...document-service-v0.11.0) (2026-08-09)
 
 

@@ -4,7 +4,10 @@
 
 package com.openbank.campaign.infrastructure.rest
 
+import com.openbank.campaign.application.usecase.CampaignNotFoundException
+import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundException
 import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -17,6 +20,7 @@ import com.openbank.libs.authz.Authorize
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.core.Response
@@ -76,6 +80,8 @@ data class StepRequest(
     val delaySeconds: Long = 0,
     /** Optional branch condition (ADR-0200 D1, #3585). Absent means the step always runs. */
     val condition: StepCondition? = null,
+    /** Optional explicit earlier source step for a multi-path decision. */
+    val conditionSourceOrder: Int? = null,
     /** The B-arm values for a campaign-wide content experiment; absent keeps one shared message. */
     val variantBVariables: Map<String, String>? = null,
     /** Use the catalogue's safe PUSH counterpart only when this EMAIL step lacks email consent. */
@@ -111,10 +117,41 @@ data class ApprovalRequest(val approver: String? = null)
 /**
  * The authenticated caller — recorded as the maker on create and as the checker on activate.
  *
- * A top-level extension rather than a method: `CampaignResource` sits exactly at detekt's
- * `TooManyFunctions` threshold of 11, which fires AT the limit, so a private helper costs the gate.
+ * A top-level extension rather than a method: lifecycle endpoints remain separately authorized,
+ * while this keeps identity extraction outside the HTTP adapter's public surface.
  */
 private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
+
+private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
+    CampaignStep(
+        it.order,
+        it.template,
+        it.channel,
+        it.variables,
+        it.delaySeconds,
+        it.condition,
+        it.conditionSourceOrder,
+        it.variantBVariables,
+        it.fallbackToPush,
+        it.mobileDestination,
+        it.inAppSurface,
+        it.variantBTemplate,
+        it.variantBChannel,
+        it.variantBDelaySeconds,
+    )
+}
+
+private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignDefinition(
+    name = name,
+    goal = goal,
+    segmentRef = SegmentRef(segmentName, segmentVersion),
+    steps = toSteps(),
+    stopCondition = stopCondition?.let { StopCondition(it.maxSendsPerParty) },
+    conversionRule = conversionRule,
+    holdoutPercent = holdoutPercent,
+    schedule = schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
+    trigger = trigger,
+)
 
 /**
  * Operator API for the campaign first slice (ADR-0200). Activation is four-eyes gated by the
@@ -123,6 +160,7 @@ private fun JsonWebToken.principalName(): String = name ?: subject ?: "unknown"
  */
 @Path("/api/v1/campaigns")
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Each method is a separately authorised lifecycle endpoint.
 class CampaignResource(private val service: CampaignService, private val jwt: JsonWebToken) {
 
     @GET
@@ -137,30 +175,13 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
 
     @POST
     @Authorize(action = "campaign.create", resource = "#request.name")
-    suspend fun create(request: CreateCampaignRequest): Response {
+    suspend fun create(request: CreateCampaignRequest): Response = try {
         val createdBy = jwt.principalName()
-        val steps = request.steps.map {
-            CampaignStep(
-                it.order,
-                it.template,
-                it.channel,
-                it.variables,
-                it.delaySeconds,
-                it.condition,
-                it.variantBVariables,
-                it.fallbackToPush,
-                it.mobileDestination,
-                it.inAppSurface,
-                it.variantBTemplate,
-                it.variantBChannel,
-                it.variantBDelaySeconds,
-            )
-        }
         val campaign = service.createDraft(
             request.name,
             request.goal,
             SegmentRef(request.segmentName, request.segmentVersion),
-            steps,
+            request.toSteps(),
             createdBy,
             request.stopCondition?.let { StopCondition(it.maxSendsPerParty) },
             request.conversionRule,
@@ -168,7 +189,41 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
             request.trigger,
         )
-        return Response.status(Response.Status.CREATED).entity(campaign).build()
+        Response.status(Response.Status.CREATED).entity(campaign).build()
+    } catch (e: CampaignReferenceNotFoundException) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+    }
+
+    /** The authenticated maker may revise only the unsubmitted definition. */
+    @PUT
+    @Path("/{id}")
+    @Authorize(action = "campaign.create", resource = "#id")
+    suspend fun revise(@PathParam("id") id: UUID, request: CreateCampaignRequest): Response = runCatching {
+        Response.ok(
+            service.reviseDraft(
+                id = id,
+                definition = request.toDefinition(),
+                revisedBy = jwt.principalName(),
+            ),
+        ).build()
+    }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
+
+    /**
+     * Starts a new, maker-owned DRAFT from an existing campaign definition. The source is never
+     * edited or reactivated: authoring continues in Studio, where the marketer can review every
+     * copied surface and entry setting before a separate approver sees the new campaign.
+     */
+    @POST
+    @Path("/{id}/duplicate")
+    @Authorize(action = "campaign.create", resource = "#id")
+    suspend fun duplicate(@PathParam("id") id: UUID): Response = try {
+        Response.status(Response.Status.CREATED).entity(service.duplicateAsDraft(id, jwt.principalName())).build()
+    } catch (_: CampaignNotFoundException) {
+        Response.status(Response.Status.NOT_FOUND).build()
+    } catch (e: NoSuchElementException) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+    } catch (e: IllegalArgumentException) {
+        Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
     }
 
     @POST

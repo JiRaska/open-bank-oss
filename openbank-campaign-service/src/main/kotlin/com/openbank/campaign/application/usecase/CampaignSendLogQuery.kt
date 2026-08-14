@@ -65,6 +65,7 @@ class CampaignSendLogQuery(private val sendLog: SendLogRepository) {
                 reached = rows.sumOf { it.count },
                 delivered = byOutcome[SendOutcome.SENT] ?: 0,
                 failed = byOutcome[SendOutcome.FAILED] ?: 0,
+                skipped = byOutcome[SendOutcome.SKIPPED_CONDITION] ?: 0,
                 suppressed = SUPPRESSION_REASONS.mapNotNull { r ->
                     byOutcome[r]?.takeIf { it > 0 }?.let { SuppressionCount(r.name, it) }
                 },
@@ -106,6 +107,8 @@ data class StepFunnel(
     val reached: Long,
     val delivered: Long,
     val failed: Long,
+    /** The condition did not hold, so this party continued through another reviewed path. */
+    val skipped: Long,
     val suppressed: List<SuppressionCount>,
 )
 

@@ -17,16 +17,21 @@
 #      Caveat: only CURRENT workload templates were back-signed; a `kubectl rollout undo` to a
 #      pre-signing revision references an unsigned historical tag and will be REJECTED — rebuild
 #      (build-push-*.sh signs) or sign that digest first.
-#   4. (in progress) SBOM-attestation rule — the provenance gate beyond signatures (ADR-0030 D4).
-#      auto-deploy.yml runs `cosign attest --type cyclonedx` on every pushed image (KMS key),
-#      and release-please.yml attaches a signed evidence bundle per release. The admission rule
-#      is LIVE in AUDIT mode as a SEPARATE ClusterPolicy (verify-sbom-attestation-policy.yaml —
-#      separate so this policy's Enforce is not coupled to the attestation rule's staging).
-#      Its PolicyReport violations are the fleet-redeploy worklist. Flip that policy to Enforce
-#      ONLY once the running fleet is redeployed with attested images and the Audit report runs
-#      clean for an observation window (rules.yaml: provenance.enforce_criteria; cf. the step-3
-#      #770 revert). Until then the provenance gate stays ADVISORY. The signature rule below
-#      stays Enforce regardless.
+#   4. (done, 2026-07-12) SBOM-attestation rule — the provenance gate beyond signatures
+#      (ADR-0030 D4). auto-deploy.yml runs `cosign attest --type cyclonedx` on every pushed
+#      image (KMS key), and release-please.yml attaches a signed evidence bundle per release.
+#      The admission rule lives in a SEPARATE ClusterPolicy (verify-sbom-attestation-policy.yaml
+#      — separate so this policy's Enforce is not coupled to the attestation rule's staging) and
+#      graduated Audit -> Enforce on 2026-07-12 after the fleet-wide attested redeploy. The
+#      provenance gate is therefore BLOCKING, not advisory: an openbank-* image without a
+#      cyclonedx attestation is rejected at admission just as an unsigned one is.
+#      Verified in-cluster 2026-08-13 — both policies report Enforce + Ready:
+#        verify-openbank-image-signatures          Enforce  Ready
+#        verify-openbank-image-sbom-attestation    Enforce  Ready
+#      (This paragraph read "(in progress) … LIVE in AUDIT mode … stays ADVISORY" until
+#      2026-08-13 — false for a month, and this file is where a reader comes to learn the
+#      provenance posture. #1915.)
+#      Backing OUT either policy: docs/runbooks/0011-kyverno-admission-rollback.md.
 apiVersion: kyverno.io/v1
 kind: ClusterPolicy
 metadata:
@@ -54,7 +59,11 @@ spec:
       verifyImages:
         - imageReferences:
             - "265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*"
-          # Audit-only: do not rewrite the image to its digest or fail the pod.
+          # Non-mutating: do not rewrite the tag to its digest, and do not require the
+          # reference to already BE a digest. Neither weakens the gate — `required: true`
+          # plus validationFailureAction: Enforce still rejects an unsigned image. (This
+          # comment read "Audit-only: … or fail the pod", which stopped being true when the
+          # policy graduated to Enforce and misdescribes what these two flags do. #1915.)
           mutateDigest: false
           verifyDigest: false
           required: true

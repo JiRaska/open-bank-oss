@@ -96,6 +96,11 @@ open class CampaignJourneyActivitiesImpl(
             sendLog.latestDeliveryStatusBeforeStep(campaignId, partyId, stepOrder)
         }
 
+    override fun deliveryStatusForStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? =
+        runBlockingOnWorker {
+            sendLog.deliveryStatusForStep(campaignId, partyId, stepOrder)
+        }
+
     override fun skipStep(campaignId: UUID, partyId: UUID, stepOrder: Int) = runBlockingOnWorker {
         sendLog.record(
             SendRecord(Ids.newId(), campaignId, partyId, stepOrder, SendOutcome.SKIPPED_CONDITION, Instant.now()),

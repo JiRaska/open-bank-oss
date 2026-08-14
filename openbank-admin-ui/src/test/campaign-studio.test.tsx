@@ -4,13 +4,15 @@
 
 import React from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { SessionProvider } from 'next-auth/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import CampaignDetailPage from '@/app/campaigns/[id]/page'
 import NewCampaignPage from '@/app/campaigns/new/page'
 
-vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }), useSearchParams: () => new URLSearchParams() }))
+const routerPush = vi.hoisted(() => vi.fn())
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ push: routerPush }), useSearchParams: () => new URLSearchParams() }))
 
 const CAMPAIGN_ID = '7b1f1d5e-0d2a-4a6a-8f7e-2c1b9a0d3e4f'
 
@@ -27,6 +29,19 @@ const CADENCES = {
 const TRIGGERS = {
   state: 'ok',
   items: [{ trigger: 'ACCOUNT_OPENED', humanForm: 'when an account is opened' }],
+}
+
+const TEMPLATES = {
+  state: 'ok',
+  items: [
+    { template: 'MARKETING_PRODUCT_OFFER', channel: 'EMAIL', variables: ['offerTitle', 'offerText', 'ctaText'] },
+    { template: 'MARKETING_PRODUCT_OFFER_PUSH', channel: 'PUSH', variables: ['offerTitle'] },
+    { template: 'MARKETING_PRODUCT_OFFER_BANNER', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_BANNER' },
+    { template: 'MARKETING_PRODUCT_OFFER_CAROUSEL', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'HOME_CAROUSEL' },
+    { template: 'MARKETING_PRODUCT_OFFER_STORY', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'STORIES' },
+    { template: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'PRODUCT_FEED' },
+    { template: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB', channel: 'BANNER', variables: ['offerTitle', 'offerText', 'ctaText'], inAppSurface: 'REWARDS_HUB' },
+  ],
 }
 
 function detail(state: string) {
@@ -51,8 +66,9 @@ function detail(state: string) {
 
 function mockFetch(routes: Record<string, unknown>) {
   return vi.fn(async (url: string) => {
-    const match = Object.keys(routes).find(k => String(url).includes(k))
-    return { ok: true, status: 200, json: async () => (match ? routes[match] : {}) }
+    const key = String(url)
+    const match = Object.keys(routes).find(k => key.includes(k))
+    return { ok: true, status: 200, json: async () => (match ? routes[match] : key.includes('/api/campaigns/templates') ? TEMPLATES : {}) }
   })
 }
 
@@ -71,7 +87,10 @@ function renderDetail() {
 }
 
 describe('campaign studio', () => {
-  beforeEach(() => vi.unstubAllGlobals())
+  beforeEach(() => {
+    vi.unstubAllGlobals()
+    routerPush.mockReset()
+  })
 
   /**
    * ADR-0221 D1 step 2: the audience is a picker over versioned segment artifacts, and ADR-0201 D1
@@ -104,6 +123,31 @@ describe('campaign studio', () => {
     expect(screen.getByText(/fixed app deep link/i)).toBeTruthy()
   }, 15000)
 
+  it('keeps the customer-surface overview in sync with the authored journey', async () => {
+    vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
+    render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
+
+    await waitFor(() => expect(document.querySelector('[data-surface="PUSH"]')).toBeTruthy(), { timeout: 8000 })
+    // The initial app-first step is a push. The overview must reflect the actual authored channel,
+    // not an aspirational multi-channel plan.
+    expect(document.querySelector('[data-surface="BANNER"]')).toBeNull()
+
+    fireEvent.click(document.querySelector('[data-channel-pick="BANNER"]')!)
+
+    await waitFor(() => expect(document.querySelector('[data-surface="BANNER"]')).toBeTruthy(), { timeout: 8000 })
+    expect(document.querySelector('[data-surface="PUSH"]')).toBeNull()
+    // A rail is only useful when it selects an actual moment, not when it repeats the selected
+    // canvas node. Add a second step, then switch the preview back to the first touchpoint.
+    fireEvent.click(document.querySelector('[data-add-step="true"]')!)
+    await waitFor(() => expect(document.querySelector('[data-touchpoint="1"]')).toBeTruthy(), { timeout: 8000 })
+    const firstTouchpoint = document.querySelector('[data-touchpoint="0"]') as HTMLButtonElement
+    const secondTouchpoint = document.querySelector('[data-touchpoint="1"]') as HTMLButtonElement
+    expect(secondTouchpoint.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(firstTouchpoint)
+    expect(firstTouchpoint.getAttribute('aria-pressed')).toBe('true')
+    expect(secondTouchpoint.getAttribute('aria-pressed')).toBe('false')
+  }, 15000)
+
   /**
    * ADR-0176 D4 / ADR-0221 D1 step 3: a campaign supplies values, never body text. The fields
    * offered are exactly the template's declared variables — a free-form body field here would be a
@@ -113,6 +157,7 @@ describe('campaign studio', () => {
     vi.stubGlobal('fetch', mockFetch({ '/api/segments': SEGMENTS }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     // Mobile is the studio's starting surface. E-mail remains available when a campaign genuinely
     // needs its richer template, and that switch—not the initial screen—owns these three fields.
     fireEvent.click(document.querySelector('[data-channel-pick="EMAIL"]')!)
@@ -136,6 +181,7 @@ describe('campaign studio', () => {
       if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
       if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url.includes('/api/campaigns/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
       if (url === '/api/campaigns') {
         createBody = JSON.parse(String(init?.body))
         return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
@@ -145,6 +191,7 @@ describe('campaign studio', () => {
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
     await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Recurring welcome' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Keep new customers engaged' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
@@ -168,6 +215,7 @@ describe('campaign studio', () => {
       if (url.includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
       if (url.includes('/api/campaigns/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (url.includes('/api/campaigns/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (url.includes('/api/campaigns/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
       if (url === '/api/campaigns') {
         createBody = JSON.parse(String(init?.body))
         return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: CAMPAIGN_ID } }) }
@@ -177,6 +225,7 @@ describe('campaign studio', () => {
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
     await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Two headlines' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)
@@ -208,6 +257,125 @@ describe('campaign studio', () => {
     expect(screen.queryByText('Approve and activate')).toBeNull()
   }, 15000)
 
+  it('reuses a campaign as a new editable draft without changing the viewed campaign', async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.includes(`/api/campaigns/${CAMPAIGN_ID}/duplicate`)) {
+        expect(init?.method).toBe('POST')
+        return { ok: true, status: 200, json: async () => ({ state: 'ok', campaign: { id: 'draft-copy-123' } }) }
+      }
+      return { ok: true, status: 200, json: async () => detail('ACTIVE') }
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-reuse-draft')).toBeTruthy(), { timeout: 8000 })
+    fireEvent.click(screen.getByRole('button', { name: 'Create draft copy' }))
+
+    await waitFor(() => expect(routerPush).toHaveBeenCalledWith('/campaigns/new?draft=draft-copy-123'))
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/campaigns/${CAMPAIGN_ID}/duplicate`,
+      { method: 'POST' },
+    )
+  }, 15000)
+
+  it('turns server-attributed app attention into a per-surface campaign funnel', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 120 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'CLICK', count: 18 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'DISMISS', count: 7 },
+        ],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-funnel')).toBeTruthy(), { timeout: 8000 })
+    const funnel = within(screen.getByTestId('campaign-attention-funnel'))
+    expect(funnel.getByText('Home banner')).toBeTruthy()
+    expect(funnel.getByText('120')).toBeTruthy()
+    expect(funnel.getByText('15.0 %')).toBeTruthy()
+    expect(funnel.getByText('Click-event / impression-event ratio')).toBeTruthy()
+    expect(within(screen.getByTestId('campaign-attention-next-evidence')).getByText('Set a measurable outcome before choosing a surface')).toBeTruthy()
+    expect(funnel.getByText(/18 click events; 120 impression events on Home banner/)).toBeTruthy()
+  }, 15000)
+
+  it('keeps independent app events out of a made-up attention funnel', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 12 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_BANNER', type: 'CLICK', count: 18 },
+          // An independently observed click is valid, but does not create an exposure path.
+          { stepOrder: 2, channel: 'PUSH', surface: 'PRODUCT_FEED', type: 'CLICK', count: 3 },
+        ],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-funnel')).toBeTruthy(), { timeout: 8000 })
+    const funnel = within(screen.getByTestId('campaign-attention-funnel'))
+    expect(funnel.getByText('150.0 %')).toBeTruthy()
+    expect(funnel.getByText(/18 click events; 12 impression events on Home banner \(event ratio 150.0 %\)/)).toBeTruthy()
+    expect(funnel.getAllByText('Click-event / impression-event ratio')).toHaveLength(2)
+  }, 15000)
+
+  it('chooses next evidence from all observed rows on an app surface', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [
+          { stepOrder: 1, channel: 'PUSH', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 80 },
+          { stepOrder: 2, channel: 'BANNER', surface: 'HOME_BANNER', type: 'IMPRESSION', count: 80 },
+          { stepOrder: 1, channel: 'BANNER', surface: 'HOME_CAROUSEL', type: 'IMPRESSION', count: 150 },
+        ],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-next-evidence')).toBeTruthy(), { timeout: 8000 })
+    expect(within(screen.getByTestId('campaign-attention-next-evidence')).getByText(/0 click events; 160 impression events on Home banner/)).toBeTruthy()
+  }, 15000)
+
+  it('uses holdout results, not app taps, for an incrementality decision', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        campaign: { ...active.campaign, conversionRule: 'ACCOUNT_OPENED', holdoutPercent: 10 },
+        engagement: [{ stepOrder: 1, channel: 'BANNER', surface: 'HOME_CAROUSEL', type: 'IMPRESSION', count: 40 }],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-next-evidence')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Validate the effect with the control group')).toBeTruthy()
+  }, 15000)
+
+  it('does not fabricate a surface insight before the app confirms an exposure', async () => {
+    const active = detail('ACTIVE')
+    vi.stubGlobal('fetch', mockFetch({
+      [`/api/campaigns/${CAMPAIGN_ID}`]: {
+        ...active,
+        engagement: [],
+        sources: { ...active.sources, engagement: 'ok' },
+      },
+    }))
+    renderDetail()
+
+    await waitFor(() => expect(screen.getByTestId('campaign-attention-next-evidence')).toBeTruthy(), { timeout: 8000 })
+    expect(screen.getByText('Wait for the first verified exposure')).toBeTruthy()
+  }, 15000)
+
   it('submits an opted-in consent fallback as part of the step definition', async () => {
     let createBody: Record<string, unknown> | undefined
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
@@ -218,11 +386,13 @@ describe('campaign studio', () => {
       if (String(url).includes('/api/segments')) return { ok: true, status: 200, json: async () => SEGMENTS }
       if (String(url).includes('/cadences')) return { ok: true, status: 200, json: async () => CADENCES }
       if (String(url).includes('/triggers')) return { ok: true, status: 200, json: async () => TRIGGERS }
+      if (String(url).includes('/templates')) return { ok: true, status: 200, json: async () => TEMPLATES }
       return { ok: true, status: 200, json: async () => ({}) }
     }))
     render(React.createElement(Providers, null, React.createElement(NewCampaignPage)))
 
     await waitFor(() => expect(document.querySelector('[data-segment="actives@1"]')).toBeTruthy(), { timeout: 8000 })
+    await waitFor(() => expect(document.querySelector('[data-channel-pick="EMAIL"]')).toBeTruthy(), { timeout: 8000 })
     fireEvent.change(document.getElementById('c-name')!, { target: { value: 'Fallback offer' } })
     fireEvent.change(document.getElementById('c-goal')!, { target: { value: 'Open more accounts' } })
     fireEvent.click(document.querySelector('[data-segment="actives@1"]')!)

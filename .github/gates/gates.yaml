@@ -319,11 +319,12 @@ gates:
         --canary-baseline .github/canary-rollout-realisable-baseline.txt
 
   - id: gen-network-policies-drift-gate
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "gen-network-policies drift gate (ADR-0081, issue #854)"
     group: gitops
     mode: enforced
     budget_seconds: 30   # 7.6s in CI
+    selftest: python3 openbank-infra/scripts/gen-network-policies.py --self-test
+    selftest_expect: pass
     run: |
       # PyYAML is a SHARD prerequisite, not this gate's: run-gates.py imports it, so the
       # hash-pinned install that used to sit here now runs once per shard in ci.yml before
@@ -420,10 +421,11 @@ gates:
   # NetworkPolicy gate above, including --intent-to-add so a NEW service with no
   # committed runbook fails as an addition rather than being invisible to `git diff`.
   - id: service-runbook-drift
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "service runbook drift (issue #2255, enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 openbank-infra/scripts/generate-service-runbooks.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/generate-service-runbooks.py --force
       git add -A --intent-to-add docs/runbooks/
@@ -546,10 +548,11 @@ gates:
   # a bucket outside Terraform is a governance question with a real choice in it, which is
   # exactly where advisory belongs.
   - id: db-backup-association-gate
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "db-backup association gate — every backed-up CNPG cluster has pod identity (enforced)"
     group: gitops
     mode: enforced
+    selftest: python3 openbank-infra/scripts/check-db-backup-associations.py --self-test
+    selftest_expect: pass
     run: |
       python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
@@ -1093,11 +1096,12 @@ gates:
       python3 .github/scripts/check-journey-catalog.py --root . --enforce
 
   - id: adr-registry-integrity-check
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "ADR registry integrity check"
     group: registry
     mode: enforced
     budget_seconds: 90   # the registry shard is 20s in CI end to end
+    selftest: bash .github/scripts/check-adr-registry.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-adr-registry.sh
 
@@ -1195,10 +1199,11 @@ gates:
   # exercise. ENFORCED, and the pyyaml the generator needs is installed by the
   # gen-network-policies step above.
   - id: eu-ai-act-inventory-drift
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "EU AI Act inventory drift (ADR-0148 rule #7, enforced)"
     group: registry
     mode: enforced
+    selftest: bash .github/scripts/check-eu-ai-act.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-eu-ai-act.sh
 
@@ -1609,10 +1614,11 @@ gates:
   # the generated artifact only; a stale snapshot would reintroduce the exact hand-edited
   # drift this refactor removes.
   - id: ai-governance-snapshot-drift
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "AI governance snapshot drift (ADR-0029 D3 / ADR-0031, enforced)"
     group: registry
     mode: enforced
+    selftest: python3 .github/scripts/gen-ai-governance-snapshot.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/gen-ai-governance-snapshot.py --check
 
@@ -2037,10 +2043,11 @@ gates:
   # Route SET only — it does not read schemas or status codes. Do not read a green here as
   # "this spec is true"; see the script header for the precise limits.
   - id: openapi-route-conformance
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "openapi-route-conformance — published contract vs served routes (enforced)"
     group: api
     mode: enforced
+    selftest: python3 .github/scripts/check-openapi-route-conformance.py --self-test
+    selftest_expect: pass
     run: |
       python3 .github/scripts/check-openapi-route-conformance.py --enforce \
         --baseline .github/openapi-route-conformance-baseline.txt
@@ -2506,10 +2513,11 @@ gates:
   # identity remains — forcing real caller auth to land before/with the port.
   # 0 violations on origin/main at introduction — a regression guard. ENFORCED.
   - id: mcp-real-port-requires-caller-auth-first
-    selftest_exempt: "debt — no self-test harness yet (baselined 2026-08-09, #4335)"
     name: "MCP real-port requires caller auth first (BLOCKER #2206, enforced)"
     group: security
     mode: enforced
+    selftest: bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh --self-test
+    selftest_expect: pass
     run: |
       bash .github/scripts/check-mcp-stub-ports-vs-caller-auth.sh .
 

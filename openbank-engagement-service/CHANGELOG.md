@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.10.0...engagement-service-v0.11.0) (2026-08-14)
+
+
+### Features
+
+* **engagement:** support campaign story placements ([#4770](https://github.com/JiRaska/open-bank-oss/issues/4770)) ([aca2935](https://github.com/JiRaska/open-bank-oss/commit/aca29354c69f7df9ec2bf481adee865651b4d181))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.9.0...engagement-service-v0.10.0) (2026-08-13)
 
 

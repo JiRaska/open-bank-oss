@@ -91,6 +91,39 @@ spec:
               device-registration path (POST /api/v1/devices) or a mass token invalidation, not
               the push provider.
 
+        # A terminal transition that found no row to write itself onto (issue #4512). The service
+        # then publishes a NotificationOutcome event for a notification the table cannot show:
+        # the producer's funnel is told about a message that has no durable record, which is an
+        # evidence gap under DORA Art. 17-19, not a counting quirk.
+        #
+        # Measured 2026-08-09: four SCA_APPROVAL PUSH fan-outs, four NotificationOutcome rows in
+        # notification_outbox, zero notifications rows, and zero error lines in the pod. Every
+        # conventional signal was green — the consumer acked, the offsets advanced, the outbox
+        # dispatched. There is NOTHING failing to alert on, which is why this reads a counter that
+        # only increments on a path the code treats as successful.
+        #
+        # Same `or vector(0)` self-delta as ScaApprovalPushUndeliverable below, and for the same
+        # measured reason: Micrometer registers a counter lazily on its first increment, so the
+        # series is born at 1 after every pod restart and increase() would read 0 on the very
+        # first occurrence — the one that matters most. Threshold is one: a single orphaned
+        # transition is already a lost record.
+        - alert: NotificationStatusRowMissing
+          expr: |
+            (sum(openbank_notification_status_row_missing_total) or vector(0))
+            -
+            (sum(openbank_notification_status_row_missing_total offset 15m) or vector(0)) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A notification outcome was published for a row that does not exist"
+            description: >-
+              notification-service completed a terminal transition against a missing notifications
+              row and published the outcome event anyway, so a delivery attempt happened with no
+              durable record of it. Check the notification.status.row_missing ERROR line for the
+              notificationId and party, then compare notification_outbox against notifications for
+              that window — an outbox row with no matching notifications row is the fingerprint.
+
         # The ratio rules above are about the channel; this one is about a single message, because
         # not every push is worth the same alert. SCA_APPROVAL is the prompt telling a customer a
         # payment waits on their approval — a PSD2 Art. 97 control — so ONE undelivered instance

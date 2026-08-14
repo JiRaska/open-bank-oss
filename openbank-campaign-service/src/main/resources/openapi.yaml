@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.28.0
+  version: 1.36.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -116,6 +116,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Campaign'
+        '409':
+          description: A reviewed segment reference is no longer available
   /api/v1/campaigns/summary:
     get:
       tags: [Campaigns]
@@ -186,6 +188,55 @@ paths:
                   properties:
                     trigger: { type: string, example: ACCOUNT_OPENED }
                     humanForm: { type: string, example: when an account is opened }
+  /api/v1/campaigns/templates:
+    get:
+      tags: [Campaigns]
+      summary: Reviewed cross-channel templates available to Campaign Studio
+      operationId: listCampaignTemplates
+      description: >-
+        The exact closed content catalogue the aggregate accepts. It is served so Studio never
+        duplicates a stale e-mail, push, banner, carousel, product-feed, or rewards-hub option.
+        Templates remain reviewed code; this endpoint does not accept marketer-authored markup.
+        NOTE the literal path segment: it must keep matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Every marketing template with its channel, named variables, and app surface where applicable
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [template, channel, variables]
+                  properties:
+                    template: { type: string, example: MARKETING_PRODUCT_OFFER_BANNER }
+                    channel: { type: string, enum: [EMAIL, PUSH, BANNER] }
+                    variables:
+                      type: array
+                      items: { type: string }
+                      example: [offerTitle, offerText, ctaText]
+                    inAppSurface:
+                      type: string
+                      nullable: true
+                      enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
+  /api/v1/campaigns/guardrails:
+    get:
+      tags: [Campaigns]
+      summary: Current outbound-contact guardrails for Campaign Studio
+      operationId: campaignContactGuardrails
+      description: >-
+        The active platform limit and quiet period for outbound campaign contacts. This is not a
+        forecast of the audience that will be allowed: consent, suppression and rolling counts are
+        evaluated live for each person immediately before delivery. In-app placements have their
+        own rendering-time impression policy and are not counted as outbound sends here.
+        NOTE the literal path segment: it must keep matching ahead of /api/v1/campaigns/{id}.
+      responses:
+        '200':
+          description: Current platform contact policy, safe to explain but not override from Studio
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CampaignContactGuardrails'
   /api/v1/campaigns/{id}:
     get:
       tags: [Campaigns]
@@ -202,6 +253,53 @@ paths:
                 $ref: '#/components/schemas/Campaign'
         '404':
           description: Not found
+    put:
+      tags: [Campaigns]
+      summary: Revise the authenticated maker's unsubmitted campaign draft
+      description: >-
+        A DRAFT may be revised only by its recorded maker. Once submitted, the approved definition
+        is immutable through this endpoint so the checker always approves the journey that runs.
+      operationId: reviseCampaignDraft
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCampaignRequest'
+      responses:
+        '200':
+          description: Draft revised
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '409':
+          description: Campaign is not a draft, caller is not its maker, or the definition is invalid
+  /api/v1/campaigns/{id}/duplicate:
+    post:
+      tags: [Campaigns]
+      summary: Reuse a campaign definition as a fresh draft
+      description: >-
+        Creates a new maker-owned DRAFT from the source definition. It does not copy lifecycle
+        state, approval, enrolments, sends, outcomes or other runtime history; the new campaign
+        must pass its own four-eyes approval before it can run. Current catalogues are validated
+        again so an obsolete segment, trigger or conversion rule cannot be copied into a draft.
+      operationId: duplicateCampaignAsDraft
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '201':
+          description: New reusable campaign draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Campaign'
+        '404':
+          description: Source campaign not found
+        '409':
+          description: Source definition cannot be used with the current reviewed catalogues
   /api/v1/campaigns/{id}/submit:
     post:
       tags: [Campaigns]
@@ -653,7 +751,8 @@ components:
             Optional on create; absent means EMAIL. Must agree with the template's own channel —
             MARKETING_PRODUCT_OFFER renders on EMAIL, MARKETING_PRODUCT_OFFER_PUSH on PUSH and
             MARKETING_PRODUCT_OFFER_BANNER, MARKETING_PRODUCT_OFFER_CAROUSEL,
-            MARKETING_PRODUCT_OFFER_PRODUCT_FEED and MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
+            MARKETING_PRODUCT_OFFER_STORY, MARKETING_PRODUCT_OFFER_PRODUCT_FEED and
+            MARKETING_PRODUCT_OFFER_REWARDS_HUB on BANNER — and a
             mismatch is rejected with 400.
         variables:
           type: object
@@ -707,7 +806,7 @@ components:
         inAppSurface:
           type: string
           nullable: true
-          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
           description: >-
             Closed authenticated-app inventory for a BANNER step. Absent retains HOME_BANNER for
             backwards-compatible placements. Each surface has its own reviewed template shape;
@@ -725,6 +824,14 @@ components:
             so IF_PREVIOUS_CONFIRMED does not hold and IF_PREVIOUS_NOT_CONFIRMED does.
           type: string
           enum: [IF_PREVIOUS_CONFIRMED, IF_PREVIOUS_NOT_CONFIRMED]
+        conditionSourceOrder:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: >-
+            Optional explicit earlier step whose delivery status the condition reads. Both arms of
+            a decision use the same source, so a skipped arm cannot become the other arm's input.
+            Absent preserves the historical most-recent-earlier-step behaviour.
     CreateCampaignRequest:
       type: object
       required: [name, goal, segmentName, segmentVersion, steps]
@@ -806,6 +913,19 @@ components:
         cap ends the journey as STOPPED_MAX_SENDS. Absent means the journey runs every step.
       properties:
         maxSendsPerParty: { type: integer, minimum: 1 }
+    CampaignContactGuardrails:
+      type: object
+      required: [maxSendsPerParty, sendWindowHours, quietHoursStart, quietHoursEnd, timeZone]
+      description: >-
+        Platform-wide rules currently applied to every e-mail or push handoff. They are observable
+        to explain a launch, never author-editable. Consent and party-specific counts remain live
+        checks at delivery, so this object never claims how many people will receive a campaign.
+      properties:
+        maxSendsPerParty: { type: integer, minimum: 1, example: 2 }
+        sendWindowHours: { type: integer, minimum: 1, example: 168 }
+        quietHoursStart: { type: integer, minimum: 0, maximum: 23, example: 21 }
+        quietHoursEnd: { type: integer, minimum: 0, maximum: 23, example: 8 }
+        timeZone: { type: string, example: Europe/Prague }
     ApprovalRequest:
       type: object
       deprecated: true
@@ -916,6 +1036,13 @@ components:
           description: Sends this step recorded at all — delivered plus every suppression.
         delivered: { type: integer, format: int64 }
         failed: { type: integer, format: int64 }
+        skipped:
+          type: integer
+          format: int64
+          description: >-
+            Parties for whom this conditional step did not run because its reviewed delivery
+            predicate did not hold. They are not failures or suppressions; they continued through
+            the complementary path.
         suppressed:
           type: array
           description: >-
@@ -938,7 +1065,7 @@ components:
           enum: [PUSH, BANNER]
         surface:
           type: string
-          enum: [HOME_BANNER, HOME_CAROUSEL, PRODUCT_FEED, REWARDS_HUB]
+          enum: [HOME_BANNER, HOME_CAROUSEL, STORIES, PRODUCT_FEED, REWARDS_HUB]
         type:
           type: string
           enum: [IMPRESSION, CLICK, DISMISS]
