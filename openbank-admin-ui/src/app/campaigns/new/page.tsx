@@ -365,9 +365,29 @@ export default function NewCampaignPage() {
   // A campaign is an experience across surfaces, not a list of transport rows. Keep this compact
   // overview next to the canvas so a marketer can scan the whole customer footprint without
   // opening every node. It is derived solely from the steps that will be sent to campaign-service.
-  const experienceSurfaces = (['PUSH', 'BANNER', 'EMAIL'] as EditorChannel[])
-    .map(channel => ({ channel, count: steps.filter(step => step.channel === channel).length }))
-    .filter(({ count }) => count > 0)
+  const surfaceLabel = (surface: EditorInAppSurface) => {
+    const labels: Record<EditorInAppSurface, [string, string]> = {
+      HOME_BANNER: ['Banner na domovské obrazovce', 'Home banner'],
+      HOME_CAROUSEL: ['Carousel na domovské obrazovce', 'Home carousel'],
+      STORIES: ['Příběh v aplikaci', 'In-app story'],
+      PRODUCT_FEED: ['Feed produktů', 'Product feed'],
+      REWARDS_HUB: ['Centrum odměn', 'Rewards hub'],
+    }
+    const [cs, en] = labels[surface]
+    return t(cs, en)
+  }
+
+  const destinationLabel = (destination: NonNullable<EditorStep['mobileDestination']>) => {
+    const labels: Record<NonNullable<EditorStep['mobileDestination']>, [string, string]> = {
+      HOME: ['Domov', 'Home'],
+      SAVINGS: ['Spoření', 'Savings'],
+      CARDS: ['Karty', 'Cards'],
+      PAYMENTS: ['Platby', 'Payments'],
+      PRODUCT_HUB: ['Produkty', 'Products'],
+    }
+    const [cs, en] = labels[destination]
+    return t(cs, en)
+  }
 
   const setContentExperimentEnabled = (enabled: boolean) => {
     setContentExperiment(enabled)
@@ -700,15 +720,37 @@ export default function NewCampaignPage() {
           <div>
             <p className="campaign-composer-eyebrow"><PanelsTopLeft className="h-3.5 w-3.5" /> {t('Zážitek napříč aplikací', 'Experience across the app')}</p>
             <h3>{t('Co lidé skutečně uvidí', 'What people will actually see')}</h3>
-            <p>{t('Jen plochy z této cesty. Nic se nedoplňuje domněnkou.', 'Only surfaces in this journey. Nothing is inferred.')}</p>
+            <p>{t('Vyberte moment a náhled telefonu se přepne. Jen kroky z této cesty, nic nedoplňujeme domněnkou.', 'Choose a moment to switch the phone preview. Only steps in this journey; nothing is inferred.')}</p>
           </div>
           <div className="campaign-surface-map-items" data-testid="campaign-surface-map">
-            {experienceSurfaces.length === 0 ? (
+            {steps.length === 0 ? (
               <span className="campaign-surface-map-empty">{t('Přidejte první ověřený krok.', 'Add the first reviewed step.')}</span>
-            ) : experienceSurfaces.map(({ channel, count }) => {
-              const Icon = channel === 'PUSH' ? BellRing : channel === 'BANNER' ? PanelsTopLeft : Mail
-              const label = channel === 'PUSH' ? t('Push', 'Push') : channel === 'BANNER' ? t('Banner v aplikaci', 'In-app banner') : t('E-mail', 'Email')
-              return <span key={channel} data-surface={channel}><Icon className="h-3.5 w-3.5" /> {label}<strong>{count}</strong></span>
+            ) : steps.map((step, index) => {
+              const Icon = step.channel === 'PUSH' ? BellRing : step.channel === 'BANNER' ? PanelsTopLeft : Mail
+              const channel = step.channel === 'PUSH' ? t('Push do aplikace', 'App push') : step.channel === 'BANNER' ? t('Banner v aplikaci', 'In-app banner') : t('E-mail', 'Email')
+              const detail = step.channel === 'BANNER'
+                ? surfaceLabel(step.inAppSurface ?? 'HOME_BANNER')
+                : step.channel === 'PUSH'
+                  ? t(`Otevře: ${destinationLabel(step.mobileDestination ?? 'HOME')}`, `Opens: ${destinationLabel(step.mobileDestination ?? 'HOME')}`)
+                  : t('Schválená šablona', 'Approved template')
+              return (
+                <button
+                  key={`${step.channel}-${index}`}
+                  type="button"
+                  data-surface={step.channel}
+                  data-touchpoint={index}
+                  data-selected={selected === index ? 'true' : 'false'}
+                  aria-pressed={selected === index}
+                  onClick={() => setSelected(index)}
+                >
+                  <span className="campaign-surface-map-icon"><Icon className="h-3.5 w-3.5" /></span>
+                  <span className="campaign-surface-map-copy">
+                    <strong>{t(`Krok ${index + 1}: ${channel}`, `Step ${index + 1}: ${channel}`)}</strong>
+                    <small>{detail}</small>
+                  </span>
+                  <span className="campaign-surface-map-open">{t('Náhled', 'Preview')}</span>
+                </button>
+              )
             })}
           </div>
         </aside>

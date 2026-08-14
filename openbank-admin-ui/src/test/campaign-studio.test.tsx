@@ -136,6 +136,16 @@ describe('campaign studio', () => {
 
     await waitFor(() => expect(document.querySelector('[data-surface="BANNER"]')).toBeTruthy(), { timeout: 8000 })
     expect(document.querySelector('[data-surface="PUSH"]')).toBeNull()
+    // A rail is only useful when it selects an actual moment, not when it repeats the selected
+    // canvas node. Add a second step, then switch the preview back to the first touchpoint.
+    fireEvent.click(document.querySelector('[data-add-step="true"]')!)
+    await waitFor(() => expect(document.querySelector('[data-touchpoint="1"]')).toBeTruthy(), { timeout: 8000 })
+    const firstTouchpoint = document.querySelector('[data-touchpoint="0"]') as HTMLButtonElement
+    const secondTouchpoint = document.querySelector('[data-touchpoint="1"]') as HTMLButtonElement
+    expect(secondTouchpoint.getAttribute('aria-pressed')).toBe('true')
+    fireEvent.click(firstTouchpoint)
+    expect(firstTouchpoint.getAttribute('aria-pressed')).toBe('true')
+    expect(secondTouchpoint.getAttribute('aria-pressed')).toBe('false')
   }, 15000)
 
   /**
