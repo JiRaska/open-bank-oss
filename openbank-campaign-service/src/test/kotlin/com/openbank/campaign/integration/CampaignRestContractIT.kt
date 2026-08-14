@@ -288,7 +288,13 @@ class CampaignRestContractIT {
                 statement.setString(3, "prove private ownership validation")
                 statement.setString(4, "actives")
                 statement.setInt(5, 1)
-                statement.setString(6, "[]")
+                // This parent is also visible to portfolio reads in the shared HTTP test database.
+                // Keep it a valid aggregate rather than a send-log-only shape, otherwise any list
+                // projection that reconstructs Campaign rejects the fixture before it can answer.
+                statement.setString(
+                    6,
+                    """[{"order":1,"template":"MARKETING_PRODUCT_OFFER","channel":"EMAIL","variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]""",
+                )
                 statement.setInt(7, 0)
                 statement.setString(8, "ACTIVE")
                 statement.setString(9, "fixture")
