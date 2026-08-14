@@ -2286,7 +2286,10 @@ gates:
   #
   # Checks three agreements, each in BOTH directions: channel addresses vs the topics the service
   # actually produces, message names vs the event-type literals declared in its src/main, and
-  # payload properties vs the producing data class's primary-constructor properties. Names only —
+  # payload properties vs the producer's field names — the primary constructor where there is a
+  # data class, and the `mapOf`/`buildMap`/JSON-template construction site where there is not
+  # (that half was previously skipped, so a hand-built producer got no payload check at all).
+  # Names only —
   # types are deliberately out of scope (a Kotlin type maps to a JSON Schema type through Jackson,
   # and modelling that badly is worse than not modelling it); schema-compat-gate below owns types,
   # where it compares like against like across the PR base.
