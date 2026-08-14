@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.29.0](https://github.com/JiRaska/open-bank-oss/compare/v0.28.0...v0.29.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** enable reusable campaign drafts ([#4756](https://github.com/JiRaska/open-bank-oss/issues/4756)) ([d59e6c5](https://github.com/JiRaska/open-bank-oss/commit/d59e6c5aaf134fc08fd0acac1af915bc43cb46c2))
+
 ## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/v0.27.0...v0.28.0) (2026-08-13)
 
 
