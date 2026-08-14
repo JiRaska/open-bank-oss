@@ -660,6 +660,17 @@ class PanacheSendLogRepository :
         ).firstResult<SendLogEntity>()
     }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
 
+    override suspend fun deliveryStatusForStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? =
+        Panache.withSession {
+            find(
+                "campaignId = ?1 and partyId = ?2 and stepOrder = ?3 and outcome <> ?4 order by occurredAt desc",
+                campaignId,
+                partyId,
+                stepOrder,
+                SendOutcome.SKIPPED_CONDITION.name,
+            ).firstResult<SendLogEntity>()
+        }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
+
     override suspend fun conversionContextFor(campaignId: UUID, partyId: UUID): ConversionContext =
         Panache.withSession {
             find(

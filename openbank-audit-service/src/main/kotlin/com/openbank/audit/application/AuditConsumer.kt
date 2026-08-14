@@ -6,6 +6,7 @@ package com.openbank.audit.application
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.audit.domain.model.ActorProvenance
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
@@ -101,6 +102,7 @@ class AuditConsumer {
             val node: JsonNode = objectMapper.readTree(payload)
             val eventTime = eventTime(node)
             val resolvedSource = resolveSourceService(node, address)
+            val actor = resolveActor(node)
             val entry = AuditEntry(
                 id = UUID.randomUUID(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
@@ -112,13 +114,22 @@ class AuditConsumer {
                     ?: node.textOrNull("type")
                     ?: address.ceType
                     ?: "UNKNOWN",
-                aggregateType = node.textOrNull("aggregateType") ?: inferAggregateType(node),
+                // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
+                // own "aggregateType" field survives verbatim while inferAggregateType's table below
+                // is all uppercase, so the column records WHICH resolution path fired, not what the
+                // aggregate is. Measured on the live audit_entries table before this fix:
+                // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
+                // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
+                // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
+                // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
+                // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
+                // this stops the split growing, it does not backfill the 10-year tamper-evident
+                // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
+                // its own decision, not a drive-by fix here).
+                aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
                 aggregateId = inferAggregateId(node),
-                actorId = node.textOrNull("requestedBy")
-                    ?: node.textOrNull("actorId")
-                    // transaction.initiated events carry the customer identity here (ADR-0021).
-                    ?: node.textOrNull("initiatedByPartyId"),
-                actorType = node.textOrNull("actorType"),
+                actorId = actor.first,
+                actorType = actor.second,
                 payload = payload,
                 sourceService = resolvedSource.first,
                 sourceServiceSource = resolvedSource.second,
@@ -126,9 +137,17 @@ class AuditConsumer {
                 occurredAt = eventTime ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
                 occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
-                // ADR-0226: cross-channel dimensions, additive — producers adopt them channel by
-                // channel, so absence stays null (unknown), never a guessed default.
-                channel = node.textOrNull("channel"),
+                // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
+                // sweep after #4553 found the bare JSON key "channel" independently populated by
+                // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
+                // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
+                // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
+                // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
+                // (dispute-service, via openbank.dispute.events — the only one confirmed live
+                // before this fix, all rows spelled "APP"). Storing the bare value made the column
+                // ungroupable: a caller reading "API" could not tell an onboarding channel from an
+                // ingress one. See resolveChannel() for the mapping.
+                channel = resolveChannel(node.textOrNull("channel"), address.topic),
                 actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
                 sessionId = node.textOrNull("sessionId"),
                 // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
@@ -138,6 +157,12 @@ class AuditConsumer {
                 delegationId = node.textOrNull("delegationId"),
             )
             if (eventTime == null) countMissingEventTime(entry.sourceService)
+            if (::meterRegistry.isInitialized) {
+                meterRegistry.countActorProvenance(
+                    entry.sourceService,
+                    actorProvenance(entry.actorId, entry.actorType),
+                )
+            }
             if (entry.sourceServiceSource != AttributionSource.EVENT) {
                 countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
             }
@@ -287,6 +312,145 @@ class AuditConsumer {
         /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
+}
+
+/** Matches AuditRepository's `@Column(name = "channel", length = 32)` (V14, issue #4660). */
+private const val MAX_CHANNEL_CHARS = 32
+
+/**
+ * Namespaces a raw "channel" value by the topic it arrived on (issue #4660), rather than
+ * trusting the bare value's vocabulary. Keyed on the TOPIC, not on inferred aggregate type or
+ * event shape: the topic is the one signal every producer already agrees on (it is how they
+ * get subscribed to in the first place), so this needs no per-producer parsing and stays
+ * correct for a producer neither of us has read the code of yet — an unrecognised topic still
+ * gets its own disjoint namespace ("$topic:$raw"), it just isn't given a friendly name.
+ *
+ * The two known mappings exist only to keep the common rows short and readable within the
+ * VARCHAR(32) column (V14) — "onboarding:MOBILE_APP" (22 chars) fits; a full topic name would
+ * not ("openbank.party.events:MOBILE_APP" is 33). A top-level function, not a class member: it
+ * needs no instance state, and `AuditConsumer` was already at detekt's TooManyFunctions threshold.
+ */
+private fun resolveChannel(raw: String?, topic: String?): String? {
+    if (raw == null) return null
+    val namespace = when (topic) {
+        "openbank.party.events" -> "onboarding"
+        "openbank.dispute.events" -> "complaint"
+        // Not "openbank.customer.audit" -> "ingress": that topic exists and is subscribed, but
+        // its one real publisher (EdgeAuditPublisher) sets no "channel" field today, and
+        // AuditChannel (ADR-0226's ui/mcp/api) has no live Kafka path at all yet — McpCallAuditor
+        // only reaches LoggingAuditEventPublisher. Naming a topic for a wiring that does not
+        // exist would be a guess about where it eventually lands, not a fact. The catch-all
+        // below already gives it a disjoint namespace the day it does.
+        else -> topic ?: "unscoped"
+    }
+    return "$namespace:$raw".take(MAX_CHANNEL_CHARS)
+}
+
+/**
+ * `openbank.audit.actor.missing{source_service,provenance}` — the third leg of #3994, and the
+ * only one of the three that had no signal at all.
+ *
+ * The issue asked for three things in increasing cost: make the gap loud, fix the producers,
+ * and decide whether an actor can be REQUIRED. This is the first, for the actor dimension:
+ * `openbank.audit.event.time.missing` and `openbank.audit.attribution.missing` already exist,
+ * and the actor gap — 75% of the live trail, the larger of the two halves in this issue's
+ * title — was observable only by hand-running a `GROUP BY` against the audit database.
+ *
+ * **What the counter can and cannot fix, and how that was established.** Asking the live
+ * database which actor-ish keys appear in actor-less payloads is the obvious probe and it
+ * gives the WRONG answer:
+ *
+ * ```
+ * SELECT DISTINCT k FROM audit_entries, jsonb_object_keys(payload::jsonb) k
+ *  WHERE actor_id IS NULL AND (k ILIKE '%by%' OR k ILIKE '%actor%' OR ...);
+ *   -> initiatedByPartyId, reviewedBy      (and reviewedBy is JSON-null on all 53 rows)
+ * ```
+ *
+ * That reads as "no actor is recoverable, every gap is a producer omission" — and it is a
+ * measurement of sandbox TRAFFIC, not of the wire contract. `openbank.cards.events`,
+ * `openbank.lending.events` and account-service's savings path have no rows here at all, and
+ * sanctions' `reviewedBy` is null only because no manual review has run. Enumerating the
+ * producers' serialised TYPES instead found three actor spellings genuinely on the wire and
+ * unread — `reviewedBy`, `changedBy`, `actorKind` — all three in data classes where the JSON
+ * key exists only as a Kotlin property name, so no grep for a quoted field name would have
+ * found them either. Those are recovered above.
+ *
+ * What remains after that is a genuine producer-side omission — the actor is known to the
+ * service and never reaches the wire (consent's `createdBy`/`revokedBy`, dispute's
+ * `resolvedBy`, domestic-payment's command `actorId` from the JWT, statement's
+ * `period.restated.v1`). This consumer must not paper over those: `actor_id` is chain-hashed
+ * into `record_hash`, so a fabricated actor is not a lesser evil than an honest NULL. This
+ * counter is what makes each producer's fix — or regression — visible without another manual
+ * query.
+ *
+ * Counted for DECLARED too, not only the two absences: a ratio needs its denominator, and a
+ * counter that only ever increments on failure cannot distinguish "no gaps" from "no traffic"
+ * — the exact shape of the zero-denials-from-an-idle-service trap. Tag cardinality is bounded
+ * by the fixed 21-topic service list times three enum values.
+ */
+internal fun MeterRegistry.countActorProvenance(sourceService: String, provenance: ActorProvenance) {
+    counter(
+        "openbank.audit.actor.missing",
+        "source_service",
+        sourceService,
+        "provenance",
+        provenance.name,
+    ).increment()
+}
+
+/**
+ * The actor identity and kind a producer put on the wire: `(actorId, actorType)` (#3994).
+ *
+ * **The first three id spellings are unchanged and stay FIRST**, so no row that is attributed
+ * today changes actor — a fix that improves 1359 unattributed rows by silently moving the 425
+ * already-correct ones is a regression, not a fix.
+ *
+ * The last two are additive recoveries: real actor identities that were already on the wire and
+ * that this consumer simply was not reading, so they landed as NULL in a column chain-hashed into
+ * `record_hash` and served to data subjects by the GDPR Art. 15 access log.
+ *
+ *  - `reviewedBy` — sanctions.screening.event serialises the `SanctionsCheck` aggregate whole, so
+ *    the four-eyes manual-review identity (the highest-value actor in the fleet) rides as a Kotlin
+ *    property name with no string literal anywhere in the producer to grep for.
+ *  - `changedBy` — cards.events: `CardStatusChanged`, `CardLimitsChanged` and `CardControlsChanged`
+ *    all carry it; only `CardIssued` omits it.
+ *  - `actorKind` — lending's transition events emit `actorId` AND `actorKind`, so the id was
+ *    already caught while the TYPE beside it was dropped. The row named the actor but could not
+ *    say whether it was a human or the automated policy engine, which is exactly what a four-eyes
+ *    or DORA Art. 17 reconstruction asks of a credit decision.
+ *
+ * Deliberately NOT recovered, though both are actor-ish and tempting: `partyId` (a data SUBJECT on
+ * most topics, an actor only on dispute/fx — a per-topic rule, not a spelling) and
+ * `delegatePartyId` (a delegate belongs in ADR-0232's `onBehalfOf`/`delegationId` pair, which this
+ * consumer already reads separately). Guessing either would write a confident wrong actor into a
+ * tamper-evident record — the same failure mode `TopicAttribution` exists to avoid.
+ *
+ * Free-standing to keep [AuditConsumer] under detekt's function-count threshold, which fires AT
+ * the threshold and not above it.
+ */
+private fun resolveActor(node: JsonNode): Pair<String?, String?> = Pair(
+    node.textOrNull("requestedBy")
+        ?: node.textOrNull("actorId")
+        // transaction.initiated events carry the customer identity here (ADR-0021).
+        ?: node.textOrNull("initiatedByPartyId")
+        ?: node.textOrNull("reviewedBy")
+        ?: node.textOrNull("changedBy"),
+    node.textOrNull("actorType") ?: node.textOrNull("actorKind"),
+)
+
+/**
+ * Classifies one row's actor claim for the [AuditConsumer.countActorProvenance] counter (#3994).
+ *
+ * Reads the RESOLVED entry fields rather than the payload, so it classifies exactly what was
+ * stored — a second pass over the JSON could disagree with the row it is supposed to describe,
+ * which is the drift that made `inferAggregateId`/`inferAggregateType` contradict each other.
+ *
+ * Free-standing to keep [AuditConsumer] under detekt's function-count threshold.
+ */
+internal fun actorProvenance(actorId: String?, actorType: String?): ActorProvenance = when {
+    actorId != null -> ActorProvenance.DECLARED
+    actorType != null -> ActorProvenance.SYSTEM
+    else -> ActorProvenance.ABSENT
 }
 
 /**

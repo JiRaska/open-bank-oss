@@ -101,6 +101,19 @@ spec:
             description: "{{ $labels.service }} has >100 unrelayed outbox rows for >15m — money/events may be stuck."
     - name: openbank.tier1.progressive_delivery
       rules:
+        # BOTH ALERTS BELOW WERE STRUCTURALLY DEAD UNTIL #4584. They read `rollout_phase`,
+        # which the argo-rollouts controller exports on :8090 — and nothing scraped that port,
+        # because apps/argo-rollouts.yaml nested the chart's `controller.metrics` block one
+        # level too high, so the ServiceMonitor it configures was never created. Prometheus
+        # held zero `rollout_*` series, these rules matched nothing, and they reported
+        # `health: ok` and `state: inactive` throughout: an expression over an absent metric
+        # is an empty result, not an error. All 21 Rollouts — every money-path service —
+        # therefore had no progressive-delivery alerting at all.
+        #
+        # The label note below is a good example of why that went unnoticed for so long: it
+        # records a real bug found by READING the exporter's source, which is exactly the kind
+        # of care that makes a rule look verified. It was never checked against Prometheus.
+        # Before trusting any rule here, run `count(rollout_phase)` and read a non-zero answer.
         # Fires when a Rollout's canary analysis aborts (Prometheus analysis gate
         # failed: error-rate ≥5% or p95 latency ≥1s). Rollout auto-reverts to
         # stable, but operators need to know so they can investigate the root

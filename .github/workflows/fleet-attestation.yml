@@ -50,6 +50,12 @@ jobs:
       - name: shellcheck
         run: shellcheck -S warning .github/scripts/check-fleet-attestations.sh
 
+      # The classifier decides whether a cosign failure is published as a supply-chain
+      # verdict or as "the probe could not run" (#1915). It needs no registry, so it is
+      # proven here on every PR — against inputs it must classify each of the three ways.
+      - name: Classifier selftest
+        run: .github/scripts/check-fleet-attestations.sh --selftest
+
   verify:
     name: Verify fleet attestations
     runs-on: ubuntu-latest
@@ -60,6 +66,10 @@ jobs:
     permissions:
       contents: read
       id-token: write # AWS OIDC
+    outputs:
+      # 0 = clean, 1 = a real fleet gap, 2 = the probe could not run (#1915). `raise-issue`
+      # reads this so a registry throttle never files a supply-chain gap ticket.
+      status: ${{ steps.gate.outputs.status }}
     env:
       AWS_REGION: eu-north-1
       ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
@@ -85,9 +95,21 @@ jobs:
         # pipeline below exits with `tee`'s status, so the gate printed
         # "FLEET ATTESTATION GATE: FAIL" and the step still went green. Verified against
         # run 29488481556, which reported FAIL on an absent image and concluded success.
+        #
+        # The exit code is captured rather than propagated straight through, because 1 and 2
+        # mean different things: 1 is a fleet gap, 2 is "the probe could not run" and is NOT a
+        # verdict about any image (#1915). Both still fail the step — an unchecked fleet is not
+        # a pass — but the code is published so `raise-issue` can refuse to file a supply-chain
+        # ticket for a registry throttle.
         run: |
-          set -euo pipefail
+          set -uo pipefail
           .github/scripts/check-fleet-attestations.sh | tee "${RUNNER_TEMP}/gate.log"
+          status="${PIPESTATUS[0]}"
+          echo "status=${status}" >> "$GITHUB_OUTPUT"
+          if [ "$status" -eq 2 ]; then
+            echo "::warning title=Fleet attestation gate could not run::The probe failed for at least one image (registry/credential/tooling). This says nothing about whether the fleet is attested — do not report it as a gap."
+          fi
+          exit "$status"
 
       - name: Job summary
         if: always()
@@ -113,10 +135,13 @@ jobs:
   # unread red schedule is how sbom-drift-scanner's `no-pod-found` sat unactioned. On the
   # scheduled run only (a PR failure is already visible to its author), file/refresh an
   # issue so the gap has an owner and a paper trail.
+  # `status != '2'` is the whole point of the exit-code split: a probe that could not run must
+  # not open (or bump) an issue asserting a latent admission failure. A 2 still leaves the
+  # scheduled run red, which is the honest signal for "unchecked".
   raise-issue:
     name: Raise issue on gap
     needs: verify
-    if: ${{ failure() && github.event_name == 'schedule' }}
+    if: ${{ failure() && github.event_name == 'schedule' && needs.verify.outputs.status != '2' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5  # API calls only
     permissions:

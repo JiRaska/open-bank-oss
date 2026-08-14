@@ -51,9 +51,14 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         // Existing workflow histories did not call controlState. Temporal versioning keeps their
         // replay command-for-command identical; new signals still protect them immediately.
         val controlVersion = Workflow.getVersion(CONTROL_STATE_CHANGE_ID, Workflow.DEFAULT_VERSION, CONTROL_STATE_V1)
+        val decisionSourceVersion = Workflow.getVersion(
+            DECISION_SOURCE_CHANGE_ID,
+            Workflow.DEFAULT_VERSION,
+            DECISION_SOURCE_V1,
+        )
         val definition = activities.loadDefinition(campaignId)
         for (step in definition.steps.sortedBy { it.order }) {
-            executeStep(campaignId, partyId, definition, step, controlVersion)?.let {
+            executeStep(campaignId, partyId, definition, step, controlVersion, decisionSourceVersion)?.let {
                 activities.markTerminated(campaignId, partyId, it)
                 return
             }
@@ -68,6 +73,7 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         definition: JourneyDefinition,
         step: CampaignStep,
         controlVersion: Int,
+        decisionSourceVersion: Int,
     ): TerminationReason? {
         readyOrTermination(campaignId, partyId, controlVersion)?.let { return it }
         // ADR-0200 D1: evaluate durable SENT rows before every step, including the first.
@@ -95,12 +101,23 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         }
         // Conditions are evaluated after the delay, when the predecessor's outcome can exist.
         if (step.condition != null &&
-            !step.condition.holdsFor(activities.previousDeliveryStatus(campaignId, partyId, step.order))
+            !step.condition.holdsFor(deliveryStatusForCondition(campaignId, partyId, step, decisionSourceVersion))
         ) {
             activities.skipStep(campaignId, partyId, step.order)
             return null
         }
         return deliverWhenReady(campaignId, partyId, step.order, controlVersion)
+    }
+
+    private fun deliveryStatusForCondition(
+        campaignId: UUID,
+        partyId: UUID,
+        step: CampaignStep,
+        decisionSourceVersion: Int,
+    ) = if (decisionSourceVersion >= DECISION_SOURCE_V1 && step.conditionSourceOrder != null) {
+        activities.deliveryStatusForStep(campaignId, partyId, step.conditionSourceOrder)
+    } else {
+        activities.previousDeliveryStatus(campaignId, partyId, step.order)
     }
 
     private fun deliverWhenReady(
@@ -197,6 +214,8 @@ class CampaignJourneyWorkflowImpl : CampaignJourneyWorkflow {
         private const val SCHEDULE_TO_CLOSE_MINUTES = 5L
         private const val CONTROL_STATE_CHANGE_ID = "campaign-control-state-v1"
         private const val CONTROL_STATE_V1 = 1
+        private const val DECISION_SOURCE_CHANGE_ID = "campaign-decision-source-v1"
+        private const val DECISION_SOURCE_V1 = 1
         private const val PATH_EXPERIMENT_DELAY_CHANGE_ID = "campaign-path-experiment-delay-v1"
         private const val PATH_EXPERIMENT_DELAY_V1 = 1
         private val CONTROL_RECHECK_INTERVAL: Duration = Duration.ofMinutes(1)

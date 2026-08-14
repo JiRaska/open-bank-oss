@@ -1,0 +1,431 @@
+{
+  "consumer": {
+    "name": "openbank-admin-ui"
+  },
+  "interactions": [
+    {
+      "description": "Product Studio authors a schema-valid draft",
+      "providerStates": [
+        {
+          "name": "Product Studio draft prerequisite offering exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "attributes": {
+            "coverage": {
+              "amount": "100000",
+              "currency": "EUR"
+            },
+            "premiumModel": "CALCULATED",
+            "termYears": 20
+          },
+          "documentCodes": [
+
+          ],
+          "eligibility": [
+
+          ],
+          "name": {
+            "en": "Term life"
+          },
+          "prices": [
+
+          ],
+          "relationships": [
+
+          ],
+          "schemaRef": {
+            "id": "org.openbank.insurance.term-life",
+            "version": 1
+          }
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000001/revisions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "revision": 0,
+          "state": "DRAFT"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.revision": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "Product Studio replaces a draft with a strong precondition",
+      "providerStates": [
+        {
+          "name": "Product Studio editable draft exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "attributes": {
+            "coverage": {
+              "amount": "100000",
+              "currency": "EUR"
+            },
+            "premiumModel": "CALCULATED",
+            "termYears": 20
+          },
+          "documentCodes": [
+
+          ],
+          "eligibility": [
+
+          ],
+          "name": {
+            "en": "Term life"
+          },
+          "prices": [
+
+          ],
+          "relationships": [
+
+          ],
+          "schemaRef": {
+            "id": "org.openbank.insurance.term-life",
+            "version": 1
+          }
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "If-Match": "\"0\""
+        },
+        "method": "PUT",
+        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000002/revisions/30000000-0000-0000-0000-000000000001"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "revision": 0,
+          "state": "DRAFT"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.revision": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "Product Studio publishes through an independent checker",
+      "providerStates": [
+        {
+          "name": "Product Studio independently checkable draft exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "reason": "independent commercial approval"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json",
+          "If-Match": "\"0\""
+        },
+        "method": "POST",
+        "path": "/api/v2/offerings/20000000-0000-0000-0000-000000000003/revisions/30000000-0000-0000-0000-000000000002/publish"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "revision": 1,
+          "state": "PUBLISHED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.revision": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "Product Studio creates a contextual offering",
+      "providerStates": [
+        {
+          "name": "Product Studio offering prerequisite specification exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "code": "PACT_STUDIO_OFFER",
+          "market": {
+            "channels": [
+              "WEB"
+            ],
+            "countries": [
+              "CZ"
+            ],
+            "locales": [
+              "en"
+            ]
+          },
+          "specificationId": "10000000-0000-0000-0000-000000000001"
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/offerings"
+      },
+      "response": {
+        "body": {
+          "code": "PACT_STUDIO_OFFER",
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "specificationId": "10000000-0000-0000-0000-000000000001"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.specificationId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "Product Studio creates a schema-pinned specification",
+      "providerStates": [
+        {
+          "name": "Product Studio specification code is available"
+        }
+      ],
+      "request": {
+        "body": {
+          "code": "PACT_STUDIO_SPEC",
+          "schemaRef": {
+            "id": "org.openbank.insurance.term-life",
+            "version": 1
+          }
+        },
+        "headers": {
+          "Accept": "application/json",
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v2/specifications"
+      },
+      "response": {
+        "body": {
+          "code": "PACT_STUDIO_SPEC",
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "schemaRef": {
+            "id": "org.openbank.insurance.term-life",
+            "version": 1
+          }
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.schemaRef.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "Product Studio loads an exact trusted schema version",
+      "providerStates": [
+        {
+          "name": "trusted insurance term-life schema version 1 is installed"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/product-types/org.openbank.insurance.term-life/versions/1"
+      },
+      "response": {
+        "body": {
+          "document": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema"
+          },
+          "id": "org.openbank.insurance.term-life",
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+          "version": 1
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.sha256": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.version": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

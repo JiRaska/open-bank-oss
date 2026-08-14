@@ -1,0 +1,4 @@
+Product Catalog is available inside the cluster at:
+  http://product-catalog:{{ .Values.service.port }}/api/v2
+
+Industry packs enabled: {{ if .Values.catalogPacks }}{{ join ", " .Values.catalogPacks }}{{ else }}none (neutral kernel){{ end }}

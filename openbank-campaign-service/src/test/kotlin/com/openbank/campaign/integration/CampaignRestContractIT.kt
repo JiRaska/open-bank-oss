@@ -66,8 +66,8 @@ class CampaignRestContractIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private fun draftBody(name: String) = """
-        {"name":"$name","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+    private fun draftBody(name: String, segmentName: String = "actives") = """
+        {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
     """.trimIndent()
@@ -84,6 +84,126 @@ class CampaignRestContractIT {
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
+
+    private fun insertLegacySegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO segments (id, name, version, rules_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, name)
+                statement.setInt(3, 1)
+                statement.setString(4, """[{"type":"PartyStatusIs","status":"ACTIVE"}]""")
+                statement.setObject(5, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun deleteSegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("DELETE FROM segments WHERE name = ? AND version = 1").use { statement ->
+                statement.setString(1, name)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    fun `create reports a missing segment as a configuration conflict`() {
+        val missingSegment = "missing-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody("missing-segment-${UUID.randomUUID()}", missingSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $missingSegment@1 not found"))
+        }
+    }
+
+    @Test
+    fun `maker can revise an unsubmitted draft through the HTTP contract`() {
+        val id = createDraft()
+        val revisedName = "revised-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody(revisedName))
+        } When {
+            put("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+            body("state", equalTo("DRAFT"))
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+        }
+    }
+
+    @Test
+    fun `operator can reuse a reviewed definition as an independent draft through the HTTP contract`() {
+        val sourceName = "source-${UUID.randomUUID()}"
+        val sourceId = createDraft(sourceName)
+        submit(sourceId)
+
+        val copiedId = When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(201)
+            body("name", equalTo("Copy of $sourceName"))
+            body("state", equalTo("DRAFT"))
+            // TestSecurity supplies the operator role but no JWT subject; the resource deliberately
+            // falls back to `unknown` rather than trusting a browser-provided maker field.
+            body("createdBy", equalTo("unknown"))
+            body("approvedBy", nullValue())
+        } Extract {
+            path<String>("id")
+        }
+
+        assertThat(copiedId).isNotEqualTo(sourceId)
+        When {
+            get("/api/v1/campaigns/$sourceId")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(sourceName))
+            body("state", equalTo("PENDING_APPROVAL"))
+        }
+    }
+
+    @Test
+    fun `reuse reports a stale source definition as conflict rather than source not found`() {
+        val staleSegment = "retired-${UUID.randomUUID()}"
+        insertLegacySegment(staleSegment)
+        val sourceId = Given {
+            contentType("application/json")
+            body(draftBody("stale-${UUID.randomUUID()}", staleSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        deleteSegment(staleSegment)
+
+        When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $staleSegment@1 not found"))
+        }
+    }
 
     private fun insertEnrolment(
         campaignId: UUID,
@@ -179,6 +299,32 @@ class CampaignRestContractIT {
         }
     }
 
+    /**
+     * Real Flyway-backed projection fixture.  This deliberately writes the closed `STORIES` value
+     * through PostgreSQL rather than only mocking the Kafka consumer: a stale CHECK constraint
+     * otherwise keeps unit tests green while every live story event retries at the consumer.
+     */
+    private fun insertStoryEngagement(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_engagement_event
+                    (event_id, campaign_id, step_order, channel, surface, type, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setInt(3, 0)
+                statement.setString(4, "BANNER")
+                statement.setString(5, "STORIES")
+                statement.setString(6, "IMPRESSION")
+                statement.setObject(7, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
     @Test
     @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
     fun `interaction validation resolves only server-owned context for the owning party`() {
@@ -216,6 +362,24 @@ class CampaignRestContractIT {
             get("/api/v1/campaigns/interactions/$interactionRef")
         } Then {
             statusCode(404)
+        }
+    }
+
+    @Test
+    fun `campaign engagement reports attributable story attention through the HTTP contract`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertStoryEngagement(campaignId)
+
+        When {
+            get("/api/v1/campaigns/$campaignId/engagement")
+        } Then {
+            statusCode(200)
+            body("[0].stepOrder", equalTo(0))
+            body("[0].channel", equalTo("BANNER"))
+            body("[0].surface", equalTo("STORIES"))
+            body("[0].type", equalTo("IMPRESSION"))
+            body("[0].count", equalTo(1))
         }
     }
 
@@ -362,6 +526,45 @@ class CampaignRestContractIT {
         } Then {
             statusCode(200)
             body("steps[0].channel", org.hamcrest.Matchers.equalTo("EMAIL"))
+        }
+    }
+
+    @Test
+    fun `two decision paths can name the same explicit source step`() {
+        val body = """
+            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[
+               {"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":2,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_CONFIRMED","conditionSourceOrder":1},
+               {"order":3,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_NOT_CONFIRMED","conditionSourceOrder":1}
+             ]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
         }
     }
 
@@ -517,6 +720,84 @@ class CampaignRestContractIT {
             body("find { it.cadence == 'DAILY_MORNING' }.humanForm", org.hamcrest.Matchers.containsString("09:00"))
             // Never UTC: a cron without a zone fires an hour or two off the customer's morning.
             body("find { it.cadence == 'DAILY_MORNING' }.zone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
+    @Test
+    fun `planning keeps a submitted recurring campaign visibly unplanned until activation`() {
+        val name = "planned-${UUID.randomUUID()}"
+        val id = Given {
+            contentType("application/json")
+            body(
+                draftBody(name).replace(
+                    "\"steps\":[",
+                    "\"schedule\":{\"cadence\":\"DAILY_MORNING\"},\"steps\":[",
+                ),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        submit(id)
+
+        When {
+            get("/api/v1/campaigns/planning")
+        } Then {
+            statusCode(200)
+            body("find { it.campaignId == '$id' }.entry", equalTo("SCHEDULED"))
+            body("find { it.campaignId == '$id' }.cadence", equalTo("DAILY_MORNING"))
+            body("find { it.campaignId == '$id' }.zone", equalTo("Europe/Prague"))
+            // A schedule is created only after four-eyes activation. Rendering a date here would
+            // make an unapproved campaign look operationally live.
+            body("find { it.campaignId == '$id' }.nextScheduledWindowAt", nullValue())
+        }
+    }
+
+    /** Studio reads the exact catalogue the aggregate validates, including authenticated app placement. */
+    @Test
+    fun `the template catalogue serves channels declared variables and in-app surfaces`() {
+        When {
+            get("/api/v1/campaigns/templates")
+        } Then {
+            statusCode(200)
+            body(
+                "template",
+                org.hamcrest.Matchers.hasItems("MARKETING_PRODUCT_OFFER", "MARKETING_PRODUCT_OFFER_BANNER"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.channel",
+                org.hamcrest.Matchers.equalTo("PUSH"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.variables",
+                org.hamcrest.Matchers.contains("offerTitle"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_BANNER' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("HOME_BANNER"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_STORY' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("STORIES"),
+            )
+        }
+    }
+
+    /** Studio explains the live policy values but never turns them into a person-level delivery promise. */
+    @Test
+    fun `the contact guardrails are served with the active platform values`() {
+        When {
+            get("/api/v1/campaigns/guardrails")
+        } Then {
+            statusCode(200)
+            body("maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+            body("sendWindowHours", org.hamcrest.Matchers.equalTo(168))
+            body("quietHoursStart", org.hamcrest.Matchers.equalTo(21))
+            body("quietHoursEnd", org.hamcrest.Matchers.equalTo(8))
+            body("timeZone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
         }
     }
 

@@ -5,6 +5,7 @@
 package com.openbank.notification.infrastructure.observability
 
 import com.openbank.notification.application.port.out.PushMetricsPort
+import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
@@ -16,10 +17,15 @@ import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 
 /**
- * Micrometer adapter for [PushMetricsPort] (ADR-0252 phase 0). Emits two series:
+ * Micrometer adapter for [PushMetricsPort] (ADR-0252 phase 0). Emits three series:
  *
  * - `openbank_notification_push_sends_total{platform,outcome,error_code,service="notification"}`
  * - `openbank_notification_push_fanouts_total{outcome,devices_bucket,service="notification"}`
+ * - `openbank_notification_status_row_missing_total{channel,template,service="notification"}`
+ *
+ * The third is the issue-#4512 signal: a terminal transition that found no row to write itself
+ * onto, and published its outcome event anyway. Like `SKIPPED` above it is a **success**-path
+ * counter — nothing fails when it increments, which is exactly why nothing could see it before.
  *
  * `outcome=ACCEPTED` counts provider acceptances, not deliveries — see [PushSendOutcome.ACCEPTED].
  * The alert this is built for is the one that was missing: `ACCEPTED` sitting at zero while the
@@ -68,6 +74,17 @@ class PushMetricsAdapter(private val registry: MeterRegistry?) : PushMetricsPort
                 .tag("template", template.name)
                 .tag("outcome", outcome.name)
                 .tag("devices_bucket", deviceBucket(devices))
+                .register(r)
+                .increment()
+        }
+    }
+
+    override fun recordMissingRow(channel: NotificationChannel, template: NotificationTemplate) {
+        registry?.let { r ->
+            Counter.builder("openbank.notification.status.row.missing")
+                .tag("service", SERVICE)
+                .tag("channel", channel.name)
+                .tag("template", template.name)
                 .register(r)
                 .increment()
         }

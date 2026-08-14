@@ -49,6 +49,15 @@ class AgentChatContractTest {
     }
 
     @Test
+    fun `the contract documents the no-tools catalog draft review seam`() {
+        assertThat(openapi)
+            .contains("/agent/catalog-reviews:")
+            .contains("operationId: createCatalogReview")
+            .contains("self-hosted model with no tools")
+            .contains("cannot mutate or publish catalog content")
+    }
+
+    @Test
     fun `the oversight sweep endpoint is documented`() {
         assertThat(openapi)
             .contains("/agent/oversight/run:")

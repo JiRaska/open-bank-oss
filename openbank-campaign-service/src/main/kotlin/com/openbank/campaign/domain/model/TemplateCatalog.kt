@@ -42,6 +42,7 @@ object TemplateCatalog {
         // offer body and CTA. It remains a closed template, never marketer-authored markup.
         "MARKETING_PRODUCT_OFFER_BANNER" to setOf("offerTitle", "offerText", "ctaText"),
         "MARKETING_PRODUCT_OFFER_CAROUSEL" to setOf("offerTitle", "offerText", "ctaText"),
+        "MARKETING_PRODUCT_OFFER_STORY" to setOf("offerTitle", "offerText", "ctaText"),
         "MARKETING_PRODUCT_OFFER_PRODUCT_FEED" to setOf("offerTitle", "offerText", "ctaText"),
         "MARKETING_PRODUCT_OFFER_REWARDS_HUB" to setOf("offerTitle", "offerText", "ctaText"),
     )
@@ -58,6 +59,7 @@ object TemplateCatalog {
         "MARKETING_PRODUCT_OFFER_PUSH" to Channel.PUSH,
         "MARKETING_PRODUCT_OFFER_BANNER" to Channel.BANNER,
         "MARKETING_PRODUCT_OFFER_CAROUSEL" to Channel.BANNER,
+        "MARKETING_PRODUCT_OFFER_STORY" to Channel.BANNER,
         "MARKETING_PRODUCT_OFFER_PRODUCT_FEED" to Channel.BANNER,
         "MARKETING_PRODUCT_OFFER_REWARDS_HUB" to Channel.BANNER,
     )
@@ -79,9 +81,14 @@ object TemplateCatalog {
     fun templateForInAppSurface(surface: InAppSurface): String = when (surface) {
         InAppSurface.HOME_BANNER -> "MARKETING_PRODUCT_OFFER_BANNER"
         InAppSurface.HOME_CAROUSEL -> "MARKETING_PRODUCT_OFFER_CAROUSEL"
+        InAppSurface.STORIES -> "MARKETING_PRODUCT_OFFER_STORY"
         InAppSurface.PRODUCT_FEED -> "MARKETING_PRODUCT_OFFER_PRODUCT_FEED"
         InAppSurface.REWARDS_HUB -> "MARKETING_PRODUCT_OFFER_REWARDS_HUB"
     }
+
+    /** The app placement a banner template is approved to render on, or null for dispatched channels. */
+    fun inAppSurfaceFor(template: String): InAppSurface? =
+        InAppSurface.entries.firstOrNull { templateForInAppSurface(it) == template }
 
     fun exists(template: String): Boolean = template in ALL
 

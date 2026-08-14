@@ -4,6 +4,7 @@
 
 package com.openbank.notification.infrastructure.observability
 
+import com.openbank.notification.domain.model.NotificationChannel
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.domain.model.PushPlatform
@@ -43,6 +44,18 @@ class PushMetricsAdapterTest {
         // Without this tag an undeliverable SCA approval — a PSD2 Art. 97 prompt — is
         // indistinguishable from an undeliverable marketing message, and no alert can single
         // it out. Measured 2026-08-08: 11 failed SCA_APPROVAL pushes across 6 parties.
+        assertThat(counter?.id?.getTag("template")).isEqualTo("SCA_APPROVAL")
+    }
+
+    @Test
+    fun `a transition with no row to land on is counted, channel and template kept`() {
+        // Issue #4512. Nothing fails when this happens — the outcome event still commits and the
+        // message is still acked — so this counter is the only observable the state has.
+        adapter.recordMissingRow(NotificationChannel.PUSH, NotificationTemplate.SCA_APPROVAL)
+
+        val counter = registry.find("openbank.notification.status.row.missing").counter()
+        assertThat(counter?.count()).isEqualTo(1.0)
+        assertThat(counter?.id?.getTag("channel")).isEqualTo("PUSH")
         assertThat(counter?.id?.getTag("template")).isEqualTo("SCA_APPROVAL")
     }
 

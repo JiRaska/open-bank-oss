@@ -12,6 +12,8 @@ import io.temporal.activity.ActivityInterface
 import java.util.UUID
 
 @ActivityInterface
+// Temporal requires one stable activity contract; splitting it would distribute replay compatibility.
+@Suppress("TooManyFunctions")
 interface CampaignJourneyActivities {
     fun loadDefinition(campaignId: UUID): JourneyDefinition
     fun controlState(campaignId: UUID, partyId: UUID): JourneyControlState
@@ -25,6 +27,9 @@ interface CampaignJourneyActivities {
      * condition (#3585). Null when this party has no earlier send in this campaign.
      */
     fun previousDeliveryStatus(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
+
+    /** Delivery state for an explicit source step in a multi-path decision. */
+    fun deliveryStatusForStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus?
 
     /**
      * Record that [stepOrder] was skipped because its branch condition did not hold, and move the

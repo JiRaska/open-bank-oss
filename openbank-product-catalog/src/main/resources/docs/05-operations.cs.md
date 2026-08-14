@@ -25,37 +25,51 @@
 |---|---|---|
 | `/api/v1/products/...` | 8104 | REST API produktového masteru |
 | `/api/v1/fees` | 8104 | celobankovní sazebník |
+| `/api/v2/product-types/...` | 8104 | důvěryhodná schémata a jejich validace |
+| `/api/v2/specifications`, `/offerings` | 8104 | generický produktový master a nabídky |
+| `/api/v2/offerings/{id}/revisions...` | 8104 | autorský a maker-checker publikační tok |
+| `/api/v2/products/{id}` | 8104 | pouze publikované kontextové čtení |
+| `/api/v2/events` | 8104 | trvalý kurzor změn pro standalone integrace |
 | `/api/v1/info` | 8104 | `ServiceInfoResource` (build metadata, z openbank-libs) |
-| `/q/openbank/docs` | 8104 | **Docs-as-Service** (tato dokumentace) |
-| `/q/openapi` | 8104 | OpenAPI spec |
-| `/api/docs` | 8104 | Swagger UI |
-| `/q/health` | 8104 | SmallRye Health (liveness + readiness) |
+| `/q/openbank/docs` | 8085 | **Docs-as-Service** (tato dokumentace) |
+| `/q/openapi` | 8085 | OpenAPI spec |
+| `/api/docs` | 8085 | Swagger UI |
+| `/q/health` | 8085 | SmallRye Health (liveness + readiness, management port) |
 
 ## Konfigurace
 
-Služba se konfiguruje přes `application.yaml`. Dnes **nemá žádné externí závislosti na datastoru/brokeru/secretech**, takže konfigurační plocha je malá:
+Služba se konfiguruje přes `application.yaml`. Bankovní profil vyžaduje PostgreSQL a OIDC; Kafka ani Redis dnes zapojené nejsou:
 
 | Nastavení | Hodnota | Účel |
 |---|---|---|
 | `quarkus.http.port` | `8104` | port aplikace |
+| `quarkus.management.port` | `8085` | port health a metrik |
+| `openbank.api.version` | `2` | nejnovější major; response hlavička zohledňuje cestu v1/v2 |
+| `REACTIVE_URL` / `JDBC_URL` | lokální PostgreSQL defaulty | databázová URL aplikace a Flyway |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` | lokální vývojové defaulty | databázové přihlašovací údaje |
+| `QUARKUS_OIDC_AUTH_SERVER_URL` | lokální OpenBank realm | OIDC issuer/discovery URL |
+| `CATALOG_SCOPE_CLAIM` | `scope` | JWT claim se scopes |
+| `CATALOG_READ_SCOPE` / `CATALOG_AUTHOR_SCOPE` / `CATALOG_PUBLISH_SCOPE` | `catalog:*` | provider-neutral mapování oprávnění |
+| `OPENBANK_CATALOG_PACKS` | bank: `banking,insurance`; standalone: prázdné | explicitní výběr důvěryhodných packů |
+| `OPENBANK_BANK_V1_COMPATIBILITY_ENABLED` | bank: `true`; standalone: `false` | zapnutí legacy bankovního API, seedů a projekce |
 | `quarkus.http.cors.origins` | `localhost:3000`, `openbank-admin-ui:3000` | CORS allowlist |
 | `quarkus.http.header.*` | bezpečnostní hlavičky | CSP, HSTS, X-Frame-Options, nosniff atd. |
 | `quarkus.log.level` | `INFO` | úroveň logů |
 | `quarkus.smallrye-openapi.path` | `/q/openapi` | OpenAPI endpoint |
 | `quarkus.swagger-ui.path` | `/api/docs` | Swagger UI |
 
-Nejsou potřeba žádné secrety, takže dnes neexistuje žádná blokující plocha Vault/`BootstrapVerifier` ([ADR 0017](../../../../docs/adr/0017-secrets-via-vault.md) platí teprve po zavedení credentialu k datastoru).
+Produkční databázové přihlašovací údaje jsou secrety a musí je dodat deployment; hodnota v repozitáři je jen lokální vývojový default.
+Standalone při startu odmítá plaintext OIDC issuer. Legacy `/api/v1` navíc vyžaduje banking pack i
+explicitně zapnutý compatibility flag.
 
 ## Health checky
 
-- **Liveness:** `/q/health/live` — JVM + ArC běží. (SmallRye Health je na classpath; žádné vlastní DB/broker readiness checky neexistují, protože takové závislosti zatím nejsou.)
-- **Readiness:** `/q/health/ready` — proces připraven obsluhovat.
-
-Až přijde MongoDB úložiště, měl by se přidat readiness check na připojení k datastoru.
+- **Liveness:** `:8085/q/health/live` — JVM + ArC běží.
+- **Readiness:** `:8085/q/health/ready` — zahrnuje extension-provided readiness datového zdroje.
 
 ## FinOps workload tier (ADR-0057)
 
-Katalog jsou **bezstavová, převážně čtecí referenční data s nárazovým provozem** (procházení v admin UI, občasné čtení službami account/interest/fx/card). Je přirozeným kandidátem na **T1 — HTTP → 0**: scale-to-zero na příchozí HTTP přes KEDA HTTP add-on, tolerantní ke cold-startu v rámci svého latency SLO, ~0 idle náklady. Jako **non-money-path** služba smí škálovat na nulu. Dle [ADR 0057](../../../../docs/adr/0057-scale-to-zero-workload-tiers-and-finops-classifier.md) je tier **odvozen z naměřeného provozu**, ne přiřazen ručně; zde uvedená hodnota je očekávaná klasifikace, kterou potvrdí FinOps klasifikátor.
+Katalog je **stavová služba s bezstavovými aplikačními replikami**: trvalý stav vlastní PostgreSQL. Aplikace je teoreticky vhodná pro HTTP scale-to-zero, ale přímí bankovní volající dnes drží minimum na jedné replice; tuto provozní hranici zachycuje ADR-0083. Změna se musí opřít o měření provozu a chování závislostí.
 
 ## SLO
 
@@ -65,17 +79,23 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 | Metrika | Cíl | Poznámky |
 |---|---|---|
 | Dostupnost | 99,5 % | služba referenčních dat, ne money-path |
-| Latence p95 GET | < 50 ms | in-memory čtení, bez I/O |
-| Cold start (T1 scale-to-zero) | v rámci latency SLO | Quarkus fast-jar startuje v desítkách ms |
+| Latence p95 GET | < 50 ms | návrhový cíl včetně PostgreSQL I/O |
+| Cold start | v rámci timeoutů volajících | musí se měřit přes KEDA proxy cestu |
 | Chybovost | < 0,1 % 5xx | |
 
 ## Runbooky
 
 - **Zastaralé nebo špatné ceny v admin UI** — UI musí číst `GET /api/v1/fees`; ověř, že nespadá na napevno zadrátovaný seznam. Zkontroluj `fees[]` a `status` produktu přes `GET /api/v1/products/{id}`.
-- **Produkt chybí ve veřejném seznamu** — zkontroluj `status == ACTIVE` a `isPublic == true`; produkty DRAFT/INACTIVE/neveřejné jsou vyloučeny ze zákaznických pohledů.
-- **Stav ztracen po restartu** — dnes očekávané: úložiště je in-memory a při každém bootu znovu naseeduje pevný 15-produktový katalog. Jakýkoli runtime create/update se neperzistuje, dokud nepřijde DB úložiště ([04 — Data](./04-data.md)).
+- **Požadován zákaznický seznam** — ve v1 veřejná projekce neexistuje. Nevystavuj autentizovaný operátorský seznam; použij až publikovanou projekci v2.
+- **Stav chybí po restartu** — jde o incident: stav je v PostgreSQL. Ověř cílovou databázi, historii Flyway a obnovu; seeder nikdy nepřepisuje neprázdné úložiště.
 - **Duplicitní code při create** — `409`; zvol unikátní `code`.
+- **Standalone consumer zaostává** — pokračuj na `GET /api/v2/events` od posledního potvrzeného
+  opaque cursoru; zpracování musí být idempotentní podle event `id`.
+- **Rollback na starší v1 binárku změnil bankovní produkt** — při návratu aktuální verze porovná
+  startup reconciler a následně každých 30 sekund `products.row_version` s uloženým watermarkem a
+  vytvoří/obnoví v2 draft. Oboustrannou změnu odmítne jako konflikt; řeš ji přes normální
+  author/publish tok a neupravuj audit ani outbox ručně.
 
 ## Release
 
-Vydávaný komponent (má `version.txt`, aktuálně `0.1.0`). Verzování/changelog vlastní release-please z Conventional Commits ([ADR 0029](../../../../docs/adr/0029-versioning-release-and-governance-as-code.md)). Neupravuj `version.txt` ručně ve feature PR. Změny API kontraktu zvedají `openapi.yaml:info.version` nezávisle ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+Vydávaný komponent (má `version.txt`). Verzování/changelog vlastní release-please z Conventional Commits ([ADR 0029](../../../../docs/adr/0029-versioning-release-and-governance-as-code.md)). Neupravuj `version.txt` ručně ve feature PR. Změny API kontraktu zvedají `openapi.yaml:info.version` nezávisle ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).

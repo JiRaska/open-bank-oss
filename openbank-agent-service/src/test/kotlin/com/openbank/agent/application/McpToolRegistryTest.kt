@@ -71,6 +71,7 @@ class McpToolRegistryTest {
         assertThat(registry.serviceOf("get_account_balance")).isEqualTo("balance-service")
         assertThat(registry.serviceOf("list_transactions")).isEqualTo("transaction-service")
         assertThat(registry.serviceOf("list_products")).isEqualTo("product-catalog")
+        assertThat(registry.serviceOf("get_catalog_revision")).isEqualTo("product-catalog")
         assertThat(registry.serviceOf("list_ledger_journals")).isEqualTo("ledger-service")
         assertThat(registry.domainOf("get_account")).isEqualTo("Core Banking")
     }
@@ -80,6 +81,14 @@ class McpToolRegistryTest {
         assertThat(registry.capabilityOf("get_account")).isEqualTo("query.ledger.readonly")
         assertThat(registry.capabilityOf("list_transactions")).isEqualTo("query.ledger.readonly")
         assertThat(registry.capabilityOf("get_balance_holds")).isEqualTo("query.ledger.readonly")
+    }
+
+    @Test
+    fun `catalog revision review is a read-only catalog capability`() {
+        assertThat(registry.capabilityOf("get_catalog_revision")).isEqualTo("query.catalog.readonly")
+        assertThat(registry.tools.single { it.name == "get_catalog_revision" }.description)
+            .contains("Read-only")
+            .contains("cannot create")
     }
 
     @Test

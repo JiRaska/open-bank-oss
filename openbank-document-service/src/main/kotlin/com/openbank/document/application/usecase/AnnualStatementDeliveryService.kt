@@ -9,6 +9,7 @@ import com.openbank.document.application.port.`in`.AnnualStatementDeliveryUseCas
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
 import com.openbank.document.application.port.out.AccountInfo
 import com.openbank.document.application.port.out.AccountLookupPort
+import com.openbank.document.application.port.out.DeliveryOutcome
 import com.openbank.document.application.port.out.PartyInfo
 import com.openbank.document.application.port.out.PartyLookupPort
 import com.openbank.document.application.port.out.StatementDeliveryPort
@@ -81,12 +82,29 @@ class AnnualStatementDeliveryService(
         val account = partyId?.let { accountLookupPort.findCurrentAccount(it) }
 
         val renderedHtml = templateUseCase.previewRender(template.bodyHtml, buildRenderData(cmd, party, account))
-        deliveryPort.deliver(
+        val outcome = deliveryPort.deliver(
             partyRef = cmd.partyRef,
             documentBytes = renderedHtml.toByteArray(Charsets.UTF_8),
             contentType = "text/html",
             subject = "Annual statement of fees ${cmd.year} — account ${cmd.accountId}",
         )
+
+        // Only a REAL delivery may be recorded. The idempotency key lives for 400 days and the
+        // guard at the top of this method consults it, so recording one for a no-op does not merely
+        // overstate today — it suppresses the delivery a real channel would make for the rest of
+        // that window, silently, for a PAD Art. 5 obligation the bank must fulfil. While the only
+        // implementation is the phase-1 stub this branch is always taken, which is the point: the
+        // work stays outstanding and re-attemptable instead of being marked done.
+        if (outcome != DeliveryOutcome.DELIVERED) {
+            log.warnf(
+                "Annual statement for account %s year %d was NOT delivered (outcome=%s) — no " +
+                    "idempotency record written, so a real delivery channel will still send it.",
+                cmd.accountId,
+                cmd.year,
+                outcome,
+            )
+            return
+        }
 
         idempotencyStore.save(
             idempotencyKey,

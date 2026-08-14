@@ -33,6 +33,7 @@ class CampaignSendLogTest {
         record(SendOutcome.SUPPRESSED_CAP, 2),
         record(SendOutcome.SUPPRESSED_QUIET_HOURS, 2),
         record(SendOutcome.FAILED, 3),
+        record(SendOutcome.SKIPPED_CONDITION, 3),
     )
 
     private fun record(outcome: SendOutcome, step: Int) = SendRecord(
@@ -93,6 +94,7 @@ class CampaignSendLogTest {
                 SendOutcome.SUPPRESSED_CAP,
                 SendOutcome.SUPPRESSED_QUIET_HOURS,
                 SendOutcome.FAILED,
+                SendOutcome.SKIPPED_CONDITION,
             ),
             sends.map { it.outcome }.toSet(),
         )
@@ -164,5 +166,14 @@ class CampaignSendLogTest {
         assertEquals(0, page.page)
         assertEquals(1, page.size)
         assertEquals(1, page.items.size)
+    }
+
+    @Test
+    fun `a skipped conditional branch is reported separately from failure and suppression`(): Unit = runBlocking {
+        val step = query.funnel(campaignId).single { it.stepOrder == 3 }
+
+        assertEquals(1, step.skipped)
+        assertEquals(1, step.failed)
+        assertEquals(0, step.suppressed.size)
     }
 }

@@ -5,14 +5,7 @@
 'use client'
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import type { EditorChannel, EditorCondition, EditorStep } from '@/components/campaigns/JourneyEditor'
-
-const IN_APP_TEMPLATE: Record<NonNullable<EditorStep['inAppSurface']>, string> = {
-  HOME_BANNER: 'MARKETING_PRODUCT_OFFER_BANNER',
-  HOME_CAROUSEL: 'MARKETING_PRODUCT_OFFER_CAROUSEL',
-  PRODUCT_FEED: 'MARKETING_PRODUCT_OFFER_PRODUCT_FEED',
-  REWARDS_HUB: 'MARKETING_PRODUCT_OFFER_REWARDS_HUB',
-}
+import type { EditorChannel, EditorCondition, EditorInAppSurface, EditorStep } from '@/components/campaigns/JourneyEditor'
 
 /**
  * Edits the step selected on the canvas.
@@ -31,6 +24,7 @@ export function StepEditor({
   step,
   templates,
   templateChannel,
+  templateSurface,
   templateLabels,
   variableLabels,
   contentExperiment = false,
@@ -44,6 +38,8 @@ export function StepEditor({
   templates: Record<string, string[]>
   /** template id → the channel it renders on. The service refuses a mismatch. */
   templateChannel: Record<string, EditorChannel>
+  /** Authenticated app surface → its reviewed banner template, served by campaign-service. */
+  templateSurface: Partial<Record<EditorInAppSurface, string>>
   templateLabels: Record<string, string>
   /**
    * variable id → what to call it, and what a filled-in one looks like.
@@ -72,6 +68,18 @@ export function StepEditor({
   const variantBTemplate = step.variantBTemplate ?? step.template
   const variantBChannel = step.variantBChannel ?? step.channel
   const variantBDeclared = templates[variantBTemplate] ?? []
+  const firstSurface = Object.keys(templateSurface)[0] as EditorInAppSurface | undefined
+  const selectedSurface = step.inAppSurface ?? firstSurface
+  const templateForSurface = (surface: EditorInAppSurface | undefined) => surface ? templateSurface[surface] : undefined
+  const surfaceLabel = (surface: EditorInAppSurface) => {
+    switch (surface) {
+      case 'HOME_BANNER': return t('Banner na domovské obrazovce', 'Home banner')
+      case 'HOME_CAROUSEL': return t('Carousel na domovské obrazovce', 'Home carousel')
+      case 'STORIES': return t('Příběhy v aplikaci', 'In-app stories')
+      case 'PRODUCT_FEED': return t('Feed produktů', 'Product feed')
+      case 'REWARDS_HUB': return t('Centrum odměn', 'Rewards hub')
+    }
+  }
   const missing = declared.filter(v => !(step.variables[v] ?? '').trim())
   // `.input` is the console's own field style — hover, focus ring, sizing — and I had hand-rolled a
   // worse copy of it. Reinventing a house primitive is the same failure ADR-0208 D2 names for colour.
@@ -108,7 +116,9 @@ export function StepEditor({
         <span className="text-sm font-medium">{t('Kanál', 'Channel')}</span>
         <div className="flex gap-2">
           {(['EMAIL', 'PUSH', 'BANNER'] as EditorChannel[]).map(c => {
-            const first = Object.keys(templates).find(tpl => templateChannel[tpl] === c)
+            const first = c === 'BANNER'
+              ? templateForSurface(selectedSurface)
+              : Object.keys(templates).find(tpl => templateChannel[tpl] === c)
             const active = step.channel === c
             return (
               <button
@@ -120,14 +130,12 @@ export function StepEditor({
                 onClick={() => first && onChange({
                   ...step,
                   channel: c,
-                  template: c === 'BANNER'
-                    ? IN_APP_TEMPLATE[step.inAppSurface ?? 'HOME_BANNER']
-                    : first,
+                  template: first,
                   variables: {},
                   ...(c === 'PUSH' || c === 'BANNER'
                     ? { fallbackToPush: false, mobileDestination: step.mobileDestination ?? 'HOME' }
                     : { mobileDestination: undefined }),
-                  ...(c === 'BANNER' ? { inAppSurface: step.inAppSurface ?? 'HOME_BANNER' } : { inAppSurface: undefined }),
+                  ...(c === 'BANNER' && selectedSurface ? { inAppSurface: selectedSurface } : { inAppSurface: undefined }),
                   ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
                 })}
                 // `.btn` again rather than a hand-rolled box — the third time tonight that a
@@ -188,22 +196,23 @@ export function StepEditor({
               <span className="font-medium">{t('Plocha v aplikaci', 'In-app surface')}</span>
               <select
                 className={field}
-                value={step.inAppSurface ?? 'HOME_BANNER'}
+                value={selectedSurface ?? ''}
                 onChange={e => {
-                  const inAppSurface = e.target.value as NonNullable<EditorStep['inAppSurface']>
+                  const inAppSurface = e.target.value as EditorInAppSurface
+                  const template = templateForSurface(inAppSurface)
+                  if (!template) return
                   onChange({
                     ...step,
                     inAppSurface,
-                    template: IN_APP_TEMPLATE[inAppSurface],
+                    template,
                     variables: {},
                     ...(step.variantBVariables !== undefined ? { variantBVariables: {} } : {}),
                   })
                 }}
               >
-                <option value="HOME_BANNER">{t('Banner na domovské obrazovce', 'Home banner')}</option>
-                <option value="HOME_CAROUSEL">{t('Carousel na domovské obrazovce', 'Home carousel')}</option>
-                <option value="PRODUCT_FEED">{t('Feed produktů', 'Product feed')}</option>
-                <option value="REWARDS_HUB">{t('Centrum odměn', 'Rewards hub')}</option>
+                {Object.keys(templateSurface).map(surface => (
+                  <option key={surface} value={surface}>{surfaceLabel(surface as EditorInAppSurface)}</option>
+                ))}
               </select>
               <span className="block text-xs text-muted-foreground">
                 {t('Každá plocha má schválený tvar karty; šablona se přepne spolu s ní.', 'Each surface has an approved card shape; its template changes with the surface.')}
@@ -264,7 +273,7 @@ export function StepEditor({
           })}
         >
           {Object.keys(templates).filter(tpl => templateChannel[tpl] === step.channel && (
-            step.channel !== 'BANNER' || tpl === IN_APP_TEMPLATE[step.inAppSurface ?? 'HOME_BANNER']
+            step.channel !== 'BANNER' || tpl === templateForSurface(selectedSurface)
           )).map(tpl => (
             <option key={tpl} value={tpl}>
               {templateLabels[tpl] ?? tpl}
@@ -325,7 +334,7 @@ export function StepEditor({
                 onChange={e => {
                   const channel = e.target.value as EditorChannel
                   const first = Object.keys(templates).find(tpl => templateChannel[tpl] === channel && (
-                    channel !== 'BANNER' || tpl === IN_APP_TEMPLATE.HOME_BANNER
+                    channel !== 'BANNER' || tpl === templateForSurface('HOME_BANNER')
                   ))
                   if (!first) return
                   onChange({ ...step, variantBChannel: channel, variantBTemplate: first, variantBVariables: {} })
@@ -346,7 +355,7 @@ export function StepEditor({
                 onChange={e => onChange({ ...step, variantBTemplate: e.target.value, variantBVariables: {} })}
               >
                 {Object.keys(templates).filter(tpl => templateChannel[tpl] === variantBChannel && (
-                  variantBChannel !== 'BANNER' || tpl === IN_APP_TEMPLATE.HOME_BANNER
+                  variantBChannel !== 'BANNER' || tpl === templateForSurface('HOME_BANNER')
                 )).map(tpl => <option key={tpl} value={tpl}>{templateLabels[tpl] ?? tpl}</option>)}
               </select>
             </label>
@@ -416,6 +425,14 @@ export function StepEditor({
             {t(
               'První krok nemá co předcházet — „dorazil" tu nikdy neplatí, „nedorazil" vždy.',
               'The first step has no predecessor — "arrived" never holds here, "did not" always does.',
+            )}
+          </p>
+        )}
+        {step.conditionSourceOrder !== undefined && step.condition && (
+          <p className="text-xs text-muted-foreground">
+            {t(
+              `Tato větev vždy čte výsledek kroku ${step.conditionSourceOrder + 1}.`,
+              `This path always reads the result of step ${step.conditionSourceOrder + 1}.`,
             )}
           </p>
         )}

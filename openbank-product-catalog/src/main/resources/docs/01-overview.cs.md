@@ -6,7 +6,7 @@
 
 - **Produktový master** — jeden záznam na produkt (např. `SAVINGS_STANDARD`, `CURRENT_PERSONAL`, `LOAN_PERSONAL_5Y`, `MORTGAGE_FIXED_20Y`, `CREDIT_CARD_CLASSIC`, `TERM_DEPOSIT_12M`, `OVERDRAFT_PERSONAL`, multi-měnový umbrella). Každý nese identitu (`code`, `name`, `type`, `currency`), životní cyklus `status` (DRAFT / ACTIVE / INACTIVE / DEPRECATED / ARCHIVED), ceny (`baseRate`, `fee`, `fees[]`), cílové segmenty, historii verzí a obchodní podmínky.
 - **Konfigurační bloky podle typu** — `cardConfig`, `multiCurrencyConfig`, `overdraftConfig`, `termDepositConfig`, `savingsConfig` (sazby, FX marže, sítě/úrovně karet, výpovědní lhůta atd.).
-- **Celobankovní sazebník poplatků** — všechny poplatky produktů zploštělé do jednoho filtrovatelného sazebníku (`FeeScheduleItem`), kde každý řádek nese identitu vlastnícího produktu a odvozený stabilní kód (např. `CURRENT_PERSONAL_FX_CONVERSION`). To je vlastní zdroj pravdy katalogu pro ceny, takže **admin UI nikdy nezadrátuje ceník napevno**.
+- **Celobankovní sazebník poplatků** — všechny poplatky produktů zploštělé do jednoho filtrovatelného sazebníku (`FeeScheduleItem`), kde každý řádek nese identitu vlastnícího produktu a odvozený zobrazovací kód (např. `CURRENT_PERSONAL_FX_CONVERSION`). Zobrazovací kód se mění se jménem poplatku; identitou je pouze složené id. To je vlastní zdroj pravdy katalogu pro ceny, takže **admin UI nikdy nezadrátuje ceník napevno**.
 
 ## Co služba **NEDĚLÁ**
 
@@ -28,9 +28,9 @@
         account-service ─────────────────────────►│  (kód produktu, typ, poplatky)
         interest / fx / card-issuance ────────────►│  (sazby, FX marže, konfig karty)
                                                    ▼
-                                          in-memory produktové úložiště
-                                          (dnes 15 nasazených produktů;
-                                           plánovaná perzistence v MongoDB)
+                                          PostgreSQL úložiště produktů
+                                          (15 bankovních příkladů se seeduje
+                                           do prázdné databáze)
 ```
 
 Katalog je **poskytovatel referenčních dat**: sídlí proti proudu od provozních money-path služeb, které čtou definice produktů, ale nikdy nezapisují zpět.
@@ -47,25 +47,33 @@ Katalog je **poskytovatel referenčních dat**: sídlí proti proudu od provozn�
 | Deaktivace produktu | `POST /api/v1/products/{id}/deactivate` | — |
 | Poplatky jednoho produktu | `GET /api/v1/products/{id}/fees` | — |
 | Celobankovní sazebník (filtrovatelný) | `GET /api/v1/fees` | — |
+| Validace proti důvěryhodnému oborovému schématu | `POST /api/v2/types/{code}/versions/{version}:validate` | — |
+| Autorská revize nabídky | `POST/PUT /api/v2/offerings/{id}/revisions...` | `CatalogChangeEvent` v outboxu |
+| Publikace schválené revize | `POST /api/v2/offerings/{id}/revisions/{revisionId}:publish` | audit + schválení + `CatalogChangeEvent` |
+| Výpis publikované nabídky k danému času | `GET /api/v2/products/{offeringId}` | — |
 
-Dnes se nevydávají žádné doménové události (žádná Kafka/outbox) — služba je převážně čtecí referenční data.
+Každá přijatá změna v2 zapisuje doménový stav, audit a transportně neutrální outbox atomicky. Služba zatím nemá Kafka dispatcher; samotná spolehlivost důkazu proto nezávisí na brokeru.
 
 ## Volající
 
 - **admin-ui** — operátoři procházejí/udržují produktový master a vykreslují obrazovku poplatků z `GET /api/v1/fees`.
 - **account-service** — čte definice produktů (typ, měna, multi-měnová konfigurace) při zakládání účtu.
 - **interest / fx / card-issuance** — čtou deklarované sazby, FX marže a konfiguraci karty.
-- **zákaznické plochy** — veřejný výpis produktů (`isPublic=true`, status `ACTIVE`) pro retailové procházení.
+- **zákaznické plochy** — samostatná veřejná projekce zatím neexistuje; nesmějí přímo vystavit operátorský seznam.
 
 ## Závislosti
 
 - **openbank-libs** — sdílené runtime instalatérství (BuildInfo / `ServiceInfoResource`, DocsResource pro Docs-as-Service, filtr API verze).
 - **PostgreSQL** — reaktivní Panache + reaktivní PG klient pro aplikační cestu, JDBC pro Flyway (ADR-0009 / ADR-0105 P1); viz [04 — Data](./04-data.md).
+
+Katalog se dodává také samostatně jako atestovaný OCI image, zabezpečený Helm chart a Docker Compose
+quickstart. Standalone režim vyžaduje pouze PostgreSQL a standardní OIDC issuer; žádný oborový pack
+se nezapne bez výslovné volby provozovatele. Viz `standalone/README.md` v modulu služby.
 - **Keycloak** — čistý OIDC resource server (`quarkus-oidc`, realm `openbank`): validuje bearer tokeny proti JWKS realmu a žádné nevydává, takže nepotřebuje client secret.
-- **Žádné** zapojení Kafky / Redisu v kódu dnes.
+- **Žádná runtime závislost** na Kafce ani Redisu; v2 ukládá událostní obálky do PostgreSQL outboxu pro pozdější transportní adaptér.
 
 ## Obchodní hodnota
 
 - **Jediný zdroj pravdy pro produkty a ceny** — ceník žije v katalogu, neduplikuje se ve webové vrstvě; `GET /api/v1/fees` je jediné místo, odkud UI čte poplatky.
 - **Konzistentní definice produktů** — služby account, interest, fx i card čtou tentýž produktový master, čímž mizí drift mezi „co prodáváme" a „co provozujeme".
-- **Verzované, transparentní ceny** — každý produkt nese `versionHistory` a `termsAndConditions` s daty účinnosti, což podporuje spotřebitelskou transparentnost a auditní potřeby (viz [06 — Compliance](./06-compliance.md)).
+- **Explicitní produktové informace** — produkty nesou účinné obchodní podmínky a legacy poznámky k verzím. Ty pomáhají operátorům, ale nejsou neměnnou auditní stopou; tu přinesou revize a publikační důkazy dle ADR-0257.
