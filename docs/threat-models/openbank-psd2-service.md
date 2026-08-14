@@ -72,6 +72,36 @@ requests, but the irreversible action lives downstream.
 
 ## 6. Change log
 
+- **2026-08-07 (#3658, recorded retroactively 2026-08-14)** — The required Berlin Group headers on
+  `AisResource` and `PisResource` changed from non-nullable `String` to `String?` plus an explicit
+  guard, so a **missing** `Consent-ID` / `Idempotency-Key` answers **400** instead of **500**.
+  Previously the non-nullable Kotlin signature made JAX-RS inject `null` and the request died in
+  `GenericExceptionMapper`; the exact case those headers exist to gate was the case the API answered
+  worst.
+
+  **Security posture is unchanged or improved, and this was verified rather than assumed:**
+  - Every REQUIRED header still rejects. `AisResource` guards inline
+    (`if (consentId.isNullOrBlank()) throw Psd2RequestFormatException(CONSENT_ID_REQUIRED)`);
+    all four `PisResource` initiation endpoints delegate to the shared `initiatePayment`, which
+    guards both `Consent-ID` and `Idempotency-Key` before any other work. Checked per endpoint, not
+    per file.
+  - The rejection is a `Psd2RequestFormatException`, i.e. the Berlin Group error shape, not a bare
+    `IllegalArgumentException` — correct for this surface.
+  - The other newly-nullable parameters (`dateFrom`, `dateTo`, `bookingStatus`, `limit`,
+    `afterCursor`) are genuinely optional query parameters and correctly carry no guard.
+  - No consent check is weakened, no new data flow, no new store, no endpoint added or removed.
+    The **I**nformation-disclosure and **S**poofing rows are untouched; what improves is the error
+    contract on the request-format boundary.
+
+  **Why this entry is late.** ADR-0030 D2's `threat-model-updated-on-trust-boundary-change` gate
+  fired on the PR and named this file. The PR was merged past it — the ruleset recorded a
+  `required_status_checks` bypass — so the gate's demand was never met and, unlike a red build,
+  nothing would ever ask again: the gate evaluates a diff, and that diff is long merged. Surfaced by
+  the `merged-past-red-check` watch (#4828) once it could read the bypass log for the first time
+  (#4791).
+
+  Rollback: none applicable — this records a change already on `main`.
+
 - **2026-06-15 (ADR-0090 P4)** — Added **QSEAL** message-signature verification
   (`QsealSignatureFilter` after the QWAC gate; `QsealVerifier` pure-JCA: `Digest` body binding +
   `Signature` verification over the canonical signing string via the `TPP-Signature-Certificate`
