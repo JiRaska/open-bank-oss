@@ -140,11 +140,17 @@ export async function POST(req: NextRequest) {
       cache: 'no-store',
     })
     clearTimeout(timer)
+    if (!res.ok) {
+      return NextResponse.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'mcp_unreachable' } },
+        { status: res.status },
+      )
+    }
     const data = await res.json()
     return NextResponse.json(data, { status: res.status })
-  } catch (e) {
+  } catch {
     return NextResponse.json(
-      { jsonrpc: '2.0', id: null, error: { code: -32603, message: e instanceof Error ? e.message : 'mcp_unreachable' } },
+      { jsonrpc: '2.0', id: null, error: { code: -32603, message: 'mcp_unreachable' } },
       { status: 502 },
     )
   }

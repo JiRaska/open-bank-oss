@@ -37,11 +37,12 @@ export async function POST(req: NextRequest) {
       cache: 'no-store',
     })
     clearTimeout(timer)
+    if (!res.ok) return NextResponse.json({ reply: '', model: '', toolCalls: [], error: 'agent_unreachable' }, { status: res.status })
     const data = await res.json()
     return NextResponse.json(data, { status: res.status })
-  } catch (e) {
+  } catch {
     return NextResponse.json(
-      { reply: '', model: '', toolCalls: [], error: e instanceof Error ? e.message : 'agent_unreachable' },
+      { reply: '', model: '', toolCalls: [], error: 'agent_unreachable' },
       { status: 502 },
     )
   }
@@ -57,8 +58,9 @@ export async function GET() {
       headers: { Authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     })
+    if (!res.ok) return NextResponse.json({ default: '', models: [], error: 'agent_unreachable' }, { status: res.status })
     return NextResponse.json(await res.json(), { status: res.status })
-  } catch (e) {
-    return NextResponse.json({ default: '', models: [], error: e instanceof Error ? e.message : 'agent_unreachable' }, { status: 502 })
+  } catch {
+    return NextResponse.json({ default: '', models: [], error: 'agent_unreachable' }, { status: 502 })
   }
 }
