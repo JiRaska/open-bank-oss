@@ -4,9 +4,9 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowRight, Clock3, ShieldCheck, Sparkles, Users } from 'lucide-react'
+import { ArrowRight, Clock3, Plus, ShieldCheck, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
@@ -19,6 +19,9 @@ interface Segment {
   name: string
   version: number
   rules: string[]
+  state: 'DRAFT' | 'PENDING_APPROVAL' | 'APPROVED'
+  createdBy: string
+  approvedBy?: string | null
 }
 
 interface Preview {
@@ -34,21 +37,23 @@ export default function SegmentsPage() {
   const [loading, setLoading] = useState(true)
   const [previews, setPreviews] = useState<Record<string, Preview | 'loading'>>({})
 
-  useEffect(() => {
-    fetch('/api/segments')
-      .then(r => r.json())
-      .then((d: { items: Segment[]; state: string }) => {
-        if (d.state !== 'ok') {
-          setUnavailable(
-            d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable',
-          )
-          return
-        }
-        setItems(d.items ?? [])
-      })
-      .catch(() => setUnavailable('unreachable'))
-      .finally(() => setLoading(false))
+  const loadAudiences = useCallback(() => {
+    fetch('/api/audiences').then(r => r.json()).then((d: { items: Segment[]; state: string }) => {
+      if (d.state !== 'ok') { setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable'); return }
+      setItems(d.items ?? [])
+    }).catch(() => setUnavailable('unreachable')).finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    loadAudiences()
+  }, [loadAudiences])
+
+  const lifecycle = (s: Segment, action: 'submit' | 'approve') => {
+    fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/${action}`, { method: 'POST' }).then(r => {
+      if (!r.ok) throw new Error()
+      loadAudiences()
+    }).catch(() => setUnavailable('unreachable'))
+  }
 
   const key = (s: Segment) => `${s.name}@${s.version}`
 
@@ -57,7 +62,7 @@ export default function SegmentsPage() {
   const loadPreview = (s: Segment) => {
     const k = key(s)
     setPreviews(p => ({ ...p, [k]: 'loading' }))
-    fetch(`/api/segments/${encodeURIComponent(s.name)}/${s.version}/preview`)
+    fetch(`/api/audiences/${encodeURIComponent(s.name)}/${s.version}/preview`)
       .then(r => r.json())
       .then((d: Preview) => setPreviews(p => ({ ...p, [k]: d })))
       .catch(() => setPreviews(p => ({ ...p, [k]: { state: 'unreachable' } })))
@@ -82,7 +87,7 @@ export default function SegmentsPage() {
   const audiencePurpose = (s: Segment) => {
     if (s.name === 'actives') return t('Široký výchozí okruh pro ověřenou produktovou nabídku.', 'A broad default audience for a verified product offer.')
     if (s.name === 'actives-tenured-30d') return t('Stabilnější publikum pro nabídky po prvním měsíci vztahu.', 'A more established audience for offers after the first month of a relationship.')
-    return t('Verzované publikum z katalogu kampaní.', 'A versioned audience from the campaign catalogue.')
+    return t('Verzované publikum s dohledatelným schválením.', 'A versioned audience with traceable approval.')
   }
 
   const renderPreview = (s: Segment) => {
@@ -134,6 +139,7 @@ export default function SegmentsPage() {
           'Choose an audience by intent, verify its current reach, then go straight to designing the journey.',
         )}
         icon={<Users className="h-6 w-6" />}
+        actions={<Link href="/segments/new" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link>}
       />
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
@@ -157,7 +163,7 @@ export default function SegmentsPage() {
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <ShieldCheck className="h-5 w-5 text-emerald-600" />
               <p className="mt-3 text-sm font-semibold text-slate-900">{t('Bezpečné publikum', 'Safe audiences')}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">{t('Definice jsou verzované a reviewované v kódu. Souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Definitions are versioned and reviewed in code. Consent and frequency protections are evaluated again at send time.')}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">{t('Pravidla jsou uzavřená a typovaná. Verze se stává použitelnou až po schválení jiným člověkem; souhlas a frekvenční ochrany se vyhodnotí znovu při odeslání.', 'Rules are closed and typed. A version becomes targetable only after a different person approves it; consent and frequency protections are evaluated again at send time.')}</p>
             </div>
           </section>
 
@@ -166,7 +172,7 @@ export default function SegmentsPage() {
               <article key={key(s)} className="group rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-violet-200 hover:shadow-lg hover:shadow-violet-950/5" data-audience-card={key(s)}>
                 <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-slate-400">{t('Verzované publikum', 'Versioned audience')} · v{s.version}</p>
+                    <p className="text-[.68rem] font-bold uppercase tracking-[.12em] text-slate-400">{s.state === 'APPROVED' ? t('Schválené publikum', 'Approved audience') : s.state === 'PENDING_APPROVAL' ? t('Čeká na schválení', 'Awaiting approval') : t('Rozpracované publikum', 'Draft audience')} · v{s.version}</p>
                     <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">{audienceName(s)}</h2>
                     <p className="mt-1 text-sm leading-5 text-slate-500">{audiencePurpose(s)}</p>
                   </div>
@@ -182,13 +188,13 @@ export default function SegmentsPage() {
 
                 <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="min-h-8">{renderPreview(s)}</div>
-                  <Link
+                  {s.state === 'APPROVED' ? <Link
                     href={`/campaigns/new?audience=${encodeURIComponent(key(s))}`}
                     className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-700"
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link>
+                  </Link> : s.state === 'DRAFT' ? <button onClick={() => lifecycle(s, 'submit')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800">{t('Odeslat ke schválení', 'Submit for approval')}</button> : <button onClick={() => lifecycle(s, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">{t('Schválit publikum', 'Approve audience')}</button>}
                 </div>
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
