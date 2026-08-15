@@ -174,7 +174,7 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "07eb0af8e87295d1",
+      "sha256": "81928b131b4bf83d",
       "counts": {
         "external": 2,
         "not-applicable": 2,

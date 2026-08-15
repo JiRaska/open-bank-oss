@@ -6,22 +6,37 @@ package com.openbank.campaign.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
+import com.openbank.campaign.application.port.out.CampaignEngagementEvent
+import com.openbank.campaign.application.port.out.CampaignEngagementEventType
+import com.openbank.campaign.application.port.out.CampaignEngagementMetric
+import com.openbank.campaign.application.port.out.CampaignEngagementRepository
 import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
+import com.openbank.campaign.application.port.out.CampaignExperimentRepository
+import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.ContentVariantMetrics
 import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
+import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.ContentVariant
+import com.openbank.campaign.domain.model.DecisionPathSelection
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
+import com.openbank.campaign.domain.model.ExperimentCohort
+import com.openbank.campaign.domain.model.InAppSurface
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentCatalog
 import com.openbank.campaign.domain.model.SegmentRef
@@ -67,6 +82,14 @@ class CampaignEntity : PanacheEntityBase() {
     @Column(nullable = false, columnDefinition = "text")
     lateinit var stepsJson: String
 
+    /**
+     * Nullable for every linear campaign written before graph support. Keeping topology separate
+     * from step content makes rollout reversible: a downgrade can still read its historical steps
+     * and a graph-enabled version can distinguish "no graph" from an empty/corrupt graph payload.
+     */
+    @Column(columnDefinition = "text")
+    var decisionsJson: String? = null
+
     // Nullable (V3): a campaign without a stop condition has no row content here — null, not an
     // empty object, so "no condition" and "condition" can never be confused. Same text-not-jsonb
     // reason as stepsJson.
@@ -91,6 +114,10 @@ class CampaignEntity : PanacheEntityBase() {
     /** TriggerCatalog key (V7). Column is `trigger_event`: `trigger` is a reserved SQL word. */
     @Column(name = "trigger_event", length = 64)
     var triggerEvent: String? = null
+
+    /** Percentage assigned to the durable no-contact control cohort (V8). */
+    @Column(nullable = false)
+    var holdoutPercent: Int = 0
 
     @Column(nullable = false)
     lateinit var state: String
@@ -130,6 +157,18 @@ class EnrolmentEntity : PanacheEntityBase() {
     lateinit var startedAt: Instant
 
     var completedAt: Instant? = null
+
+    /** Stored rather than re-derived so reports keep the original experimental assignment. */
+    @Column(nullable = false)
+    var experimentCohort: String = ExperimentCohort.TREATMENT.name
+
+    /** Null for historic and no-contact rows; A/B enrolments keep the arm they were assigned. */
+    @Column(length = 1)
+    var contentVariant: String? = null
+
+    /** Nullable for enrolments created before decision-path reporting existed. */
+    @Column(columnDefinition = "text")
+    var decisionPathJson: String? = null
 }
 
 @Entity
@@ -163,6 +202,41 @@ class SendLogEntity : PanacheEntityBase() {
 
     @Column
     var deliveryUpdatedAt: Instant? = null
+
+    /** Actual request medium; nullable so migration leaves historical decision rows intact. */
+    @Column(length = 8)
+    var channel: String? = null
+}
+
+/**
+ * GDPR-minimised local projection of an attributable app event.  The source event's party id is
+ * intentionally not copied: Campaign Studio needs aggregate attention signals, not a customer
+ * behavioural-history table.  The event id is the idempotency boundary for Kafka redelivery.
+ */
+@Entity
+@Table(name = "campaign_engagement_event")
+class CampaignEngagementEventEntity : PanacheEntityBase() {
+    @Id
+    @Column(nullable = false, updatable = false)
+    lateinit var eventId: UUID
+
+    @Column(nullable = false)
+    lateinit var campaignId: UUID
+
+    @Column(nullable = false)
+    var stepOrder: Int = 0
+
+    @Column(nullable = false, length = 8)
+    lateinit var channel: String
+
+    @Column(nullable = false, length = 32)
+    lateinit var surface: String
+
+    @Column(nullable = false, length = 16)
+    lateinit var type: String
+
+    @Column(nullable = false)
+    lateinit var occurredAt: Instant
 }
 
 @Entity
@@ -216,11 +290,13 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
+        decisionsJson = this@toEntity.decisions.takeIf { it.isNotEmpty() }?.let { mapper.writeValueAsString(it) }
         stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
         conversionRule = this@toEntity.conversionRule
         scheduleCadence = this@toEntity.schedule?.cadence
         scheduleEndAt = this@toEntity.schedule?.endAt
         triggerEvent = this@toEntity.trigger
+        holdoutPercent = this@toEntity.holdoutPercent
         state = this@toEntity.state.name
         createdBy = this@toEntity.createdBy
         approvedBy = this@toEntity.approvedBy
@@ -234,12 +310,14 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         goal = goal,
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
+        decisions = decisionsJson?.let { mapper.readValue<List<CampaignDecision>>(it) } ?: emptyList(),
         stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
         conversionRule = conversionRule,
         // Reconstructed only when a cadence is present: an end instant on its own would be a
         // schedule with nothing to fire, so the cadence is what decides whether one exists.
         schedule = scheduleCadence?.let { CampaignSchedule(it, scheduleEndAt) },
         trigger = triggerEvent,
+        holdoutPercent = holdoutPercent,
         state = CampaignState.valueOf(state),
         createdBy = createdBy,
         approvedBy = approvedBy,
@@ -249,7 +327,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
 }
 
 @ApplicationScoped
-class PanacheEnrolmentRepository :
+class PanacheEnrolmentRepository(private val mapper: ObjectMapper) :
     EnrolmentRepository,
     PanacheRepository<EnrolmentEntity> {
 
@@ -290,6 +368,9 @@ class PanacheEnrolmentRepository :
         currentStep = this@toEntity.currentStep
         startedAt = this@toEntity.startedAt
         completedAt = this@toEntity.completedAt
+        experimentCohort = this@toEntity.experimentCohort.name
+        contentVariant = this@toEntity.contentVariant?.name
+        decisionPathJson = this@toEntity.decisionPath.takeIf { it.isNotEmpty() }?.let { mapper.writeValueAsString(it) }
     }
 
     private fun EnrolmentEntity.toDomain(): Enrolment = Enrolment(
@@ -300,7 +381,111 @@ class PanacheEnrolmentRepository :
         currentStep,
         startedAt,
         completedAt,
+        ExperimentCohort.valueOf(experimentCohort),
+        contentVariant?.let(ContentVariant::valueOf),
+        decisionPathJson?.let { mapper.readValue<List<DecisionPathSelection>>(it) } ?: emptyList(),
     )
+}
+
+/** SQL aggregation keeps the experiment screen bounded even when a campaign has millions of rows. */
+@ApplicationScoped
+class PanacheCampaignExperimentRepository : CampaignExperimentRepository {
+    override suspend fun metrics(campaignId: UUID): List<ExperimentCohortMetrics> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.experimentCohort, count(e), count(distinct s.partyId) " +
+                    "from EnrolmentEntity e left join SendLogEntity s on " +
+                    "s.campaignId = e.campaignId and s.partyId = e.partyId and s.outcome = :converted " +
+                    "where e.campaignId = :campaignId group by e.experimentCohort",
+                Array<Any>::class.java,
+            )
+                .setParameter("converted", SendOutcome.CONVERTED.name)
+                .setParameter("campaignId", campaignId)
+                .resultList
+        }
+    }
+        .awaitSuspending()
+        .map { row ->
+            ExperimentCohortMetrics(
+                cohort = ExperimentCohort.valueOf(row[0] as String),
+                assigned = row[1] as Long,
+                converted = row[2] as Long,
+            )
+        }
+}
+
+/** A/B outcomes are grouped in SQL, never reconstructed from an unbounded send-log page. */
+@ApplicationScoped
+class PanacheCampaignContentExperimentRepository : CampaignContentExperimentRepository {
+    override suspend fun metrics(campaignId: UUID): List<ContentVariantMetrics> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.contentVariant, count(e), count(distinct s.partyId) " +
+                    "from EnrolmentEntity e left join SendLogEntity s on " +
+                    "s.campaignId = e.campaignId and s.partyId = e.partyId and s.outcome = :converted " +
+                    "where e.campaignId = :campaignId and e.contentVariant is not null group by e.contentVariant",
+                Array<Any>::class.java,
+            )
+                .setParameter("converted", SendOutcome.CONVERTED.name)
+                .setParameter("campaignId", campaignId)
+                .resultList
+        }
+    }
+        .awaitSuspending()
+        .map { row ->
+            ContentVariantMetrics(
+                variant = ContentVariant.valueOf(row[0] as String),
+                assigned = row[1] as Long,
+                converted = row[2] as Long,
+            )
+        }
+}
+
+/** Event-id idempotency is enforced by Postgres, not a racy read-then-write check in a consumer. */
+@ApplicationScoped
+class PanacheCampaignEngagementRepository : CampaignEngagementRepository {
+    override suspend fun record(event: CampaignEngagementEvent): Boolean = Panache.withTransaction {
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery<Any>(
+                "INSERT INTO campaign_engagement_event " +
+                    "(event_id, campaign_id, step_order, channel, surface, type, occurred_at) " +
+                    "VALUES (:eventId, :campaignId, :stepOrder, :channel, :surface, :type, :occurredAt) " +
+                    "ON CONFLICT (event_id) DO NOTHING",
+            )
+                .setParameter("eventId", event.eventId)
+                .setParameter("campaignId", event.campaignId)
+                .setParameter("stepOrder", event.stepOrder)
+                .setParameter("channel", event.channel.name)
+                .setParameter("surface", event.surface.name)
+                .setParameter("type", event.type.name)
+                .setParameter("occurredAt", event.occurredAt)
+                .executeUpdate()
+        }
+    }.awaitSuspending() == 1
+
+    override suspend fun metrics(campaignId: UUID): List<CampaignEngagementMetric> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select e.stepOrder, e.channel, e.surface, e.type, count(e) " +
+                    "from CampaignEngagementEventEntity e where e.campaignId = :campaignId " +
+                    "group by e.stepOrder, e.channel, e.surface, e.type " +
+                    "order by e.stepOrder, e.channel, e.surface, e.type",
+                Array<Any>::class.java,
+            ).setParameter("campaignId", campaignId).resultList
+        }
+    }.awaitSuspending().map { row ->
+        CampaignEngagementMetric(
+            stepOrder = row[0] as Int,
+            channel = Channel.valueOf(row[1] as String),
+            surface = InAppSurface.valueOf(row[2] as String),
+            type = CampaignEngagementEventType.valueOf(row[EVENT_TYPE_INDEX] as String),
+            count = row[4] as Long,
+        )
+    }
+
+    private companion object {
+        const val EVENT_TYPE_INDEX = 3
+    }
 }
 
 @ApplicationScoped
@@ -330,6 +515,7 @@ class PanacheSendLogRepository :
                     deliveryStatus = send.deliveryStatus.name
                     deliveryReason = send.deliveryReason
                     deliveryUpdatedAt = send.deliveryUpdatedAt
+                    channel = send.channel?.name
                 },
             )
         }.awaitSuspending()
@@ -445,6 +631,30 @@ class PanacheSendLogRepository :
     }.awaitSuspending().toInt()
 
     /**
+     * A push interaction reference is the immutable send-log id. Check ownership, medium and
+     * handoff outcome in one SQL predicate so neither the caller nor the edge can turn this into
+     * a campaign/party discovery oracle. A persisted `SENT` is the point at which the request was
+     * accepted by notification-service; suppressed and email rows are not attributable. Delivery
+     * status is deliberately not a precondition: a PUSH gateway acknowledgement is a later, weaker
+     * signal and must not erase an app interaction the bank actually observed.
+     */
+    override suspend fun attributionForAppInteraction(
+        interactionRef: UUID,
+        partyId: UUID,
+    ): CampaignInteractionAttribution? = Panache.withSession {
+        find(
+            "id = ?1 and partyId = ?2 and channel in (?3, ?4) and outcome = ?5",
+            interactionRef,
+            partyId,
+            Channel.PUSH.name,
+            Channel.BANNER.name,
+            SendOutcome.SENT.name,
+        ).firstResult<SendLogEntity>()
+    }.awaitSuspending()?.let {
+        CampaignInteractionAttribution(it.campaignId, it.stepOrder, Channel.valueOf(requireNotNull(it.channel)))
+    }
+
+    /**
      * The predecessor send's delivery status (#3585 branch conditions).
      *
      * Ordered by step DESC then time DESC, and limited to one row: a retried step can leave more
@@ -467,6 +677,17 @@ class PanacheSendLogRepository :
             SendOutcome.SKIPPED_CONDITION.name,
         ).firstResult<SendLogEntity>()
     }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
+
+    override suspend fun deliveryStatusForStep(campaignId: UUID, partyId: UUID, stepOrder: Int): DeliveryStatus? =
+        Panache.withSession {
+            find(
+                "campaignId = ?1 and partyId = ?2 and stepOrder = ?3 and outcome <> ?4 order by occurredAt desc",
+                campaignId,
+                partyId,
+                stepOrder,
+                SendOutcome.SKIPPED_CONDITION.name,
+            ).firstResult<SendLogEntity>()
+        }.awaitSuspending()?.let { DeliveryStatus.valueOf(it.deliveryStatus) }
 
     override suspend fun conversionContextFor(campaignId: UUID, partyId: UUID): ConversionContext =
         Panache.withSession {
@@ -547,4 +768,5 @@ private fun SendLogEntity.toDomain(): SendRecord = SendRecord(
     deliveryStatus = DeliveryStatus.valueOf(deliveryStatus),
     deliveryReason = deliveryReason,
     deliveryUpdatedAt = deliveryUpdatedAt,
+    channel = channel?.let(Channel::valueOf),
 )

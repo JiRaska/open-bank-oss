@@ -37,6 +37,7 @@ interface ParsedAgents {
   runtime?: Record<string, unknown>
   model_gateway?: Record<string, unknown>
   tool_tiers?: Record<string, string[]>
+  case_classes?: { classes?: Record<string, unknown> }
   agents?: Record<string, unknown>[]
 }
 
@@ -46,6 +47,7 @@ export interface AgentCharter {
   id: string; plane: string; charter: string; owns: string[]; skills: string[]
   dataRead: string[]; pii: string; toolsAllow: string[]; toolsDeny: string[]
   requiresHuman: string[]; tokensPerRun: number | null; runsPerDay: number | null
+  caseCapabilities: string[]
   /** Only finops-agent/devops-agent declare this today — most agents run on-demand, not on a clock. */
   schedule: AgentSchedule | null
 }
@@ -57,6 +59,7 @@ export interface AgentCharterRegistry {
   toolTiers: Record<string, string[]>
   runtime: Record<string, unknown>
   modelGateway: Record<string, unknown>
+  caseClasses: string[]
 }
 
 async function readRaw(): Promise<{ available: boolean; data: ParsedAgents | null }> {
@@ -101,6 +104,7 @@ export async function loadAgentCharters(): Promise<AgentCharterRegistry> {
         typeof r === 'string' ? r : Object.entries(r as Record<string, unknown>).map(([k, v]) => `${k}: ${v}`).join(' ')) : [],
       tokensPerRun: typeof limits.tokens_per_run === 'number' ? limits.tokens_per_run : null,
       runsPerDay: typeof limits.runs_per_day === 'number' ? limits.runs_per_day : null,
+      caseCapabilities: Array.isArray(ag.case_capabilities) ? (ag.case_capabilities as unknown[]).map(String) : [],
       schedule,
     }
   })
@@ -112,6 +116,7 @@ export async function loadAgentCharters(): Promise<AgentCharterRegistry> {
     toolTiers: (d?.tool_tiers ?? {}) as Record<string, string[]>,
     runtime: (d?.runtime ?? {}) as Record<string, unknown>,
     modelGateway: (d?.model_gateway ?? {}) as Record<string, unknown>,
+    caseClasses: Object.keys(d?.case_classes?.classes ?? {}),
   }
 }
 

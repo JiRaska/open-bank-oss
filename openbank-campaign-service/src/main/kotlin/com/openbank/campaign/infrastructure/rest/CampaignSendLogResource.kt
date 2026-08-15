@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.infrastructure.rest
 
+import com.openbank.campaign.application.usecase.CampaignEngagementQuery
 import com.openbank.campaign.application.usecase.CampaignSendLogQuery
 import com.openbank.campaign.application.usecase.CampaignSummaryQuery
 import com.openbank.campaign.domain.model.SendOutcome
@@ -23,7 +24,11 @@ import java.util.UUID
  */
 @Path("/api/v1/campaigns")
 @ApplicationScoped
-class CampaignSendLogResource(private val query: CampaignSendLogQuery, private val summaries: CampaignSummaryQuery) {
+class CampaignSendLogResource(
+    private val query: CampaignSendLogQuery,
+    private val summaries: CampaignSummaryQuery,
+    private val engagement: CampaignEngagementQuery,
+) {
 
     /**
      * Reach and delivery for every campaign in one call (issue #3296).
@@ -91,6 +96,16 @@ class CampaignSendLogResource(private val query: CampaignSendLogQuery, private v
     @Path("/{id}/journey")
     @Authorize(action = "campaign.read", resource = "#id")
     suspend fun journey(@PathParam("id") id: UUID): Response = Response.ok(query.funnel(id)).build()
+
+    /**
+     * App attention after a validated campaign handoff.  These are event counts (not people and
+     * not product conversions); an empty list means no attributable event has arrived, not proof
+     * that an audience saw zero content.
+     */
+    @GET
+    @Path("/{id}/engagement")
+    @Authorize(action = "campaign.read", resource = "#id")
+    suspend fun engagement(@PathParam("id") id: UUID): Response = Response.ok(engagement.metrics(id)).build()
 
     private fun badOutcome(cause: Throwable): Response = Response.status(Response.Status.BAD_REQUEST)
         .entity(

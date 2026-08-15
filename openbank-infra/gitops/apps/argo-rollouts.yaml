@@ -30,28 +30,59 @@ spec:
     helm:
       releaseName: argo-rollouts
       valuesObject:
-        # Single replica is sufficient for the sandbox — scale to 2 for HA in prod.
-        replicaCount: 1
+        # EVERYTHING BELOW MUST BE NESTED UNDER `controller:` (#4584).
+        #
+        # This block previously spelled `replicaCount`, `resources` and `metrics` at the
+        # TOP level. The argo-rollouts chart defines all three under `controller.*`
+        # (values.yaml: controller.replicas / controller.resources / controller.metrics),
+        # and Helm silently discards an unknown top-level key — no error, no warning, no
+        # ArgoCD diff. So all three had NEVER taken effect, for the whole life of this file.
+        #
+        # The cost was not cosmetic. `controller.metrics.serviceMonitor` is what creates
+        # the `argo-rollouts-metrics` Service and its ServiceMonitor, so NOTHING ever
+        # scraped the controller and Prometheus held zero `rollout_*` series. Three alerts
+        # evaluate over metric families that therefore did not exist, and could never fire:
+        #   RolloutNoAvailableReplicas   (prometheus-rules-workload-availability.yaml)
+        #   RolloutProgressDeadlineExceeded, RolloutAnalysisAborted (prometheus-rules-tier1.yaml)
+        # All 21 Rollouts — including every money-path service — had no readiness alerting
+        # at all, while the rules read as present and evaluated `health: ok` forever.
+        #
+        # Measured, rather than argued: `helm template` with this (corrected) nesting emits
+        # `Service/argo-rollouts-metrics` + a ServiceMonitor; with the old spelling it emits
+        # ZERO ServiceMonitors. The live cluster agreed — no metrics Service existed, and
+        # `spec.replicas` was 2 (the chart default) despite `replicaCount: 1`, with
+        # `resources: {}` despite the block above. `check-helm-values-keys.py` now fails the
+        # build on any valuesObject key the chart ignores.
+        #
+        # The ingress NetworkPolicy already allows observability -> :8090, so no policy
+        # change is needed; it was generated for a scrape that never happened.
+        controller:
+          # Declared as 1 for years and ignored; the chart default is 2 and the cluster has
+          # been running 2 throughout. Kept at 2 — dropping to 1 would be a live availability
+          # REDUCTION on the controller that drives every money-path deploy, unrelated to
+          # this fix. The workload-availability rules already aggregate with `max by (...)`
+          # precisely so a second controller replica cannot break the join.
+          replicas: 2
 
-        resources:
-          requests:
-            cpu: 50m
-            memory: 128Mi
-          limits:
-            cpu: 250m
-            memory: 256Mi
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
 
-        # Prometheus metrics on :8090/metrics — scraped by the ServiceMonitor below.
-        # The controller emits deployment outcome events (promoted / aborted) that
-        # feed the ADR-0061 CFR / MTTR recording rules (Phase 2 follow-up).
-        metrics:
-          enabled: true
-          serviceMonitor:
+          # Prometheus metrics on :8090/metrics — scraped by the ServiceMonitor below.
+          # The controller emits deployment outcome events (promoted / aborted) that
+          # feed the ADR-0061 CFR / MTTR recording rules (Phase 2 follow-up).
+          metrics:
             enabled: true
-            # Must match the label selector of the kube-prometheus-stack Prometheus
-            # instance (scraping selector: release=kube-prometheus-stack).
-            additionalLabels:
-              release: kube-prometheus-stack
+            serviceMonitor:
+              enabled: true
+              # Must match the label selector of the kube-prometheus-stack Prometheus
+              # instance (scraping selector: release=kube-prometheus-stack).
+              additionalLabels:
+                release: kube-prometheus-stack
 
         # Dashboard: internal-only web UI at :3100 — no external Ingress (ADR-0056).
         # Operators access via: kubectl argo rollouts dashboard

@@ -6,6 +6,7 @@ package com.openbank.sca.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sca.application.port.`in`.ConsumeScaCommand
 import com.openbank.sca.application.port.`in`.EnrollDeviceCommand
 import com.openbank.sca.application.port.`in`.InitiateScaCommand
@@ -32,7 +33,10 @@ import com.openbank.sca.domain.model.SignatureAlgorithm
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.runs
+import io.mockk.slot
 import io.mockk.verify
 import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.runBlocking
@@ -603,6 +607,31 @@ class ScaServiceTest {
                 },
             )
         }
+    }
+
+    /**
+     * Regression for #4353. The assertion above checks `OutboxMessage.eventType` — the outbox
+     * COLUMN — and stayed green for the whole life of this publisher while the serialized
+     * payload carried no `eventType` at all. Only the body reaches a consumer: the dispatcher
+     * publishes `payload` and onboarding-service's `parseScaEvent` switches on the body's
+     * `eventType`, so a missing key sent every DEVICE_ENROLLED down `else -> null`.
+     *
+     * Asserting the column cannot catch that; this asserts what actually goes on the wire.
+     */
+    @Test
+    fun `enroll publishes eventType in the payload body, not only the outbox column`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { enrolledDeviceRepository.findByCredentialId("cred-wire") } returns null
+        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
+        val captured = slot<OutboxMessage>()
+        coEvery { outboxRepository.save(capture(captured)) } just runs
+
+        service.enroll(EnrollDeviceCommand(partyId, "cred-wire", "pk", SignatureAlgorithm.ES256))
+
+        val body = objectMapper.readTree(captured.captured.payload)
+        assertThat(body.path("eventType").asText()).isEqualTo("DEVICE_ENROLLED")
+        assertThat(body.path("partyId").asText()).isEqualTo(partyId.toString())
+        assertThat(body.path("credentialId").asText()).isEqualTo("cred-wire")
     }
 
     @Test

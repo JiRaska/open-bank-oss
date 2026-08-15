@@ -7,7 +7,7 @@
       "description": "GET the GL trial balance for a FINREP reporting date",
       "providerStates": [
         {
-          "name": "ledger has journal entries for the reporting date"
+          "name": "ledger has frozen monthly trial balance for the reporting date"
         }
       ],
       "request": {
@@ -15,16 +15,10 @@
           "Accept": "application/json"
         },
         "method": "GET",
-        "path": "/api/v1/journals/trial-balance",
-        "query": {
-          "asOf": [
-            "2026-06-30"
-          ]
-        }
+        "path": "/api/v1/ledger/periods/MONTH/2026-06-30/frozen-trial-balance"
       },
       "response": {
         "body": {
-          "asOf": "2026-06-30",
           "balanced": true,
           "lines": [
             {
@@ -32,7 +26,8 @@
               "net": 150000.0,
               "type": "ASSET"
             }
-          ]
+          ],
+          "period": "MONTH:2026-06"
         },
         "headers": {
           "Content-Type": "application/json"
@@ -73,51 +68,6 @@
               ]
             },
             "$.lines[*].type": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
-                }
-              ]
-            }
-          }
-        },
-        "status": 200
-      }
-    },
-    {
-      "description": "GET the GL trial balance for a date with no ledger activity",
-      "providerStates": [
-        {
-          "name": "ledger has no journal entries"
-        }
-      ],
-      "request": {
-        "headers": {
-          "Accept": "application/json"
-        },
-        "method": "GET",
-        "path": "/api/v1/journals/trial-balance",
-        "query": {
-          "asOf": [
-            "2000-01-01"
-          ]
-        }
-      },
-      "response": {
-        "body": {
-          "asOf": "2000-01-01",
-          "balanced": true,
-          "lines": [
-
-          ]
-        },
-        "headers": {
-          "Content-Type": "application/json"
-        },
-        "matchingRules": {
-          "body": {
-            "$.balanced": {
               "combine": "AND",
               "matchers": [
                 {

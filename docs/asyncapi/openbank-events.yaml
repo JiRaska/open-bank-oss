@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Kafka event streams across all OpenBank services.
     All topics follow the naming convention: openbank.{domain}.{aggregate}.{event}
@@ -182,10 +182,31 @@ channels:
 
   sanctions-events:
     address: openbank.sanctions.screening.event
-    description: Sanctions screening result events (clear, hit, pending-review)
+    description: |
+      Sanctions check lifecycle events. TWO distinct event types share this channel:
+        - `SanctionChecked`  — an automated screening produced a status from list matching.
+        - `SanctionReviewed` — a human analyst manually dispositioned an existing check.
+      Until #1035 both paths emitted `SanctionChecked`, so the two facts were indistinguishable
+      and no consumer could route them apart.
+
+      **The discriminator is the `ce-type` Kafka HEADER, not a body field.** This channel is
+      outbox-relayed: `SanctionsRepositoryImpl` writes `OutboxMessage(eventType = ...)` and the
+      body is the serialised `SanctionsCheck` aggregate plus `occurredAt` — nothing else. The
+      dispatcher moves `eventType` onto the header `ce-type`
+      (`OutboxKafkaHeaders.HEADER_EVENT_TYPE`), so the body carries no `eventType` at all.
+
+      A consumer that takes `payload: String` and reads `node.path("eventType")` — the
+      `PartyEventConsumer` idiom, which works only because party HAND-BUILDS its payload with
+      the key in it — gets `""` here, matches no branch, and silently discards 100% of messages
+      with no error and no log line. Take `Message<String>` and read the header instead
+      (`AuditConsumer` is the correct in-fleet reference shape), and give the
+      unrecognised/missing-header outcome its own counter: the failure state of this channel is
+      indistinguishable from success at every other layer. Refs #1035, #1916.
     messages:
       SanctionsScreeningEvent:
         $ref: '#/components/messages/SanctionsScreeningEvent'
+      SanctionsReviewEvent:
+        $ref: '#/components/messages/SanctionsReviewEvent'
 
 operations:
   publishAccountCreated:
@@ -258,7 +279,7 @@ operations:
     action: send
     channel:
       $ref: '#/channels/sanctions-events'
-    summary: sanctions-service publishes SanctionsScreeningEvent
+    summary: sanctions-service publishes SanctionsScreeningEvent and SanctionsReviewEvent
 
 components:
   messages:
@@ -404,6 +425,22 @@ components:
     SanctionsScreeningEvent:
       name: SanctionsScreeningEvent
       title: Sanctions Screening Event
+      description: >-
+        `ce-type` header = `SanctionChecked` — emitted by SanctionsService.screen. The type is a
+        HEADER, not a body field; see the channel description.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SanctionsScreeningEventPayload'
+
+    SanctionsReviewEvent:
+      name: SanctionsReviewEvent
+      title: Sanctions Review Outcome Event
+      description: >-
+        `ce-type` header = `SanctionReviewed` — emitted by SanctionsService.review when an
+        analyst dispositions a check. The type is a HEADER, not a body field; see the channel
+        description. Same payload shape as the screening event (the payload is the serialised
+        aggregate), but `reviewedBy` / `reviewNote` / `reviewedAt` are populated and
+        `occurredAt` is the review instant rather than the screening instant.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SanctionsScreeningEventPayload'
@@ -595,6 +632,25 @@ components:
               type: string
             legalName:
               type: string
+            materiality:
+              type: string
+              enum: [MATERIAL, NON_MATERIAL, NO_CHANGE]
+              description: >-
+                PARTY_UPDATED only. Publisher-declared materiality of the master-data change
+                (ADR-0256 D1, issue #4458) — never inferred by a consumer from the payload.
+                MATERIAL is the only value that is a KYC re-screening trigger
+                (PARTY_DATA_CHANGED); NON_MATERIAL covers contact details, trading name, address
+                and preferences; NO_CHANGE is an update that moved no compared field and is
+                deliberately NOT folded into NON_MATERIAL. Additive since party-service
+                openapi 1.15.0 — absent on events published before it, and on every event type
+                other than PARTY_UPDATED.
+            materialFields:
+              type: array
+              items:
+                type: string
+              description: >-
+                The changed fields that made the event MATERIAL (subset of legalName,
+                dateOfBirth, nationality, partyType). Empty for NON_MATERIAL and NO_CHANGE.
 
     ConsentEventPayload:
       allOf:
@@ -715,7 +771,7 @@ components:
 
     NotificationRequestPayload:
       type: object
-      required: [partyId, channel, templateId]
+      required: [partyId, channel, template, recipient, variables]
       properties:
         partyId:
           type: string
@@ -723,13 +779,30 @@ components:
         channel:
           type: string
           enum: [EMAIL, PUSH]
-        templateId:
+        template:
           type: string
-          enum: [ACCOUNT_OPENED, PAYMENT_COMPLETED, KYC_REJECTED, OTP_CODE, WELCOME]
+          description: Closed notification-service template identifier.
+        recipient:
+          type: string
         variables:
           type: object
           additionalProperties:
             type: string
+        correlationId:
+          type: string
+          format: uuid
+          description: Optional producer-owned delivery-outcome correlation id.
+        deepLink:
+          type: string
+          enum: [openbank://home, openbank://savings, openbank://cards, openbank://payments, openbank://products]
+          description: Optional allow-listed mobile route for a PUSH tap. Never customer content.
+        interactionRef:
+          type: string
+          format: uuid
+          description: >-
+            Optional opaque producer-owned PUSH interaction reference. campaign-service supplies
+            its send-log id; it is neither a campaign id nor party identity and is not a delivery
+            outcome correlation.
 
     SwiftMessageEventPayload:
       allOf:
@@ -815,26 +888,96 @@ components:
               type: number
 
     SanctionsScreeningEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            screeningId:
-              type: string
-              format: uuid
-            partyId:
-              type: string
-              format: uuid
-            subjectName:
-              type: string
-            screeningType:
-              type: string
-              enum: [PARTY_ONBOARDING, PAYMENT_COUNTERPARTY, PERIODIC_REVIEW]
-            result:
-              type: string
-              enum: [CLEAR, HIT, POTENTIAL_MATCH, PENDING_REVIEW]
-            listNames:
-              type: array
-              items:
-                type: string
-              description: Sanctions lists that produced a hit (e.g. EU, OFAC, UN)
+      # NOT built on EventEnvelope, and that is deliberate: this channel is outbox-relayed, so
+      # the body is the serialised `SanctionsCheck` aggregate plus `occurredAt` and carries none
+      # of the envelope fields. `eventType` rides in the `ce-type` Kafka header (see the channel
+      # description). The previous version of this schema declared `eventType`, `aggregateId`,
+      # `correlationId` and six body fields (`screeningId`, `partyId`, `subjectName`,
+      # `screeningType`, `result`, `listNames`) that the producer has never emitted — a consumer
+      # written against it discards every message. Derived by reading the serialised type
+      # (`domain/model/SanctionsCheck.kt`), not by grepping for quoted JSON keys, which cannot
+      # see a serialised data class. Refs #1035, #1916.
+      type: object
+      required: [id, entityType, name, status, overallScore, checkedAt, occurredAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The sanctions check id; also the outbox `aggregateId` / `ce-id` header.
+        idempotencyKey:
+          type: string
+        entityType:
+          type: string
+          enum: [INDIVIDUAL, ORGANIZATION, VESSEL, AIRCRAFT]
+        name:
+          type: string
+        aliases:
+          type: array
+          items:
+            type: string
+        dateOfBirth:
+          type: [string, 'null']
+        nationality:
+          type: [string, 'null']
+        identifiers:
+          type: object
+          additionalProperties:
+            type: string
+          description: e.g. passport, taxId.
+        status:
+          type: string
+          enum: [CLEAR, HIT, POTENTIAL_HIT, WHITELISTED, ESCALATED]
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/SanctionsMatch'
+        overallScore:
+          type: number
+          description: 0.0-1.0. `isHighRisk()` is HIT, or POTENTIAL_HIT with score > 0.85.
+        checkedLists:
+          type: array
+          items:
+            type: string
+            enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+        reviewedBy:
+          type: [string, 'null']
+          description: Populated only on `SanctionReviewed`.
+        reviewNote:
+          type: [string, 'null']
+          description: Populated only on `SanctionReviewed`.
+        checkedAt:
+          type: string
+          format: date-time
+        reviewedAt:
+          type: [string, 'null']
+          format: date-time
+        occurredAt:
+          type: string
+          format: date-time
+          description: >-
+            The event instant, added by the producer on top of the aggregate: `checkedAt` for
+            `SanctionChecked`, `reviewedAt` (falling back to `checkedAt`) for `SanctionReviewed`.
+
+    SanctionsMatch:
+      type: object
+      required: [listType, matchType, matchScore, matchedName]
+      properties:
+        listType:
+          type: string
+          enum: [OFAC_SDN, EU_CONSOLIDATED, UN_CONSOLIDATED, HM_TREASURY, FATF_HIGH_RISK, PEP_GLOBAL, CNB_DOMESTIC]
+        matchType:
+          type: string
+          enum: [EXACT, FUZZY, PHONETIC, ALIAS]
+        matchScore:
+          type: number
+          description: 0.0-1.0.
+        matchedName:
+          type: string
+        matchedId:
+          type: [string, 'null']
+        listEntryDate:
+          type: [string, 'null']
+        programs:
+          type: array
+          items:
+            type: string

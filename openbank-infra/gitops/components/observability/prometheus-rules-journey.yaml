@@ -37,6 +37,36 @@ spec:
         # — no result, no alert. Same for JourneyStale below. That case belongs entirely to
         # JourneyMissing, which is why that rule is not redundant and must not be "simplified"
         # away: it is the only one of the three that can fire on a journey broken from birth.
+        # A SINGLE failed journey run. Added after measuring the rules below against reality:
+        # on 2026-08-13 the public-edge journey went red twice in 24h — customer-edge answered
+        # 5xx and p95 crossed 2s — and NOTHING fired, because every rule here compares
+        # last_schedule against last_success and one failure on a 5-minute schedule is a
+        # 5-minute gap, far short of the 900s those rules need.
+        #
+        # That was the wrong shape for this signal. The journey asserts a customer-visible
+        # property; one failed assertion IS the event, not a blip to be smoothed away. So this
+        # fires on the Job's own failure count, at ticket severity — the sustained case still
+        # pages through JourneyFailing below, and the two do not duplicate each other because
+        # they answer different questions ("something broke once" vs "it has been broken").
+        #
+        # `max_over_time` because kube-state-metrics drops the series when the Job object is
+        # garbage-collected (failedJobsHistoryLimit: 1), and an alert that vanishes with its
+        # evidence is one nobody can triage.
+        - alert: JourneyRunFailed
+          expr: |
+            max by (namespace, job_name) (
+              max_over_time(kube_job_status_failed{namespace="observability", job_name=~"journey-.*"}[30m])
+            ) > 0
+          for: 1m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Journey run {{ $labels.job_name }} failed"
+            description: >-
+              A synthetic journey run failed its thresholds against production. k6 prints which
+              check failed and the latency percentiles — read the Job logs. A single failure here
+              is a customer-visible property that did not hold, not a flake; if it repeats,
+              JourneyFailing will page. Catalog: openbank-libs/governance/journeys.yaml.
         - alert: JourneyFailing
           expr: |
             max by (namespace, cronjob) (

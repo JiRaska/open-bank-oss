@@ -13,7 +13,10 @@ whether anything reads the artifact before assuming a green covers it.
 
 WHAT IT CHECKS: for every `openbank-*/src/main/resources/openapi.yaml`, the set of
 (HTTP method, absolute path) pairs declared under `paths:` — resolved against `servers[0].url`
-— against the same set read off the JAX-RS annotations of that service's resource classes.
+— against the same set read off the JAX-RS annotations of that service's resource classes. A
+resource that implements an OpenAPI-generated server interface is also an authoritative served
+route declaration: compilation proves it implements the generated methods and the generator owns
+the JAX-RS annotations, so no handwritten annotation copy is needed.
 Drift is reported in both directions:
 
     served-not-published   a route the code answers and the contract omits
@@ -95,6 +98,7 @@ BASELINE_HEADER = """\
 
 # A JAX-RS *client* stub carries the CALLEE's routes, not this service's served contract.
 CLIENT_HINT = re.compile(r"@RegisterRestClient")
+GENERATED_API_IMPORT = re.compile(r"import\s+[\w.]+\.generated\.api\.([A-Za-z][A-Za-z0-9_]*Api)\b")
 
 
 def normalize(path: str) -> str:
@@ -138,6 +142,34 @@ def spec_routes(spec_text: str) -> set[str]:
         method = re.match(r"^    ([a-z]+):\s*$", line)
         if method and current and method.group(1) in SPEC_METHODS:
             routes.add(f"{method.group(1).upper()} {normalize(current)}")
+    return routes
+
+
+def generated_api_routes(spec_text: str) -> dict[str, set[str]]:
+    """Routes owned by each OpenAPI tag's generated `<Tag>Api` server interface."""
+    prefix = server_prefix(spec_text)
+    routes: dict[str, set[str]] = {}
+    current: str | None = None
+    method: str | None = None
+    for line in spec_text.splitlines():
+        path_key = re.match(r"^  ([\"']?)(/\S*?)\1:\s*$", line)
+        if path_key:
+            current = prefix + path_key.group(2)
+            method = None
+            continue
+        operation = re.match(r"^    ([a-z]+):\s*$", line)
+        if operation:
+            method = operation.group(1).upper() if operation.group(1) in SPEC_METHODS else None
+            continue
+        tags = re.match(r"^      tags:\s*\[([^]]+)]\s*$", line)
+        if not (tags and current and method):
+            continue
+        for raw_tag in tags.group(1).split(","):
+            words = re.findall(r"[A-Za-z0-9]+", raw_tag)
+            if not words:
+                continue
+            api = "".join(word[:1].upper() + word[1:] for word in words) + "Api"
+            routes.setdefault(api, set()).add(f"{method} {normalize(current)}")
     return routes
 
 
@@ -216,6 +248,24 @@ def code_routes(service_dir: Path) -> set[str]:
     return routes
 
 
+def generated_server_routes(service_dir: Path, spec_text: str) -> set[str]:
+    """Routes declared by generated server interfaces implemented in this service."""
+    src = service_dir / "src/main/kotlin"
+    if not src.is_dir():
+        return set()
+    implemented: set[str] = set()
+    for kt in sorted(src.rglob("*.kt")):
+        try:
+            text = kt.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for api in set(GENERATED_API_IMPORT.findall(text)):
+            if re.search(rf":\s*{re.escape(api)}\b", text):
+                implemented.add(api)
+    by_api = generated_api_routes(spec_text)
+    return set().union(*(by_api.get(api, set()) for api in implemented)) if implemented else set()
+
+
 SHARED_RUNTIME = Path("openbank-libs-runtime")
 
 # Quarkus serves its management surface (health, metrics, the generated spec) from extensions,
@@ -251,13 +301,96 @@ def load_baseline(path: Path) -> set[str]:
     return entries
 
 
+def self_test() -> int:
+    """Falsify the path normaliser, the server-prefix resolver and the served/published split.
+
+    #2358: a route can be published in openapi.yaml and served nowhere, or served and
+    published nowhere. Both are silent — the spec is a document, so nothing at runtime
+    disagrees with it, and the failure surfaces as a client 404 against an endpoint the
+    documentation promises.
+
+    Every helper here compares STRINGS across two very different sources, and the ways they go
+    wrong are asymmetric: a normaliser that is too eager makes real drift disappear (two
+    different routes collapse to one), and one that is too literal manufactures drift out of a
+    trailing slash. The externally_served exemption is the sharpest — widen it and genuine
+    unserved routes become invisible.
+    """
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want!r}, got {got!r}")
+
+    # --- normalisation: must remove NOISE, never distinctions -----------------------------
+    case("duplicate slashes collapse", normalize("/a//b"), "/a/b")
+    case("a trailing slash is dropped", normalize("/a/b/"), "/a/b")
+    case("root survives", normalize("/"), "/")
+    # A path parameter is part of the route's identity — collapsing {id} would merge
+    # /accounts/{id} with /accounts/{iban} and hide a real difference.
+    case("path parameters are preserved", normalize("/a/{id}/b"), "/a/{id}/b")
+    case("distinct routes stay distinct", normalize("/a/b") == normalize("/a/c"), False)
+
+    # --- the server prefix, which decides what ABSOLUTE means ------------------------------
+    case("an absolute server url yields its path",
+         server_prefix('servers:\n  - url: http://localhost:8101/api/v1\n'), "/api/v1")
+    case("a prefix-only server url yields itself",
+         server_prefix('servers:\n  - url: /api/v1\n'), "/api/v1")
+    case("a host-only url yields no prefix",
+         server_prefix('servers:\n  - url: http://localhost:8101\n'), "")
+    case("no servers block yields no prefix", server_prefix("paths:\n  /x:\n"), "")
+    # A trailing slash on the server url must not double up when routes are joined to it.
+    case("a trailing slash on the server url is dropped",
+         server_prefix('servers:\n  - url: http://localhost:8101/api/v1/\n'), "/api/v1")
+
+    # --- published routes, resolved against the prefix ------------------------------------
+    spec = ('servers:\n  - url: /api/v1\n'
+            'paths:\n'
+            '  /accounts:\n'
+            '    get:\n'
+            '      summary: list\n'
+            '    post:\n'
+            '      summary: create\n'
+            '  /accounts/{id}:\n'
+            '    get:\n'
+            '      summary: one\n')
+    got = spec_routes(spec)
+    want = {"GET /api/v1/accounts", "POST /api/v1/accounts", "GET /api/v1/accounts/{id}"}
+    case("every verb under every path is published, prefixed", got, want)
+
+    # --- the exemption, which is where over-widening hides real drift ----------------------
+    shared = {"GET /api/v1/info"}
+    case("a quarkus management route is externally served",
+         externally_served("GET /q/health/live", set()), True)
+    case("a libs-runtime shared route is externally served",
+         externally_served("GET /api/v1/info", shared), True)
+    # THE ONE THAT MATTERS: an ordinary business route is NOT externally served. If it were,
+    # a published-but-unimplemented endpoint would be silently exempted — the gate's whole
+    # subject.
+    case("an ordinary route is NOT externally served",
+         externally_served("GET /api/v1/accounts", shared), False)
+    case("a route merely resembling the shared one is not exempt",
+         externally_served("GET /api/v1/information", shared), False)
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: openapi route conformance is falsifiable (16 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--enforce", action="store_true")
+    ap.add_argument("--self-test", action="store_true")
     ap.add_argument("--service", help="check a single openbank-* module (default: the whole fleet)")
     ap.add_argument("--baseline", help="file of declared, already-known findings (see module docstring)")
     ap.add_argument("--write-baseline", help="rewrite the baseline file from the current findings")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     level = "error" if args.enforce else "warning"
     specs = sorted(Path(".").glob("openbank-*/src/main/resources/openapi.yaml"))
@@ -276,8 +409,9 @@ def main() -> int:
     for spec_path in specs:
         service_dir = Path(spec_path.parts[0])
         service = service_dir.name
-        declared = spec_routes(spec_path.read_text(encoding="utf-8", errors="replace"))
-        served = code_routes(service_dir)
+        spec_text = spec_path.read_text(encoding="utf-8", errors="replace")
+        declared = spec_routes(spec_text)
+        served = code_routes(service_dir) | generated_server_routes(service_dir, spec_text)
 
         # A service with no annotated resource class at all is not evidence of drift — it is a
         # service this heuristic cannot see (generated resources, a non-JAX-RS surface). Report

@@ -1,0 +1,33 @@
+# Optional Product Studio overlay. Keeping it separate lets the backend-only quickstart remain
+# industry-neutral while Compose validates every required UI secret/image before starting Studio.
+services:
+  studio:
+    image: ${STUDIO_IMAGE:?Set STUDIO_IMAGE to a released immutable Product Studio image reference}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      NODE_ENV: production
+      NEXTAUTH_URL: ${STUDIO_PUBLIC_URL:?Set STUDIO_PUBLIC_URL}
+      NEXTAUTH_SECRET: ${STUDIO_AUTH_SECRET:?Set STUDIO_AUTH_SECRET}
+      KEYCLOAK_PUBLIC_URL: ${STUDIO_KEYCLOAK_URL:?Set STUDIO_KEYCLOAK_URL}
+      KEYCLOAK_URL: ${STUDIO_KEYCLOAK_URL:?Set STUDIO_KEYCLOAK_URL}
+      KEYCLOAK_REALM: ${STUDIO_KEYCLOAK_REALM:-openbank}
+      KEYCLOAK_CLIENT_ID: ${STUDIO_KEYCLOAK_CLIENT_ID:-openbank-product-studio}
+      KEYCLOAK_CLIENT_SECRET: ${STUDIO_KEYCLOAK_CLIENT_SECRET:?Set STUDIO_KEYCLOAK_CLIENT_SECRET}
+      CATALOG_SCOPE_CLAIM: ${CATALOG_SCOPE_CLAIM:-scope}
+      CATALOG_READ_SCOPE: ${CATALOG_READ_SCOPE:-catalog:read}
+      CATALOG_AUTHOR_SCOPE: ${CATALOG_AUTHOR_SCOPE:-catalog:author}
+      CATALOG_PUBLISH_SCOPE: ${CATALOG_PUBLISH_SCOPE:-catalog:publish}
+      ALLOW_INSECURE_STUDIO_URLS: ${ALLOW_INSECURE_STUDIO_URLS:-false}
+      SERVICES_HOST: catalog
+    ports:
+      - "${STUDIO_PORT:-3000}:3000"
+    depends_on:
+      catalog:
+        condition: service_started
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    networks: [catalog]

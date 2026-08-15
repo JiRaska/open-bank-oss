@@ -75,7 +75,8 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
  * bronze_events is keyed by (aggregate_type, aggregate_id), and only SOME events carry partyId in
  * their payload — party, account, consent and kyc events do; transaction events do NOT (they are
  * keyed by accountId). So the party's transactions are reached through the accounts the party owns,
- * which is ADR-0210 D2's account→party resolution, done here in SQL.
+ * which is ADR-0210 D2's account→party resolution — owned by the `silver_party_accounts` view, not
+ * by this route.
  *
  * ISOLATION IS THE LOAD-BEARING PROPERTY. Both arms filter on this party: the direct arm on
  * JSONExtractString(payload,'partyId'), the indirect arm on aggregate_id IN (that party's account
@@ -83,30 +84,26 @@ async function chQuery(sql: string): Promise<Record<string, unknown>[]> {
  * transactions — which is why `customer-360.test.ts` asserts isolation, not just assembly.
  */
 function scopedRowsSql(partyId: string): string {
-  // `aggregate_type` is UPPERCASE in bronze (PARTY, ACCOUNT, ONBOARDING_FUNNEL — confirmed against
-  // the sandbox), so every comparison is folded with upper(). The first version compared against
-  // lowercase literals and silently matched nothing on the account arm: a filter that finds no rows
-  // is indistinguishable from a party that has no accounts, so nothing failed — it just showed
-  // less. Casing is normalised here and again when the rows are grouped.
+  // Ownership resolution is NOT restated here. `silver_party_accounts` (V5__party_accounts.sql) is
+  // the ADR-0210 D2 view — "materialises as a ClickHouse view alongside the existing silver views"
+  // — and this route reads it rather than re-deriving it, for the same reason the ADR rejects
+  // querying bronze directly: a resolution with two definitions has two answers, and this one IS
+  // the isolation boundary. It carries the `upper()` fold and the empty-partyId guard, and it reads
+  // bronze rather than silver because an account's latest event is typically BALANCE_UPDATED, which
+  // carries no partyId. The CTE that used to live here shipped the whole of that reasoning inside
+  // one caller (issue #4511).
   //
-  // party_accounts reads bronze_events, NOT silver_current_state, and that is deliberate: silver
-  // keeps only the LATEST event per aggregate, and an account's latest event is typically
-  // BALANCE_UPDATED, whose payload has accountId but no partyId. Resolving ownership needs the
-  // event that carried it (account opened), which only the full history has.
+  // What stays here is only the party scoping: every reference to the view is filtered to THIS
+  // party, which is what `customer-360.test.ts` asserts. A reference without that WHERE is the leak.
   return `
-    WITH party_accounts AS (
-      SELECT DISTINCT aggregate_id
-      FROM ${DB}.bronze_events
-      WHERE upper(aggregate_type) = 'ACCOUNT'
-        AND JSONExtractString(payload, 'partyId') = '${partyId}'
-    )
     SELECT aggregate_type, aggregate_id, event_type, occurred_at, payload
     FROM ${DB}.silver_current_state
     WHERE JSONExtractString(payload, 'partyId') = '${partyId}'
-       OR (upper(aggregate_type) = 'TRANSACTION'
-           AND aggregate_id IN (SELECT aggregate_id FROM party_accounts))
-       OR (upper(aggregate_type) = 'ACCOUNT'
-           AND aggregate_id IN (SELECT aggregate_id FROM party_accounts))
+       OR (upper(aggregate_type) IN ('TRANSACTION', 'ACCOUNT')
+           AND aggregate_id IN (
+             SELECT account_id FROM ${DB}.silver_party_accounts
+             WHERE party_id = '${partyId}'
+           ))
     ORDER BY occurred_at DESC
     LIMIT 5000
   `

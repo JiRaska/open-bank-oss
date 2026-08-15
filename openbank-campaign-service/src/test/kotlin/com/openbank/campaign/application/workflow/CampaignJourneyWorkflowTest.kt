@@ -4,8 +4,11 @@
 package com.openbank.campaign.application.workflow
 
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.campaign.domain.model.CampaignDecision
+import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.DecisionPath
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.StepCondition
 import com.openbank.campaign.domain.model.StopCondition
@@ -39,6 +42,7 @@ class CampaignJourneyWorkflowTest {
 
     private lateinit var env: TestWorkflowEnvironment
     private lateinit var worker: Worker
+    private lateinit var decisionWorker: Worker
     private lateinit var activities: CampaignJourneyActivities
 
     private val campaignId: UUID = UUID.randomUUID()
@@ -46,6 +50,7 @@ class CampaignJourneyWorkflowTest {
 
     companion object {
         private const val TASK_QUEUE = "test-campaign-journey"
+        private const val DECISION_TASK_QUEUE = "test-campaign-decision-journey"
 
         internal fun kotlinAwareDataConverter(): DataConverter = DefaultDataConverter
             .newDefaultInstance()
@@ -55,15 +60,20 @@ class CampaignJourneyWorkflowTest {
                 ),
             )
 
-        private fun step(order: Int, condition: StepCondition? = null, delaySeconds: Long = 0): CampaignStep =
-            CampaignStep(
-                order = order,
-                template = "MARKETING_PRODUCT_OFFER",
-                channel = Channel.EMAIL,
-                variables = emptyMap(),
-                delaySeconds = delaySeconds,
-                condition = condition,
-            )
+        private fun step(
+            order: Int,
+            condition: StepCondition? = null,
+            delaySeconds: Long = 0,
+            conditionSourceOrder: Int? = null,
+        ): CampaignStep = CampaignStep(
+            order = order,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = emptyMap(),
+            delaySeconds = delaySeconds,
+            condition = condition,
+            conditionSourceOrder = conditionSourceOrder,
+        )
     }
 
     @BeforeEach
@@ -82,10 +92,16 @@ class CampaignJourneyWorkflowTest {
         )
         worker = env.newWorker(TASK_QUEUE)
         worker.registerWorkflowImplementationTypes(CampaignJourneyWorkflowImpl::class.java)
+        decisionWorker = env.newWorker(DECISION_TASK_QUEUE)
+        decisionWorker.registerWorkflowImplementationTypes(DecisionJourneyWorkflowImpl::class.java)
         activities = mockk(relaxed = true)
+        every { activities.controlState(campaignId, partyId) } returns
+            JourneyControlState(CampaignState.ACTIVE, goalReached = false)
         every { activities.deliverStep(any(), any(), any()) } returns StepOutcome.SENT
         every { activities.previousDeliveryStatus(any(), any(), any()) } returns null
+        every { activities.deliveryStatusForStep(any(), any(), any()) } returns null
         worker.registerActivitiesImplementations(activities)
+        decisionWorker.registerActivitiesImplementations(activities)
         env.start()
     }
 
@@ -96,6 +112,14 @@ class CampaignJourneyWorkflowTest {
         env.workflowClient.newWorkflowStub(
             CampaignJourneyWorkflow::class.java,
             WorkflowOptions.newBuilder().setTaskQueue(TASK_QUEUE).build(),
+        ).run(campaignId, partyId)
+    }
+
+    /** Graph histories are served only by their dedicated workflow type and task queue. */
+    private fun runDecisionGraph() {
+        env.workflowClient.newWorkflowStub(
+            DecisionJourneyWorkflow::class.java,
+            WorkflowOptions.newBuilder().setTaskQueue(DECISION_TASK_QUEUE).build(),
         ).run(campaignId, partyId)
     }
 
@@ -181,6 +205,90 @@ class CampaignJourneyWorkflowTest {
     }
 
     @Test
+    fun `complementary paths read their one explicit source, not a skipped sibling`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(
+            listOf(
+                step(0),
+                step(1, StepCondition.IF_PREVIOUS_CONFIRMED, conditionSourceOrder = 0),
+                step(2, StepCondition.IF_PREVIOUS_NOT_CONFIRMED, conditionSourceOrder = 0),
+            ),
+            null,
+        )
+        every { activities.deliveryStatusForStep(campaignId, partyId, 0) } returns DeliveryStatus.CONFIRMED
+
+        run()
+
+        verify { activities.deliverStep(campaignId, partyId, 0) }
+        verify { activities.deliverStep(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }
+        verify { activities.skipStep(campaignId, partyId, 2) }
+        verify(exactly = 2) { activities.deliveryStatusForStep(campaignId, partyId, 0) }
+        verify(exactly = 0) { activities.previousDeliveryStatus(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.previousDeliveryStatus(campaignId, partyId, 2) }
+    }
+
+    @Test
+    fun `an explicit decision records and executes only its confirmed path`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(
+            steps = listOf(step(0), step(1), step(2)),
+            stopCondition = null,
+            decisions = listOf(
+                CampaignDecision(
+                    sourceStepOrder = 0,
+                    evaluationDelaySeconds = 0,
+                    confirmedStepOrder = 1,
+                    notConfirmedStepOrder = 2,
+                ),
+            ),
+        )
+        every { activities.deliveryStatusForStep(campaignId, partyId, 0) } returns DeliveryStatus.CONFIRMED
+
+        runDecisionGraph()
+
+        verify { activities.deliverStep(campaignId, partyId, 0) }
+        verify { activities.deliverStep(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }
+        verify {
+            activities.recordDecisionPath(campaignId, partyId, 0, DecisionPath.CONFIRMED, 1)
+        }
+        verify { activities.markCompleted(campaignId, partyId) }
+    }
+
+    @Test
+    fun `a delivery that is pending at handoff can take the confirmed path after its observation window`() {
+        val observationSeconds = 60L
+        val startedAt = env.currentTimeMillis()
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(
+            steps = listOf(step(0), step(1), step(2)),
+            stopCondition = null,
+            decisions = listOf(
+                CampaignDecision(
+                    sourceStepOrder = 0,
+                    evaluationDelaySeconds = observationSeconds,
+                    confirmedStepOrder = 1,
+                    notConfirmedStepOrder = 2,
+                ),
+            ),
+        )
+        // The activity models a provider receipt that arrives after handoff. TestWorkflowEnvironment
+        // advances its virtual clock through Workflow.sleep, so this proves the decision reads the
+        // post-window durable state instead of committing PENDING at the initial send.
+        every { activities.deliveryStatusForStep(campaignId, partyId, 0) } answers {
+            if (env.currentTimeMillis() >= startedAt + observationSeconds * 1_000) {
+                DeliveryStatus.CONFIRMED
+            } else {
+                DeliveryStatus.PENDING
+            }
+        }
+
+        runDecisionGraph()
+
+        verify { activities.deliverStep(campaignId, partyId, 1) }
+        verify(exactly = 0) { activities.deliverStep(campaignId, partyId, 2) }
+        verify { activities.recordDecisionPath(campaignId, partyId, 0, DecisionPath.CONFIRMED, 1) }
+    }
+
+    @Test
     fun `IF_PREVIOUS_CONFIRMED does not hold for a first step, which has no predecessor`() {
         every { activities.loadDefinition(campaignId) } returns
             JourneyDefinition(listOf(step(0, StepCondition.IF_PREVIOUS_CONFIRMED)), null)
@@ -203,5 +311,45 @@ class CampaignJourneyWorkflowTest {
         // the new activity is never invoked, so a journey started before this change emits no
         // command its recorded history lacks.
         verify(exactly = 0) { activities.previousDeliveryStatus(any(), any(), any()) }
+        verify(exactly = 0) { activities.deliveryStatusForStep(any(), any(), any()) }
+    }
+
+    // --- live campaign controls and goal exit ---------------------------------------------------
+
+    @Test
+    fun `a closed campaign terminates before its next send`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(listOf(step(0)), null)
+        every { activities.controlState(campaignId, partyId) } returns
+            JourneyControlState(CampaignState.CLOSED, goalReached = false)
+
+        run()
+
+        verify(exactly = 0) { activities.deliverStep(any(), any(), any()) }
+        verify { activities.markTerminated(campaignId, partyId, TerminationReason.CAMPAIGN_CLOSED) }
+    }
+
+    @Test
+    fun `a recorded conversion ends the journey before another persuasion`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(listOf(step(0)), null)
+        every { activities.controlState(campaignId, partyId) } returns
+            JourneyControlState(CampaignState.ACTIVE, goalReached = true)
+
+        run()
+
+        verify(exactly = 0) { activities.deliverStep(any(), any(), any()) }
+        verify { activities.markTerminated(campaignId, partyId, TerminationReason.GOAL_REACHED) }
+    }
+
+    @Test
+    fun `a pause observed at delivery retries the same step after resume instead of advancing`() {
+        every { activities.loadDefinition(campaignId) } returns JourneyDefinition(listOf(step(0)), null)
+        every { activities.deliverStep(campaignId, partyId, 0) } returnsMany
+            listOf(StepOutcome.CAMPAIGN_PAUSED, StepOutcome.SENT)
+
+        run()
+
+        verify(exactly = 2) { activities.deliverStep(campaignId, partyId, 0) }
+        verify(exactly = 1) { activities.advanceStep(campaignId, partyId, 0) }
+        verify { activities.markCompleted(campaignId, partyId) }
     }
 }

@@ -67,21 +67,37 @@ open class ClickHouseWarehouseStateReader : WarehouseStateReader {
         tsv.lineSequence().filter { it.isNotBlank() }.map { it.split('\t') }.toList()
 
     private companion object {
+        // upper(aggregate_type), not the raw column (issue #4604, the #4553 follow-up). bronze holds
+        // both `ACCOUNT`/`Account` and `Transaction`/`Consent`-only spellings for the same domains, and
+        // AggregateKey's equals/hashCode are case-sensitive — so an unfolded GROUP BY produces TWO
+        // AggregateKeys for one real aggregate. ReconciliationJob compares this reader's output against
+        // HttpReconciliationSource's, which reports each OLTP service's OWN (consistently-cased)
+        // convention: a pre-#4576 mixed-case account would then show up as BOTH missingInWarehouse
+        // (source key not found under its case) AND missingInSource (warehouse key not found under
+        // its case) — a false DRIFT the periodic job would seal to WORM as audit evidence, and an
+        // operator would investigate a backfill that does not exist. Folding here merges the
+        // case-variant rows via ClickHouse's own GROUP BY, taking the true max version and the full
+        // version sequence across both spellings — the same semantics silver_current_state's argMax
+        // reduction already gives the rest of the warehouse.
         const val CURRENT_VERSIONS_SQL =
-            "SELECT aggregate_type, aggregate_id, max(aggregate_version) " +
-                "FROM bronze_events GROUP BY aggregate_type, aggregate_id FORMAT TabSeparated"
+            "SELECT upper(aggregate_type), aggregate_id, max(aggregate_version) " +
+                "FROM bronze_events GROUP BY upper(aggregate_type), aggregate_id FORMAT TabSeparated"
 
         // count(DISTINCT aggregate_id): a per-type aggregate count, so whole-aggregate loss is caught
         // even when versions still line up (F4). Independent of the version tie-out.
         const val ROW_COUNTS_SQL =
-            "SELECT aggregate_type, count(DISTINCT aggregate_id) " +
-                "FROM bronze_events GROUP BY aggregate_type FORMAT TabSeparated"
+            "SELECT upper(aggregate_type), count(DISTINCT aggregate_id) " +
+                "FROM bronze_events GROUP BY upper(aggregate_type) FORMAT TabSeparated"
 
         // groupUniqArray + arraySort: the distinct, ordered version sequence per aggregate, so the
         // completeness check (F5) can spot a hole in the monotonic sequence (a provably lost event).
+        // Folding here is not just cosmetic: an unfolded GROUP BY would split one account's version
+        // history across two sequences (e.g. [1,3] under `ACCOUNT` and [2,4] under `Account`), and
+        // Completeness.gapsFromVersions would report two holes that do not exist in the real,
+        // interleaved sequence [1,2,3,4].
         const val VERSIONS_BY_AGGREGATE_SQL =
-            "SELECT aggregate_type, aggregate_id, " +
+            "SELECT upper(aggregate_type), aggregate_id, " +
                 "arrayStringConcat(arraySort(groupUniqArray(aggregate_version)), ',') " +
-                "FROM bronze_events GROUP BY aggregate_type, aggregate_id FORMAT TabSeparated"
+                "FROM bronze_events GROUP BY upper(aggregate_type), aggregate_id FORMAT TabSeparated"
     }
 }

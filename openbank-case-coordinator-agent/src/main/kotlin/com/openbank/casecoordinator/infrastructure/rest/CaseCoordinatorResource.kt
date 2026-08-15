@@ -17,6 +17,7 @@ import com.openbank.casecoordinator.domain.model.JoinSignal
 import com.openbank.casecoordinator.domain.model.SupersedeSignal
 import com.openbank.casecoordinator.domain.model.SynthesisRequest
 import com.openbank.libs.temporal.TemporalConfig
+import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.common.annotation.Blocking
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowNotFoundException
@@ -45,6 +46,7 @@ class CaseCoordinatorResource(
     private val gate: CaseCapabilityGate,
     private val workflowClient: WorkflowClient,
     private val temporalConfig: TemporalConfig,
+    private val identity: SecurityIdentity,
 ) {
 
     data class Status(val service: String, val status: String)
@@ -113,11 +115,25 @@ class CaseCoordinatorResource(
         val openedBy = requireNotNull(request.openedBy) { "openedBy is required" }
         val dispositionTarget = requireNotNull(request.dispositionTarget) { "dispositionTarget is required" }
 
-        return when (val result = openService.open(openedBy, caseClass, subjectRef, dispositionTarget)) {
+        // The authenticated caller, not the body's claim. `openedBy` still names WHICH agent
+        // identity the call acts as (ADR-0244 D9 charter capability), but the open-rate quota is
+        // keyed on this instead — a ceiling keyed on a value the caller picks is not a ceiling
+        // (#4834). Same separation McpEndpoint documents for X-Agent-Id: the bearer proves who,
+        // the header only names which.
+        val callerPrincipal = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "anonymous"
+
+        return when (
+            val result = openService.open(callerPrincipal, openedBy, caseClass, subjectRef, dispositionTarget)
+        ) {
             is CaseOpenResult.Opened -> Response.status(Response.Status.CREATED)
                 .entity(OpenCaseResponse(result.caseId)).build()
             CaseOpenResult.Denied -> Response.status(Response.Status.FORBIDDEN)
-                .entity(errorBody("case.open denied for '$openedBy' or class '$caseClass' not enabled")).build()
+                // The caller's own openedBy is NOT echoed back (#4215). It is free-form request
+                // input; reflecting it verbatim into a response body serves no diagnostic purpose
+                // the caller does not already have, and it is the same untrusted value the log
+                // line downstream had to sanitise. The class is a server-side enum, so it stays.
+                .entity(errorBody("case.open denied for the requested agent, or class not enabled"))
+                .build()
             CaseOpenResult.Duplicate -> Response.status(Response.Status.CONFLICT)
                 .entity(errorBody("a case for this class and subject already runs")).build()
             CaseOpenResult.RateLimited -> Response.status(HTTP_TOO_MANY_REQUESTS)
@@ -137,7 +153,11 @@ class CaseCoordinatorResource(
         if (!temporalConfig.enabled()) return temporalUnavailable()
         if (!capable(type, agentId)) {
             return Response.status(Response.Status.FORBIDDEN)
-                .entity(errorBody("signal '$type' denied for agent '$agentId'")).build()
+                // agentId is NOT echoed (#4834), matching the openCase denial. It is free-form
+                // request-body input, and reflecting it verbatim tells the caller nothing it did
+                // not just send. `type` stays: reaching this line means capable() already matched
+                // it against the four known signal literals, so it is a bounded server-side value.
+                .entity(errorBody("signal '$type' denied for the requested agent")).build()
         }
         return deliver(id, type, agentId, request)
     }

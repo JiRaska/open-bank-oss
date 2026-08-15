@@ -55,6 +55,10 @@ class ClickHouseAnalyticsSinkIT {
                     MountableFile.forClasspathResource("clickhouse/V1__analytics_bronze_silver.sql"),
                     "/docker-entrypoint-initdb.d/01-analytics.sql",
                 )
+                .withCopyFileToContainer(
+                    MountableFile.forClasspathResource("clickhouse/V6__campaign_engagement.sql"),
+                    "/docker-entrypoint-initdb.d/06-campaign-engagement.sql",
+                )
                 .withExposedPorts(8123)
                 // The mounted DDL triggers ClickHouse's initdb flow (temp server → run SQL → shut down →
                 // real server), far heavier than a plain boot. On a contended host (many other containers
@@ -156,4 +160,42 @@ class ClickHouseAnalyticsSinkIT {
         ).trim()
         assertThat(count).isEqualTo("1")
     }
+
+    @Test
+    fun `campaign mart separates app observation types without exposing party data`() = runBlocking<Unit> {
+        val campaignId = UUID.randomUUID().toString()
+        val commonPayload = mapOf(
+            "campaignId" to campaignId,
+            "stepOrder" to 0,
+            "channel" to "PUSH",
+        )
+        val impression = campaignEvent("EngagementEvent.IMPRESSION", commonPayload)
+        val click = campaignEvent("EngagementEvent.CLICK", commonPayload)
+
+        sink().writeBatch(listOf(impression, click))
+
+        val row = reader.query(
+            "SELECT impressions, clicks, dismissals " +
+                "FROM $DB.gold_campaign_engagement WHERE campaign_id = '$campaignId' FORMAT TabSeparated",
+        ).trim()
+
+        assertThat(row).isEqualTo("1\t1\t0")
+        val columns = reader.query(
+            "SELECT name FROM system.columns WHERE database = '$DB' " +
+                "AND table = 'gold_campaign_engagement' ORDER BY name FORMAT TabSeparated",
+        )
+        assertThat(columns).doesNotContain("party_id").doesNotContain("interaction_ref")
+    }
+
+    private fun campaignEvent(eventType: String, payload: Map<String, Any>): AnalyticsEnvelope = AnalyticsEnvelope(
+        eventId = UUID.randomUUID(),
+        aggregateType = "ENGAGEMENT",
+        aggregateId = UUID.randomUUID().toString(),
+        aggregateVersion = 0,
+        eventType = eventType,
+        occurredAt = Instant.now(),
+        sourceService = "openbank-engagement-service",
+        schemaVersion = 1,
+        payload = payload,
+    )
 }

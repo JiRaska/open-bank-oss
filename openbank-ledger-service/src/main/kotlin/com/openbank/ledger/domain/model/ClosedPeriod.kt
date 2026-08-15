@@ -164,6 +164,18 @@ enum class ClosedPeriodStatus {
 }
 
 /**
+ * What evidence can actually be served for a close.
+ *
+ * `HASH_ONLY` retains the V22 attestation anchor without pretending its missing lines can be
+ * reconstructed from today's mutable journal. New freezes are always [LINES_V1].
+ */
+enum class ClosedPeriodEvidenceState {
+    NONE,
+    HASH_ONLY,
+    LINES_V1,
+}
+
+/**
  * The frozen, attestable artefact for one accounting period (ADR-0096 D1).
  *
  * This is what replaces "the trial balance is a read API". `/api/v1/journals/trial-balance` is a
@@ -180,6 +192,7 @@ data class ClosedPeriodRecord(
     val id: UUID,
     val period: AccountingPeriod,
     val status: ClosedPeriodStatus,
+    val evidenceState: ClosedPeriodEvidenceState = ClosedPeriodEvidenceState.NONE,
     val computedAt: Instant,
     val totalDebits: BigDecimal,
     val totalCredits: BigDecimal,
@@ -204,7 +217,12 @@ data class ClosedPeriodRecord(
         checkConflict(draftedBy != frozenBy) {
             "Four-eyes violation: ${period.label} must be frozen by someone other than the draft author"
         }
-        return copy(status = ClosedPeriodStatus.FROZEN, frozenBy = frozenBy, frozenAt = frozenAt)
+        return copy(
+            status = ClosedPeriodStatus.FROZEN,
+            evidenceState = ClosedPeriodEvidenceState.LINES_V1,
+            frozenBy = frozenBy,
+            frozenAt = frozenAt,
+        )
     }
 
     companion object {

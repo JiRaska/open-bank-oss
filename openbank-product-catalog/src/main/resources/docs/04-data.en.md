@@ -36,7 +36,7 @@ erDiagram
   PRODUCT ||--o| SAVINGS_CONFIG : "optional"
 
   PRODUCT {
-    string id PK "UUID or prod-xxx"
+    string id PK "canonical UUID; prod-xxx is a legacy alias"
     string code UK "e.g. SAVINGS_STANDARD"
     string name
     string type "SAVINGS|CURRENT|LOAN|MORTGAGE|CREDIT_CARD|TERM_DEPOSIT|OVERDRAFT|INVESTMENT"
@@ -52,6 +52,7 @@ erDiagram
     double maxBalance
     timestamptz createdAt
     timestamptz updatedAt
+    long rowVersion "optimistic concurrency token"
   }
 
   FEE {
@@ -66,7 +67,13 @@ erDiagram
   }
 ```
 
-The model is the Kotlin domain in `domain/Product.kt`; under a MongoDB target each `Product` maps naturally to one document with embedded `fees[]`, `*Config`, `versionHistory[]`, and `termsAndConditions[]`.
+The model is the Kotlin domain in `domain/Product.kt`. PostgreSQL stores the complete representation in JSONB while canonical identity, lookup/filter fields and the optimistic row version remain relational and indexed.
+
+The additive v2 model keeps identity, lifecycle, effective dates, locks and lookups relational:
+`catalog_schemas`, `catalog_specifications`, `catalog_offerings`, immutable
+`catalog_revisions`, exact `catalog_price_components NUMERIC(38,18)`, relationships, approvals,
+append-only audit and outbox. Schema-governed content is JSONB. There is no `tenant_id`: ADR-0152
+defines one regulated company per deployment.
 
 ## Seeded catalog (current fixture)
 
@@ -78,10 +85,20 @@ The product catalog holds **reference data only — no personal data**. There is
 
 ## Retention
 
-`retentionPolicy: indefinite` — product definitions and their version history are kept indefinitely. Historic product versions and effective-dated terms-and-conditions are retained for **transparency and dispute evidence** (a customer must be able to see the pricing that applied when they took the product), not deleted. There is no GDPR erasure dimension because there is no personal data (see [06 — Compliance](./06-compliance.md)).
+`retentionPolicy: indefinite` — current product definitions are kept indefinitely. The embedded
+legacy `versionHistory` remains informational because v1 mutates the current document. Published v2
+revisions, approvals, audit and event envelopes are retained as immutable evidence. There is no GDPR
+erasure dimension because there is no personal data (see [06 — Compliance](./06-compliance.md)).
 
 ## Migrations
 
 | Migration | Status |
 |---|---|
-| (none yet) | No Flyway migrations exist. When the MongoDB-backed store lands, schema/seed bootstrapping will be added per the platform pattern. |
+| `V1__init_products.sql` | Creates the canonical product table and indexes. |
+| `V2__add_product_row_version.sql` | Adds the expand-only optimistic-concurrency token; old binaries ignore it. |
+| `V3__add_generic_catalog_platform.sql` | Adds the v2 schema/specification/offering/revision, approval, audit and outbox model beside v1. |
+| `V4__map_legacy_bank_products.sql` | Adds the canonical v1-to-v2 identity mapping without changing legacy rows. |
+| `V5__complete_catalog_evidence_contract.sql` | Adds effective price ranges, mixed-version-safe outbox evidence and child immutability. |
+| `V6__preserve_mixed_version_outbox_and_published_children.sql` | Restores old-writer outbox defaults first and closes published-child INSERT/relocation bypasses. |
+| `V7__track_bank_v1_projection_revision.sql` | Records v1 and draft watermarks so one-sided rollback writes reconcile and two-sided drift fails closed. |
+| `V8__order_catalog_outbox_for_cursor.sql` | Assigns immutable commit-safe cursor positions so reverse commits or clock changes cannot create a gap. |

@@ -35,6 +35,9 @@ class ClosedPeriodEntity : PanacheEntityBase {
     @Column(name = "status", nullable = false)
     var status: String = "DRAFT"
 
+    @Column(name = "evidence_state", nullable = false)
+    var evidenceState: String = "NONE"
+
     @Column(name = "computed_at", nullable = false)
     var computedAt: Instant = Instant.EPOCH
 

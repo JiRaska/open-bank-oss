@@ -176,6 +176,10 @@ try {
       selftestDeclared: latest.selftest_declared,
       minSubjects: latest.min_subjects,
       budgetSeconds: latest.budget_seconds,
+      // ?? 0, mirroring gate-health-puller-script-configmap.yaml's to_row(): an artifact
+      // from a run-gates.py before this field existed has no such key, and this must
+      // degrade to "no selftest cost recorded", not throw across the whole collect.
+      selftestSeconds: latest.selftest_seconds ?? 0,
       runsObserved: history.length,
     }
   })

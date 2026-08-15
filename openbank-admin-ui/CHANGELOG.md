@@ -1,5 +1,245 @@
 # Changelog
 
+## [0.134.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.133.0...admin-ui-v0.134.0) (2026-08-15)
+
+
+### Features
+
+* **campaign:** add explicit decision graph journeys ([#4781](https://github.com/JiRaska/open-bank-oss/issues/4781)) ([3cc3fe0](https://github.com/JiRaska/open-bank-oss/commit/3cc3fe087e4dccd29ec7f54a36b5e8318fbaa01f))
+
+## [0.133.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.132.0...admin-ui-v0.133.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** unify operator surfaces ([#4842](https://github.com/JiRaska/open-bank-oss/issues/4842)) ([519f1e4](https://github.com/JiRaska/open-bank-oss/commit/519f1e406201fdbe7d5df999faa8da91423bfdcb))
+
+## [0.132.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.131.0...admin-ui-v0.132.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** unify operator workspace ([#4821](https://github.com/JiRaska/open-bank-oss/issues/4821)) ([c2415dd](https://github.com/JiRaska/open-bank-oss/commit/c2415ddea8f4bd4d82ceb57c86fb8a04b6386548))
+
+## [0.131.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.130.0...admin-ui-v0.131.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** show confirmed campaign outcomes ([#4789](https://github.com/JiRaska/open-bank-oss/issues/4789)) ([93ecf96](https://github.com/JiRaska/open-bank-oss/commit/93ecf96c51f8529a9466ccf0d0da2bb908a23c81))
+
+## [0.130.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.129.0...admin-ui-v0.130.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** add campaign delivery health ([#4788](https://github.com/JiRaska/open-bank-oss/issues/4788)) ([5c14837](https://github.com/JiRaska/open-bank-oss/commit/5c14837f1c90e8b097775ebcc1a55be5f5f0e2a7))
+* **campaign:** add planning radar ([#4787](https://github.com/JiRaska/open-bank-oss/issues/4787)) ([8e88e85](https://github.com/JiRaska/open-bank-oss/commit/8e88e851200173644f4c93dd1891ad18964c1fa4))
+
+## [0.129.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.128.0...admin-ui-v0.129.0) (2026-08-14)
+
+
+### Features
+
+* **product-catalog:** ship standalone platform and intelligence studio ([#4501](https://github.com/JiRaska/open-bank-oss/issues/4501)) ([cdd4af2](https://github.com/JiRaska/open-bank-oss/commit/cdd4af291b1f88500cdbcfdd3cf55dc316f94029))
+
+## [0.128.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.127.0...admin-ui-v0.128.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** add campaign touchpoint rail ([#4782](https://github.com/JiRaska/open-bank-oss/issues/4782)) ([0905941](https://github.com/JiRaska/open-bank-oss/commit/09059417a608440ee25c425c83141162445f1261))
+
+## [0.127.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.1...admin-ui-v0.127.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** add app story campaign surface ([#4771](https://github.com/JiRaska/open-bank-oss/issues/4771)) ([2f9aa3e](https://github.com/JiRaska/open-bank-oss/commit/2f9aa3e6943eed6f95df1ae4bc1dac5be4c12c64))
+
+## [0.126.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.126.0...admin-ui-v0.126.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **admin-ui:** stage readiness policy in image build ([#4763](https://github.com/JiRaska/open-bank-oss/issues/4763)) ([d961079](https://github.com/JiRaska/open-bank-oss/commit/d96107933baf09ac324eb19720e6565cc7d2571c))
+
+## [0.126.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.125.0...admin-ui-v0.126.0) (2026-08-14)
+
+
+### Features
+
+* **campaign:** enable reusable campaign drafts ([#4756](https://github.com/JiRaska/open-bank-oss/issues/4756)) ([d59e6c5](https://github.com/JiRaska/open-bank-oss/commit/d59e6c5aaf134fc08fd0acac1af915bc43cb46c2))
+
+## [0.125.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.124.0...admin-ui-v0.125.0) (2026-08-14)
+
+
+### Features
+
+* **admin-ui:** render agent outcome metrics with their denominator ([#4749](https://github.com/JiRaska/open-bank-oss/issues/4749)) ([a27ac89](https://github.com/JiRaska/open-bank-oss/commit/a27ac8966ac99ca08a5beaa6800875a2aec057dc)), closes [#4462](https://github.com/JiRaska/open-bank-oss/issues/4462)
+
+
+### Bug Fixes
+
+* **admin-ui:** derive readiness money-path set from rules.yaml ([#4746](https://github.com/JiRaska/open-bank-oss/issues/4746)) ([db83514](https://github.com/JiRaska/open-bank-oss/commit/db835142f882cfb8442231689ad6673da5301535)), closes [#2365](https://github.com/JiRaska/open-bank-oss/issues/2365)
+
+## [0.124.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.123.0...admin-ui-v0.124.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** guide campaign attention decisions ([89d6fd1](https://github.com/JiRaska/open-bank-oss/commit/89d6fd144691d34fa61ba631346f0b0c413e6dcc)), closes [#4476](https://github.com/JiRaska/open-bank-oss/issues/4476)
+
+## [0.123.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.122.0...admin-ui-v0.123.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** explain live launch guardrails ([#4735](https://github.com/JiRaska/open-bank-oss/issues/4735)) ([0e70531](https://github.com/JiRaska/open-bank-oss/commit/0e7053135e57150016034eb6392f3fd7144d1b7b))
+
+## [0.122.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.121.0...admin-ui-v0.122.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** show campaign attention funnel ([#4731](https://github.com/JiRaska/open-bank-oss/issues/4731)) ([b3e5c83](https://github.com/JiRaska/open-bank-oss/commit/b3e5c839a005521c7b28c4fdbf54d01a8a622c8f))
+
+## [0.121.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.120.0...admin-ui-v0.121.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** clarify campaign customer surfaces ([#4714](https://github.com/JiRaska/open-bank-oss/issues/4714)) ([921810a](https://github.com/JiRaska/open-bank-oss/commit/921810adefde790e06477a9aab794ec1a08b64c2))
+* **campaign:** add explicit decision sources ([#4690](https://github.com/JiRaska/open-bank-oss/issues/4690)) ([3296001](https://github.com/JiRaska/open-bank-oss/commit/3296001b81fda644c6ba8d0b4d7b8703b2f5bc22))
+
+## [0.120.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.119.0...admin-ui-v0.120.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** refresh operator workspace ([#4648](https://github.com/JiRaska/open-bank-oss/issues/4648)) ([bec7f9b](https://github.com/JiRaska/open-bank-oss/commit/bec7f9b2a5725377dab8536f251c614d9f8a7647))
+
+## [0.119.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.118.0...admin-ui-v0.119.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add delivery decision paths ([#4686](https://github.com/JiRaska/open-bank-oss/issues/4686)) ([73b2a0a](https://github.com/JiRaska/open-bank-oss/commit/73b2a0a82857b4676b3b613d9f88b73b94416c11))
+
+## [0.118.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.117.0...admin-ui-v0.118.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** let makers revise drafts ([#4667](https://github.com/JiRaska/open-bank-oss/issues/4667)) ([60b86bb](https://github.com/JiRaska/open-bank-oss/commit/60b86bb48e7c480bd05b79a5c8a2c544f9e2b1f4))
+
+## [0.117.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.116.0...admin-ui-v0.117.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** add governed audience library ([#4653](https://github.com/JiRaska/open-bank-oss/issues/4653)) ([f2dc472](https://github.com/JiRaska/open-bank-oss/commit/f2dc472990b45978e4f0486099ac4589404cb08e)), closes [#4652](https://github.com/JiRaska/open-bank-oss/issues/4652)
+
+## [0.116.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.115.0...admin-ui-v0.116.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** add app-first journey recipes ([#4643](https://github.com/JiRaska/open-bank-oss/issues/4643)) ([fa06243](https://github.com/JiRaska/open-bank-oss/commit/fa06243b5673dd0b06e3efe175a481bc66c495c9))
+
+## [0.115.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.1...admin-ui-v0.115.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add journey path experiments ([#4588](https://github.com/JiRaska/open-bank-oss/issues/4588)) ([3077571](https://github.com/JiRaska/open-bank-oss/commit/307757110c42470d51d9fdfbdf869fb133fcf447))
+
+## [0.114.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.114.0...admin-ui-v0.114.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** label regulatory preview honestly ([#4610](https://github.com/JiRaska/open-bank-oss/issues/4610)) ([7b9c592](https://github.com/JiRaska/open-bank-oss/commit/7b9c592aed59b6081f607e1257c7418897b11766))
+
+## [0.114.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.113.0...admin-ui-v0.114.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** strengthen operator dashboard ([#4598](https://github.com/JiRaska/open-bank-oss/issues/4598)) ([914ab71](https://github.com/JiRaska/open-bank-oss/commit/914ab71e1d9542f74ebe2e06c0c27f6ff3de07c1))
+* **campaign:** add in-app campaign surfaces ([#4586](https://github.com/JiRaska/open-bank-oss/issues/4586)) ([8f81863](https://github.com/JiRaska/open-bank-oss/commit/8f81863a2e890efa5f9de77ff59201bb36e2a46a))
+
+
+### Bug Fixes
+
+* **admin-ui:** load regulatory templates ([#4602](https://github.com/JiRaska/open-bank-oss/issues/4602)) ([9629531](https://github.com/JiRaska/open-bank-oss/commit/96295319c727c43407ac87628b596e27d26153bb))
+
+## [0.113.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.112.0...admin-ui-v0.113.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add in-app banner channel ([#4577](https://github.com/JiRaska/open-bank-oss/issues/4577)) ([d95c85c](https://github.com/JiRaska/open-bank-oss/commit/d95c85cf3fbe0428e4cc5e44bcca27d05bc574ab))
+
+## [0.112.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.3...admin-ui-v0.112.0) (2026-08-13)
+
+
+### Features
+
+* add trusted campaign engagement analytics ([#4555](https://github.com/JiRaska/open-bank-oss/issues/4555)) ([22ab0ba](https://github.com/JiRaska/open-bank-oss/commit/22ab0ba6930bff0d70594ab2ee72cf5407bee0b8))
+* **admin-ui:** elevate campaign composer ([#4540](https://github.com/JiRaska/open-bank-oss/issues/4540)) ([28bddcc](https://github.com/JiRaska/open-bank-oss/commit/28bddcc13c1e52c9dc8354babdd88f0295ebb7f2))
+* **governance:** add gate lifecycle metadata gate, split selftest_seconds ([#4521](https://github.com/JiRaska/open-bank-oss/issues/4521)) ([d9951da](https://github.com/JiRaska/open-bank-oss/commit/d9951dab5e68c43c9328eeb702369c0f08e7672f))
+
+## [0.111.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.2...admin-ui-v0.111.3) (2026-08-13)
+
+
+### Bug Fixes
+
+* **analytics-sink:** materialise the ADR-0210 D2 party key as a ClickHouse view ([#4520](https://github.com/JiRaska/open-bank-oss/issues/4520)) ([3aa3598](https://github.com/JiRaska/open-bank-oss/commit/3aa359899951d96fe6c5914cce44dcecd6436a11))
+
+## [0.111.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.1...admin-ui-v0.111.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** call agent team swarm ([#4517](https://github.com/JiRaska/open-bank-oss/issues/4517)) ([ebfc7bb](https://github.com/JiRaska/open-bank-oss/commit/ebfc7bbd0d477f59cbeb986cffe22e6e3fb310fe))
+
+## [0.111.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.111.0...admin-ui-v0.111.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **admin-ui:** call the agent collaboration a swarm, not a mesh ([#4506](https://github.com/JiRaska/open-bank-oss/issues/4506)) ([d2ad9e0](https://github.com/JiRaska/open-bank-oss/commit/d2ad9e0ba54abf688dcb3eeae815c2122f688885))
+
+## [0.111.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.110.0...admin-ui-v0.111.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** explain AI mesh ([#4496](https://github.com/JiRaska/open-bank-oss/issues/4496)) ([ba3b451](https://github.com/JiRaska/open-bank-oss/commit/ba3b45176eb791a26f20479516de10501292f9ec))
+* **campaign:** add marketer control room ([#4495](https://github.com/JiRaska/open-bank-oss/issues/4495)) ([5dc4141](https://github.com/JiRaska/open-bank-oss/commit/5dc414143c05815d43da3c50a3547db692e65356)), closes [#4476](https://github.com/JiRaska/open-bank-oss/issues/4476)
+
+## [0.110.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.109.0...admin-ui-v0.110.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
+## [0.109.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.108.0...admin-ui-v0.109.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** visualize agent diagnostics ([#4489](https://github.com/JiRaska/open-bank-oss/issues/4489)) ([df9a38c](https://github.com/JiRaska/open-bank-oss/commit/df9a38c0faf044d1718590fa75567bffaa339228))
+
+## [0.108.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.107.0...admin-ui-v0.108.0) (2026-08-13)
+
+
+### Features
+
+* **admin-ui:** humanize AIOps agent roster ([66ca219](https://github.com/JiRaska/open-bank-oss/commit/66ca219ba9e16dd511977f26be73798c1762721e)), closes [#4482](https://github.com/JiRaska/open-bank-oss/issues/4482)
+
 ## [0.107.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.106.0...admin-ui-v0.107.0) (2026-08-09)
 
 

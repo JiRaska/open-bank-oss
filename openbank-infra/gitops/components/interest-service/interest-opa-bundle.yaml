@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: interest-service
     app.kubernetes.io/part-of: interest
   annotations:
-    openbank.tech/policy-checksum: "5adc9e402474419f"
+    openbank.tech/policy-checksum: "3a5ea4dc0777b81e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -541,8 +541,12 @@ data:
     #   interest.list    — listAllAccruals, listRateConfigs, list (withholding)
     #   interest.read    — getAccruals/getSummary/getCapitalizations/getRateConfig (#id), get (withholding)
     #
-    # Base rest.rego already grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) and
-    # compliance-read-any (ROLE_COMPLIANCE) for interest.list/.read — no extension needed for those.
+    # Base rest.rego grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) for interest.list/.read, and
+    # compliance-read-any for interest.read ONLY (that rule matches actions ending in ".read", so it
+    # never covers the list). It reaches no other role: ROLE_VIEWER and ROLE_AUDITOR — both admitted by
+    # the resources' own @RolesAllowed — are denied by the base policy. See interest-oversight-read
+    # below, which closes that gap; the earlier form of this line claimed no extension was needed for
+    # reads and was wrong.
     #
     # No legitimate M2M writer exists: audited the fleet for callers of interest-service —
     # agent-service's InterestServiceClient is read-only (listAccruals/getAccruals), and accrueAll's
@@ -572,6 +576,45 @@ data:
     	role in input.principal.roles
     	not startswith(input.principal.id, "service-account-")
     	input.action in {"interest.create", "interest.trigger", "interest.delete"}
+    }
+
+    # Read grant for the oversight roles the two resources actually admit (#3679 follow-up).
+    #
+    # The header above claims base rest.rego "already grants operator-read-any and compliance-read-any
+    # for interest.list/.read — no extension needed for those". Measured against the DEPLOYED bundle,
+    # that is not true for the roles a real console session carries:
+    #
+    #   interest.list  ROLE_VIEWER   -> DENY      interest.read  ROLE_VIEWER   -> DENY
+    #   interest.list  ROLE_AUDITOR  -> DENY      interest.read  ROLE_AUDITOR  -> DENY
+    #   interest.list  ROLE_COMPLIANCE -> DENY  (compliance-read-any matches only actions ending
+    #                                            in ".read", and the endpoint an analyst opens is
+    #                                            the LIST)
+    #
+    # operator-read-any needs ROLE_OPERATOR/ROLE_ADMIN, and role_action_matrix carries no ROLE_VIEWER
+    # or ROLE_AUDITOR entry at all. Meanwhile InterestResource is class-annotated
+    # @RolesAllowed(ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN, ROLE_API) and WithholdingRemittanceResource
+    # adds ROLE_AUDITOR, so both admit these roles at the JAX-RS layer; admin-ui's /interest page is not
+    # role-gated and its sidebar entry is gated on `payments:view`, which includes ROLES.VIEWER. The
+    # deployed realm seeds demo@openbank.local with ROLE_VIEWER alone and compliance@/compliance2@ with
+    # ROLE_COMPLIANCE+ROLE_VIEWER — so since #3695 flipped AUTHZ_ENFORCE on 2026-08-07, all three have
+    # been 403ing on a read they are entitled to. This closes that regression rather than introducing a
+    # new grant; it is the same shape sdd/aml/balances/fx/ledger already carry.
+    #
+    # READ-ONLY BY CONSTRUCTION, which is what makes a role-only grant acceptable here where the write
+    # rule above had to exclude service accounts: the action set is a closed literal of the two read
+    # actions, not a startswith(input.action, "interest.") family, so no widening of interest.* can leak
+    # through it, and neither role appears on any interest write path. It grants the shared backend
+    # client nothing new — service-account-openbank-services holds ROLE_API in the deployed realm (and
+    # ROLE_OPERATOR in the docker/CI realms, where base operator-read-any already covers both actions).
+    #
+    # ROLE_COMPLIANCE is deliberately NOT listed: neither resource admits it at the JAX-RS layer, so a
+    # compliance-only principal 403s before OPA is consulted and a grant here would be dead. The real
+    # compliance users reach these reads through the ROLE_VIEWER they also hold.
+    allowed_reasons contains "interest-oversight-read" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_VIEWER", "ROLE_AUDITOR"}
+    	role in input.principal.roles
+    	input.action in {"interest.read", "interest.list"}
     }
 
     # No M2M caller of interest writes exists (fleet audit above), so this loses no legitimate
@@ -1220,6 +1263,8 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
+                                             # core also enforces maker != checker for standalone installs.
         - opsmessage.compose                # ADR-0176 D5: operator-initiated customer messaging.
                                              # Confirmed no M2M caller — the only allow rule for this
                                              # action requires HUMAN + (ROLE_OPERATOR or ROLE_ADMIN) and

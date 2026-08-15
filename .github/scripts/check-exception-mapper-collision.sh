@@ -28,6 +28,47 @@
 # check-no-service-principal-type.sh / check-domain-purity.py. ENFORCED.
 # Usage: check-exception-mapper-collision.sh [root]   (default root: .)
 set -euo pipefail
+
+# --- self-test ------------------------------------------------------------------------
+# libs-runtime owns the mappers for the shared JDK exception types. A service-local
+# ExceptionMapper for the SAME type collides non-deterministically — whichever CDI bean wins
+# decides the HTTP status, and it can differ between builds (#526). The rule the fleet relies
+# on is "map IllegalArgumentException to 400 in libs-runtime, never locally".
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+  put() { mkdir -p "$(dirname "$1")"; printf '%b' "$2" > "$1"; }
+  expect() { local label="$1" root="$2" want="$3" sub="${4:-}" out rc
+    out=$(bash "$0" "$root" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
+  K() { echo "$1/openbank-x/src/main/kotlin/M.kt"; }
+
+  # THE DEFECT: a local mapper for a libs-runtime-owned type.
+  a="$td/bad"; put "$(K "$a")" 'class M : ExceptionMapper<IllegalArgumentException> {\n}\n'
+  expect "a local mapper for IllegalArgumentException is FLAGGED" "$a" 1 "collides non-deterministically"
+  # The sanctioned fix: a dedicated exception type of the service's own.
+  b="$td/good"; put "$(K "$b")" 'class M : ExceptionMapper<MyOwnDomainException> {\n}\n'
+  expect "a mapper for a service-owned type is clean" "$b" 0 "none collide"
+  # Another owned type from the list, so the case does not pin one name only.
+  c="$td/state"; put "$(K "$c")" 'class M : ExceptionMapper<IllegalStateException> {\n}\n'
+  expect "IllegalStateException is covered too" "$c" 1 "collides non-deterministically"
+  # PROSE: the comment explaining the ban names the very type it bans.
+  d="$td/comment"; # The comment must carry the FULL signature `: ExceptionMapper<...>`, or the pattern never
+  # matches it and the comment filter is never exercised — a fixture that cannot reach the
+  # branch it claims to test.
+  put "$(K "$d")" '// never write : ExceptionMapper<IllegalArgumentException> here (#526)\nclass M : ExceptionMapper<MyOwnDomainException> {\n}\n'
+  expect "the type named in a comment is not a hit" "$d" 0 "none collide"
+  # A tree with no Kotlin at all must not read like a clean fleet.
+  e="$td/empty"; mkdir -p "$e/openbank-x/src/main/kotlin"
+  expect "an empty tree reports 0 checked" "$e" 0 "0 "
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: ExceptionMapper collision guard is falsifiable (5 cases)"
+  exit 0
+fi
 root="${1:-.}"
 fail=0
 checked=0

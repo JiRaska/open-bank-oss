@@ -123,6 +123,15 @@ class McpToolRegistry {
             ),
         ),
         ToolDefinition(
+            name = "get_catalog_revision",
+            description = "Get one exact v2 catalog revision for grounded draft review. Read-only; " +
+                "it cannot create, replace, publish or retire a revision.",
+            inputSchema = schema(
+                "offeringId" to (stringProp("UUID of the offering that owns the revision") to true),
+                "revisionId" to (stringProp("UUID of the exact catalog revision") to true),
+            ),
+        ),
+        ToolDefinition(
             name = "list_ledger_journals",
             description = "List recent general-ledger journals.",
             inputSchema = schema(
@@ -347,6 +356,7 @@ class McpToolRegistry {
         "list_products" to "query.catalog.readonly",
         "get_product" to "query.catalog.readonly",
         "get_product_fees" to "query.catalog.readonly",
+        "get_catalog_revision" to "query.catalog.readonly",
         // Journal posting/listing touches the GL write model — query.ledger.readonly is correct.
         "list_ledger_journals" to "query.ledger.readonly",
         // Trial balance is a GL aggregate read (Refs #299 / ADR-0031): dedicated query.gl.readonly

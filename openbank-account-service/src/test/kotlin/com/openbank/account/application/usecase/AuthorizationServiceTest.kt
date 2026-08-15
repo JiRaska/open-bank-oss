@@ -54,6 +54,7 @@ class AuthorizationServiceTest {
             accountRepository,
             authorizationRepository,
             delegationProjectionRepository,
+            mockk(relaxed = true),
             Clock.fixed(fixedInstant, ZoneOffset.UTC),
         )
     }

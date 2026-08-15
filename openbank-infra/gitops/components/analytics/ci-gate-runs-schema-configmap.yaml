@@ -65,6 +65,14 @@ data:
         mode         LowCardinality(String),    -- enforced | advisory
         status       LowCardinality(String),    -- ok | failed | warned | skipped | unfalsified
         seconds      Float64,
+        -- Falsification cost, split out (external review 2026-08-10) — `seconds` stays the
+        -- total (self-test + run:) so nothing already reading it is redefined underfoot.
+        -- 0.0 when the gate declares no selftest, never NULL, matching run-gates.py's
+        -- json_records() exactly. NOTE: no semicolon inside this comment block — the
+        -- schema-apply Job splits statements on `;` at end-of-line, and this repo's own
+        -- gate scripts already learned that a stray `;` inside a comment silently splits a
+        -- statement in half. Caught here by testing the split, not by reading the SQL.
+        selftest_seconds Float64 DEFAULT 0,
         subjects     Nullable(Int64),
         selftest_declared Bool,
         selftest_passed   Nullable(Bool),
@@ -81,3 +89,11 @@ data:
     -- retention floor pulling the other way, unlike bronze_events' 10-year minimum.
     TTL toDateTime(run_created_at) + INTERVAL 13 MONTH
     SETTINGS index_granularity = 8192;
+
+    -- The table above already exists live (created 2026-08-10, ADR-0255 Tier 2) — CREATE TABLE
+    -- IF NOT EXISTS is a no-op on it, so a NEW column needs its own ALTER, applied idempotently
+    -- alongside it. Verified against a real clickhouse/clickhouse-server:24.8: ADD COLUMN IF
+    -- NOT EXISTS is safe to re-run (this table's own schema-apply Job already re-applies its
+    -- statements on every sync).
+    ALTER TABLE openbank_analytics.ci_gate_runs
+        ADD COLUMN IF NOT EXISTS selftest_seconds Float64 DEFAULT 0 AFTER seconds;

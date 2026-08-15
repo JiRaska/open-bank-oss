@@ -92,10 +92,13 @@ class AuditConsumerTest {
 
         consumer.consume(payload)
 
+        // "unscoped:mcp", not "mcp" — this call uses the single-arg consume(payload), i.e.
+        // EventAddress.NONE, so there is no topic to namespace by (issue #4660). See the
+        // resolveChannel tests below for the namespaced-by-topic cases.
         coVerify {
             repo.save(
                 match {
-                    it.channel == "mcp" &&
+                    it.channel == "unscoped:mcp" &&
                         it.actChain == listOf("agent-session:7f3a", "mcp-cli") &&
                         it.sessionId == "sess-123"
                 },
@@ -548,6 +551,123 @@ class AuditConsumerTest {
         // INGEST — but via the "unparseable occurredAt" warning path, which reports a malformed
         // producer where there is only an absent field. Asserted so the two stay distinguishable.
         coVerify { repo.save(match { it.occurredAtSource == OccurredAtSource.INGEST }) }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Case fold, issue #4553's pattern found again here 2026-08-13. A producer's own
+    // "aggregateType" field used to survive verbatim while inferAggregateType's table is all
+    // uppercase, so the column recorded WHICH resolution path fired, not what the aggregate is.
+    // Measured on the live audit_entries table before this fix: ACCOUNT 656 / Account 126,
+    // Transaction 193 with ZERO uppercase TRANSACTION rows, Consent 11 with ZERO uppercase
+    // CONSENT rows.
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    fun `consume uppercases a producer's mixed-case aggregateType`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val payload = """
+            {
+              "eventType": "AccountCreated",
+              "aggregateType": "Account",
+              "accountId": "$accountId",
+              "occurredAt": "2026-05-27T12:00:00Z"
+            }
+        """.trimIndent()
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify { repo.save(match { it.aggregateType == "ACCOUNT" }) }
+    }
+
+    @Test
+    fun `consume uppercases an INFERRED aggregateType too, so both paths agree`(): Unit = runBlocking {
+        // inferAggregateType already returns uppercase ("TRANSACTION"), so this asserts the fold
+        // is a no-op on that path — both paths must converge on the SAME casing, not just each
+        // individually look fine.
+        val transactionId = UUID.randomUUID()
+        val payload = """{"eventType":"X","transactionId":"$transactionId"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload)
+
+        coVerify { repo.save(match { it.aggregateType == "TRANSACTION" }) }
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // Channel namespacing, issue #4660 (a #4553 fleet-sweep finding). Three producers write the
+    // bare JSON key "channel" with no shared vocabulary: AuditChannel (ADR-0226, "ui"/"mcp"/"api"),
+    // OnboardingChannel (party-service, up to "MOBILE_APP") and ComplaintChannel (dispute-service,
+    // up to "ARBITER") — "api" (AuditChannel) and "API" (OnboardingChannel) collide on both case
+    // and meaning. Namespacing by source topic keeps them apart without touching any producer.
+    // -----------------------------------------------------------------------------------------
+
+    @Test
+    fun `consume namespaces channel as onboarding for party events`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val payload = """{"eventType":"RelationshipAdded","partyId":"$partyId","channel":"API"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, EventAddress(topic = "openbank.party.events"))
+
+        // Not "API" bare — that is indistinguishable from AuditChannel's "api" (case-folded) without
+        // the namespace, and the two are different concepts (onboarding channel vs ingress channel).
+        coVerify { repo.save(match { it.channel == "onboarding:API" }) }
+    }
+
+    @Test
+    fun `consume namespaces channel as complaint for dispute events`(): Unit = runBlocking {
+        val complaintId = UUID.randomUUID()
+        val payload = """{"eventType":"complaint.received","complaintId":"$complaintId","channel":"APP"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, EventAddress(topic = "openbank.dispute.events"))
+
+        coVerify { repo.save(match { it.channel == "complaint:APP" }) }
+    }
+
+    @Test
+    fun `consume namespaces channel by the raw topic when the topic is not one of the known two`(): Unit = runBlocking {
+        // No hardcoded mapping for a topic this consumer has not been told the shape of — see
+        // resolveChannel's own KDoc for why guessing a namespace here would be worse than an
+        // honest, disjoint fallback. Expected value computed the same way resolveChannel builds
+        // it (topic + ":" + raw, truncated to the column width) rather than hand-counted, so a
+        // future column-width change can't silently desync the test from the code.
+        val topic = "openbank.short.topic"
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","channel":"weird"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, EventAddress(topic = topic))
+
+        coVerify { repo.save(match { it.channel == "$topic:weird".take(32) }) }
+    }
+
+    @Test
+    fun `consume truncates an overlong namespaced channel rather than failing the insert`(): Unit = runBlocking {
+        // VARCHAR(32) (V14). A topic name long enough to push "<topic>:<value>" past 32 chars must
+        // not crash the whole entry — a truncated query-index value is a far smaller loss than
+        // dropping the tamper-evident audit row it is attached to.
+        val longTopic = "openbank.sanctions.screening.event"
+        val payload = """{"eventType":"X","accountId":"${UUID.randomUUID()}","channel":"SOMETHING_LONG"}"""
+
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, EventAddress(topic = longTopic))
+
+        coVerify {
+            repo.save(
+                match {
+                    it.channel != null &&
+                        it.channel!!.length <= 32 &&
+                        it.channel == "$longTopic:SOMETHING_LONG".take(32)
+                },
+            )
+        }
     }
 
     private companion object {

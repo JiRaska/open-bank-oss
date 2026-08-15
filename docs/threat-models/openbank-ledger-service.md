@@ -30,6 +30,8 @@ Assets protected, in priority order:
    accounts tie out per customer (CNB zákon 563/1991 Sb., vyhláška 501/2002 Sb.).
 4. **Trial balance / sub-ledger balances** — derived reporting that auditors and reconciliation rely on.
 5. **Idempotency + outbox** — exactly-once posting and reliable event emission (ADR-0050).
+6. **Frozen period evidence** — line-level statutory source for FINREP/COREP; V22 historical
+   close hashes remain evidence anchors but do not contain reproducible lines.
 
 ## 2. Data-flow diagram (textual)
 
@@ -98,6 +100,13 @@ isolation from transport/persistence.
   `SKIP`); a posted row's event is published exactly once per successful tick or bounded to `DEAD` (ADR-0050).
 - Domain-metric labels are **low-cardinality and PII-free** (currency + a closed `type` set; gauge by `service`);
   never an account id, IBAN, amount, party, or entry id (ADR-0077 cardinality contract).
+- **Closed-period evidence:** a new freeze persists the re-verified lines, FROZEN status flip and
+  `PeriodFrozen` outbox row in one transaction. The database rejects UPDATE/DELETE of persisted
+  evidence. FINREP/COREP calls only `frozen-trial-balance`, which rejects DRAFT, missing and V22
+  `HASH_ONLY` records; the operational endpoint may recompute those historical rows but is never a
+  regulatory source. During rollout the count of `HASH_ONLY` frozen records is an explicit report
+  availability gate. No backfill is automatic: historical reproduction needs a separately approved,
+  controlled evidence-import procedure and cannot be inferred from mutable journals.
 
 ## 5. Open items / follow-ups
 
@@ -228,6 +237,48 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-09** — Outbound client edge + posting semantics (#3921, correctness half). Two changes to
+  the money path, and the second is the one that needs the scrutiny.
+  **(a) Outbound edge.** `FxServiceClient.getRate` now sends `asOf=<business day>` alongside
+  `source=CNB`. Same host, route, method, authz and OIDC client-credentials posture — one query
+  parameter, no new dependency and no new trust boundary. It removes a *correctness* exposure
+  rather than adding one: a belated or manual revaluation of an older day used to be marked at
+  **today's** fixing, because the port had no date to ask with. A day with no fixing in effect now
+  answers 404, which the adapter maps to `null` exactly as it already did for an un-ingested
+  currency, so the leg skips loudly (`FxRevaluationSkippedAllLegs`) instead of marking at a wrong
+  rate.
+  **(b) A corrected fixing can now post.** `fx-reval-{date}` keyed the entry on the business day
+  alone, so `postJournal`'s idempotency short-circuit returned the ORIGINAL entry on any re-run —
+  a corrected ČNB fixing could never be incorporated, and the run reported `posted = true` having
+  changed nothing. The key now carries a 12-hex-char SHA-256 digest of the fixing set the posting
+  was built from, so a different fixing is a different key.
+  **Why this does not double-count, which is the whole risk.** `FxRevaluationPosting.movement` is
+  carry-relative — `round(position × rate) − carryCzk`, where `carryCzk` is the counter-value
+  account's trial-balance net — and the trial balance is cumulative to the business day
+  (`entry_date <= :asOf`). The first posting carries `entryDate = command.date`, so a correcting
+  run reads its own predecessor and posts only the DIFFERENCE. Invariant §4 ("the position after
+  n postings equals the latest mark") is preserved by construction, not by convention, and
+  `a corrected fixing posts a superseding entry for the difference, under a different key` asserts
+  it arithmetically (25,145,000 + 355,000 = 25,500,000).
+  **Rejected alternatives**, on failure mode rather than taste: *reversal-and-repost* uses the
+  available `reverseJournal` to produce three entries whose net is identical, and adds a failure
+  mode the superseding form lacks — a reversal that commits without its repost leaves the position
+  marked at nothing, whereas an interrupted superseding run leaves it merely stale. *Overwriting
+  the original entry* is unavailable and correctly so: entries are append-only and an attested
+  year refuses new activity (`requireOpenPeriod`), so a correction into a closed period fails
+  loudly as a posting into a locked day, governed by the existing day/period locks — those are
+  unchanged and still apply to the correcting entry.
+  **Repudiation:** improved. The entry description already named the fixings (step 2); the key is
+  now derived from them, so "which fixing valued this position, and which superseded it" is
+  answerable from the ledger for the first time. **EoP/authn:** unchanged — the correcting entry
+  is posted by the same `SYSTEM_USER` under the same day and period locks as any other
+  revaluation. **Degradation:** with no `validFrom` on any leg there is no identity to key on and
+  the key falls back to exactly `fx-reval-{date}`; corrections stay impossible, deliberately,
+  since a fabricated identity would be worse than an honest inability, and the state is visible
+  via `openbank_fx_fixing_age_seconds` and the missing `[fixings …]` suffix.
+  Rollback: revert. Entries already posted under either key form remain valid and independently
+  correct, because each one only ever booked a delta.
+
 - **2026-08-05** — Prohibit the customer-edge M2M principal from every ledger write, including
   year-close attestation (#3734). `operator-ledger-write` and `operator-year-close-attest` were
   role-only, and `rules.yaml`'s `role_action_matrix` grants `ledger.create/reverse/trigger/
@@ -281,3 +332,14 @@ set) apply equally to the new `ledger.approval.decide` action.
   entry and reports success while every position marked that day keeps the superseded rate's CZK
   counter-value. That needs a correcting-entry decision, not a patch, and #3921 stays open for it.
   Rollback: revert; the field is read-only on this side and nothing persists it.
+
+- **2026-08-14** — Closed-period freezes now retain their exact trial-balance lines for FINREP/COREP
+  (ADR-0096 D1 expand stage). The security boundary is the evidence write: `freeze` re-computes and
+  hash-compares the DRAFT, then writes the exact reverified lines, status transition and outbox row
+  in one reactive transaction. **Tampering:** the new table has a database trigger rejecting update
+  and delete, its FK is `ON DELETE RESTRICT`, and FROZEN reads use those rows rather than a mutable
+  journal aggregate. **Repudiation:** the stable existing hash is retained and callers can reproduce
+  the lines it anchored; the endpoint's DRAFT/no-record behavior remains live computation. **DoS:**
+  line inserts occur only during an operator four-eyes freeze, not on the posting path. **Rollback:**
+  before FINREP depends on the source, stop writers and archive frozen evidence, then remove the
+  trigger/function/table; never delete attested evidence as a convenience rollback.

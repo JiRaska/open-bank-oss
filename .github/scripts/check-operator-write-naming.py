@@ -177,13 +177,14 @@ IDENTITY_PIN_RE = re.compile(
 )
 
 
-def rego_sources() -> list[tuple[Path, str]]:
+def rego_sources(root: Path = None) -> list[tuple[Path, str]]:
     """Every rego body that can define an allowed_reasons rule, from both authoring shapes."""
     out: list[tuple[Path, str]] = []
-    shared = REPO / "openbank-libs/governance/policies/rest.rego"
+    base = root or REPO
+    shared = base / "openbank-libs/governance/policies/rest.rego"
     if shared.exists():
         out.append((shared, shared.read_text()))
-    components = REPO / "openbank-infra/gitops/components"
+    components = base / "openbank-infra/gitops/components"
     for p in sorted(components.glob("*/*_rest_ext.rego")):
         out.append((p, p.read_text()))
     # Heredoc form: `X_REST_EXT=$(cat << 'REGO' ... REGO`. Extract the body so a rule authored
@@ -210,7 +211,119 @@ def rule_bodies(src: str):
         yield m.group(1), src[start : i - 1]
 
 
+def rule_verdict(reason: str, body: str) -> str:
+    """Why this rule is or is not a finding: one of read/read-name/not-role-gated/
+    identity-pinned/conventionally-named/baselined/VIOLATION.
+
+    A separate function so the self-test can drive every branch. Inline in main() it could
+    only be exercised by constructing a whole fake repo, which is how a branch ends up
+    unfalsified — the failure this whole batch is about.
+    """
+    if reason in READ_REASONS or reason in DECLARED_EXCEPTIONS:
+        return "declared"
+    if READ_NAME_RE.search(reason):
+        return "read-name"
+    if not ROLE_GATE_RE.search(body):
+        return "not-role-gated"
+    if IDENTITY_PIN_RE.search(body):
+        return "identity-pinned"
+    if reason.startswith("operator-") and reason.endswith("-write"):
+        return "conventionally-named"
+    if reason in BASELINE:
+        return "baselined"
+    return "VIOLATION"
+
+
+def self_test() -> int:
+    """Falsify the classifier and the source discovery.
+
+    GHSA-58jq-9hq3-66jr: `service-account-openbank-services` — the identity nearly every
+    backend authenticates as — carries ROLE_OPERATOR, so a rego rule granting a write on
+    HUMAN + that role admits ANY backend service to ANY write in that domain. rest.rego blocks
+    that only for reasons someone REGISTERED, and registration depends on the rule being
+    findable by name. 18 rules did not follow the convention, which is why this discovery half
+    exists — and why a silent failure here is invisible by construction: the register just
+    stays short, and a short register reads exactly like a closed gap.
+    """
+    import tempfile
+
+    fails: list[str] = []
+    ROLE = 'input.principal.roles[_] == "ROLE_OPERATOR"'
+    PIN = 'input.principal.id == "service-account-openbank-services"'
+
+    def case(label: str, reason: str, body: str, want: str) -> None:
+        got = rule_verdict(reason, body)
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # THE DEFECT: role-gated, unpinned, and not named so anyone could ever find it.
+    case("an unpinned role-gated write with a non-conventional name is a VIOLATION",
+         "ledger-adjust", ROLE, "VIOLATION")
+
+    # The convention makes it findable, which is all this gate asks for.
+    case("the operator-*-write convention is accepted",
+         "operator-ledger-write", ROLE, "conventionally-named")
+
+    # Pinning the caller is the SANCTIONED way to grant an M2M write, so it must not be a
+    # finding — otherwise the gate pushes authors away from the correct fix.
+    case("pinning input.principal.id is accepted",
+         "ledger-adjust", ROLE + "\n  " + PIN, "identity-pinned")
+
+    # Not role-gated at all: identity- or type-scoped rules are a different question.
+    case("a rule with no role gate is out of scope",
+         "ledger-adjust", 'input.principal.type == "HUMAN"', "not-role-gated")
+
+    # Reads carry no write risk, by name and by declaration.
+    case("a -read name is accepted", "ledger-read", ROLE, "read-name")
+
+    if READ_REASONS:
+        case("a declared read reason is accepted", sorted(READ_REASONS)[0], ROLE, "declared")
+    if DECLARED_EXCEPTIONS:
+        case("a declared exception is accepted", sorted(DECLARED_EXCEPTIONS)[0], ROLE, "declared")
+
+    # SOURCE DISCOVERY. Both authoring shapes exist in this repo, and a sweep that reads only
+    # standalone .rego files loses every rule written inside a bundle generator's heredoc —
+    # the estate then looks covered while an entire authoring style is unread.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        (root / "openbank-libs/governance/policies").mkdir(parents=True)
+        (root / "openbank-libs/governance/policies/rest.rego").write_text(
+            'allowed_reasons contains "shared-rule" if {\n  true\n}\n')
+        comp = root / "openbank-infra/gitops/components/x"
+        comp.mkdir(parents=True)
+        (comp / "x_rest_ext.rego").write_text(
+            'allowed_reasons contains "standalone-rule" if {\n  true\n}\n')
+        (comp / "gen-x-opa-bundle.sh").write_text(
+            "X=$(cat << 'REGO'\n"
+            'allowed_reasons contains "heredoc-rule" if {\n  true\n}\n'
+            "REGO\n")
+        found = {r for _p, src in rego_sources(root) for r, _b in rule_bodies(src)}
+        for want in ("shared-rule", "standalone-rule", "heredoc-rule"):
+            if want not in found:
+                fails.append(f"source discovery missed {want!r} — found {sorted(found)}")
+
+    # And the real policy estate must still be readable: a fixture-only self-test cannot tell
+    # that the globs still match the tree they were written for.
+    live = rego_sources()
+    live_rules = sum(1 for _p, src in live for _r in rule_bodies(src))
+    if not live or live_rules == 0:
+        fails.append(f"reading the real repo found {len(live)} source(s) and {live_rules} "
+                     f"rule(s) — the policy layout moved and this gate is scanning nothing")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: operator-write-naming is falsifiable "
+          f"(classifier + both authoring shapes + a live read of {live_rules} rule(s))")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     enforce = "--enforce" in sys.argv
     violations: list[str] = []
     baselined: list[str] = []
@@ -222,18 +335,11 @@ def main() -> int:
         clean = re.sub(r"^\s*#.*$", "", src, flags=re.MULTILINE)
         for reason, body in rule_bodies(clean):
             checked += 1
-            if reason in READ_REASONS or reason in DECLARED_EXCEPTIONS:
-                continue
-            if READ_NAME_RE.search(reason):
-                continue
-            if not ROLE_GATE_RE.search(body):
-                continue  # not role-gated: identity- or type-scoped, out of scope here
-            if IDENTITY_PIN_RE.search(body):
-                continue  # names a specific caller — the sanctioned way to grant an M2M write
-            if reason.startswith("operator-") and reason.endswith("-write"):
-                continue  # covered by rest.rego's shared-M2M write prohibition
-            if reason in BASELINE:
+            verdict = rule_verdict(reason, body)
+            if verdict == "baselined":
                 baselined.append(reason)
+                continue
+            if verdict != "VIOLATION":
                 continue
             violations.append(
                 f"{path.relative_to(REPO)}: rule '{reason}' grants on ROLE_OPERATOR/ROLE_ADMIN "

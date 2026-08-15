@@ -4,6 +4,7 @@
 
 package com.openbank.document.infrastructure.delivery
 
+import com.openbank.document.application.port.out.DeliveryOutcome
 import com.openbank.document.application.port.out.StatementDeliveryPort
 import jakarta.enterprise.context.ApplicationScoped
 import org.jboss.logging.Logger
@@ -26,12 +27,20 @@ import org.jboss.logging.Logger
 class LoggingStatementDeliveryAdapter : StatementDeliveryPort {
     private val log = Logger.getLogger(LoggingStatementDeliveryAdapter::class.java)
 
-    override fun deliver(partyRef: String, documentBytes: ByteArray, contentType: String, subject: String) {
+    override fun deliver(
+        partyRef: String,
+        documentBytes: ByteArray,
+        contentType: String,
+        subject: String,
+    ): DeliveryOutcome {
         log.infof(
             "STUB DELIVERY (ADR-0248 phase-1, NOT actually sent) — subject=\"%s\" contentType=%s bytes=%d",
             subject,
             contentType,
             documentBytes.size,
         )
+        // SKIPPED, never DELIVERED: the caller keys a 400-day idempotency record off this, and a
+        // record written now is what a real channel would later consult and skip.
+        return DeliveryOutcome.SKIPPED
     }
 }

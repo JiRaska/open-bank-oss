@@ -6,6 +6,10 @@ package com.openbank.campaign.infrastructure.consent
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.campaign.application.port.out.ConsentCheckPort
+import com.openbank.libs.contact.ContactSuppressionPort
+import com.openbank.libs.contact.SuppressionEntry
+import com.openbank.libs.contact.SuppressionReason
+import com.openbank.libs.contact.SuppressionScope
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -36,13 +40,34 @@ interface ConsentServiceClient {
     ): Uni<ConsentCheckResponse>
 }
 
+@RegisterRestClient(configKey = "consent-service")
+@RegisterProvider(OidcClientRequestReactiveFilter::class)
+@Path("/api/v1/suppressions")
+@Produces(MediaType.APPLICATION_JSON)
+interface SuppressionServiceClient {
+    @GET
+    @Path("/party/{partyId}")
+    fun listActive(@PathParam("partyId") partyId: UUID): Uni<List<SuppressionResponse>>
+}
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class SuppressionResponse(
+    val scope: SuppressionScope,
+    val value: String? = null,
+    val reason: SuppressionReason,
+    val source: String,
+) {
+    fun toEntry(): SuppressionEntry = SuppressionEntry(scope, value, reason, source)
+}
+
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ConsentCheckResponse(val granted: Boolean = false)
 
 /**
  * ADR-0198/0195: the consent check is a live call to consent-service, never a cached copy — a
- * cached consent is one that survives its own revocation. Fail-closed: an unreachable or denying
- * consent-service means no marketing send.
+ * cached consent is one that survives its own revocation. Fail-closed without inventing a policy
+ * decision: an unavailable consent-service propagates to ContactPolicyGate as GATE_UNAVAILABLE.
+ * The Temporal activity retries it; it neither sends nor permanently labels the party as denied.
  */
 @ApplicationScoped
 class LiveConsentCheckAdapter(
@@ -52,6 +77,17 @@ class LiveConsentCheckAdapter(
 ) : ConsentCheckPort {
 
     override suspend fun hasActiveConsent(partyId: UUID, scope: String): Boolean =
-        runCatching { client.hasActiveConsent(partyId, grantee, scope).awaitSuspending().granted }
-            .getOrDefault(false)
+        client.hasActiveConsent(partyId, grantee, scope).awaitSuspending().granted
+}
+
+/**
+ * ADR-0219 D3: the contact gate reads the platform do-not-contact list owned by consent-service.
+ * Failures are deliberately not converted to an empty list:
+ * [com.openbank.libs.contact.ContactPolicyGate] catches the exception and fails closed with
+ * GATE_UNAVAILABLE. An outage must never look like "this party has no suppressions".
+ */
+@ApplicationScoped
+class LiveSuppressionAdapter(@RestClient private val client: SuppressionServiceClient) : ContactSuppressionPort {
+    override suspend fun activeSuppressions(partyId: UUID): List<SuppressionEntry> =
+        client.listActive(partyId).awaitSuspending().map(SuppressionResponse::toEntry)
 }

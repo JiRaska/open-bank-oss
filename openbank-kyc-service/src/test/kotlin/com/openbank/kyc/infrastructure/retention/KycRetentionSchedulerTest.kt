@@ -5,10 +5,18 @@
 package com.openbank.kyc.infrastructure.retention
 
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessMetrics
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
+import io.mockk.every
 import io.mockk.mockk
+import io.quarkus.runtime.StartupEvent
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -56,12 +64,64 @@ class KycRetentionSchedulerTest {
         coVerify(exactly = 1) { kycCaseRepository.deleteErasedCasesOlderThan(any()) }
     }
 
-    private fun scheduler(retentionYears: Long = 5, dryRun: Boolean = false, enabled: Boolean = true) =
-        KycRetentionScheduler(
-            kycCaseRepository = kycCaseRepository,
-            clock = fixedClock,
-            retentionYears = retentionYears,
-            dryRun = dryRun,
-            enabled = enabled,
+    @Test
+    fun `records liveness only after the retention delete completes`(): Unit = runBlocking {
+        val registry = SimpleMeterRegistry()
+        coEvery { kycCaseRepository.deleteErasedCasesOlderThan(any()) } returns 0L
+        val scheduler = scheduler(domainMetrics = metricsOver(registry))
+
+        scheduler.registerLiveness(StartupEvent())
+        assertThat(successRecordedOf(registry)).isEqualTo(0.0)
+
+        scheduler.enforceRetention()
+
+        assertThat(successRecordedOf(registry)).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `dry-run and disabled schedules do not record liveness success`(): Unit = runBlocking {
+        val registry = SimpleMeterRegistry()
+        val metrics = metricsOver(registry)
+
+        val dryRunScheduler = scheduler(dryRun = true, domainMetrics = metrics)
+        dryRunScheduler.registerLiveness(StartupEvent())
+        dryRunScheduler.enforceRetention()
+        assertThat(successRecordedOf(registry)).isEqualTo(0.0)
+
+        val disabledRegistry = SimpleMeterRegistry()
+        val disabledScheduler = scheduler(
+            enabled = false,
+            domainMetrics = metricsOver(disabledRegistry),
         )
+        disabledScheduler.registerLiveness(StartupEvent())
+        disabledScheduler.enforceRetention()
+        assertThat(successRecordedOf(disabledRegistry)).isEqualTo(0.0)
+    }
+
+    private fun metricsOver(registry: MeterRegistry): DomainMetrics {
+        val instance = mockk<Instance<MeterRegistry>>()
+        every { instance.isResolvable } returns true
+        every { instance.get() } returns registry
+        return DomainMetrics().apply { registryInstance = instance }
+    }
+
+    private fun successRecordedOf(registry: MeterRegistry): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "kyc-retention")
+        .gauge()
+        ?.value()
+
+    private fun scheduler(
+        retentionYears: Long = 5,
+        dryRun: Boolean = false,
+        enabled: Boolean = true,
+        domainMetrics: DomainMetrics = mockk(relaxed = true),
+    ): KycRetentionScheduler = KycRetentionScheduler(
+        kycCaseRepository = kycCaseRepository,
+        clock = fixedClock,
+        retentionYears = retentionYears,
+        dryRun = dryRun,
+        enabled = enabled,
+        domainMetrics = domainMetrics,
+    )
 }

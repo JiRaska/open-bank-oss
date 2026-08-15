@@ -49,6 +49,10 @@ const SERVICE_MAP: Record<string, { container: string; port: number }> = {
   'sepa-instant':           { container: 'openbank-sepa-instant',           port: 8127 },
   'document-service':       { container: 'openbank-document-service',       port: 8143 },
   'engagement-service':     { container: 'openbank-engagement-service',     port: 8153 },
+  // ADR-0097: the regulatory console reads the implemented FINREP/COREP templates
+  // through this same operator-token BFF path. Without this entry, a healthy
+  // finrep-service is invisible to the browser and the page can only show mock data.
+  'finrep-service':         { container: 'openbank-finrep-service',         port: 8140 },
   'vop-service':            { container: 'openbank-vop-service',            port: 8149 },
 }
 
@@ -86,6 +90,9 @@ async function resolveInCluster(svcKey: string): Promise<ResolvedService | null>
 }
 
 async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
+  if (svcKey === 'product-catalog' && process.env.CATALOG_STANDALONE_SIDECAR === 'true') {
+    return { url: 'http://127.0.0.1:8104', scaledToZero: false }
+  }
   if (inCluster()) {
     // Only proxy to services the cluster actually exposes; an undeployed service
     // resolves to null → 404 rather than a misleading hang.
@@ -103,7 +110,7 @@ async function serviceBaseUrl(svcKey: string): Promise<ResolvedService | null> {
 
 const FORWARD_HEADERS = [
   'content-type', 'accept', 'authorization',
-  'idempotency-key', 'x-request-id', 'x-correlation-id',
+  'idempotency-key', 'if-match', 'x-request-id', 'x-correlation-id',
   // ADR-0155/ADR-0176: the maker's four-eyes retry carries this header once a checker has
   // approved (AuthorizeInterceptor). Without forwarding it, every retry looks identical to the
   // original request and gets 202'd again forever.
@@ -193,6 +200,8 @@ async function proxy(
     const responseHeaders = new Headers()
     const ct = upstream.headers.get('content-type')
     if (ct) responseHeaders.set('content-type', ct)
+    const etag = upstream.headers.get('etag')
+    if (etag) responseHeaders.set('etag', etag)
     responseHeaders.set('cache-control', 'no-store')
 
     const data = await upstream.arrayBuffer()

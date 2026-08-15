@@ -114,14 +114,99 @@ def find_mismatches(changed: list[str], packages: list[str]) -> list[tuple[str, 
     return findings
 
 
+def self_test() -> int:
+    """Falsify the commit classifier and the release-scope comparison.
+
+    release-please needs BOTH axes to cut a release: a releasing TYPE and a touched path
+    inside the package's release subtree. This gate catches the combination that produces a
+    version bump for an artifact that did not change — a feat/fix PR touching only src/test,
+    docs or gitops under a package directory.
+
+    Both halves classify strings, and both have a lenient direction that reports clean: a
+    type the regex fails to parse is "not releasing", and a package prefix that matches too
+    eagerly makes every diff look release-worthy.
+    """
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # --- the classifier ------------------------------------------------------------------
+    for title, want in (
+        ("feat(ledger): add x", ("feat", True)),
+        ("fix(ledger): repair x", ("fix", True)),
+        ("perf(ledger): speed x", ("perf", True)),
+        ("security(ledger): patch x", ("security", True)),
+        # Hidden types do not release at any path — that is the lever when a PR changes no
+        # shipped code.
+        ("docs(ledger): explain x", ("docs", False)),
+        ("chore(ledger): tidy x", ("chore", False)),
+        ("ci(ledger): wire x", ("ci", False)),
+        ("refactor(ledger): move x", ("refactor", False)),
+        # A breaking marker releases a MAJOR even on a hidden type — the documented lever.
+        ("docs(ledger)!: drop x", ("docs", True)),
+        ("chore!: drop x", ("chore", True)),
+        # No scope at all is still a conventional commit.
+        ("feat: add x", ("feat", True)),
+    ):
+        case(f"classify({title!r})", classify(title, False), want)
+
+    # A BREAKING CHANGE footer releases a major even with no `!` in the subject — missing this
+    # would classify a real breaking change as non-releasing, the lenient direction.
+    case("a BREAKING CHANGE footer makes a hidden type releasing",
+         classify("docs(ledger): drop x", True), ("docs", True))
+
+    # A non-conventional subject is not classifiable. It must yield None rather than a guess:
+    # inventing a type here would either force or suppress a release on a subject nobody
+    # parsed.
+    for junk in ("no colon here", "Feat(ledger): capitalised", "123(ledger): numeric", ""):
+        case(f"classify({junk!r}) is unparseable", classify(junk, False), (None, False))
+
+    # --- the scope comparison -------------------------------------------------------------
+    pkgs = ["openbank-ledger-service", "openbank-admin-ui"]
+
+    # THE DEFECT: a package touched only outside its release subtree.
+    case("test-only changes under a package are a mismatch",
+         find_mismatches(["openbank-ledger-service/src/test/kotlin/T.kt"], pkgs),
+         [("openbank-ledger-service", ["openbank-ledger-service/src/test/kotlin/T.kt"])])
+    # A real source change is release-worthy — nothing to flag.
+    case("a src/main change is not a mismatch",
+         find_mismatches(["openbank-ledger-service/src/main/kotlin/A.kt"], pkgs), [])
+    # MIXED: one release-worthy file is enough to justify the bump.
+    case("a mixed diff with one src/main file is not a mismatch",
+         find_mismatches(["openbank-ledger-service/src/test/kotlin/T.kt",
+                          "openbank-ledger-service/src/main/kotlin/A.kt"], pkgs), [])
+    # A package not touched at all must not appear.
+    case("an untouched package is not reported", find_mismatches(["docs/adr/x.md"], pkgs), [])
+    # PREFIX PRECISION: a sibling directory that merely starts with the package name is a
+    # different package. Matching it would attribute someone else's diff to this one.
+    case("a same-prefix sibling directory is not this package",
+         find_mismatches(["openbank-ledger-service-extras/src/test/T.kt"], pkgs), [])
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: release-scope-mismatch is falsifiable (21 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--title", required=True, help="PR title (the default squash-commit subject)")
+    ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--title", required=False, help="PR title (the default squash-commit subject)")
     ap.add_argument("--body", default="", help="PR body, scanned for a BREAKING CHANGE: footer")
     ap.add_argument("--base", default="origin/main", help="PR base ref/sha (3-dot diff)")
     ap.add_argument("--changed-files", help="file with a newline-separated changed-file list (skips git)")
     ap.add_argument("--enforce", action="store_true")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
+    if not args.title:
+        ap.error("--title is required")
 
     ctype, triggering = classify(args.title, "BREAKING CHANGE:" in args.body)
     if not triggering:

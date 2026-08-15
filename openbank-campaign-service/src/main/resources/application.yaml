@@ -75,6 +75,7 @@ openbank:
     namespace: ${OPENBANK_TEMPORAL_NAMESPACE:openbank}
     task-queue: ${OPENBANK_TEMPORAL_TASK_QUEUE:openbank-campaign}
   campaign:
+    decision-task-queue: ${OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE:openbank-campaign-decision}
     worker:
       enabled: ${CAMPAIGN_WORKER_ENABLED:true}
     # ADR-0200 D6: suppression defaults. Evaluated before consent, per party per window.
@@ -82,7 +83,6 @@ openbank:
     quiet-hours-start: ${CAMPAIGN_QUIET_HOURS_START:21}
     quiet-hours-end: ${CAMPAIGN_QUIET_HOURS_END:8}
     consent-grantee: party-service:marketing-comms
-    marketing-scope: MARKETING_COMMS_EMAIL
 
 consent-service:
   url: http://localhost:8106
@@ -100,12 +100,31 @@ mp:
         bootstrap:
           servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     outgoing:
+      campaign-banner-placements-out:
+        connector: smallrye-kafka
+        topic: openbank.campaign.banner.placements
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       notification-requests-out:
         connector: smallrye-kafka
         topic: openbank.notification.requests
         value:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
+      # Attributable in-app attention events emitted by engagement-service.  This is aggregate-only
+      # reporting: lag can make a metric temporarily unavailable, but can never affect delivery or
+      # enrolment.  Start at latest so enabling the projection cannot reprocess historic, pre-
+      # attribution app behaviour into a campaign funnel.
+      engagement-events-in:
+        connector: smallrye-kafka
+        topic: openbank.engagement.events
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        group:
+          id: openbank-campaign-service-engagement-events
+        auto:
+          offset:
+            reset: latest
       # ADR-0239 D3: delivery outcomes for this service's own send requests, correlated by the
       # send-log row id. Its own consumer group, not the service-wide default one shared with
       # consent-events-in: two channels in one group makes both subscriptions one member set, so a

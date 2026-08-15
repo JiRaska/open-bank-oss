@@ -14,7 +14,11 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        border: 'hsl(var(--border))',
+        // --border is a direct-use CSS colour because the application also
+        // consumes it as `border-color: var(--border)` in shared primitives.
+        // Wrapping a hex token in hsl() makes Tailwind's border-border utility
+        // invalid, so this must follow the same direct-token contract as accent.
+        border: 'var(--border)',
         input: 'hsl(var(--input))',
         ring: 'hsl(var(--ring))',
         background: 'hsl(var(--background))',

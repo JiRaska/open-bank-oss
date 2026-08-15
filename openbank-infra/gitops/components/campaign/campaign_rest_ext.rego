@@ -56,3 +56,13 @@ allowed_reasons contains "campaign-auditor-read" if {
 	"ROLE_AUDITOR" in input.principal.roles
 	input.action in {"campaign.read", "campaign.list"}
 }
+
+# The customer edge may validate only the opaque interaction reference that it received back from
+# notification-service. It gets a yes/no response scoped to the JWT-derived party id; campaign
+# details never leave this boundary. This is deliberately a different action from campaign.read:
+# granting the edge the latter would expose the entire operator campaign plane.
+allowed_reasons contains "edge-campaign-interaction-validation" if {
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-edge"
+    input.action == "campaign.interaction.validate"
+}

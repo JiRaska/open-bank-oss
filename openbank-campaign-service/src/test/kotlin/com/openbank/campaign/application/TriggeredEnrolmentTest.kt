@@ -8,11 +8,13 @@ import com.openbank.campaign.application.port.out.CampaignEnrolmentCount
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.TriggeredEnrolment
 import com.openbank.campaign.application.usecase.TriggeredEnrolmentService
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
@@ -56,10 +58,14 @@ class TriggeredEnrolmentTest {
     )
 
     private class Journeys : JourneySignaller {
-        val started = mutableListOf<UUID>()
+        val started = mutableListOf<Pair<UUID, JourneyType>>()
         override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
-        override fun startJourney(campaignId: UUID, partyId: UUID) {
-            started += partyId
+        override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalCampaignClosed(campaignId: UUID, partyId: UUID) = Unit
+        override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
+        override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) {
+            started += partyId to type
         }
     }
 
@@ -108,7 +114,7 @@ class TriggeredEnrolmentTest {
         val outcome = service(campaign(), enrolments, journeys).enrol(campaignId, inSegment)
 
         assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
-        assertThat(journeys.started).containsExactly(inSegment)
+        assertThat(journeys.started).containsExactly(inSegment to JourneyType.LINEAR)
         assertThat(enrolments.saved.map { it.partyId }).containsExactly(inSegment)
     }
 
@@ -124,6 +130,25 @@ class TriggeredEnrolmentTest {
             .describedAs("the trigger decides when, the segment decides who — this is the audience boundary")
             .isEmpty()
         assertThat(enrolments.saved).isEmpty()
+    }
+
+    @Test
+    fun `a reviewed decision graph enters the isolated Temporal workflow lane`(): Unit = runBlocking {
+        val enrolments = Enrolments()
+        val journeys = Journeys()
+        val graph = campaign().copy(
+            steps = listOf(
+                CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(2, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(3, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+            ),
+            decisions = listOf(CampaignDecision(1, 86_400, 2, 3)),
+        )
+
+        val outcome = service(graph, enrolments, journeys).enrol(campaignId, inSegment)
+
+        assertThat(outcome).isEqualTo(TriggeredEnrolment.ENROLLED)
+        assertThat(journeys.started).containsExactly(inSegment to JourneyType.DECISION_GRAPH)
     }
 
     @Test

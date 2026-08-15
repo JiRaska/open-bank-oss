@@ -15,8 +15,11 @@ import { JourneyCanvas } from '@/components/campaigns/JourneyCanvas'
  */
 
 const STEPS = [
-  { order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0 },
-  { order: 2, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 172800 },
+  { order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'PUSH' as const },
+  {
+    order: 2, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 172800, channel: 'BANNER' as const,
+    condition: 'IF_PREVIOUS_CONFIRMED' as const, conditionSourceOrder: 0,
+  },
 ]
 
 const FUNNEL = [
@@ -30,6 +33,7 @@ const FUNNEL = [
       { reason: 'SUPPRESSED_QUIET_HOURS', count: 90 },
     ],
   },
+  { stepOrder: 2, reached: 600, delivered: 420, failed: 0, skipped: 180, suppressed: [] },
 ]
 
 function renderFlow(funnel = FUNNEL, audience: number | null = 1000) {
@@ -105,5 +109,43 @@ describe('journey canvas', () => {
     renderFlow()
 
     expect(screen.getByText(/people in segment/)).toBeTruthy()
+  })
+
+  it('shows the reviewed decision and separates its other path from delivery loss', () => {
+    const { container } = renderFlow()
+
+    expect(screen.getByText(/step 1 delivered/)).toBeTruthy()
+    expect(screen.getByText(/180 took another path/)).toBeTruthy()
+    expect(container.querySelector('[data-branch="IF_PREVIOUS_CONFIRMED"]')).toBeTruthy()
+    expect(screen.getByText(/STEP 1 · push/)).toBeTruthy()
+    expect(screen.getByText(/STEP 2 · banner/)).toBeTruthy()
+  })
+
+  it('draws declared graph edges rather than inventing a linear path, and keeps missing evidence unknown', () => {
+    const graphSteps = [
+      { order: 1, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'PUSH' as const },
+      { order: 2, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'BANNER' as const },
+      { order: 3, template: 'MARKETING_PRODUCT_OFFER', delaySeconds: 0, channel: 'BANNER' as const },
+    ]
+    const { container } = render(
+      React.createElement(
+        LanguageProvider,
+        null,
+        React.createElement(JourneyCanvas, {
+          steps: graphSteps,
+          funnel: [],
+          audienceSize: null,
+          decisions: [{ sourceStepOrder: 1, evaluationDelaySeconds: 86_400, confirmedStepOrder: 2, notConfirmedStepOrder: 3 }],
+          decisionPaths: [],
+          decisionPathsKnown: false,
+        }),
+      ),
+    )
+
+    expect(container.querySelector('[data-graph-edge="1-confirmed"]')).toBeTruthy()
+    expect(container.querySelector('[data-graph-edge="1-not-confirmed"]')).toBeTruthy()
+    expect(container.querySelector('[data-linear-edge]')).toBeNull()
+    expect(screen.getByText(/Branch outcomes are unavailable right now/)).toBeTruthy()
+    expect(screen.queryByText(/0× confirmed/)).toBeNull()
   })
 })

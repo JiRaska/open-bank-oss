@@ -47,7 +47,7 @@ class RegisteredPromptTemplatesTest {
         assertThat(RegisteredPromptTemplates.uiAssistantPrompt(pageContext))
             .isEqualTo(
                 RegisteredPromptTemplates.normalizeTrailingWhitespace(
-                    registeredPrompt("ui-assistant", "system.v2")
+                    registeredPrompt("ui-assistant", "system.v3")
                         .replace("{{page_context}}", pageContext),
                 ),
             )
@@ -58,7 +58,7 @@ class RegisteredPromptTemplatesTest {
         assertThat(RegisteredPromptTemplates.uiAssistantPrompt("   "))
             .isEqualTo(
                 RegisteredPromptTemplates.normalizeTrailingWhitespace(
-                    registeredPrompt("ui-assistant", "system.v2")
+                    registeredPrompt("ui-assistant", "system.v3")
                         .replace(" Operator is viewing: {{page_context}}.", ""),
                 ),
             )

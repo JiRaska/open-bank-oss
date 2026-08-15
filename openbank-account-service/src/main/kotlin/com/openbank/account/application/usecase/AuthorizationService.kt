@@ -15,7 +15,9 @@ import com.openbank.account.application.port.out.AccountRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.model.AccountAuthorization
 import com.openbank.account.domain.model.AuthorizationRole
+import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -30,8 +32,11 @@ class AuthorizationService(
     private val accountRepository: AccountRepository,
     private val authorizationRepository: AccountAuthorizationRepository,
     private val delegationProjectionRepository: DelegationProjectionRepository,
+    private val metrics: DomainMetrics,
     private val clock: Clock,
 ) : AuthorizationUseCase {
+
+    private val log = Logger.getLogger(AuthorizationService::class.java)
 
     override suspend fun grantAuthorization(command: GrantAuthorizationCommand): AccountAuthorization {
         accountRepository.findById(command.accountId)
@@ -125,9 +130,7 @@ class AuthorizationService(
         val role = AuthorizationRole.PAYMENT_ONLY
         val legacy = authorizationRepository.findActiveByAccountAndParty(accountId, partyId)
             .filter { it.role == role || it.role == AuthorizationRole.FULL_ACCESS }
-        if (legacy.any { withinLegacyTransactionLimit(it, amount) }) {
-            return DelegatedPaymentDecision(DelegatedPaymentOutcome.LEGACY_AUTHORIZATION)
-        }
+        val legacyPermits = legacy.any { withinLegacyTransactionLimit(it, amount) }
 
         val now = OffsetDateTime.now(clock)
         val candidates = delegationProjectionRepository.findActiveByAccountAndParty(accountId, partyId)
@@ -135,6 +138,18 @@ class AuthorizationService(
         val permitting = candidates.firstOrNull { grant ->
             amount == null || grant.withinPerTransactionLimit(amount.amount, amount.currency.code)
         }
+
+        recordStoreDisagreement(legacyPermits, permitting != null)
+
+        // Order preserved deliberately: the legacy store still answers first, exactly as before.
+        // The projection is now evaluated BEFORE this return rather than after it — that is the
+        // whole change, and it is why a disagreement can be seen at all. The verdict is not
+        // affected: an observation that altered the decision would be a behaviour change smuggled
+        // in as telemetry.
+        if (legacyPermits) {
+            return DelegatedPaymentDecision(DelegatedPaymentOutcome.LEGACY_AUTHORIZATION)
+        }
+
         return when {
             permitting != null -> DelegatedPaymentDecision(
                 outcome = DelegatedPaymentOutcome.DELEGATED,
@@ -147,6 +162,42 @@ class AuthorizationService(
                 DelegatedPaymentDecision(DelegatedPaymentOutcome.LIMIT_EXCEEDED)
             else -> DelegatedPaymentDecision(DelegatedPaymentOutcome.NO_GRANT)
         }
+    }
+
+    /**
+     * The dual-run's actual risk, made visible (ADR-0232 D1, issue #2993).
+     *
+     * `account_authorizations` and the delegation projection are two stores answering one
+     * question, and nothing writes both: `AuthorizationResource.grant`/`.revoke` touch only the
+     * former, `DelegationEventConsumer` only the latter. So a revocation in either store leaves
+     * the other one granting — and because this method ORs them, the surviving arm carries the
+     * debit and no signal anywhere disagrees. That asymmetry is *deliberate* today (the KDoc on
+     * [hasDelegatedAccess] chose additive semantics), which is exactly why it needs measuring
+     * rather than fixing on a hunch: an "accepted" divergence with no instrument is
+     * indistinguishable from an unnoticed one.
+     *
+     * Recorded only when the two stores genuinely differ, and only for a non-owner — an owner
+     * never reaches here, so the counter counts delegation decisions and not traffic. It is
+     * emitted at the decision, not by a nightly diff, so it reports the state the guard acted on
+     * rather than the state some later snapshot found.
+     *
+     * A zero on this counter means one of two very different things, and the alert must not
+     * confuse them: no divergence, or no delegated payments at all. Both `account_authorizations`
+     * and `account_delegation_projection` are empty in the sandbox today, so a zero currently
+     * measures traffic. Pair it with the decision count before reading it as an invariant.
+     */
+    private fun recordStoreDisagreement(legacyPermits: Boolean, delegationPermits: Boolean) {
+        if (legacyPermits == delegationPermits) return
+        val direction = if (legacyPermits) "legacy_only" else "delegation_only"
+        metrics.authorizationStoreDisagreement("account_delegated_payment", direction)
+        log.warnf(
+            "delegation store disagreement on a payment decision (%s): " +
+                "account_authorizations permits=%s, delegation projection permits=%s — " +
+                "one store has a grant the other does not (ADR-0232 D1 dual-run, #2993)",
+            direction,
+            legacyPermits,
+            delegationPermits,
+        )
     }
 
     /**

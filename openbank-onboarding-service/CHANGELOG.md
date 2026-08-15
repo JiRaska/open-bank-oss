@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.0...onboarding-service-v0.7.1) (2026-08-14)
+
+
+### Bug Fixes
+
+* **sca:** DEVICE_ENROLLED carries no eventType in the payload body, so onboarding has never projected one ([#4692](https://github.com/JiRaska/open-bank-oss/issues/4692)) ([e36e5a5](https://github.com/JiRaska/open-bank-oss/commit/e36e5a505ad1ab3352ab4b40ed53e5ceb5c22725))
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.6.0...onboarding-service-v0.7.0) (2026-08-14)
+
+
+### Features
+
+* **scheduler:** register workflow liveness on four retention and cleanup jobs (ADR-0237) ([#4739](https://github.com/JiRaska/open-bank-oss/issues/4739)) ([c2a2fa4](https://github.com/JiRaska/open-bank-oss/commit/c2a2fa4b788a172ef85c8babb439cecd10fbfe23)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.5.9...onboarding-service-v0.6.0) (2026-08-08)
 
 

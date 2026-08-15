@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.19.0...card-issuance-service-v0.20.0) (2026-08-14)
+
+
+### Features
+
+* **scheduler:** register workflow liveness on four retention and cleanup jobs (ADR-0237) ([#4739](https://github.com/JiRaska/open-bank-oss/issues/4739)) ([c2a2fa4](https://github.com/JiRaska/open-bank-oss/commit/c2a2fa4b788a172ef85c8babb439cecd10fbfe23)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.18.1...card-issuance-service-v0.19.0) (2026-08-13)
+
+
+### Features
+
+* **cards:** additional cardholder — a card issued to someone else, with its own limits ([#4194](https://github.com/JiRaska/open-bank-oss/issues/4194)) ([25bd631](https://github.com/JiRaska/open-bank-oss/commit/25bd63177daa65dae31a2958cae80cdab2def3b9))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.18.0...card-issuance-service-v0.18.1) (2026-08-09)
 
 

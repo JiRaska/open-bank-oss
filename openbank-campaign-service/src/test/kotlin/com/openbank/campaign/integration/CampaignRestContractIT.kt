@@ -5,6 +5,7 @@
 package com.openbank.campaign.integration
 
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
+import io.agroal.api.AgroalDataSource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -14,8 +15,13 @@ import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.containsInAnyOrder
+import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Test
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /**
@@ -37,7 +43,11 @@ import java.util.UUID
 @QuarkusTestResource(CampaignRestContractIT.NoBrokerNoWorkerResource::class)
 @QuarkusTestResource(CampaignPostgresRedisTestResource::class)
 @TestSecurity(user = "maker@openbank.test", roles = ["ROLE_OPERATOR"])
+@Suppress("LargeClass") // one HTTP contract class intentionally exercises the served campaign resource
 class CampaignRestContractIT {
+
+    @Inject
+    lateinit var dataSource: AgroalDataSource
 
     /**
      * No Kafka and no Temporal worker. Neither is on the path of these endpoints, and starting them
@@ -56,8 +66,8 @@ class CampaignRestContractIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private fun draftBody(name: String) = """
-        {"name":"$name","goal":"prove the HTTP contract","segmentName":"actives","segmentVersion":1,
+    private fun draftBody(name: String, segmentName: String = "actives") = """
+        {"name":"$name","goal":"prove the HTTP contract","segmentName":"$segmentName","segmentVersion":1,
          "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
     """.trimIndent()
@@ -74,6 +84,311 @@ class CampaignRestContractIT {
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
+
+    private fun insertLegacySegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO segments (id, name, version, rules_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setString(2, name)
+                statement.setInt(3, 1)
+                statement.setString(4, """[{"type":"PartyStatusIs","status":"ACTIVE"}]""")
+                statement.setObject(5, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun deleteSegment(name: String) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("DELETE FROM segments WHERE name = ? AND version = 1").use { statement ->
+                statement.setString(1, name)
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    fun `create reports a missing segment as a configuration conflict`() {
+        val missingSegment = "missing-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody("missing-segment-${UUID.randomUUID()}", missingSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $missingSegment@1 not found"))
+        }
+    }
+
+    @Test
+    fun `maker can revise an unsubmitted draft through the HTTP contract`() {
+        val id = createDraft()
+        val revisedName = "revised-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(draftBody(revisedName))
+        } When {
+            put("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+            body("state", equalTo("DRAFT"))
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(revisedName))
+        }
+    }
+
+    @Test
+    fun `operator can reuse a reviewed definition as an independent draft through the HTTP contract`() {
+        val sourceName = "source-${UUID.randomUUID()}"
+        val sourceId = createDraft(sourceName)
+        submit(sourceId)
+
+        val copiedId = When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(201)
+            body("name", equalTo("Copy of $sourceName"))
+            body("state", equalTo("DRAFT"))
+            // TestSecurity supplies the operator role but no JWT subject; the resource deliberately
+            // falls back to `unknown` rather than trusting a browser-provided maker field.
+            body("createdBy", equalTo("unknown"))
+            body("approvedBy", nullValue())
+        } Extract {
+            path<String>("id")
+        }
+
+        assertThat(copiedId).isNotEqualTo(sourceId)
+        When {
+            get("/api/v1/campaigns/$sourceId")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(sourceName))
+            body("state", equalTo("PENDING_APPROVAL"))
+        }
+    }
+
+    @Test
+    fun `reuse reports a stale source definition as conflict rather than source not found`() {
+        val staleSegment = "retired-${UUID.randomUUID()}"
+        insertLegacySegment(staleSegment)
+        val sourceId = Given {
+            contentType("application/json")
+            body(draftBody("stale-${UUID.randomUUID()}", staleSegment))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        deleteSegment(staleSegment)
+
+        When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $staleSegment@1 not found"))
+        }
+    }
+
+    private fun insertEnrolment(
+        campaignId: UUID,
+        state: String,
+        cohort: String = "TREATMENT",
+        partyId: UUID = UUID.randomUUID(),
+    ): UUID {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO enrolments (id, campaign_id, party_id, state, current_step, started_at, experiment_cohort)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setObject(3, partyId)
+                statement.setString(4, state)
+                statement.setInt(5, 1)
+                statement.setObject(6, OffsetDateTime.now())
+                statement.setString(7, cohort)
+                statement.executeUpdate()
+            }
+        }
+        return partyId
+    }
+
+    private fun insertConversion(campaignId: UUID, partyId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO send_log (id, campaign_id, party_id, step_order, outcome, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setObject(3, partyId)
+                statement.setInt(4, 1)
+                statement.setString(5, "CONVERTED")
+                statement.setObject(6, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    private fun insertPushSend(campaignId: UUID, partyId: UUID): UUID {
+        val interactionRef = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO send_log (id, campaign_id, party_id, step_order, outcome, occurred_at, delivery_status, channel)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, interactionRef)
+                statement.setObject(2, campaignId)
+                statement.setObject(3, partyId)
+                statement.setInt(4, 0)
+                statement.setString(5, "SENT")
+                statement.setObject(6, OffsetDateTime.now())
+                statement.setString(7, "PENDING")
+                statement.setString(8, "PUSH")
+                statement.executeUpdate()
+            }
+        }
+        return interactionRef
+    }
+
+    /**
+     * A campaign row written straight through JDBC so a send-log / engagement row has something to
+     * hang off. It must still be a campaign the aggregate can hydrate: `steps_json` of `[]` violates
+     * `require(steps.isNotEmpty())`, and every read that loads the whole table — `GET
+     * /api/v1/campaigns/planning` — then answers 400 for the entire portfolio because of one row the
+     * HTTP API could never have created (#4825).
+     */
+    private fun insertCampaignForSendLog(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaigns (
+                    id, name, goal, segment_name, segment_version, steps_json, holdout_percent,
+                    state, created_by, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, campaignId)
+                statement.setString(2, "interaction validation fixture")
+                statement.setString(3, "prove private ownership validation")
+                statement.setString(4, "actives")
+                statement.setInt(5, 1)
+                statement.setString(6, FIXTURE_STEPS_JSON)
+                statement.setInt(7, 0)
+                statement.setString(8, "ACTIVE")
+                statement.setString(9, "fixture")
+                statement.setObject(10, OffsetDateTime.now())
+                statement.setObject(11, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    /**
+     * Real Flyway-backed projection fixture.  This deliberately writes the closed `STORIES` value
+     * through PostgreSQL rather than only mocking the Kafka consumer: a stale CHECK constraint
+     * otherwise keeps unit tests green while every live story event retries at the consumer.
+     */
+    private fun insertStoryEngagement(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_engagement_event
+                    (event_id, campaign_id, step_order, channel, surface, type, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setInt(3, 0)
+                statement.setString(4, "BANNER")
+                statement.setString(5, "STORIES")
+                statement.setString(6, "IMPRESSION")
+                statement.setObject(7, OffsetDateTime.now())
+                statement.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+    fun `interaction validation resolves only server-owned context for the owning party`() {
+        // The validation route intentionally needs no campaign lifecycle read. Seed the minimal
+        // durable parent directly, so this test runs entirely under the edge's ROLE_API identity
+        // rather than borrowing an operator token to create a draft.
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        val owner = UUID.randomUUID()
+        val interactionRef = insertPushSend(campaignId, owner)
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef")
+        } Then {
+            statusCode(204)
+        }
+
+        Given {
+            header("X-Customer-Party-Id", owner.toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef/attribution")
+        } Then {
+            statusCode(200)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("stepOrder", equalTo(0))
+            body("channel", equalTo("PUSH"))
+            body("partyId", nullValue())
+        }
+
+        Given {
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+        } When {
+            get("/api/v1/campaigns/interactions/$interactionRef")
+        } Then {
+            statusCode(404)
+        }
+    }
+
+    @Test
+    fun `campaign engagement reports attributable story attention through the HTTP contract`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        insertStoryEngagement(campaignId)
+
+        When {
+            get("/api/v1/campaigns/$campaignId/engagement")
+        } Then {
+            statusCode(200)
+            body("[0].stepOrder", equalTo(0))
+            body("[0].channel", equalTo("BANNER"))
+            body("[0].surface", equalTo("STORIES"))
+            body("[0].type", equalTo("IMPRESSION"))
+            body("[0].count", equalTo(1))
+        }
+    }
 
     /**
      * The regression this file exists for, and the reason a manual check was not enough.
@@ -221,6 +536,146 @@ class CampaignRestContractIT {
         }
     }
 
+    @Test
+    fun `two decision paths can name the same explicit source step`() {
+        val body = """
+            {"name":"decision-${UUID.randomUUID()}","goal":"prove an explicit decision source survives HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[
+               {"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":2,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_CONFIRMED","conditionSourceOrder":1},
+               {"order":3,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0,
+                "condition":"IF_PREVIOUS_NOT_CONFIRMED","conditionSourceOrder":1}
+             ]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[1].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+            body("steps[2].conditionSourceOrder", org.hamcrest.Matchers.equalTo(1))
+        }
+    }
+
+    @Test
+    fun `an explicit decision graph survives the campaign HTTP contract`() {
+        val body = """
+            {"name":"graph-${UUID.randomUUID()}","goal":"prove an explicit graph survives HTTP",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[
+               {"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":2,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0},
+               {"order":3,"template":"MARKETING_PRODUCT_OFFER",
+                "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}
+             ],
+             "decisions":[{"sourceStepOrder":1,"evaluationDelaySeconds":60,
+               "confirmedStepOrder":2,"notConfirmedStepOrder":3}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("decisions[0].sourceStepOrder", org.hamcrest.Matchers.equalTo(1))
+            body("decisions[0].evaluationDelaySeconds", org.hamcrest.Matchers.equalTo(60))
+            body("decisions[0].confirmedStepOrder", org.hamcrest.Matchers.equalTo(2))
+            body("decisions[0].notConfirmedStepOrder", org.hamcrest.Matchers.equalTo(3))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("decisions[0].sourceStepOrder", org.hamcrest.Matchers.equalTo(1))
+            body("decisions[0].notConfirmedStepOrder", org.hamcrest.Matchers.equalTo(3))
+        }
+    }
+
+    /**
+     * These terminal reasons are operator-visible contract values, not internal workflow detail.
+     * Drive the real endpoint over rows that can only be produced by live journey control: a test
+     * of the enum alone would pass while REST serialization or the repository mapping rejected it.
+     */
+    @Test
+    fun `journey control terminal reasons survive persistence and the HTTP contract`() {
+        val campaignId = UUID.fromString(createDraft())
+        insertEnrolment(campaignId, "TERMINATED_CAMPAIGN_CLOSED")
+        insertEnrolment(campaignId, "COMPLETED_GOAL_REACHED")
+
+        When {
+            get("/api/v1/campaigns/$campaignId/enrolments")
+        } Then {
+            statusCode(200)
+            body(
+                "state",
+                containsInAnyOrder("TERMINATED_CAMPAIGN_CLOSED", "COMPLETED_GOAL_REACHED"),
+            )
+        }
+    }
+
+    @Test
+    fun `holdout is durable and its experiment compares two independently counted cohorts`() {
+        val body = """
+            {"name":"experiment-${UUID.randomUUID()}","goal":"measure incremental account opening",
+             "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED","holdoutPercent":20,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
+        """.trimIndent()
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("holdoutPercent", org.hamcrest.Matchers.equalTo(20))
+        } Extract {
+            path<String>("id")
+        }
+        val campaignId = UUID.fromString(id)
+        val treatmentParty = insertEnrolment(campaignId, "ACTIVE")
+        insertEnrolment(campaignId, "HOLDOUT", cohort = "HOLDOUT")
+        insertConversion(campaignId, treatmentParty)
+
+        When {
+            get("/api/v1/campaigns/$id/experiment")
+        } Then {
+            statusCode(200)
+            body("treatment.assigned", org.hamcrest.Matchers.equalTo(1))
+            body("treatment.converted", org.hamcrest.Matchers.equalTo(1))
+            body("holdout.assigned", org.hamcrest.Matchers.equalTo(1))
+            body("decision.state", org.hamcrest.Matchers.equalTo("COLLECTING_DATA"))
+            body("decision.minimumAssignedPerCohort", org.hamcrest.Matchers.equalTo(100))
+            body("holdout.converted", org.hamcrest.Matchers.equalTo(0))
+            body("observedLiftPercentagePoints", org.hamcrest.Matchers.equalTo(100.0f))
+        }
+    }
+
     /**
      * A cadence must survive the create-and-read round trip, and be readable back as itself.
      *
@@ -316,6 +771,84 @@ class CampaignRestContractIT {
         }
     }
 
+    @Test
+    fun `planning keeps a submitted recurring campaign visibly unplanned until activation`() {
+        val name = "planned-${UUID.randomUUID()}"
+        val id = Given {
+            contentType("application/json")
+            body(
+                draftBody(name).replace(
+                    "\"steps\":[",
+                    "\"schedule\":{\"cadence\":\"DAILY_MORNING\"},\"steps\":[",
+                ),
+            )
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        submit(id)
+
+        When {
+            get("/api/v1/campaigns/planning")
+        } Then {
+            statusCode(200)
+            body("find { it.campaignId == '$id' }.entry", equalTo("SCHEDULED"))
+            body("find { it.campaignId == '$id' }.cadence", equalTo("DAILY_MORNING"))
+            body("find { it.campaignId == '$id' }.zone", equalTo("Europe/Prague"))
+            // A schedule is created only after four-eyes activation. Rendering a date here would
+            // make an unapproved campaign look operationally live.
+            body("find { it.campaignId == '$id' }.nextScheduledWindowAt", nullValue())
+        }
+    }
+
+    /** Studio reads the exact catalogue the aggregate validates, including authenticated app placement. */
+    @Test
+    fun `the template catalogue serves channels declared variables and in-app surfaces`() {
+        When {
+            get("/api/v1/campaigns/templates")
+        } Then {
+            statusCode(200)
+            body(
+                "template",
+                org.hamcrest.Matchers.hasItems("MARKETING_PRODUCT_OFFER", "MARKETING_PRODUCT_OFFER_BANNER"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.channel",
+                org.hamcrest.Matchers.equalTo("PUSH"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_PUSH' }.variables",
+                org.hamcrest.Matchers.contains("offerTitle"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_BANNER' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("HOME_BANNER"),
+            )
+            body(
+                "find { it.template == 'MARKETING_PRODUCT_OFFER_STORY' }.inAppSurface",
+                org.hamcrest.Matchers.equalTo("STORIES"),
+            )
+        }
+    }
+
+    /** Studio explains the live policy values but never turns them into a person-level delivery promise. */
+    @Test
+    fun `the contact guardrails are served with the active platform values`() {
+        When {
+            get("/api/v1/campaigns/guardrails")
+        } Then {
+            statusCode(200)
+            body("maxSendsPerParty", org.hamcrest.Matchers.equalTo(2))
+            body("sendWindowHours", org.hamcrest.Matchers.equalTo(168))
+            body("quietHoursStart", org.hamcrest.Matchers.equalTo(21))
+            body("quietHoursEnd", org.hamcrest.Matchers.equalTo(8))
+            body("timeZone", org.hamcrest.Matchers.equalTo("Europe/Prague"))
+        }
+    }
+
     /** A trigger key survives the round trip, so a campaign can declare what wakes it. */
     @Test
     fun `a campaign can declare a trigger and reads it back`() {
@@ -367,6 +900,94 @@ class CampaignRestContractIT {
             post("/api/v1/campaigns")
         } Then {
             statusCode(400)
+        }
+    }
+
+    /** Studio reads these labels from the service instead of duplicating an executable event list. */
+    @Test
+    fun `the trigger catalogue is served with its operator-facing meaning`() {
+        When {
+            get("/api/v1/campaigns/triggers")
+        } Then {
+            statusCode(200)
+            body("trigger", org.hamcrest.Matchers.hasItem("ACCOUNT_OPENED"))
+            body(
+                "find { it.trigger == 'ACCOUNT_OPENED' }.humanForm",
+                org.hamcrest.Matchers.equalTo("when an account is opened"),
+            )
+        }
+    }
+
+    /** A/B paths survive HTTP and have a measured endpoint even before either arm has enrolled. */
+    @Test
+    fun `a path experiment keeps both declared arms and exposes its empty measurement`() {
+        val body = """
+            {"name":"ab-${UUID.randomUUID()}","goal":"prove A/B content round trip",
+             "segmentName":"actives","segmentVersion":1,"conversionRule":"ACCOUNT_OPENED",
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER",
+                       "variables":{"offerTitle":"A","offerText":"A copy","ctaText":"Go"},
+                       "variantBVariables":{"offerTitle":"B"},
+                       "variantBTemplate":"MARKETING_PRODUCT_OFFER_PUSH","variantBChannel":"PUSH",
+                       "variantBDelaySeconds":86400,
+                       "delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].variantBVariables.offerTitle", org.hamcrest.Matchers.equalTo("B"))
+            body("steps[0].variantBTemplate", org.hamcrest.Matchers.equalTo("MARKETING_PRODUCT_OFFER_PUSH"))
+            body("steps[0].variantBChannel", org.hamcrest.Matchers.equalTo("PUSH"))
+            body("steps[0].variantBDelaySeconds", org.hamcrest.Matchers.equalTo(86400))
+        }
+        When {
+            get("/api/v1/campaigns/$id/content-experiment")
+        } Then {
+            statusCode(200)
+            body("a.assigned", org.hamcrest.Matchers.equalTo(0))
+            body("b.assigned", org.hamcrest.Matchers.equalTo(0))
+            body("decision.state", org.hamcrest.Matchers.equalTo("COLLECTING_DATA"))
+        }
+    }
+
+    @Test
+    fun `a mobile-first push step keeps its closed app destination over the HTTP contract`() {
+        val body = """
+            {"name":"push-${UUID.randomUUID()}","goal":"savings activation",
+             "segmentName":"actives","segmentVersion":1,
+             "steps":[{"order":1,"template":"MARKETING_PRODUCT_OFFER_PUSH","channel":"PUSH",
+                       "variables":{"offerTitle":"Savings"},"mobileDestination":"SAVINGS","delaySeconds":0}]}
+        """.trimIndent()
+
+        val id = Given {
+            contentType("application/json")
+            body(body)
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$id")
+        } Then {
+            statusCode(200)
+            body("steps[0].channel", org.hamcrest.Matchers.equalTo("PUSH"))
+            body("steps[0].mobileDestination", org.hamcrest.Matchers.equalTo("SAVINGS"))
         }
     }
 
@@ -530,5 +1151,15 @@ class CampaignRestContractIT {
             statusCode(200)
             body("stopCondition", org.hamcrest.Matchers.nullValue())
         }
+    }
+
+    companion object {
+        /**
+         * The same single step [draftBody] posts. A JDBC-written fixture has to be a campaign the
+         * aggregate can hydrate, or it poisons every endpoint that lists the whole table.
+         */
+        private const val FIXTURE_STEPS_JSON =
+            "[{\"order\":1,\"template\":\"MARKETING_PRODUCT_OFFER\",\"channel\":\"EMAIL\"," +
+                "\"variables\":{\"offerTitle\":\"T\",\"offerText\":\"X\",\"ctaText\":\"Go\"},\"delaySeconds\":0}]"
     }
 }

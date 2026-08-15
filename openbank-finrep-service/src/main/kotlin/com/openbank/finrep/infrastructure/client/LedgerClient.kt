@@ -13,8 +13,8 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
-import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
@@ -25,11 +25,8 @@ import java.time.LocalDate
 /**
  * Outbound client for openbank-ledger-service's GL trial balance.
  *
- * The root path is `/api/v1/journals` — the trial balance is served by ledger's `LedgerResource`
- * at `GET /api/v1/journals/trial-balance` (`operationId: getTrialBalance`). It is deliberately
- * NOT `/api/v1/ledger/trial-balance`: ledger has no such path (`/api/v1/ledger/...` only roots
- * `close` and `fx-revaluation`), and the fiscal-year-close variant
- * `/api/v1/ledger/close/trial-balance` is a different, non-interchangeable resource.
+ * FINREP/COREP reads only the statutory MONTH frozen-evidence endpoint. Ledger rejects DRAFT,
+ * missing and legacy HASH_ONLY periods: a report must never silently fall back to a live aggregate.
  *
  * The path is pinned by the consumer-driven pact in
  * [com.openbank.finrep.contract.LedgerTrialBalancePactConsumerTest] (git-pact, ADR-0063), which
@@ -40,19 +37,23 @@ import java.time.LocalDate
  */
 @RegisterRestClient(configKey = "ledger-service")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
-@Path("/api/v1/journals")
+@Path("/api/v1/ledger/periods/MONTH")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 interface LedgerRestClient {
 
     @GET
-    @Path("/trial-balance")
-    fun getTrialBalance(@QueryParam("asOf") asOf: String): Uni<TrialBalanceResponse>
+    @Path("/{asOf}/frozen-trial-balance")
+    fun getTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 }
 
 data class TrialBalanceLineResponse(val code: String, val type: String, val net: BigDecimal)
 
-data class TrialBalanceResponse(val asOf: String, val balanced: Boolean, val lines: List<TrialBalanceLineResponse>)
+data class ClosedPeriodTrialBalanceResponse(
+    val period: String,
+    val balanced: Boolean,
+    val lines: List<TrialBalanceLineResponse>,
+)
 
 @ApplicationScoped
 class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPort {

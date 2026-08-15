@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.2...account-service-v0.20.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **account:** make the ADR-0232 dual-run's store disagreement observable ([#4634](https://github.com/JiRaska/open-bank-oss/issues/4634)) ([bca632f](https://github.com/JiRaska/open-bank-oss/commit/bca632fa2edcbc9bff0bc12174b61bb986f8b0a8)), closes [#2993](https://github.com/JiRaska/open-bank-oss/issues/2993)
+
 ## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.1...account-service-v0.20.2) (2026-08-09)
 
 

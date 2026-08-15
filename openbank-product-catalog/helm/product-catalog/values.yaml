@@ -1,0 +1,60 @@
+replicaCount: 2
+
+image:
+  repository: ghcr.io/jiraska/openbank-product-catalog
+  tag: ""
+  pullPolicy: IfNotPresent
+
+oidc:
+  issuer: ""
+  scopeClaim: scope
+  readScope: catalog:read
+  authorScope: catalog:author
+  publishScope: catalog:publish
+
+database:
+  host: ""
+  port: 5432
+  name: product_catalog
+  existingSecret: ""
+  usernameKey: username
+  passwordKey: password
+
+# Empty is intentional: industry packs are trusted code and must be opted into per deployment.
+catalogPacks: []
+bankV1CompatibilityEnabled: false
+
+service:
+  port: 8104
+
+# Optional Product Studio sidecar. The reference adapter uses Keycloak; the catalog API itself
+# remains standards-based OIDC and provider-neutral.
+studio:
+  enabled: false
+  image:
+    # No mutable/nonexistent public default: supply your released Product Studio image explicitly.
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
+  publicUrl: ""
+  keycloak:
+    publicUrl: ""
+    realm: openbank
+    clientId: openbank-product-studio
+    existingSecret: ""
+    clientSecretKey: client-secret
+    authSecretKey: auth-secret
+  port: 3000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

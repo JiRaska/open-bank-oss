@@ -99,11 +99,83 @@ def has_rollback_note(text: str) -> bool:
     return False
 
 
+def self_test() -> int:
+    """Falsify the rollback-note reader and the migration path matcher.
+
+    A Flyway migration is applied ONCE and then checksummed, so after it reaches a live
+    database it can never be edited — the rollback plan has to exist before the merge or it
+    never exists at all. What a missing note costs is not visible in CI: everything is green,
+    the migration applies, and the gap appears only during an incident, at the moment nobody
+    has time to design a reversal.
+
+    The reader tolerates a multi-line note, which is where it can go wrong in the direction
+    that passes: accept a marker with NO content and every `-- rollback` line, however empty,
+    satisfies the rule.
+    """
+    fails: list[str] = []
+
+    def case(label, text, want):
+        got = has_rollback_note(text)
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # Inline content — the common form.
+    case("an inline rollback note counts", "-- rollback: DROP TABLE x;\nCREATE TABLE x();\n", True)
+    case("case does not matter", "-- ROLLBACK: DROP TABLE x;\n", True)
+    case("a dash separator is tolerated", "-- rollback - DROP TABLE x;\n", True)
+
+    # Multi-line: the marker on one line, the plan on the next comment lines.
+    case("a following comment line counts",
+         "-- rollback:\n-- DROP TABLE x;\nCREATE TABLE x();\n", True)
+    case("a blank comment line between marker and content is tolerated",
+         "-- rollback:\n--\n-- DROP TABLE x;\n", True)
+
+    # THE DEFECT this must catch: a marker with nothing behind it. Accepting it turns the rule
+    # into "type the word rollback", which is the failure that looks exactly like compliance.
+    case("a bare marker with no content does NOT count", "-- rollback:\nCREATE TABLE x();\n", False)
+    case("a marker followed only by SQL does not count",
+         "-- rollback:\nDROP TABLE x;\n", False)
+    case("a marker followed by an empty comment only does not count",
+         "-- rollback:\n--\n--   \nCREATE TABLE x();\n", False)
+    case("no marker at all", "CREATE TABLE x();\n", False)
+    # A non-comment line ENDS the note block: content further down the file is not the note.
+    case("content after a non-comment line does not count",
+         "-- rollback:\nCREATE TABLE x();\n-- DROP TABLE x;\n", False)
+
+    # --- which files are migrations at all ------------------------------------------------
+    for path, want in (
+        ("openbank-x/src/main/resources/db/migration/V1__init.sql", True),
+        ("openbank-x/src/main/resources/db/migration/nested/V2__more.sql", True),
+        # Not migrations: a test fixture, another resources subtree, and a non-.sql file. A
+        # matcher that is too eager demands rollback notes of files that never run.
+        ("openbank-x/src/test/resources/db/migration/V1__init.sql", False),
+        ("openbank-x/src/main/resources/db/seed/V1__init.sql", False),
+        ("openbank-x/src/main/resources/db/migration/README.md", False),
+    ):
+        got = bool(MIGRATION_RE.search(path))
+        if got != want:
+            fails.append(f"MIGRATION_RE({path!r}) = {got}, expected {want}")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: db-migration rollback note is falsifiable (15 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", required=True, help="git sha of the PR base")
+    ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--base", required=False, help="git sha of the PR base")
     ap.add_argument("--enforce", action="store_true")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
+    if not args.base:
+        ap.error("--base is required")
 
     level = "error" if args.enforce else "warning"
     added, modified = changed_migrations(args.base)

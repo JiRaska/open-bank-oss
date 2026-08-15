@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.9...kyc-service-v0.10.10) (2026-08-13)
+
+
+### Bug Fixes
+
+* **kyc:** record retention workflow liveness ([#4627](https://github.com/JiRaska/open-bank-oss/issues/4627)) ([61dfabb](https://github.com/JiRaska/open-bank-oss/commit/61dfabb16f42d7c27245dd786de6dcb60899c489))
+
 ## [0.10.9](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.8...kyc-service-v0.10.9) (2026-08-10)
 
 

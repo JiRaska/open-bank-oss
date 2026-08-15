@@ -6,13 +6,16 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
-import { JourneyCanvas, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
+import { JourneyCanvas, type DecisionPathSelection, type JourneyDecision, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
+import { CampaignOutcomeBrief } from '@/components/campaigns/CampaignOutcomeBrief'
+import { CampaignAttentionFunnel, type CampaignAttentionMetric } from '@/components/campaigns/CampaignAttentionFunnel'
 
 interface Campaign {
   id: string
@@ -22,9 +25,25 @@ interface Campaign {
   state: string
   createdBy: string
   approvedBy: string | null
-  steps: { order: number; template: string; delaySeconds: number }[]
+  steps: {
+    order: number
+    template: string
+    delaySeconds: number
+    channel?: 'EMAIL' | 'PUSH' | 'BANNER'
+    condition?: 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
+    conditionSourceOrder?: number
+    nextStepOrder?: number
+    variantBVariables?: Record<string, string> | null
+    fallbackToPush?: boolean
+    mobileDestination?: 'HOME' | 'SAVINGS' | 'CARDS' | 'PAYMENTS' | 'PRODUCT_HUB' | null
+  }[]
   /** ADR-0245: a ConversionCatalog key, or absent when the campaign measures no conversion. */
   conversionRule?: string | null
+  /** Percentage deliberately kept in the no-contact control cohort. */
+  holdoutPercent?: number
+  schedule?: { cadence: string; endAt?: string | null } | null
+  trigger?: string | null
+  decisions?: JourneyDecision[]
 }
 
 interface Enrolment {
@@ -32,6 +51,7 @@ interface Enrolment {
   partyId: string
   state: string
   currentStep: number
+  decisionPath?: (DecisionPathSelection & { decidedAt?: string })[]
 }
 
 interface Send {
@@ -47,6 +67,8 @@ interface Send {
    */
   deliveryStatus?: string
   deliveryReason?: string | null
+  /** Actual request medium, including a consent-authorized EMAIL → PUSH fallback. */
+  channel?: 'EMAIL' | 'PUSH' | null
 }
 
 interface SendPage {
@@ -56,6 +78,32 @@ interface SendPage {
   size: number
 }
 
+interface Experiment {
+  holdoutPercent: number
+  treatment: { assigned: number; converted: number; conversionRate: number | null }
+  holdout: { assigned: number; converted: number; conversionRate: number | null }
+  observedLiftPercentagePoints: number | null
+  /** Optional during a mixed-version rollout; absence is not an experiment verdict. */
+  decision?: {
+    state: 'COLLECTING_DATA' | 'INCONCLUSIVE' | 'TREATMENT_OUTPERFORMS_HOLDOUT' | 'HOLDOUT_OUTPERFORMS_TREATMENT'
+    minimumAssignedPerCohort: number
+    treatmentConfidenceInterval: { lower: number; upper: number } | null
+    holdoutConfidenceInterval: { lower: number; upper: number } | null
+  }
+}
+
+interface ContentExperiment {
+  a: { assigned: number; converted: number; conversionRate: number | null }
+  b: { assigned: number; converted: number; conversionRate: number | null }
+  observedLiftPercentagePoints: number | null
+  decision?: {
+    state: 'COLLECTING_DATA' | 'INCONCLUSIVE' | 'A_OUTPERFORMS_B' | 'B_OUTPERFORMS_A'
+    minimumAssignedPerVariant: number
+    aConfidenceInterval: { lower: number; upper: number } | null
+    bConfidenceInterval: { lower: number; upper: number } | null
+  }
+}
+
 type Detail = {
   campaign: Campaign | null
   enrolments: Enrolment[]
@@ -63,6 +111,13 @@ type Detail = {
   partyNames: Record<string, string>
   sendSummary: Record<string, number>
   journey: StepFunnel[]
+  engagement: CampaignAttentionMetric[]
+  experiment: Experiment | null
+  contentExperiment: ContentExperiment | null
+  entryCatalogues?: {
+    cadences: { cadence: string; humanForm: string; zone: string }[]
+    triggers: { trigger: string; humanForm: string }[]
+  }
   sources: Record<string, string>
 }
 
@@ -99,6 +154,7 @@ function deliveryTone(status: string): Tone {
 
 export default function CampaignDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { t, language } = useLanguage()
+  const router = useRouter()
   // Params are unwrapped in an effect rather than with React `use()`. `use()` suspends until the
   // promise settles, which forces every caller — including tests — to provide a Suspense boundary
   // and, in jsdom, leaves the tree on the fallback indefinitely. An effect keeps the page mountable
@@ -146,6 +202,34 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   // maker != checker on activate. The UI renders capability, the policy decides it.
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing] = useState(false)
+  const [duplicating, setDuplicating] = useState(false)
+
+  /**
+   * Reuse does not change the source campaign. The server makes a separate DRAFT owned by this
+   * maker and Studio then reloads the real stored definition for review — never a browser copy of
+   * an ACTIVE journey or its history.
+   */
+  const duplicateAsDraft = () => {
+    if (!id) return
+    setDuplicating(true)
+    setActionError(null)
+    fetch(`/api/campaigns/${encodeURIComponent(id)}/duplicate`, { method: 'POST' })
+      .then(r => r.json())
+      .then((d: { state: string; campaign?: { id: string }; error?: string }) => {
+        if (d.state === 'ok' && d.campaign?.id) {
+          router.push(`/campaigns/new?draft=${encodeURIComponent(d.campaign.id)}`)
+          return
+        }
+        setActionError(
+          d.error ??
+          (d.state === 'forbidden'
+            ? t('Nemáte oprávnění založit nový koncept z této kampaně.', 'You are not permitted to create a new draft from this campaign.')
+            : t('Koncept se nepodařilo založit. Zdrojová cesta se nezměnila.', 'The draft could not be created. The source journey is unchanged.')),
+        )
+      })
+      .catch(() => setActionError(t('Campaign-service neodpovídá.', 'Campaign-service is not responding.')))
+      .finally(() => setDuplicating(false))
+  }
 
   const runAction = (action: string) => {
     setActing(true)
@@ -224,12 +308,28 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     loadSends(0, outcome)
   }
   const summary = detail?.sendSummary ?? {}
+  const engagement = Array.isArray(detail?.engagement) ? detail.engagement : []
+  const experiment = detail?.experiment
+  const contentExperiment = detail?.contentExperiment
+  const cadence = c?.schedule
+    ? detail?.entryCatalogues?.cadences.find(x => x.cadence === c.schedule?.cadence)
+    : undefined
+  const trigger = c?.trigger
+    ? detail?.entryCatalogues?.triggers.find(x => x.trigger === c.trigger)
+    : undefined
+  const decisionPaths = detail?.enrolments.flatMap(enrolment => enrolment.decisionPath ?? []) ?? []
 
   // From the server-side summary, never from the loaded page: a headline derived from the rows on
   // screen understates every campaign larger than one page.
   const suppressed = Object.entries(summary)
     .filter(([outcome]) => outcome.startsWith('SUPPRESSED'))
     .reduce((n, [, count]) => n + count, 0)
+  const impressions = engagement
+    .filter(metric => metric.type === 'IMPRESSION')
+    .reduce((n, metric) => n + metric.count, 0)
+  const interactions = engagement
+    .filter(metric => metric.type === 'CLICK' || metric.type === 'DISMISS')
+    .reduce((n, metric) => n + metric.count, 0)
 
   const fmtDateTime = (iso: string | null | undefined) =>
     iso
@@ -237,6 +337,66 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           dateStyle: 'medium', timeStyle: 'short',
         }).format(new Date(iso))
       : '—'
+
+  const fmtRate = (rate: number | null | undefined) =>
+    rate === null || rate === undefined ? '—' : `${(rate * 100).toFixed(1)} %`
+
+  const experimentDecisionText = (decision: Experiment['decision']) => {
+    if (!decision) {
+      return t(
+        'Tato verze služby zatím neposkytuje bránu připravenosti rozhodnutí.',
+        'This service version does not yet provide a decision-readiness gate.',
+      )
+    }
+    switch (decision.state) {
+      case 'COLLECTING_DATA':
+        return t(
+          `Sbíráme data: pro obě skupiny je potřeba alespoň ${decision.minimumAssignedPerCohort} zařazených lidí.`,
+          `Collecting data: each cohort needs at least ${decision.minimumAssignedPerCohort} assigned people.`,
+        )
+      case 'INCONCLUSIVE':
+        return t(
+          'Požadovaný rozsah dat už máme, ale 95% intervaly se překrývají. Strategii teď neměňte.',
+          'The sample threshold is met, but the 95% intervals overlap. Do not change strategy yet.',
+        )
+      case 'TREATMENT_OUTPERFORMS_HOLDOUT':
+        return t(
+          '95% intervaly se oddělily ve prospěch oslovené skupiny. Je to konzervativní signál, ne automatická změna kampaně.',
+          'The 95% intervals separate in favour of treatment. It is a conservative signal, not an automatic campaign change.',
+        )
+      case 'HOLDOUT_OUTPERFORMS_TREATMENT':
+        return t(
+          '95% intervaly se oddělily ve prospěch kontroly. Zkontrolujte obsah a provedení kampaně; systém nic automaticky nevypíná.',
+          'The 95% intervals separate in favour of holdout. Review campaign content and delivery; the system does not stop anything automatically.',
+        )
+    }
+  }
+
+  const contentExperimentDecisionText = (decision: ContentExperiment['decision']) => {
+    if (!decision) return t('Tato verze služby zatím neposkytuje bránu připravenosti rozhodnutí.', 'This service version does not yet provide a decision-readiness gate.')
+    switch (decision.state) {
+      case 'COLLECTING_DATA':
+        return t(
+          `Sbíráme data: pro obě varianty je potřeba alespoň ${decision.minimumAssignedPerVariant} zařazených lidí.`,
+          `Collecting data: each variant needs at least ${decision.minimumAssignedPerVariant} assigned people.`,
+        )
+      case 'INCONCLUSIVE':
+        return t(
+          'Požadovaný rozsah dat už máme, ale 95% intervaly se překrývají. Obsah teď neměňte.',
+          'The sample threshold is met, but the 95% intervals overlap. Do not change the content yet.',
+        )
+      case 'A_OUTPERFORMS_B':
+        return t(
+          '95% intervaly se oddělily ve prospěch varianty A. Je to konzervativní signál, ne automatická změna kampaně.',
+          'The 95% intervals separate in favour of variant A. It is a conservative signal, not an automatic campaign change.',
+        )
+      case 'B_OUTPERFORMS_A':
+        return t(
+          '95% intervaly se oddělily ve prospěch varianty B. Zkontrolujte výsledek; systém ji sám nenasazuje.',
+          'The 95% intervals separate in favour of variant B. Review the result; the system does not deploy it automatically.',
+        )
+    }
+  }
 
   /**
    * Human phrasing for a send outcome. The raw enum is what the API returns and what an engineer
@@ -288,8 +448,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       case 'ACTIVE': return t('Aktivní', 'Active')
       case 'COMPLETED': return t('Dokončeno', 'Completed')
       case 'TERMINATED_CONSENT_REVOKED': return t('Ukončeno — odvolaný souhlas', 'Ended — consent withdrawn')
+      case 'TERMINATED_CAMPAIGN_CLOSED': return t('Ukončeno — kampaň uzavřena', 'Ended — campaign closed')
+      case 'COMPLETED_GOAL_REACHED': return t('Dokončeno — cíl splněn', 'Completed — goal reached')
       case 'TERMINATED_SUPPRESSED': return t('Ukončeno — potlačeno', 'Ended — suppressed')
       case 'STOPPED_MAX_SENDS': return t('Zastaveno — limit odeslání', 'Stopped — send cap reached')
+      case 'HOLDOUT': return t('Kontrolní skupina — neosloveno', 'Control group — not contacted')
       default: return s
     }
   }
@@ -302,6 +465,35 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const byReason = Object.fromEntries(
     Object.entries(summary).filter(([outcome, count]) => outcome.startsWith('SUPPRESSED') && count > 0),
   )
+
+  const campaignNextAction = () => {
+    if (!c) return { title: '', detail: '' }
+    if (c.state === 'DRAFT') return {
+      title: t('Dokončete zadání', 'Finish the brief'),
+      detail: t('Pak ho předejte k nezávislému schválení.', 'Then submit it for independent approval.'),
+    }
+    if (c.state === 'PENDING_APPROVAL') return {
+      title: t('Vyžádejte druhé oči', 'Ask for a second pair of eyes'),
+      detail: t('Autor ji nemůže sám aktivovat.', 'The author cannot activate it alone.'),
+    }
+    if (c.state === 'PAUSED') return {
+      title: t('Rozhodněte o pokračování', 'Decide whether to resume'),
+      detail: t('Zkontrolujte cestu a teprve pak změňte stav.', 'Review the journey before changing its state.'),
+    }
+    if ((summary.FAILED ?? 0) > 0) return {
+      title: t('Prověřte neúspěšná předání', 'Review failed handoffs'),
+      detail: t('Použijte detailní log níže; potlačení pravidlem není chyba.', 'Use the detailed log below; policy suppression is not an error.'),
+    }
+    if (!c.conversionRule) return {
+      title: t('Zvažte měřitelný cíl', 'Consider a measurable outcome'),
+      detail: t('Bez něj uvidíte průchod, ale ne skutečný obchodní výsledek.', 'Without one you see flow, but not the real business outcome.'),
+    }
+    return {
+      title: t('Sledujte průchod a výsledek', 'Follow the journey and outcome'),
+      detail: t('Doručení, potlačení a konverze jsou níže oddělené, aby se nezaměnily.', 'Delivery, suppression and conversion remain separate below so they cannot be confused.'),
+    }
+  }
+  const nextAction = campaignNextAction()
 
   return (
     <div className="space-y-6">
@@ -320,6 +512,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           which is how a real refusal stops being read. */}
       {!loading && !unavailable && c && actionsFor(c.state).length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
+          {c.state === 'DRAFT' && (
+            <Link href={`/campaigns/new?draft=${encodeURIComponent(c.id)}`} className="rounded-md border px-3 py-1.5 text-sm">
+              {t('Upravit koncept', 'Edit draft')}
+            </Link>
+          )}
           {actionsFor(c.state).map(a => (
             <button
               key={a}
@@ -343,6 +540,25 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </div>
       )}
 
+      {!loading && !unavailable && c && (
+        <aside className="rounded-xl border border-indigo-100 bg-indigo-50/50 p-3 text-sm" data-testid="campaign-reuse-draft">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold text-foreground">{t('Použít cestu jako výchozí bod', 'Use this journey as a starting point')}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {t(
+                  'Vznikne nový koncept k vaší úpravě. Stav, schválení, příjemci a výsledky této kampaně se nikdy nekopírují.',
+                  'A new draft opens for your edits. This campaign’s state, approval, recipients and results are never copied.',
+                )}
+              </p>
+            </div>
+            <button type="button" className="btn btn-secondary" onClick={duplicateAsDraft} disabled={duplicating}>
+              {duplicating ? t('Zakládám koncept…', 'Creating draft…') : t('Vytvořit kopii jako koncept', 'Create draft copy')}
+            </button>
+          </div>
+        </aside>
+      )}
+
       {actionError && <p className="text-sm text-red-600">{actionError}</p>}
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
@@ -352,14 +568,47 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
 
       {!loading && !unavailable && c && (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard label={t('Stav', 'State')} value={c.state} />
-            <StatCard label={t('Segment', 'Segment')} value={`${c.segmentRef?.name}@${c.segmentRef?.version}`} />
-            <StatCard label={t('Zařazeno', 'Enrolled')} value={String(detail?.enrolments.length ?? 0)} />
-            {/* Surfaced as a headline number on purpose: "how many were deliberately not
-                contacted" is the question the send log exists to answer (#2895). */}
-            <StatCard label={t('Potlačených odeslání', 'Suppressed sends')} value={String(suppressed)} />
-          </div>
+          <CampaignOutcomeBrief
+            state={c.state}
+            audience={detail?.enrolments.length ?? 0}
+            handedOff={summary.SENT ?? 0}
+            suppressed={suppressed}
+            conversion={c.conversionRule ? (summary.CONVERTED ?? 0) : null}
+            conversionLabel={c.conversionRule ? conversionLabel(c.conversionRule) : t('Cíl není měřen', 'Outcome is not measured')}
+            inAppImpressions={detail?.sources?.engagement === 'ok' ? impressions : null}
+            inAppInteractions={detail?.sources?.engagement === 'ok' ? interactions : null}
+            nextAction={nextAction.title}
+            nextActionDetail={nextAction.detail}
+          />
+
+          <section className="rounded-lg border p-3 text-sm" data-campaign-entry>
+            <h2 className="font-semibold">{t('Vstup do cesty', 'Journey entry')}</h2>
+            {c.trigger ? (
+              <p className="mt-1 text-muted-foreground">
+                {t('Při události: ', 'On an event: ')}
+                <span className="font-medium text-foreground">{trigger?.humanForm ?? c.trigger}</span>
+                {t(
+                  ' — událost určí okamžik, ale člověk musí stále patřit do schváleného segmentu.',
+                  ' — the event chooses the moment, but the person must still belong to the approved segment.',
+                )}
+              </p>
+            ) : c.schedule ? (
+              <p className="mt-1 text-muted-foreground">
+                {t('Opakovaně: ', 'Recurring: ')}
+                <span className="font-medium text-foreground">
+                  {cadence ? `${cadence.humanForm} (${cadence.zone})` : c.schedule.cadence}
+                </span>
+                {c.schedule.endAt && ` · ${t('do ', 'until ')}${fmtDateTime(c.schedule.endAt)}`}
+              </p>
+            ) : (
+              <p className="mt-1 text-muted-foreground">
+                {t(
+                  'Jednorázově — po spuštění se aktuální publikum zařadí ručně.',
+                  'One time — the current audience is enrolled manually after activation.',
+                )}
+              </p>
+            )}
+          </section>
 
           {/* Absent rule and zero conversions are different facts and must never render the same:
               a campaign measuring nothing has no number, and saying so is the honest empty state
@@ -390,6 +639,124 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             )}
           </div>
 
+          {c.holdoutPercent && c.holdoutPercent > 0 && (
+            <section className="space-y-2 rounded-lg border p-3" data-experiment>
+              <div>
+                <h2 className="text-sm font-semibold">{t('Kontrolní skupina', 'Control group')}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'Porovnáváme skutečné bankovní konverze osloveného publika s lidmi, kterým kampaň záměrně neposlala zprávu.',
+                    'Compares real banking conversions of contacted people with people deliberately sent no campaign message.',
+                  )}
+                </p>
+              </div>
+              {detail?.sources?.experiment === 'ok' && experiment ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <StatCard
+                      label={t('Oslovení', 'Treatment')}
+                      value={`${fmtRate(experiment.treatment.conversionRate)} · ${experiment.treatment.converted}/${experiment.treatment.assigned}`}
+                    />
+                    <StatCard
+                      label={t('Kontrola', 'Holdout')}
+                      value={`${fmtRate(experiment.holdout.conversionRate)} · ${experiment.holdout.converted}/${experiment.holdout.assigned}`}
+                    />
+                    <StatCard
+                      label={t('Rozdíl (p. b.)', 'Difference (pp)')}
+                      value={experiment.observedLiftPercentagePoints === null ? '—' : experiment.observedLiftPercentagePoints.toFixed(1)}
+                    />
+                  </div>
+                  <div className="rounded-md bg-muted p-2 text-xs text-muted-foreground" data-experiment-decision>
+                    <span className="font-medium text-foreground">{t('Připravenost rozhodnutí: ', 'Decision readiness: ')}</span>
+                    {experimentDecisionText(experiment.decision)}
+                    {experiment.decision?.treatmentConfidenceInterval && experiment.decision?.holdoutConfidenceInterval && (
+                      <span>
+                        {' '}
+                        {t('95% intervaly — oslovení ', '95% intervals — treatment ')}
+                        {fmtRate(experiment.decision.treatmentConfidenceInterval.lower)}–{fmtRate(experiment.decision.treatmentConfidenceInterval.upper)}
+                        {t(', kontrola ', ', holdout ')}
+                        {fmtRate(experiment.decision.holdoutConfidenceInterval.lower)}–{fmtRate(experiment.decision.holdoutConfidenceInterval.upper)}.
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <DataUnavailable
+                  kind={detail?.sources?.experiment === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                  service="Campaign-service"
+                  feature={t('Vyhodnocení kontrolní skupiny', 'Control-group result')}
+                  dense
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Rozdíl je popisný. Brána používá konzervativní 95% Wilsonovy intervaly a nemůže sama prokázat příčinu ani změnit běžící kampaň.',
+                  'The difference is descriptive. The gate uses conservative 95% Wilson intervals; it cannot prove causality or change a running campaign itself.',
+                )}
+              </p>
+            </section>
+          )}
+
+          {c.steps.some(step => step.variantBVariables) && (
+            <section className="space-y-2 rounded-lg border p-3" data-content-experiment>
+              <div>
+                <h2 className="text-sm font-semibold">{t('Porovnání obsahu A/B', 'A/B content comparison')}</h2>
+                <p className="text-xs text-muted-foreground">
+                  {t(
+                    'Každý oslovený člověk zůstává ve variantě A nebo B po celou cestu. Porovnává se jen skutečná bankovní konverze.',
+                    'Each contacted person stays in A or B throughout the journey. Only real banking conversion is compared.',
+                  )}
+                </p>
+              </div>
+              {detail?.sources?.contentExperiment === 'ok' && contentExperiment ? (
+                <>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <StatCard label={t('Varianta A', 'Variant A')} value={`${fmtRate(contentExperiment.a.conversionRate)} · ${contentExperiment.a.converted}/${contentExperiment.a.assigned}`} />
+                    <StatCard label={t('Varianta B', 'Variant B')} value={`${fmtRate(contentExperiment.b.conversionRate)} · ${contentExperiment.b.converted}/${contentExperiment.b.assigned}`} />
+                    <StatCard label={t('B − A (p. b.)', 'B − A (pp)')} value={contentExperiment.observedLiftPercentagePoints === null ? '—' : contentExperiment.observedLiftPercentagePoints.toFixed(1)} />
+                  </div>
+                  <div className="rounded-md bg-muted p-2 text-xs text-muted-foreground" data-content-experiment-decision>
+                    <span className="font-medium text-foreground">{t('Připravenost rozhodnutí: ', 'Decision readiness: ')}</span>
+                    {contentExperimentDecisionText(contentExperiment.decision)}
+                    {contentExperiment.decision?.aConfidenceInterval && contentExperiment.decision?.bConfidenceInterval && (
+                      <span>
+                        {' '}{t('95% intervaly — A ', '95% intervals — A ')}
+                        {fmtRate(contentExperiment.decision.aConfidenceInterval.lower)}–{fmtRate(contentExperiment.decision.aConfidenceInterval.upper)}
+                        {t(', B ', ', B ')}
+                        {fmtRate(contentExperiment.decision.bConfidenceInterval.lower)}–{fmtRate(contentExperiment.decision.bConfidenceInterval.upper)}.
+                      </span>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <DataUnavailable
+                  kind={detail?.sources?.contentExperiment === 'unauthorized' ? 'unauthorized' : 'unreachable'}
+                  service="Campaign-service"
+                  feature={t('Vyhodnocení variant obsahu', 'Content-variant result')}
+                  dense
+                />
+              )}
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'Rozdíl je popisný. Brána používá 95% Wilsonovy intervaly, automaticky nemění aktivní cestu a sama nedokazuje příčinu.',
+                  'The difference is descriptive. The 95% Wilson gate never changes an active journey and does not establish causality itself.',
+                )}
+              </p>
+            </section>
+          )}
+
+          {c.steps.some(step => step.fallbackToPush) && (
+            <section className="space-y-1 rounded-lg border p-3" data-channel-fallback>
+              <h2 className="text-sm font-semibold">{t('Záložní kanál', 'Fallback channel')}</h2>
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  'U vybraných e-mailových kroků se při chybějícím e-mailovém souhlasu zkusí push. I ten projde vlastním souhlasem, frekvenčním limitem, quiet hours a suppression listem; po nedoručení e-mailu se druhá zpráva neposílá.',
+                  'Selected email steps may try push when email consent is absent. Push still passes its own consent, frequency cap, quiet hours and suppression list; an email delivery failure never triggers a second message.',
+                )}
+              </p>
+            </section>
+          )}
+
           {Object.keys(byReason).length > 0 && (
             <p className="text-xs text-muted-foreground">
               {t('Potlačeno: ', 'Suppressed: ')}
@@ -418,10 +785,21 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   steps={c.steps ?? []}
                   funnel={detail?.journey ?? []}
                   audienceSize={(detail?.enrolments?.length ?? 0) > 0 ? (detail?.enrolments?.length ?? 0) : null}
+                  decisions={c.decisions ?? []}
+                  decisionPaths={decisionPaths}
+                  decisionPathsKnown={detail?.sources?.enrolments === 'ok'}
                 />
               </SectionBoundary>
             )}
           </section>
+
+          {detail?.sources?.engagement === 'ok' && (
+            <CampaignAttentionFunnel
+              metrics={engagement}
+              hasMeasuredOutcome={c.conversionRule !== null && c.conversionRule !== undefined}
+              hasHoldout={(c.holdoutPercent ?? 0) > 0}
+            />
+          )}
 
           <section className="space-y-2">
             <h2 className="text-sm font-semibold">{t('Čtyři oči', 'Four-eyes')}</h2>
@@ -542,6 +920,10 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                         'Co se se zprávou skutečně stalo, podle notification-service.',
                         'What actually became of the message, as reported by notification-service.',
                       )}>{t('Doručení', 'Delivery')}</th>
+                      <th title={t(
+                        'Kanál, který campaign-service skutečně předal notification-service.',
+                        'The channel campaign-service actually handed to notification-service.',
+                      )}>{t('Kanál', 'Channel')}</th>
                       <th>{t('Kdy', 'When')}</th>
                     </tr>
                   </thead>
@@ -571,6 +953,13 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                           ) : (
                             <span className="text-xs text-muted-foreground">—</span>
                           )}
+                        </td>
+                        <td>
+                          {s.channel === 'EMAIL'
+                            ? t('E-mail', 'Email')
+                            : s.channel === 'PUSH'
+                              ? t('Push', 'Push')
+                              : <span className="text-xs text-muted-foreground">—</span>}
                         </td>
                         <td className="text-xs whitespace-nowrap">{fmtDateTime(s.occurredAt)}</td>
                       </tr>
