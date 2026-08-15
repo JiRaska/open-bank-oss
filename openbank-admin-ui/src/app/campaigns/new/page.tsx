@@ -168,10 +168,12 @@ export default function NewCampaignPage() {
   }
 
   useEffect(() => {
-    fetch('/api/audiences')
-      .then(r => r.json())
-      .then((d: { items: Array<Segment & { state?: string }>; state: string }) => {
-        if (d.state === 'ok') setSegments((d.items ?? []).filter(item => (item.state ?? 'APPROVED') === 'APPROVED'))
+    Promise.all([fetch('/api/audiences').then(r => r.json()), fetch('/api/segments').then(r => r.json())])
+      .then(([audiences, catalogue]: [{ items?: Array<Segment & { state?: string }>; state?: string }, { items?: Segment[]; state?: string }]) => {
+        const approved = audiences.state === 'ok'
+          ? (audiences.items ?? []).filter(item => (item.state ?? 'APPROVED') === 'APPROVED')
+          : catalogue.items ?? []
+        setSegments(approved)
       })
       .catch(() => undefined)
   }, [])
