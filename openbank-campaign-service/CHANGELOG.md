@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/v0.31.0...v0.32.0) (2026-08-15)
+
+
+### Features
+
+* **campaign:** add explicit decision graph journeys ([#4781](https://github.com/JiRaska/open-bank-oss/issues/4781)) ([3cc3fe0](https://github.com/JiRaska/open-bank-oss/commit/3cc3fe087e4dccd29ec7f54a36b5e8318fbaa01f))
+
 ## [0.31.0](https://github.com/JiRaska/open-bank-oss/compare/v0.30.0...v0.31.0) (2026-08-14)
 
 
