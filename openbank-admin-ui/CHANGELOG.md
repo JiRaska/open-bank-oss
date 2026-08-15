@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.138.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.137.0...admin-ui-v0.138.0) (2026-08-15)
+
+
+### Features
+
+* **admin-ui:** consolidate operator workspace shell ([#4936](https://github.com/JiRaska/open-bank-oss/issues/4936)) ([974a7f3](https://github.com/JiRaska/open-bank-oss/commit/974a7f368ce3a1327c7bd4651532b21af73b3d2b))
+
 ## [0.137.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.136.0...admin-ui-v0.137.0) (2026-08-15)
 
 
