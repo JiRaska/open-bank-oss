@@ -106,6 +106,7 @@ export default function NewCampaignPage() {
   const [goal, setGoal] = useState('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
+  const [segmentSource, setSegmentSource] = useState<'audiences' | 'segments'>('audiences')
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
   const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
@@ -174,6 +175,7 @@ export default function NewCampaignPage() {
           ? (audiences.items ?? []).filter(item => (item.state ?? 'APPROVED') === 'APPROVED')
           : catalogue.items ?? []
         setSegments(approved)
+        setSegmentSource(audiences.state === 'ok' ? 'audiences' : 'segments')
       })
       .catch(() => undefined)
   }, [])
@@ -184,7 +186,7 @@ export default function NewCampaignPage() {
     setReach(null)
     const [segName, segVersion] = ref.split('@')
     if (!segName) return
-    fetch(`/api/audiences/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
+    fetch(`/api/${segmentSource}/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
         if (d.state === 'ok') setReach(d.size ?? 0)
@@ -285,13 +287,13 @@ export default function NewCampaignPage() {
     if (!requestedAudience || !segments.some(s => `${s.name}@${s.version}` === requestedAudience)) return
     setSegment(requestedAudience)
     const [name, version] = requestedAudience.split('@')
-    fetch(`/api/audiences/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
+    fetch(`/api/${segmentSource}/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
         if (d.state === 'ok') setReach(d.size ?? 0)
       })
       .catch(() => undefined)
-  }, [requestedAudience, segments])
+  }, [requestedAudience, segments, segmentSource])
 
   // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
   // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
