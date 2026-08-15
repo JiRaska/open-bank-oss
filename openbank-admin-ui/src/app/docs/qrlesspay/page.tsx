@@ -4,7 +4,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash } from 'lucide-react'
+import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const ACCENT = '#6366f1'
@@ -45,6 +45,9 @@ export default function QrlessPayPage() {
           <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
         </Link>
         <Pill color="#7c3aed" bg="#f5f3ff" border="#ddd6fe" Icon={ShieldCheck} label={t('money-path', 'money-path')} />
+        <Link href="/docs/qrlesspay-readiness" style={{ textDecoration: 'none' }}>
+          <Pill color="#d97706" bg="#fffbeb" border="#fcd34d" Icon={ScrollText} label={t('Posouzení připravenosti', 'Readiness assessment')} />
+        </Link>
       </div>
 
       {/* What it is */}
@@ -179,20 +182,47 @@ export default function QrlessPayPage() {
         </div>
         <div className="card" style={{ padding: 14, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>
-            {t('Plánovaná publikace SDK', 'Planned SDK publication')}
+            {t('Dostupnost SDK — zatím nikde', 'SDK availability — nothing published yet')}
           </div>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
-              'Jádro protokolu je Kotlin Multiplatform (jedna auditovaná implementace ověřování), nad ním tenké idiomatické vazby: Android (Kotlin, Maven), iOS (Swift, SPM), React Native (TypeScript, npm) a Flutter (Dart, pub.dev) — obě mobilní cross-platform vazby delegují na stejná nativní jádra. Web není podporován (Web Bluetooth neumí roli příjemce). Banky doplní pouze svůj platební backend (IBAN rail) a vlastní potvrzovací UI + SCA. Cíl: standard kompatibilní s ČBA a EPC pro mezibankovní proximity platby bez kódu.',
-              'The protocol core is Kotlin Multiplatform (one audited verification implementation) with thin idiomatic bindings on top: Android (Kotlin, Maven), iOS (Swift, SPM), React Native (TypeScript, npm) and Flutter (Dart, pub.dev) — both cross-platform bindings delegate to the same native cores. Web is unsupported (Web Bluetooth cannot do the payee role). Banks plug in only their own payment backend (IBAN rail) plus their own confirmation UI + SCA. Goal: a ČBA and EPC-compatible standard for interbank proximity payments without a QR code.',
+              'Žádný balíček zatím není publikovaný a repozitář neexistuje — níže je návrh, ne changelog. Plán: rodina nativních SDK, ne jedno KMP jádro s tenkými obaly. Banka s čistě Swift aplikací si do binárky nepřidá Kotlin runtime, aby mohla přijímat platby, a profil, který má jedinou reálnou implementaci, není standard. Sdíleným artefaktem je proto conformance suite (jazykově neutrální vektory + interop matice), ne kód. Cena: čtyři implementace = čtyři krypto review, každá si 1.0.0 zaslouží vlastními důkazy.',
+              'Nothing is published and the repository does not exist yet — what follows is a proposal, not a changelog. The plan is a family of native SDKs rather than one KMP core with thin wrappers: a bank with a pure-Swift app will not add a Kotlin runtime to its binary to accept payments, and a profile with a single real implementation is not a standard. The shared artifact is therefore the conformance suite (language-neutral vectors + an interop matrix), not the code. The cost: four implementations means four crypto reviews, and each earns 1.0.0 on its own evidence.',
+            )}
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5, minWidth: 460 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: SUB }}>
+                  <th style={{ padding: '6px 8px', fontWeight: 700 }}>{t('Platforma', 'Platform')}</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 700 }}>{t('Balíček', 'Package')}</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 700 }}>{t('Implementace', 'Implementation')}</th>
+                  <th style={{ padding: '6px 8px', fontWeight: 700 }}>{t('Stav', 'Status')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {SDK_TARGETS.map((row, i) => (
+                  <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '6px 8px', color: INK, fontWeight: 600 }}>{row.platform}</td>
+                    <td style={{ padding: '6px 8px', color: SUB }}>{row.pkg}</td>
+                    <td style={{ padding: '6px 8px', color: SUB }}>{t(row.implCs, row.implEn)}</td>
+                    <td style={{ padding: '6px 8px', color: SUB }}>{t(row.statusCs, row.statusEn)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
+            {t(
+              'Pořadí stavby podle dosahu, ne podle pracnosti: Swift a Kotlin první (stojí na nich vazby pro React Native i Flutter), pak React Native, pak KMP (extrakce — kód už běží v naší vlastní aplikaci), nakonec Flutter. Banky doplní jen svůj platební rail a vlastní potvrzovací UI + SCA.',
+              'Build order by reach rather than effort: Swift and Kotlin first (the React Native and Flutter bindings stand on them), then React Native, then KMP (an extraction — the code already runs in our own app), then Flutter. Banks plug in only their own payment rail plus their own confirmation UI and SCA.',
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <Tag>KMP / Apache-2.0</Tag>
-            <Tag>{t('Swift · Kotlin · TypeScript · Dart', 'Swift · Kotlin · TypeScript · Dart')}</Tag>
+            <Tag>Apache-2.0</Tag>
+            <Tag>{t('Swift · Kotlin · TypeScript · Dart · KMP', 'Swift · Kotlin · TypeScript · Dart · KMP')}</Tag>
             <Tag>ČBA / EPC</Tag>
             <Tag>{t('Otevřený protokol', 'Open protocol')}</Tag>
-            <Tag>{t('Mezibankovní', 'Interbank')}</Tag>
             <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-sdk.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Návrh SDK (spec)', 'SDK proposal (spec)')}</a>
           </div>
         </div>
@@ -277,6 +307,15 @@ const LAYERS: { Icon: React.ElementType; req: boolean; threatCs: string; threatE
   { Icon: ArrowLeftRight, req: false, threatCs: 'Dvojitá platba / dva stejní odesílatelé', threatEn: 'Duplicate payment / two identical senders', mitCs: 'Varování na zařízení plátce: „tohle jsi zaplatil před chvílí“ a upozornění, když dvě dlaždice nesou stejné jméno (maskovaný IBAN už při výběru). Bez serveru.', mitEn: 'Payer-device warnings: “you paid this a moment ago”, and an alert when two tiles share a display name (masked IBAN shown at the point of choice). No server involved.' },
   { Icon: EyeOff, req: true, threatCs: 'Soukromí', threatEn: 'Privacy', mitCs: 'Po vzduchu jen křestní jméno + efemérní id; IBAN jen přes GATT read, který plátce aktivně vyvolá; rotující id + privacy MAC.', mitEn: 'Only first name + ephemeral id on air; IBAN only via the payer-initiated GATT read; rotating id + privacy MAC.' },
   { Icon: ShieldCheck, req: false, threatCs: 'Vysoká částka / MITM', threatEn: 'High value / MITM', mitCs: 'Volitelný SAS — 4-místný kód z efemérního DH, lidé ho porovnají; defeats MITM bez PKI.', mitEn: 'Optional SAS — a 4-digit code from an ephemeral DH that the humans compare; defeats MITM without PKI.' },
+]
+
+const SDK_TARGETS: { platform: string; pkg: string; implCs: string; implEn: string; statusCs: string; statusEn: string }[] = [
+  { platform: 'iOS', pkg: 'SPM', implCs: 'nativní Swift', implEn: 'native Swift', statusCs: 'navrženo — 1. v pořadí', statusEn: 'proposed — first up' },
+  { platform: 'Android', pkg: 'Maven Central (AAR)', implCs: 'nativní Kotlin', implEn: 'native Kotlin', statusCs: 'navrženo — 1. v pořadí', statusEn: 'proposed — first up' },
+  { platform: 'React Native', pkg: 'npm', implCs: 'vazba na nativní SDK', implEn: 'binds the native SDKs', statusCs: 'navrženo — 2. v pořadí', statusEn: 'proposed — second' },
+  { platform: 'Kotlin Multiplatform', pkg: 'AAR + XCFramework', implCs: 'sdílený Kotlin', implEn: 'shared Kotlin', statusCs: 'kód existuje v naší aplikaci, nevytažen', statusEn: 'code exists in our app, not extracted' },
+  { platform: 'Flutter', pkg: 'pub.dev', implCs: 'vazba na nativní SDK', implEn: 'binds the native SDKs', statusCs: 'navrženo — poslední', statusEn: 'proposed — last' },
+  { platform: 'Web', pkg: '—', implCs: 'nepodporováno', implEn: 'unsupported', statusCs: 'Web Bluetooth neumí roli příjemce', statusEn: 'Web Bluetooth cannot do the payee role' },
 ]
 
 const COMPARE: { axisCs: string; axisEn: string; qrCs: string; qrEn: string; blCs: string; blEn: string; win: 'qr' | 'bl' | 'tie' }[] = [

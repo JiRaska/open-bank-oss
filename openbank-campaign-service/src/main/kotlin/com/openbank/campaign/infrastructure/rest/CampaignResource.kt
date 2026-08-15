@@ -7,6 +7,7 @@ package com.openbank.campaign.infrastructure.rest
 import com.openbank.campaign.application.usecase.CampaignNotFoundException
 import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundException
 import com.openbank.campaign.application.usecase.CampaignService
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignStep
@@ -46,6 +47,8 @@ data class CreateCampaignRequest(
      * but only one the segment still contains: the trigger decides when, the segment decides who.
      */
     val trigger: String? = null,
+    /** Bounded, explicit yes/no delivery branches. Absent preserves a linear campaign. */
+    val decisions: List<DecisionRequest> = emptyList(),
 )
 
 /** Optional on create (ADR-0200 D1, #3585): absent means the journey runs every step, as before. */
@@ -94,6 +97,19 @@ data class StepRequest(
     val variantBTemplate: String? = null,
     val variantBChannel: Channel? = null,
     val variantBDelaySeconds: Long? = null,
+    /** Direct forward edge in an explicit-decision journey; absent makes this step terminal. */
+    val nextStepOrder: Int? = null,
+)
+
+/**
+ * One named, reviewable decision node. It may read only delivery confirmation, never an inferred
+ * open or a marketing conversion; those facts are not available to journey orchestration.
+ */
+data class DecisionRequest(
+    val sourceStepOrder: Int,
+    val evaluationDelaySeconds: Long = 0,
+    val confirmedStepOrder: Int,
+    val notConfirmedStepOrder: Int,
 )
 
 /**
@@ -138,6 +154,16 @@ private fun CreateCampaignRequest.toSteps(): List<CampaignStep> = steps.map {
         it.variantBTemplate,
         it.variantBChannel,
         it.variantBDelaySeconds,
+        it.nextStepOrder,
+    )
+}
+
+private fun CreateCampaignRequest.toDecisions(): List<CampaignDecision> = decisions.map {
+    CampaignDecision(
+        sourceStepOrder = it.sourceStepOrder,
+        evaluationDelaySeconds = it.evaluationDelaySeconds,
+        confirmedStepOrder = it.confirmedStepOrder,
+        notConfirmedStepOrder = it.notConfirmedStepOrder,
     )
 }
 
@@ -151,6 +177,7 @@ private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignD
     holdoutPercent = holdoutPercent,
     schedule = schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
     trigger = trigger,
+    decisions = toDecisions(),
 )
 
 /**
@@ -188,6 +215,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
             request.holdoutPercent,
             request.schedule?.let { CampaignSchedule(it.cadence, it.endAt) },
             request.trigger,
+            request.toDecisions(),
         )
         Response.status(Response.Status.CREATED).entity(campaign).build()
     } catch (e: CampaignReferenceNotFoundException) {

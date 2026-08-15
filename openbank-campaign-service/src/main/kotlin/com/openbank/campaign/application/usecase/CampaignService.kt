@@ -8,9 +8,11 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
@@ -26,6 +28,8 @@ import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.campaign.domain.model.TriggerCatalog
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
@@ -52,13 +56,20 @@ class CampaignReferenceNotFoundException(message: String) : NoSuchElementExcepti
  */
 @ApplicationScoped
 @Suppress("TooManyFunctions") // Lifecycle actions are separate authenticated use cases, not helpers.
-class CampaignService(
+class CampaignService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
     private val segments: SegmentRegistry,
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
+    /**
+     * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
+     * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
+     * graph work rather than replaying its new commands in an older binary.
+     */
+    @ConfigProperty(name = "openbank.campaign.explicit-graph-activation-enabled", defaultValue = "false")
+    private val explicitGraphActivationEnabled: Boolean,
 ) {
 
     private val log = Logger.getLogger(CampaignService::class.java)
@@ -74,6 +85,7 @@ class CampaignService(
         holdoutPercent: Int = 0,
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
+        decisions: List<CampaignDecision> = emptyList(),
     ): Campaign {
         val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
         val campaign = Campaign(
@@ -90,6 +102,7 @@ class CampaignService(
             // an unapproved journey (ADR-0200 D5).
             schedule = schedule,
             trigger = trigger,
+            decisions = decisions,
             state = CampaignState.DRAFT,
             createdBy = createdBy,
             approvedBy = null,
@@ -134,6 +147,7 @@ class CampaignService(
             holdoutPercent = source.holdoutPercent,
             schedule = source.schedule,
             trigger = source.trigger,
+            decisions = source.decisions,
         )
     }
 
@@ -180,6 +194,9 @@ class CampaignService(
      */
     suspend fun activate(id: UUID, approver: String): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
+        require(campaign.decisions.isEmpty() || explicitGraphActivationEnabled) {
+            "explicit decision journeys are held until the rollback-compatible Temporal worker rollout is enabled"
+        }
         val activated = campaigns.save(campaign.activate(approver))
         activated.schedule?.let { schedule ->
             val cadence = ScheduleCatalog[schedule.cadence]
@@ -277,7 +294,7 @@ class CampaignService(
                     // next `enrol` completes the pair. The reverse order costs a party: the row is
                     // already committed, the skip below sees it, and that party is never contacted and
                     // never retried (#2953).
-                    journeys.startJourney(id, partyId)
+                    journeys.startJourney(id, partyId, campaign.journeyType())
                     val contentVariant = ContentVariant.assign(campaign.id, partyId)
                         .takeIf { campaign.hasContentExperiment }
                     enrolments.save(
@@ -308,6 +325,9 @@ class CampaignService(
 
     suspend fun listEnrolments(id: UUID): List<Enrolment> = enrolments.listByCampaign(id)
 }
+
+private fun Campaign.journeyType(): JourneyType =
+    if (decisions.isEmpty()) JourneyType.LINEAR else JourneyType.DECISION_GRAPH
 
 /**
  * Campaign control targets only live journeys. Completed enrolments have no workflow to wake and

@@ -4,8 +4,10 @@
 
 package com.openbank.campaign.application.workflow
 
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.DecisionPath
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.StopCondition
 import io.temporal.activity.ActivityInterface
@@ -40,12 +42,28 @@ interface CampaignJourneyActivities {
 
     fun deliverStep(campaignId: UUID, partyId: UUID, stepOrder: Int): StepOutcome
     fun advanceStep(campaignId: UUID, partyId: UUID, stepOrder: Int)
+
+    /** Move durable progress to a graph edge's target rather than assuming order + 1. */
+    fun advanceToStep(campaignId: UUID, partyId: UUID, stepOrder: Int)
+
+    /** Persist the selected explicit edge once, so Studio can render actual journey paths. */
+    fun recordDecisionPath(
+        campaignId: UUID,
+        partyId: UUID,
+        sourceStepOrder: Int,
+        path: DecisionPath,
+        nextStepOrder: Int,
+    )
     fun markCompleted(campaignId: UUID, partyId: UUID)
     fun markTerminated(campaignId: UUID, partyId: UUID, reason: TerminationReason)
 }
 
 /** Everything a journey needs from the campaign definition, in one activity call (#3585). */
-data class JourneyDefinition(val steps: List<CampaignStep>, val stopCondition: StopCondition?)
+data class JourneyDefinition(
+    val steps: List<CampaignStep>,
+    val stopCondition: StopCondition?,
+    val decisions: List<CampaignDecision> = emptyList(),
+)
 
 /** Durable state checked before every send; signals provide low latency, this provides correctness. */
 data class JourneyControlState(val campaignState: CampaignState?, val goalReached: Boolean)

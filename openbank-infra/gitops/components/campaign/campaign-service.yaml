@@ -48,7 +48,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: campaign-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-216d50cb
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-campaign-service:sandbox-3cc3fe08
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -72,6 +72,12 @@ spec:
               value: jdbc:postgresql://campaign-db-rw.campaign.svc:5432/openbank_campaigns
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: vertx-reactive:postgresql://campaign-db-rw.campaign.svc:5432/openbank_campaigns
+            # V15 (Stories) was deployed before the additive graph migrations V13/V14.  Flyway
+            # otherwise refuses to start rather than backfilling those safe, additive columns.
+            # Keep this explicit until all environments have recorded V13/V14; then remove it in
+            # a separately reviewed cleanup rather than making out-of-order migrations implicit.
+            - name: QUARKUS_FLYWAY_OUT_OF_ORDER
+              value: "true"
             - name: DB_USER
               value: openbank
             - name: DB_PASSWORD
@@ -118,6 +124,15 @@ spec:
               value: openbank-campaign
             - name: OPENBANK_TEMPORAL_TASK_QUEUE
               value: openbank-campaign
+            # Graph runs are isolated from the replay-compatible legacy workflow queue. A rollback
+            # cannot hand their new command sequence to a legacy worker; it only pauses the graph
+            # queue until the compatible image is restored.
+            - name: OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE
+              value: openbank-campaign-decision
+            # The isolated graph worker is live and healthy. This separately reviewed step admits
+            # graph-campaign activation without changing the replay-compatible legacy queue.
+            - name: OPENBANK_CAMPAIGN_EXPLICIT_GRAPH_ACTIVATION_ENABLED
+              value: "true"
             - name: CAMPAIGN_WORKER_ENABLED
               value: "true"
             # ADR-0198: live per-send consent check (fail-closed). Declared as an

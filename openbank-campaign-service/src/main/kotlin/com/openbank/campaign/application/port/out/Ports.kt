@@ -302,8 +302,11 @@ interface JourneySignaller {
     fun signalCampaignResumed(campaignId: UUID, partyId: UUID)
     fun signalCampaignClosed(campaignId: UUID, partyId: UUID)
     fun signalGoalReached(campaignId: UUID, partyId: UUID)
-    fun startJourney(campaignId: UUID, partyId: UUID)
+    fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType)
 }
+
+/** The execution lane is selected from the reviewed campaign definition before Temporal starts. */
+enum class JourneyType { LINEAR, DECISION_GRAPH }
 
 /**
  * The recurring-enrolment schedule of a campaign, held outside this service by Temporal.

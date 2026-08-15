@@ -14,6 +14,7 @@ import {
   JourneyEditor,
   MAX_STEPS,
   type EditorChannel,
+  type EditorDecision,
   type EditorInAppSurface,
   type EditorStep,
 } from '@/components/campaigns/JourneyEditor'
@@ -71,7 +72,17 @@ interface CampaignTemplate {
   inAppSurface?: EditorInAppSurface | null
 }
 
+/** Server definitions retain their own (potentially sparse) order; canvas cards do not. */
+interface StoredCampaignStep extends EditorStep {
+  order: number
+}
+
 type EntryMode = 'MANUAL' | 'SCHEDULE' | 'TRIGGER'
+
+// Notification providers acknowledge asynchronously.  A branch taken immediately after handoff
+// would almost always see PENDING and turn a real delivery question into a disguised "no" path.
+// One day is the reviewed default window; the API still records the exact value with the decision.
+const DELIVERY_CONFIRMATION_DELAY_SECONDS = 86_400
 
 const newStep = (choice: CampaignTemplate): EditorStep => ({
   // The studio starts with the primary owned surface: the bank app. E-mail remains a supported
@@ -105,6 +116,7 @@ export default function NewCampaignPage() {
   const [trigger, setTrigger] = useState('')
   const [entryUnavailable, setEntryUnavailable] = useState(false)
   const [steps, setSteps] = useState<EditorStep[]>([])
+  const [decisions, setDecisions] = useState<EditorDecision[]>([])
   const [journeyRecipe, setJourneyRecipe] = useState<JourneyRecipeId | null>('RETURN_TO_APP')
   const [selected, setSelected] = useState<number | null>(0)
   const [reach, setReach] = useState<number | null>(null)
@@ -187,7 +199,10 @@ export default function NewCampaignPage() {
       .then(r => r.json())
       .then((d: { campaign?: {
         state?: string; name?: string; goal?: string; segmentRef?: { name: string; version: number }
-        steps?: EditorStep[]; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
+        steps?: StoredCampaignStep[]; decisions?: Array<{
+          sourceStepOrder: number; evaluationDelaySeconds?: number
+          confirmedStepOrder: number; notConfirmedStepOrder: number
+        }>; stopCondition?: { maxSendsPerParty: number } | null; conversionRule?: string | null
         holdoutPercent?: number; schedule?: { cadence: string } | null; trigger?: string | null
       }; sources?: { campaign?: string } }) => {
         const campaign = d.campaign
@@ -203,8 +218,44 @@ export default function NewCampaignPage() {
           previewReach(ref)
         }
         if (campaign.steps?.length) {
-          setSteps(campaign.steps)
+          // The API permits zero-based and sparse order values. The Studio owns its contiguous
+          // card indexes, so map every stored edge through the actual ordered definition instead
+          // of assuming a value such as 4 refers to its fifth visual card.
+          const storedSteps = [...campaign.steps].sort((a, b) => a.order - b.order)
+          const editorIndexByOrder = new Map(storedSteps.map((step, index) => [step.order, index]))
+          const editorIndex = (order: number) => editorIndexByOrder.get(order)
+          const decisionsForEditor = (campaign.decisions ?? []).map(decision => ({
+            sourceStepOrder: editorIndex(decision.sourceStepOrder),
+            evaluationDelaySeconds: decision.evaluationDelaySeconds ?? DELIVERY_CONFIRMATION_DELAY_SECONDS,
+            confirmedStepOrder: editorIndex(decision.confirmedStepOrder),
+            notConfirmedStepOrder: editorIndex(decision.notConfirmedStepOrder),
+          }))
+          if (decisionsForEditor.some(decision =>
+            decision.sourceStepOrder === undefined ||
+            decision.confirmedStepOrder === undefined ||
+            decision.notConfirmedStepOrder === undefined,
+          )) {
+            setError(t('Koncept má neplatný odkaz v rozhodovací cestě.', 'This draft has an invalid decision-path reference.'))
+            return
+          }
+          setSteps(storedSteps.map(step => ({
+            ...step,
+            ...(step.conditionSourceOrder !== undefined && step.conditionSourceOrder !== null
+              ? { conditionSourceOrder: editorIndex(step.conditionSourceOrder) } : {}),
+            ...(step.nextStepOrder !== undefined && step.nextStepOrder !== null
+              ? { nextStepOrder: editorIndex(step.nextStepOrder) } : {}),
+          })))
+          if (storedSteps.some(step =>
+            (step.conditionSourceOrder !== undefined && step.conditionSourceOrder !== null && editorIndex(step.conditionSourceOrder) === undefined) ||
+            (step.nextStepOrder !== undefined && step.nextStepOrder !== null && editorIndex(step.nextStepOrder) === undefined),
+          )) {
+            setError(t('Koncept má neplatný odkaz mezi kroky.', 'This draft has an invalid step-path reference.'))
+            return
+          }
+          setDecisions(decisionsForEditor as EditorDecision[])
           setSelected(0)
+        } else {
+          setDecisions([])
         }
         setStopAfter(campaign.stopCondition?.maxSendsPerParty ?? null)
         setConversionRule(campaign.conversionRule ?? null)
@@ -300,27 +351,27 @@ export default function NewCampaignPage() {
       }]
     })
 
-  /**
-   * A binary decision is an authoring shortcut over the service's two complementary, observable
-   * delivery conditions. Both generated paths explicitly point at the same source step: a skipped
-   * first path can therefore never become the second path's input.
-   */
+  /** Create a real reviewed decision node, not two hidden linear conditions. */
   const addDeliveryDecision = () =>
     setSteps(prev => {
       if (prev.length < 1 || prev.length > MAX_STEPS - 2) return prev
       const first = defaultStep()
       if (!first) return prev
-      const decisionStep = (condition: EditorStep['condition']): EditorStep => ({
+      const decisionStep = (): EditorStep => ({
         ...newStep(first),
-        condition,
-        conditionSourceOrder: prev.length - 1,
         ...(contentExperiment ? { variantBVariables: {} } : {}),
       })
       setSelected(prev.length)
+      setDecisions(current => [...current, {
+        sourceStepOrder: prev.length - 1,
+        evaluationDelaySeconds: DELIVERY_CONFIRMATION_DELAY_SECONDS,
+        confirmedStepOrder: prev.length,
+        notConfirmedStepOrder: prev.length + 1,
+      }])
       return [
         ...prev,
-        decisionStep('IF_PREVIOUS_CONFIRMED'),
-        decisionStep('IF_PREVIOUS_NOT_CONFIRMED'),
+        decisionStep(),
+        decisionStep(),
       ]
     })
 
@@ -340,12 +391,16 @@ export default function NewCampaignPage() {
       ...(step.variantBVariables ? { variantBVariables: { ...step.variantBVariables } } : {}),
     })))
     setJourneyRecipe(recipe.id)
+    setDecisions([])
     setSelected(0)
   }
 
   const removeStep = (i: number) =>
     setSteps(prev => {
       const next = prev.filter((_, k) => k !== i)
+      // Renumbering graph edges after a deletion can silently choose a different customer path.
+      // Removing any card therefore intentionally returns the draft to its explicit linear shape.
+      setDecisions([])
       setSelected(null)
       return next
     })
@@ -421,6 +476,14 @@ export default function NewCampaignPage() {
         ...(holdoutPercent > 0 ? { holdoutPercent } : {}),
         ...(entryMode === 'SCHEDULE' && cadence ? { schedule: { cadence } } : {}),
         ...(entryMode === 'TRIGGER' && trigger ? { trigger } : {}),
+        ...(decisions.length > 0 ? {
+          decisions: decisions.map(d => ({
+            sourceStepOrder: d.sourceStepOrder + 1,
+            evaluationDelaySeconds: d.evaluationDelaySeconds,
+            confirmedStepOrder: d.confirmedStepOrder + 1,
+            notConfirmedStepOrder: d.notConfirmedStepOrder + 1,
+          })),
+        } : {}),
         steps: steps.map((s, i) => ({
           order: i + 1,
           template: s.template,
@@ -435,6 +498,7 @@ export default function NewCampaignPage() {
           ...(s.fallbackToPush ? { fallbackToPush: true } : {}),
           ...(s.mobileDestination ? { mobileDestination: s.mobileDestination } : {}),
           ...(s.inAppSurface ? { inAppSurface: s.inAppSurface } : {}),
+          ...(s.nextStepOrder !== undefined ? { nextStepOrder: s.nextStepOrder + 1 } : {}),
           delaySeconds: s.delaySeconds,
         })),
       }),
@@ -690,6 +754,7 @@ export default function NewCampaignPage() {
           onSelect={setSelected}
           onAdd={addStep}
           onAddDecision={addDeliveryDecision}
+          decisions={decisions}
           contentCatalogueReady={contentCatalogueState === 'ok'}
           onRemove={removeStep}
           templateLabels={templateLabels}

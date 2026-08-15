@@ -9,10 +9,12 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
@@ -25,6 +27,7 @@ import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -80,7 +83,7 @@ class CampaignScheduleLifecycleTest {
             calls += "close:$partyId"
         }
         override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
-        override fun startJourney(campaignId: UUID, partyId: UUID) = Unit
+        override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) = Unit
     }
 
     private fun campaign(state: CampaignState, schedule: CampaignSchedule?) = Campaign(
@@ -138,6 +141,7 @@ class CampaignScheduleLifecycleTest {
             },
             journeys = journeys,
             scheduler = scheduler,
+            explicitGraphActivationEnabled = false,
         )
     }
 
@@ -167,6 +171,26 @@ class CampaignScheduleLifecycleTest {
         assertThat(scheduler.calls)
             .describedAs("campaigns without a cadence must not acquire a Temporal schedule object")
             .isEmpty()
+    }
+
+    @Test
+    fun `an explicit graph remains inactive until its isolated worker rollout is enabled`(): Unit = runBlocking {
+        val scheduler = RecordingScheduler()
+        val graph = campaign(CampaignState.PENDING_APPROVAL, null).copy(
+            steps = listOf(
+                CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(2, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(3, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+            ),
+            decisions = listOf(CampaignDecision(1, 86_400, 2, 3)),
+        )
+
+        assertThatThrownBy {
+            runBlocking { service(graph, scheduler).activate(campaignId, "checker@openbank.test") }
+        }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("explicit decision journeys are held")
+        assertThat(scheduler.calls).isEmpty()
     }
 
     @Test

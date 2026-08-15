@@ -11,6 +11,7 @@ import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
@@ -89,6 +90,12 @@ class CampaignDraftRevisionTest {
             holdoutPercent = 10,
             schedule = CampaignSchedule("DAILY_MORNING"),
             trigger = "ACCOUNT_OPENED",
+            steps = listOf(
+                CampaignStep(1, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(2, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+                CampaignStep(3, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0),
+            ),
+            decisions = listOf(CampaignDecision(1, 86_400, 2, 3)),
         )
         val campaigns = mockk<CampaignRepository>()
         coEvery { campaigns.findById(campaignId) } returns source
@@ -107,6 +114,7 @@ class CampaignDraftRevisionTest {
         assertThat(copied.holdoutPercent).isEqualTo(source.holdoutPercent)
         assertThat(copied.schedule).isEqualTo(source.schedule)
         assertThat(copied.trigger).isEqualTo(source.trigger)
+        assertThat(copied.decisions).isEqualTo(source.decisions)
         assertThat(source.state).isEqualTo(CampaignState.ACTIVE)
         assertThat(source.approvedBy).isEqualTo("checker@openbank.test")
         coVerify(exactly = 1) { campaigns.save(copied) }
@@ -125,6 +133,7 @@ class CampaignDraftRevisionTest {
             segmentEvaluation = mockk<SegmentEvaluationPort>(),
             journeys = mockk<JourneySignaller>(),
             scheduler = mockk<CampaignScheduler>(),
+            explicitGraphActivationEnabled = false,
         )
     }
 }

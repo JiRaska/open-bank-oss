@@ -18,6 +18,8 @@ class CampaignWorkerRegistrar(
     private val workerEnabled: Boolean,
     @ConfigProperty(name = "openbank.temporal.task-queue", defaultValue = "openbank-campaign")
     private val taskQueue: String,
+    @ConfigProperty(name = "openbank.campaign.decision-task-queue", defaultValue = "openbank-campaign-decision")
+    private val decisionTaskQueue: String,
     private val workflowClient: WorkflowClient,
     private val activities: CampaignJourneyActivitiesImpl,
     private val sweepActivities: CampaignEnrolmentSweepActivitiesImpl,
@@ -43,7 +45,12 @@ class CampaignWorkerRegistrar(
             CampaignEnrolmentSweepWorkflowImpl::class.java,
         )
         worker.registerActivitiesImplementations(activities, sweepActivities)
+        // Decision graphs have their own workflow type and task queue. An old binary polling only
+        // the legacy queue can never replay graph-only commands after an emergency rollback.
+        val decisionWorker = factory.newWorker(decisionTaskQueue)
+        decisionWorker.registerWorkflowImplementationTypes(DecisionJourneyWorkflowImpl::class.java)
+        decisionWorker.registerActivitiesImplementations(activities)
         factory.start()
-        log.infof("Temporal worker started on task queue '%s'", taskQueue)
+        log.infof("Temporal workers started on task queues '%s' and '%s'", taskQueue, decisionTaskQueue)
     }
 }

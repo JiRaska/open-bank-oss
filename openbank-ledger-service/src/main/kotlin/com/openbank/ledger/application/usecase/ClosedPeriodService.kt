@@ -16,6 +16,7 @@ import com.openbank.ledger.application.port.out.ClosedPeriodRepository
 import com.openbank.ledger.application.port.out.JournalRepository
 import com.openbank.ledger.domain.event.PeriodFrozenEvent
 import com.openbank.ledger.domain.model.AccountingPeriod
+import com.openbank.ledger.domain.model.ClosedPeriodEvidenceState
 import com.openbank.ledger.domain.model.ClosedPeriodRecord
 import com.openbank.ledger.domain.model.ClosedPeriodStatus
 import com.openbank.ledger.domain.model.ClosedPeriodVerification
@@ -40,6 +41,7 @@ import java.time.Instant
  * either change those hashes or leave two code paths pretending to be one.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // One cohesive statutory-close use case; splitting would blur its atomic invariants.
 class ClosedPeriodService(
     private val journalRepository: JournalRepository,
     private val closedPeriodRepository: ClosedPeriodRepository,
@@ -48,8 +50,46 @@ class ClosedPeriodService(
     private val clock: Clock,
 ) : ClosedPeriodUseCase {
 
-    override suspend fun getTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance =
-        computeTrialBalance(query.period)
+    override suspend fun getTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance {
+        val record = closedPeriodRepository.findByPeriod(query.period)
+        // A FROZEN close is evidence, not a cache. Returning a fresh aggregate here would make a
+        // regulatory reader observe data other than the hash-attested artefact.
+        return if (record?.status == ClosedPeriodStatus.FROZEN &&
+            record.evidenceState == ClosedPeriodEvidenceState.LINES_V1
+        ) {
+            PeriodTrialBalance(record.period, closedPeriodRepository.findFrozenLines(record.id)).also { evidence ->
+                if (evidence.contentHash() != record.contentHash) {
+                    // A legacy FROZEN close without V23 rows must never silently fall back to a
+                    // mutable journal query. An empty ledger remains valid: its canonical hash
+                    // still matches. Anything else is an operational evidence incident.
+                    throw ClosedPeriodConflictException(
+                        "Frozen evidence for ${record.period.label} is unavailable or does not match its attestation",
+                    )
+                }
+            }
+        } else {
+            computeTrialBalance(query.period)
+        }
+    }
+
+    override suspend fun getFrozenTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance {
+        val record = closedPeriodRepository.findByPeriod(query.period)
+            ?: throw ClosedPeriodConflictException(
+                "Period ${query.period.label} has no frozen line evidence; regulatory reporting is fail-closed",
+            )
+        if (record.status != ClosedPeriodStatus.FROZEN || record.evidenceState != ClosedPeriodEvidenceState.LINES_V1) {
+            throw ClosedPeriodConflictException(
+                "Period ${query.period.label} evidence state is ${record.evidenceState}; regulatory reporting requires FROZEN LINES_V1",
+            )
+        }
+        return PeriodTrialBalance(record.period, closedPeriodRepository.findFrozenLines(record.id)).also { evidence ->
+            if (evidence.contentHash() != record.contentHash) {
+                throw ClosedPeriodConflictException(
+                    "Frozen evidence for ${record.period.label} does not match its attestation",
+                )
+            }
+        }
+    }
 
     override suspend fun createDraft(command: CreateClosedPeriodDraftCommand): ClosedPeriodRecord {
         requirePeriodHasEnded(command.period)
@@ -95,7 +135,10 @@ class ClosedPeriodService(
         // Four-eyes (maker != checker) is enforced in the aggregate, which also refuses a draft
         // with no recorded author — without a maker there is nothing to separate the checker from.
         val frozen = record.freeze(command.frozenBy, Instant.now(clock))
-        return closedPeriodRepository.saveFrozen(frozen, frozenMessage(frozen))
+        // Persist these exact re-verified lines in the same transaction as the status flip and
+        // outbox row. A second repository read would leave a TOCTOU gap between hash verification
+        // and what becomes statutory evidence.
+        return closedPeriodRepository.saveFrozen(frozen, fresh, frozenMessage(frozen))
     }
 
     override suspend fun get(query: GetClosedPeriodQuery): ClosedPeriodRecord =

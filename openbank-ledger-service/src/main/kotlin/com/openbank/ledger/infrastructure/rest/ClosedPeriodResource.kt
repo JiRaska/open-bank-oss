@@ -70,6 +70,16 @@ class ClosedPeriodResource(private val closedPeriodUseCase: ClosedPeriodUseCase)
     }
 
     @GET
+    @Path("/{type}/{date}/frozen-trial-balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "#date")
+    @Operation(summary = "Immutable FROZEN LINES_V1 trial balance for regulatory reporting (fail-closed)")
+    suspend fun frozenTrialBalance(@PathParam("type") type: String, @PathParam("date") date: String): Response {
+        val tb = closedPeriodUseCase.getFrozenTrialBalance(GetPeriodTrialBalanceQuery(period(type, date)))
+        return Response.ok(tb.toResponse()).build()
+    }
+
+    @GET
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
     @Operation(summary = "List closed-period records overlapping a date range")
@@ -161,6 +171,16 @@ data class PeriodTrialBalanceResponse(
     val balanced: Boolean,
     val accountCount: Int,
     val contentHash: String,
+    val lines: List<PeriodTrialBalanceLineResponse>,
+)
+
+data class PeriodTrialBalanceLineResponse(
+    val code: String,
+    val type: String,
+    val currency: String,
+    val totalDebit: BigDecimal,
+    val totalCredit: BigDecimal,
+    val net: BigDecimal,
 )
 
 data class ClosedPeriodResponse(
@@ -170,6 +190,7 @@ data class ClosedPeriodResponse(
     val from: String,
     val to: String,
     val status: String,
+    val evidenceState: String,
     val computedAt: String,
     val totalDebits: BigDecimal,
     val totalCredits: BigDecimal,
@@ -199,6 +220,16 @@ private fun PeriodTrialBalance.toResponse() = PeriodTrialBalanceResponse(
     balanced = isBalanced,
     accountCount = accountCount,
     contentHash = contentHash(),
+    lines = lines.map {
+        PeriodTrialBalanceLineResponse(
+            code = it.code,
+            type = it.type.name,
+            currency = it.currency,
+            totalDebit = it.totalDebit,
+            totalCredit = it.totalCredit,
+            net = it.net,
+        )
+    },
 )
 
 private fun ClosedPeriodRecord.toResponse() = ClosedPeriodResponse(
@@ -208,6 +239,7 @@ private fun ClosedPeriodRecord.toResponse() = ClosedPeriodResponse(
     from = period.from.toString(),
     to = period.to.toString(),
     status = status.name,
+    evidenceState = evidenceState.name,
     computedAt = computedAt.toString(),
     totalDebits = totalDebits,
     totalCredits = totalCredits,
