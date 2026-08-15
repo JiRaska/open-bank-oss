@@ -97,7 +97,15 @@ abstract class CampaignJourneyWorkflowSupport {
         val decisions = definition.decisions.associateBy { it.sourceStepOrder }
         var currentStepOrder: Int? = definition.steps.minOfOrNull { it.order }
         while (currentStepOrder != null) {
-            val stepOrder = currentStepOrder
+            // Kotlin cannot smart-cast a `var` the loop body reassigns, so an inferred
+            // `val stepOrder = currentStepOrder` is `Int?` and compiles to a boxed Integer the
+            // loop condition has already proved non-null (CodeQL "Boxed variable is never null",
+            // alert 455). The explicit `Int` plus requireNotNull unboxes it, and matches the very
+            // next line's idiom. `currentStepOrder` itself stays nullable and must: `minOfOrNull`
+            // returns null for a definition with no steps, and a null `nextStepOrder` ends the
+            // journey. `?: break` would read better but adds a second jump statement, which
+            // detekt's LoopWithTooManyJumpStatements rejects alongside the `continue` below.
+            val stepOrder: Int = requireNotNull(currentStepOrder)
             val step = requireNotNull(steps[stepOrder]) { "graph references absent step $stepOrder" }
             executeStep(campaignId, partyId, definition, step, controlVersion, decisionSourceVersion)?.let {
                 activities.markTerminated(campaignId, partyId, it)
