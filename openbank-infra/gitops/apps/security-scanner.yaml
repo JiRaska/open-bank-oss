@@ -1,6 +1,6 @@
 # security-scanner domain: security-scanner-service + its single-owner CNPG Postgres
-# + outbound Kafka topics (openbank.security.scan.event + openbank.security.ict.incident).
-# The scanner probes all fleet services every 30 min and publishes findings to Kafka;
+# + the outbound Kafka topic openbank.security.ict.incident.
+# The scanner probes all fleet services every 30 min and serves the report over REST;
 # the admin-ui /security page reads the latest report from the bundled security-report.json
 # (baked at image build time from CI output — never triggered via UI, ADR-0029 rule #3).
 apiVersion: argoproj.io/v1alpha1
