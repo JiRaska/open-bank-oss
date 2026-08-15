@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.37.0
+  version: 1.38.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -724,6 +724,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CampaignStep'
+        decisions:
+          type: array
+          maxItems: 3
+          description: >-
+            Reviewed explicit delivery graph for this campaign. Empty or absent means the historic
+            linear journey. Every reference is the persisted CampaignStep order; clients that
+            renumber their editor cards must translate references with the actual stored order.
+          items:
+            $ref: '#/components/schemas/CampaignDecision'
         stopCondition:
           $ref: '#/components/schemas/StopCondition'
         schedule:
@@ -871,6 +880,27 @@ components:
             Optional explicit earlier step whose delivery status the condition reads. Both arms of
             a decision use the same source, so a skipped arm cannot become the other arm's input.
             Absent preserves the historical most-recent-earlier-step behaviour.
+        nextStepOrder:
+          type: integer
+          nullable: true
+          minimum: 0
+          description: >-
+            The explicit forward edge from this delivery step when the campaign uses decision
+            nodes. Null means this path ends. It is ignored by historic linear campaigns and may
+            not be set on a decision source.
+    CampaignDecision:
+      type: object
+      required: [sourceStepOrder, confirmedStepOrder, notConfirmedStepOrder]
+      description: >-
+        A bounded yes/no delivery decision. It reads only notification-service's durable delivery
+        state after the optional evaluation wait: CONFIRMED selects confirmedStepOrder; every other
+        observable state (including PENDING) selects notConfirmedStepOrder. It never claims an
+        open, click or conversion signal.
+      properties:
+        sourceStepOrder: { type: integer, minimum: 0 }
+        evaluationDelaySeconds: { type: integer, minimum: 0, default: 0 }
+        confirmedStepOrder: { type: integer, minimum: 0 }
+        notConfirmedStepOrder: { type: integer, minimum: 0 }
     CreateCampaignRequest:
       type: object
       required: [name, goal, segmentName, segmentVersion, steps]
@@ -883,6 +913,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CampaignStep'
+        decisions:
+          type: array
+          maxItems: 3
+          description: >-
+            Optional explicit delivery graph. When present it cannot be mixed with legacy
+            condition/conditionSourceOrder steps; all edges must be forward and every step must
+            be reachable from the first ordered step.
+          items:
+            $ref: '#/components/schemas/CampaignDecision'
         stopCondition:
           $ref: '#/components/schemas/StopCondition'
         schedule:

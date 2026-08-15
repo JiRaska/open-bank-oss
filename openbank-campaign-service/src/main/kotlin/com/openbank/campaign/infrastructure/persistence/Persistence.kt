@@ -24,11 +24,13 @@ import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.ContentVariant
+import com.openbank.campaign.domain.model.DecisionPathSelection
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.DeliveryTransition
 import com.openbank.campaign.domain.model.Enrolment
@@ -79,6 +81,14 @@ class CampaignEntity : PanacheEntityBase() {
     // jsonb array column, which cannot be cast to String — every read threw ClassCastException.
     @Column(nullable = false, columnDefinition = "text")
     lateinit var stepsJson: String
+
+    /**
+     * Nullable for every linear campaign written before graph support. Keeping topology separate
+     * from step content makes rollout reversible: a downgrade can still read its historical steps
+     * and a graph-enabled version can distinguish "no graph" from an empty/corrupt graph payload.
+     */
+    @Column(columnDefinition = "text")
+    var decisionsJson: String? = null
 
     // Nullable (V3): a campaign without a stop condition has no row content here — null, not an
     // empty object, so "no condition" and "condition" can never be confused. Same text-not-jsonb
@@ -155,6 +165,10 @@ class EnrolmentEntity : PanacheEntityBase() {
     /** Null for historic and no-contact rows; A/B enrolments keep the arm they were assigned. */
     @Column(length = 1)
     var contentVariant: String? = null
+
+    /** Nullable for enrolments created before decision-path reporting existed. */
+    @Column(columnDefinition = "text")
+    var decisionPathJson: String? = null
 }
 
 @Entity
@@ -276,6 +290,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         segmentName = this@toEntity.segmentRef.name
         segmentVersion = this@toEntity.segmentRef.version
         stepsJson = mapper.writeValueAsString(this@toEntity.steps)
+        decisionsJson = this@toEntity.decisions.takeIf { it.isNotEmpty() }?.let { mapper.writeValueAsString(it) }
         stopConditionJson = this@toEntity.stopCondition?.let { mapper.writeValueAsString(it) }
         conversionRule = this@toEntity.conversionRule
         scheduleCadence = this@toEntity.schedule?.cadence
@@ -295,6 +310,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
         goal = goal,
         segmentRef = SegmentRef(segmentName, segmentVersion),
         steps = mapper.readValue<List<CampaignStep>>(stepsJson),
+        decisions = decisionsJson?.let { mapper.readValue<List<CampaignDecision>>(it) } ?: emptyList(),
         stopCondition = stopConditionJson?.let { mapper.readValue<StopCondition>(it) },
         conversionRule = conversionRule,
         // Reconstructed only when a cadence is present: an end instant on its own would be a
@@ -311,7 +327,7 @@ class PanacheCampaignRepository(private val mapper: ObjectMapper) :
 }
 
 @ApplicationScoped
-class PanacheEnrolmentRepository :
+class PanacheEnrolmentRepository(private val mapper: ObjectMapper) :
     EnrolmentRepository,
     PanacheRepository<EnrolmentEntity> {
 
@@ -354,6 +370,7 @@ class PanacheEnrolmentRepository :
         completedAt = this@toEntity.completedAt
         experimentCohort = this@toEntity.experimentCohort.name
         contentVariant = this@toEntity.contentVariant?.name
+        decisionPathJson = this@toEntity.decisionPath.takeIf { it.isNotEmpty() }?.let { mapper.writeValueAsString(it) }
     }
 
     private fun EnrolmentEntity.toDomain(): Enrolment = Enrolment(
@@ -366,6 +383,7 @@ class PanacheEnrolmentRepository :
         completedAt,
         ExperimentCohort.valueOf(experimentCohort),
         contentVariant?.let(ContentVariant::valueOf),
+        decisionPathJson?.let { mapper.readValue<List<DecisionPathSelection>>(it) } ?: emptyList(),
     )
 }
 

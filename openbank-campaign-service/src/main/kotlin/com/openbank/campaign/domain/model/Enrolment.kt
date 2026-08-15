@@ -28,7 +28,19 @@ data class Enrolment(
      * allocation implementation ever changes.
      */
     val contentVariant: ContentVariant? = null,
+    /** Durable, per-party evidence of each explicit delivery decision the journey evaluated. */
+    val decisionPath: List<DecisionPathSelection> = emptyList(),
 )
+
+/** One selected edge in a reviewed campaign graph. */
+data class DecisionPathSelection(
+    val sourceStepOrder: Int,
+    val selected: DecisionPath,
+    val nextStepOrder: Int,
+    val decidedAt: Instant,
+)
+
+enum class DecisionPath { CONFIRMED, NOT_CONFIRMED }
 
 enum class EnrolmentState {
     ACTIVE,

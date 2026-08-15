@@ -7,6 +7,7 @@ package com.openbank.campaign.application.usecase
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.CampaignState
@@ -62,7 +63,7 @@ class TriggeredEnrolmentService(
         // success. A crash between the two costs a duplicate start, which the workflow id makes a
         // no-op; the reverse order costs the party forever, because the committed row makes every
         // later attempt skip them.
-        journeys.startJourney(campaignId, partyId)
+        journeys.startJourney(campaignId, partyId, campaign.journeyType())
         enrolments.save(
             Enrolment(
                 id = Ids.newId(),
@@ -78,6 +79,9 @@ class TriggeredEnrolmentService(
         return TriggeredEnrolment.ENROLLED
     }
 }
+
+private fun com.openbank.campaign.domain.model.Campaign.journeyType(): JourneyType =
+    if (decisions.isEmpty()) JourneyType.LINEAR else JourneyType.DECISION_GRAPH
 
 /**
  * What one triggered enrolment did. Every value except [ENROLLED] is a normal outcome, not a fault:

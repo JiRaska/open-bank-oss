@@ -48,6 +48,20 @@ export interface JourneyStep {
   channel?: 'EMAIL' | 'PUSH' | 'BANNER'
   condition?: 'IF_PREVIOUS_CONFIRMED' | 'IF_PREVIOUS_NOT_CONFIRMED'
   conditionSourceOrder?: number
+  nextStepOrder?: number
+}
+
+export interface JourneyDecision {
+  sourceStepOrder: number
+  evaluationDelaySeconds: number
+  confirmedStepOrder: number
+  notConfirmedStepOrder: number
+}
+
+export interface DecisionPathSelection {
+  sourceStepOrder: number
+  selected: 'CONFIRMED' | 'NOT_CONFIRMED'
+  nextStepOrder: number
 }
 
 const NODE_W = 190
@@ -73,10 +87,18 @@ export function JourneyCanvas({
   steps,
   funnel,
   audienceSize,
+  decisions = [],
+  decisionPaths = [],
+  decisionPathsKnown = true,
 }: {
   steps: JourneyStep[]
   funnel: StepFunnel[]
   audienceSize: number | null
+  decisions?: JourneyDecision[]
+  /** Per-enrolment path evidence; absent during a mixed-version rollout remains unknown. */
+  decisionPaths?: DecisionPathSelection[]
+  /** The BFF could not load enrolments: an empty fallback is not zero observed outcomes. */
+  decisionPathsKnown?: boolean
 }) {
   const { t, language } = useLanguage()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -119,6 +141,9 @@ export function JourneyCanvas({
   const rows = Array.isArray(funnel) ? funnel : []
   const byStep = new Map(rows.map(f => [f.stepOrder, f]))
   const ordered = Array.isArray(steps) ? [...steps].sort((a, b) => a.order - b.order) : []
+  const graphMode = decisions.length > 0
+  const orderIndex = new Map(ordered.map((step, index) => [step.order, index]))
+  const firstStep = ordered[0]
 
   // Entry node + one node per step.
   const cols = ordered.length + 1
@@ -127,7 +152,10 @@ export function JourneyCanvas({
   const height = DROP_Y + maxDrops * 26 + 24
 
   const colX = (i: number) => PAD + i * (NODE_W + GAP_X)
+  const stepX = (order: number) => colX((orderIndex.get(order) ?? 0) + 1)
   const anyActivity = rows.some(f => f.reached > 0)
+  const pathCount = (sourceStepOrder: number, selected: DecisionPathSelection['selected']) =>
+    decisionPaths.filter(path => path.sourceStepOrder === sourceStepOrder && path.selected === selected).length
 
   return (
     <div className="overflow-x-auto rounded-xl border" style={{ background: 'var(--surface)' }}>
@@ -163,6 +191,60 @@ export function JourneyCanvas({
           </text>
         </g>
 
+        {/* A graph has only the edges the reviewed definition declares.  In particular, do not
+            draw a comforting left-to-right chain behind an alternative terminal branch: that turns
+            a real choice into a diagram people will misread as the customer journey. */}
+        {graphMode && firstStep && (
+          <path
+            d={`M ${colX(0) + NODE_W} ${ROW_Y} L ${stepX(firstStep.order) - 4} ${ROW_Y}`}
+            stroke="var(--border-strong)" strokeWidth="1.6" fill="none" markerEnd="url(#jc-arrow)"
+            data-graph-edge={`entry-${firstStep.order}`}
+          />
+        )}
+        {graphMode && ordered.flatMap(step => {
+          const sourceX = stepX(step.order)
+          const decision = decisions.find(item => item.sourceStepOrder === step.order)
+          if (decision) {
+            const diamondX = sourceX + NODE_W + GAP_X / 2
+            const diamondY = ROW_Y
+            const target = (targetOrder: number, branch: 'confirmed' | 'not-confirmed', yOffset: number) => {
+              const targetX = stepX(targetOrder)
+              const targetY = ROW_Y + yOffset
+              return (
+                <g key={`${step.order}-${branch}`} data-graph-edge={`${step.order}-${branch}`}>
+                  <path
+                    d={`M ${diamondX + 14} ${diamondY} C ${diamondX + 38} ${diamondY + yOffset}, ${targetX - 40} ${targetY}, ${targetX - 4} ${targetY}`}
+                    stroke={branch === 'confirmed' ? 'var(--success)' : 'var(--warning)'} strokeWidth="1.6" fill="none"
+                    markerEnd="url(#jc-arrow)"
+                  />
+                  <text x={(diamondX + targetX) / 2} y={diamondY + yOffset - 7} fontSize="10" textAnchor="middle"
+                    fill={branch === 'confirmed' ? 'var(--success)' : 'var(--warning)'}>
+                    {branch === 'confirmed' ? t('potvrzeno', 'confirmed') : t('nepotvrzeno', 'not confirmed')}
+                  </text>
+                </g>
+              )
+            }
+            return [
+              <g key={`${step.order}-decision`} data-graph-edge={`${step.order}-decision`}>
+                <path d={`M ${sourceX + NODE_W} ${ROW_Y} L ${diamondX - 15} ${diamondY}`}
+                  stroke="var(--accent)" strokeWidth="1.6" fill="none" markerEnd="url(#jc-arrow)" />
+                <path d={`M ${diamondX} ${diamondY - 15} L ${diamondX + 15} ${diamondY} L ${diamondX} ${diamondY + 15} L ${diamondX - 15} ${diamondY} Z`}
+                  fill="var(--surface)" stroke="var(--accent)" strokeWidth="1.4" />
+                <text x={diamondX} y={diamondY + 4} fontSize="11" textAnchor="middle" fill="var(--accent)" fontWeight="700">?</text>
+              </g>,
+              target(decision.confirmedStepOrder, 'confirmed', -26),
+              target(decision.notConfirmedStepOrder, 'not-confirmed', 26),
+            ]
+          }
+          if (step.nextStepOrder === undefined || step.nextStepOrder === null) return []
+          const targetX = stepX(step.nextStepOrder)
+          return [
+            <path key={`${step.order}-next`} data-graph-edge={`${step.order}-next`}
+              d={`M ${sourceX + NODE_W} ${ROW_Y} L ${targetX - 4} ${ROW_Y}`}
+              stroke="var(--border-strong)" strokeWidth="1.6" fill="none" markerEnd="url(#jc-arrow)" />,
+          ]
+        })}
+
         {ordered.map((step, i) => {
           const f = byStep.get(step.order)
           const reached = f?.reached ?? 0
@@ -177,30 +259,33 @@ export function JourneyCanvas({
             ...(f && f.failed > 0 ? [{ reason: 'FAILED', count: f.failed }] : []),
           ]
           const x = colX(i + 1)
-          const prevX = colX(i)
-          const midX = (prevX + NODE_W + x) / 2
 
           return (
             <g key={step.order}>
-              {/* Edge in, carrying the wait and how many arrived. The number rides the line rather
-                  than sitting in a column, so "where did they go" is answered where it is asked. */}
-              <path
-                d={`M ${prevX + NODE_W} ${ROW_Y} C ${midX} ${ROW_Y} ${midX} ${ROW_Y} ${x} ${ROW_Y}`}
-                stroke="var(--border-strong)" strokeWidth="1.6" fill="none" markerEnd="url(#jc-arrow)"
-              />
-              <text x={midX} y={ROW_Y - 12} fontSize="11" textAnchor="middle" fill="var(--text-secondary)">
-                {delayLabel(step.delaySeconds)}
-              </text>
-              {pathTaken > 0 && (
-                <text x={midX} y={ROW_Y + 20} fontSize="12" textAnchor="middle" fontWeight="600" fill="var(--text-primary)">
-                  {n(pathTaken)}
-                </text>
-              )}
-              {branch && (
-                <text x={midX} y={ROW_Y + 34} fontSize="10" textAnchor="middle" fill="var(--text-secondary)" data-branch={step.condition}>
-                  {branch}
-                </text>
-              )}
+              {!graphMode && (() => {
+                const prevX = colX(i)
+                const midX = (prevX + NODE_W + x) / 2
+                return <>
+                  {/* Linear definitions retain their historic, compact connector treatment. */}
+                  <path data-linear-edge="true"
+                    d={`M ${prevX + NODE_W} ${ROW_Y} C ${midX} ${ROW_Y} ${midX} ${ROW_Y} ${x} ${ROW_Y}`}
+                    stroke="var(--border-strong)" strokeWidth="1.6" fill="none" markerEnd="url(#jc-arrow)"
+                  />
+                  <text x={midX} y={ROW_Y - 12} fontSize="11" textAnchor="middle" fill="var(--text-secondary)">
+                    {delayLabel(step.delaySeconds)}
+                  </text>
+                  {pathTaken > 0 && (
+                    <text x={midX} y={ROW_Y + 20} fontSize="12" textAnchor="middle" fontWeight="600" fill="var(--text-primary)">
+                      {n(pathTaken)}
+                    </text>
+                  )}
+                  {branch && (
+                    <text x={midX} y={ROW_Y + 34} fontSize="10" textAnchor="middle" fill="var(--text-secondary)" data-branch={step.condition}>
+                      {branch}
+                    </text>
+                  )}
+                </>
+              })()}
 
               <g filter="url(#jc-shadow)">
                 <rect
@@ -219,7 +304,7 @@ export function JourneyCanvas({
                   </tspan>
                   {' '}{t('doručeno', 'delivered')}
                 </text>
-                {branch && skipped !== undefined && (
+              {!graphMode && branch && skipped !== undefined && (
                   <text x={x + 16} y={ROW_Y + 40} fontSize="10" fill="var(--text-secondary)">
                     {n(skipped)} {t('jinou cestou', 'took another path')}
                   </text>
@@ -269,6 +354,29 @@ export function JourneyCanvas({
           </text>
         )}
       </svg>
+      {decisions.length > 0 && (
+        <div className="grid gap-2 border-t px-4 py-3 sm:grid-cols-2" data-decision-outcomes>
+          {decisions.map(decision => (
+            <div key={decision.sourceStepOrder} className="rounded-lg border bg-background px-3 py-2 text-xs">
+              <p className="font-medium text-foreground">
+              {t(`Rozhodnutí po kroku ${decision.sourceStepOrder}`, `Decision after step ${decision.sourceStepOrder}`)}
+            </p>
+              {decisionPathsKnown ? (
+                <p className="mt-1 text-muted-foreground">
+                  {t(`${pathCount(decision.sourceStepOrder, 'CONFIRMED')}× potvrzeno → krok ${decision.confirmedStepOrder}; `,
+                    `${pathCount(decision.sourceStepOrder, 'CONFIRMED')}× confirmed → step ${decision.confirmedStepOrder}; `)}
+                  {t(`${pathCount(decision.sourceStepOrder, 'NOT_CONFIRMED')}× nepotvrzeno → krok ${decision.notConfirmedStepOrder}`,
+                    `${pathCount(decision.sourceStepOrder, 'NOT_CONFIRMED')}× not confirmed → step ${decision.notConfirmedStepOrder}`)}
+                </p>
+              ) : (
+                <p className="mt-1 text-muted-foreground" data-decision-outcomes-unavailable>
+                  {t('Výsledky větví teď nejsou k dispozici.', 'Branch outcomes are unavailable right now.')}
+                </p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }

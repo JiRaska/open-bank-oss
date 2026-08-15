@@ -56,6 +56,16 @@ export interface EditorStep {
   mobileDestination?: EditorMobileDestination
   /** Closed in-app inventory for a BANNER step; absent remains the backwards-compatible home banner. */
   inAppSurface?: EditorInAppSurface
+  /** Direct forward edge in an explicit decision journey; absent means this path ends. */
+  nextStepOrder?: number
+}
+
+/** The Studio representation of a fixed, observable delivery decision. */
+export interface EditorDecision {
+  sourceStepOrder: number
+  evaluationDelaySeconds: number
+  confirmedStepOrder: number
+  notConfirmedStepOrder: number
 }
 
 export const MAX_STEPS = 5
@@ -100,6 +110,7 @@ export function JourneyEditor({
   onSelect,
   onAdd,
   onAddDecision,
+  decisions = [],
   contentCatalogueReady = true,
   onRemove,
   templateLabels,
@@ -115,6 +126,8 @@ export function JourneyEditor({
   onAdd: () => void
   /** Adds the complementary delivered / not-delivered pair after the current journey path. */
   onAddDecision?: () => void
+  /** Explicit, bounded decision nodes — not inferred from a pair of adjacent cards. */
+  decisions?: EditorDecision[]
   /** Without the served catalogue, a new node would be an unverified template choice. */
   contentCatalogueReady?: boolean
   onRemove: (index: number) => void
@@ -145,7 +158,7 @@ export function JourneyEditor({
   const cols = 1 + steps.length + (canAdd ? 1 : 0)
   const width = PAD * 2 + cols * NODE_W + (cols - 1) * GAP_X
   // Two rows live under the cards: the per-hop condition chips, then the journey-wide cap note.
-  const height = ROW_Y + NODE_H / 2 + 92
+  const height = ROW_Y + NODE_H / 2 + (decisions.length > 0 ? 178 : 92)
 
   const colX = (i: number) => PAD + i * (NODE_W + GAP_X)
 
@@ -361,6 +374,44 @@ export function JourneyEditor({
                   stroke="var(--text-secondary)" strokeWidth="1.5" strokeLinecap="round"
                 />
               </g>
+            </g>
+          )
+        })}
+
+        {decisions.map(decision => {
+          const sourceX = colX(decision.sourceStepOrder + 1) + NODE_W / 2
+          const decisionY = ROW_Y + NODE_H / 2 + 58
+          const confirmedX = colX(decision.confirmedStepOrder + 1) + NODE_W / 2
+          const notConfirmedX = colX(decision.notConfirmedStepOrder + 1) + NODE_W / 2
+          const diamond = `M ${sourceX} ${decisionY - 19} L ${sourceX + 26} ${decisionY} L ${sourceX} ${decisionY + 19} L ${sourceX - 26} ${decisionY} Z`
+          return (
+            <g key={`decision-${decision.sourceStepOrder}`} data-decision-node={decision.sourceStepOrder}>
+              <path
+                d={`M ${sourceX} ${ROW_Y + NODE_H / 2} L ${sourceX} ${decisionY - 20}`}
+                stroke="var(--accent)" strokeWidth="1.6" fill="none" markerEnd="url(#je-arrow)"
+              />
+              <path d={diamond} fill="var(--accent)" opacity="0.16" stroke="var(--accent)" strokeWidth="1.5" />
+              <text x={sourceX} y={decisionY + 4} fontSize="12" textAnchor="middle" fill="var(--accent)" fontWeight="700">?</text>
+              <text x={sourceX} y={decisionY + 37} fontSize="10.5" textAnchor="middle" fill="var(--text-secondary)">
+                {t(
+                  `doručeno? ověřit ${delayLabel(decision.evaluationDelaySeconds)}`,
+                  `delivered? check ${delayLabel(decision.evaluationDelaySeconds)}`,
+                )}
+              </text>
+              <path
+                d={`M ${sourceX + 26} ${decisionY} L ${confirmedX} ${ROW_Y + NODE_H / 2 + 24}`}
+                stroke="var(--success)" strokeWidth="1.35" fill="none" markerEnd="url(#je-arrow)"
+              />
+              <path
+                d={`M ${sourceX - 26} ${decisionY} L ${notConfirmedX} ${ROW_Y + NODE_H / 2 + 24}`}
+                stroke="var(--warning)" strokeWidth="1.35" fill="none" markerEnd="url(#je-arrow)"
+              />
+              <text x={(sourceX + 26 + confirmedX) / 2} y={decisionY - 7} fontSize="10" fill="var(--success)">
+                {t('ano', 'yes')}
+              </text>
+              <text x={(sourceX - 26 + notConfirmedX) / 2} y={decisionY + 15} fontSize="10" fill="var(--warning)">
+                {t('ne', 'no')}
+              </text>
             </g>
           )
         })}
