@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.38.0
+  version: 1.39.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -608,6 +608,78 @@ paths:
         '400':
           description: Unrecognised `outcome`
 
+  /api/v1/audiences:
+    get:
+      tags: [Audiences]
+      summary: List governed audience versions, including drafts awaiting approval
+      operationId: listAudiences
+      responses:
+        '200':
+          description: Audience versions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/AudienceSummary' }
+    post:
+      tags: [Audiences]
+      summary: Create a typed audience draft
+      operationId: createAudience
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateAudienceRequest' }
+      responses:
+        '201':
+          description: Draft audience
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Audience' }
+        '400': { description: Invalid or unsupported closed rule }
+
+  /api/v1/audiences/{name}/{version}/submit:
+    post:
+      tags: [Audiences]
+      summary: Submit the maker's draft for independent approval
+      operationId: submitAudience
+      parameters:
+        - $ref: '#/components/parameters/AudienceName'
+        - $ref: '#/components/parameters/AudienceVersion'
+      responses:
+        '200': { description: Audience submitted }
+        '404': { description: Unknown audience version }
+        '409': { description: Lifecycle or maker constraint rejected the submission }
+
+  /api/v1/audiences/{name}/{version}/approve:
+    post:
+      tags: [Audiences]
+      summary: Independently approve an immutable audience version
+      operationId: approveAudience
+      parameters:
+        - $ref: '#/components/parameters/AudienceName'
+        - $ref: '#/components/parameters/AudienceVersion'
+      responses:
+        '200': { description: Audience approved and targetable by campaigns }
+        '404': { description: Unknown audience version }
+        '409': { description: Lifecycle or maker/checker constraint rejected approval }
+
+  /api/v1/audiences/{name}/{version}/preview:
+    get:
+      tags: [Audiences]
+      summary: Preview a draft or approved audience with the production evaluator
+      operationId: previewAudience
+      parameters:
+        - $ref: '#/components/parameters/AudienceName'
+        - $ref: '#/components/parameters/AudienceVersion'
+      responses:
+        '200':
+          description: Cohort size at a point in time
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AudienceReach' }
+        '404': { description: Unknown audience version }
+
   /api/v1/segments:
     get:
       tags: [Segments]
@@ -656,6 +728,16 @@ paths:
 
 components:
   parameters:
+    AudienceName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9][a-z0-9-]*$' }
+    AudienceVersion:
+      name: version
+      in: path
+      required: true
+      schema: { type: integer, minimum: 1 }
     CampaignId:
       name: id
       in: path
@@ -1166,6 +1248,50 @@ components:
           type: array
           items: { type: string }
           description: What the segment selects, in words.
+
+    AudienceSummary:
+      type: object
+      required: [name, version, rules, state, createdBy]
+      properties:
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+        rules:
+          type: array
+          items: { type: string }
+        state: { type: string, enum: [DRAFT, PENDING_APPROVAL, APPROVED] }
+        createdBy: { type: string }
+        approvedBy: { type: [string, 'null'] }
+
+    Audience:
+      allOf:
+        - $ref: '#/components/schemas/AudienceSummary'
+
+    AudienceReach:
+      type: object
+      required: [name, version, size, asOf]
+      properties:
+        name: { type: string }
+        version: { type: integer, minimum: 1 }
+        size: { type: integer, minimum: 0 }
+        asOf: { type: string, format: date-time }
+
+    CreateAudienceRequest:
+      type: object
+      required: [name, rules]
+      properties:
+        name: { type: string, pattern: '^[a-z0-9][a-z0-9-]*$' }
+        rules:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/AudienceRule' }
+
+    AudienceRule:
+      type: object
+      required: [type]
+      properties:
+        type: { type: string, enum: [PARTY_STATUS_IS, TENURE_AT_LEAST_DAYS] }
+        status: { type: string }
+        minDays: { type: integer, minimum: 0 }
 
     SegmentPreview:
       type: object
