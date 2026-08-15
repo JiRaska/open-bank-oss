@@ -22,6 +22,7 @@ import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
 import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.SagaState
+import com.openbank.transaction.domain.settlement.SettlementDateResolver
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -142,6 +143,37 @@ class TransactionServiceTest {
         assertThat(result.status).isEqualTo(TransactionStatus.COMPLETED)
         verify(exactly = 1) { workflowStub.execute(result.id) }
     }
+
+    /**
+     * A savings-to-checking pocket move, reported directly: it looked like it went through, then
+     * reverted a few seconds later. Root cause — TRANSFER (own-account) was routed through
+     * SettlementDateResolver's cutoff/business-day rules, meant for a payment that leaves the bank
+     * on an external rail. A transfer submitted after the 16:00 cutoff (or on a Friday evening at
+     * all) got value-dated on the next business day; the optimistic UI showed the money moved, but
+     * balance-service's effectiveAvailable() correctly would not count it as spendable until then,
+     * so the very next transfer attempting to move it back out failed 422 insufficient-funds and the
+     * UI reverted. TRANSFER must book same-day, always — it never touches a clearing calendar.
+     */
+    @Test
+    fun `own-account transfer books and values same-day, ignoring any requested date and the cutoff`(): Unit =
+        runBlocking {
+            // Same zone the production code reads "today" in (ADR-0207 D1) — a UTC "today" would be
+            // flaky near midnight Prague time, exactly the class of bug that zone owns.
+            val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+            // A date far in the future is deliberately requested — proving TRANSFER does not defer
+            // to it, unlike every other payment type (see the settlement-date resolver tests).
+            val command = initiateCommand().copy(valueDate = today.plusMonths(1))
+
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+            every { eventPublisher.initiatedPayload(any()) } returns "{}"
+            stubWorkflowCommitted(TransactionStatus.COMPLETED)
+            every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+            val result = service.initiateTransaction(command)
+
+            assertThat(result.valueDate).isEqualTo(today)
+            assertThat(result.bookingDate).isEqualTo(today)
+        }
 
     @Test
     fun `initiate cross-currency transaction via fx-service carries the applied rate`(): Unit = runBlocking {
