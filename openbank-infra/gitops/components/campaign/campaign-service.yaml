@@ -129,10 +129,10 @@ spec:
             # queue until the compatible image is restored.
             - name: OPENBANK_CAMPAIGN_DECISION_TASK_QUEUE
               value: openbank-campaign-decision
-            # Expand first: deploy and observe the isolated graph worker before a separately
-            # reviewed GitOps change enables graph-campaign activation.
+            # The isolated graph worker is live and healthy. This separately reviewed step admits
+            # graph-campaign activation without changing the replay-compatible legacy queue.
             - name: OPENBANK_CAMPAIGN_EXPLICIT_GRAPH_ACTIVATION_ENABLED
-              value: "false"
+              value: "true"
             - name: CAMPAIGN_WORKER_ENABLED
               value: "true"
             # ADR-0198: live per-send consent check (fail-closed). Declared as an
