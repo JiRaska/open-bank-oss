@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.135.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.0...admin-ui-v0.135.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **campaign:** complete governed audience handoff ([#4894](https://github.com/JiRaska/open-bank-oss/issues/4894)) ([1c5dcc6](https://github.com/JiRaska/open-bank-oss/commit/1c5dcc6c53002ebc2ea0c6f31928b21b6860d99c))
+
 ## [0.135.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.134.0...admin-ui-v0.135.0) (2026-08-15)
 
 
