@@ -807,6 +807,19 @@ gates:
     run: |
       bash .github/scripts/pact-version-tree-equivalent.sh --self-test
 
+  # The only exception to publishing a provider verification for the exact checked-out ref.
+  # This tests the proof's negative paths too: a runtime/build/resources/root/libs change, a
+  # sibling service change, or either revision off main cannot become a broker verification.
+  - id: pact-provider-version-proof-unit-test
+    selftest_exempt: "is-a-test-suite"
+    name: "pact provider-version proof fails closed (enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "An older provider version can satisfy can-i-deploy only when the verification ran against equivalent provider code; without this proof a raw dispatch input could publish a broker result for runtime that never ran."
+    review_after: "2027-02-15"
+    run: |
+      bash .github/scripts/prove-pact-provider-version.sh --self-test
+
   # The broker half of #3432. It cannot be run against the real broker from a PR — no public
   # ingress (ADR-0056), PACT_BROKER_URL blanked off main-push — so what this asserts is only the
   # failure modes, against a stubbed curl: unreachable, non-2xx, unparseable, no version number,

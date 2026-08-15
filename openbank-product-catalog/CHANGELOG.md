@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.12.0...product-catalog-v0.12.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **product-catalog:** serialise the bank-v1 mapping check ([#4901](https://github.com/JiRaska/open-bank-oss/issues/4901)) ([ee9d201](https://github.com/JiRaska/open-bank-oss/commit/ee9d2016b43b32c78004b7d29fdffeef25ba675b)), closes [#4896](https://github.com/JiRaska/open-bank-oss/issues/4896)
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.11.4...product-catalog-v0.12.0) (2026-08-14)
 
 

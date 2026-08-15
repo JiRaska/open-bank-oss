@@ -35,6 +35,13 @@ on:
         required: false
         default: ""
         type: string
+      provider_version:
+        # Blank preserves the ordinary claim: the verification is published for exactly the
+        # checked-out ref. A distinct value is accepted only by the proof step below.
+        description: "Provider version to publish. Blank = checked-out ref."
+        required: false
+        default: ""
+        type: string
     secrets:
       PACT_BROKER_PASSWORD:
         # Must be declared here for the caller to pass it explicitly: an undeclared
@@ -158,6 +165,31 @@ jobs:
             exit 1
           fi
           echo "$REF is on main — publishing the verification against it."
+
+      - name: Prove provider version is the checked-out ref or a test-only ancestor
+        env:
+          SERVICE: ${{ inputs.service }}
+          REQUESTED_PROVIDER_VERSION: ${{ inputs.provider_version }}
+        run: |
+          set -euo pipefail
+          # The checkout is the code and tests that will run. With no override, publishing that
+          # exact SHA is the normal path. Do not infer an older version from a broker result.
+          VERIFY_REF="$(git rev-parse HEAD)"
+          if [ -n "$REQUESTED_PROVIDER_VERSION" ]; then
+            # Never forward a raw workflow input to Gradle or the Pact broker. Git resolves
+            # short SHAs and named refs once, then only the canonical full SHA is used below.
+            PROVIDER_VERSION="$(bash .github/scripts/prove-pact-provider-version.sh --resolve "$REQUESTED_PROVIDER_VERSION")"
+          else
+            PROVIDER_VERSION="$VERIFY_REF"
+          fi
+          if [ "$PROVIDER_VERSION" != "$VERIFY_REF" ]; then
+            # PR merge refs are intentionally not ancestors of main and never publish. Only the
+            # exceptional distinct-version dispatch needs the on-main, test-only proof.
+            git fetch --quiet origin main
+            bash .github/scripts/prove-pact-provider-version.sh \
+              "$SERVICE" "$PROVIDER_VERSION" "$VERIFY_REF" origin/main
+          fi
+          echo "PACT_PROVIDER_VERSION=$PROVIDER_VERSION" >> "$GITHUB_ENV"
 
       # Resolve GRADLE_USER_HOME by runner class:
       #  - ARC ephemeral (GRADLE_USER_HOME_NODE_CACHE set by arc-runners.tf): node-local
@@ -479,9 +511,6 @@ jobs:
           # Publish provider verification results only from the main push (the SHA
           # auto-deploy will gate on). PR builds verify but don't publish results.
           PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
-          # #3306: must be the sha that was CHECKED OUT, not the sha the workflow was dispatched
-          # on — otherwise the verification is published against a commit whose code never ran.
-          PACT_PROVIDER_VERSION: ${{ inputs.ref != '' && inputs.ref || github.sha }}
         run: |
           # Pact Broker config (ADR-0092) is forwarded as -D system properties; the
           # provider build.gradle.kts copies these into the forked test JVM. Empty
@@ -571,9 +600,6 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
-          # #3306: must be the sha that was CHECKED OUT, not the sha the workflow was dispatched
-          # on — otherwise the verification is published against a commit whose code never ran.
-          PACT_PROVIDER_VERSION: ${{ inputs.ref != '' && inputs.ref || github.sha }}
         run: |
           ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \

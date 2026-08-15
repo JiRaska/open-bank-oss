@@ -26,6 +26,13 @@ on:
         required: false
         default: ""
         type: string
+      provider_version:
+        # Blank deliberately means the checked-out ref. A distinct value is fail-closed in
+        # _service-ci.yml and exists only for a merged, test-fixture-only provider-state repair.
+        description: "Provider version to publish. Blank = ref; a distinct version must be an older main ancestor differing only in this service's src/test tree."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -66,5 +73,6 @@ jobs:
     with:
       service: ${{ inputs.service }}
       ref: ${{ inputs.ref }}
+      provider_version: ${{ inputs.provider_version }}
     secrets:
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
