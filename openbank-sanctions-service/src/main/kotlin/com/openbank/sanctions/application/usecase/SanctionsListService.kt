@@ -17,6 +17,7 @@ import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.time.ZonedDateTime
 import java.util.UUID
@@ -27,6 +28,14 @@ class SanctionsListService(
     private val importer: SanctionsImportService,
     private val outbox: SanctionsOutboxRepository,
     private val clock: Clock,
+    /**
+     * ADR-0256 D1 storm guard: the share of a list that may change in one refresh before the
+     * refresh is treated as an upstream reformat rather than a regime action. Above it the
+     * re-screening trigger is NOT raised — a schema change upstream must not become a fleet-wide
+     * re-screening of the whole customer book. 0.5 by default: a real sanctions action edits a
+     * handful of entries, never half the list.
+     */
+    private val stormThresholdShare: Double = DEFAULT_STORM_THRESHOLD_SHARE,
 ) {
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
@@ -36,7 +45,12 @@ class SanctionsListService(
         repo: SanctionsListRepositoryImpl,
         importer: SanctionsImportService,
         outbox: SanctionsOutboxRepository,
-    ) : this(repo, importer, outbox, Clock.systemUTC())
+        @ConfigProperty(
+            name = "openbank.sanctions.list-change.storm-threshold-share",
+            defaultValue = "0.5",
+        )
+        stormThresholdShare: Double,
+    ) : this(repo, importer, outbox, Clock.systemUTC(), stormThresholdShare)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -62,7 +76,9 @@ class SanctionsListService(
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
         val count = if (enumType != null) {
             val changeSet = importer.importList(enumType, list.sourceUrl)
-            publishChangeEvent(list.id, changeSet)
+            // Baseline = the entry count BEFORE this refresh. It is what the storm guard measures
+            // the diff against, and it must be read before markUpdated() overwrites it.
+            publishChangeEvent(list.id, changeSet, baselineEntryCount = list.lastEntryCount)
             // If importer found nothing (format stub / network error), fall back to stored count
             if (changeSet.changeCount > 0) {
                 changeSet.changeCount
@@ -87,8 +103,51 @@ class SanctionsListService(
      * emitted no event is precisely the screening gap this exists to close, so it must not pass
      * silently.
      */
-    private suspend fun publishChangeEvent(listId: UUID, changeSet: SanctionsListChangeSet) {
+    private suspend fun publishChangeEvent(listId: UUID, changeSet: SanctionsListChangeSet, baselineEntryCount: Int?) {
         if (changeSet.isEmpty) return
+
+        // ADR-0256 D1 storm guard. An upstream schema reformat re-writes every row and is
+        // indistinguishable, entry by entry, from "the whole list changed" — so the diff alone
+        // would raise a trigger that re-screens the entire customer book. Above the threshold the
+        // re-screening trigger is NOT raised; a distinct operator-facing event is, carrying counts
+        // only.
+        //
+        // Skipped when there is no baseline (a list's FIRST import legitimately changes 100% of
+        // nothing): with baseline null or 0 the share is undefined, and treating that as a storm
+        // would mean a newly configured list could never raise its first trigger.
+        if (baselineEntryCount != null && baselineEntryCount > 0) {
+            val share = changeSet.changeCount.toDouble() / baselineEntryCount
+            if (share > stormThresholdShare) {
+                // Deliberately a DIFFERENT event type: a consumer must never be able to mistake it
+                // for SANCTIONS_LIST_CHANGED and re-screen on it. Counts only, not the id list —
+                // here the id list is "most of the list" and would be noise, not evidence.
+                outbox.persistStandalone(
+                    OutboxMessage(
+                        aggregateId = listId,
+                        eventType = EVENT_SANCTIONS_LIST_CHANGE_STORM,
+                        payload = mapper.writeValueAsString(
+                            stormPayload(changeSet, baselineEntryCount, share, stormThresholdShare),
+                        ),
+                    ),
+                )
+                // ERROR, not WARN: a withheld trigger means a real list change may go
+                // un-re-screened until someone looks. Silence would trade one invisible failure
+                // for another.
+                Log.errorf(
+                    "%s for %s: %d of %d entries changed (%.1f%% > %.1f%% threshold) — " +
+                        "re-screening trigger WITHHELD, this looks like an upstream reformat. " +
+                        "Verify the feed and re-screen deliberately if the change is real " +
+                        "(ADR-0256 D1).",
+                    EVENT_SANCTIONS_LIST_CHANGE_STORM,
+                    changeSet.listType,
+                    changeSet.changeCount,
+                    baselineEntryCount,
+                    share * PERCENT,
+                    stormThresholdShare * PERCENT,
+                )
+                return
+            }
+        }
         val payload = mapper.writeValueAsString(
             mapOf(
                 "listType" to changeSet.listType.name,
@@ -208,6 +267,33 @@ class SanctionsListService(
     companion object {
         private val ALLOWED_DAYS = setOf("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
         const val EVENT_SANCTIONS_LIST_CHANGED = "SANCTIONS_LIST_CHANGED"
+
+        /** Raised INSTEAD of the re-screening trigger when the diff trips the D1 storm guard. */
+        const val EVENT_SANCTIONS_LIST_CHANGE_STORM = "SANCTIONS_LIST_CHANGE_STORM"
+
+        /** Default share of a list that may change in one refresh before it reads as a reformat. */
+        const val DEFAULT_STORM_THRESHOLD_SHARE = 0.5
+
+        private const val PERCENT = 100.0
         private val mapper = jacksonObjectMapper().findAndRegisterModules()
     }
 }
+
+/**
+ * Payload for the ADR-0256 D1 storm event. Top-level and pure, placed AFTER the class: it keeps
+ * SanctionsListService under detekt's TooManyFunctions threshold (which fires AT the limit, not
+ * above it), and sitting after the class means it cannot take an annotation intended for a
+ * following declaration.
+ */
+private fun stormPayload(
+    changeSet: SanctionsListChangeSet,
+    baselineEntryCount: Int,
+    share: Double,
+    thresholdShare: Double,
+): Map<String, Any> = mapOf(
+    "listType" to changeSet.listType.name,
+    "changeCount" to changeSet.changeCount,
+    "baselineEntryCount" to baselineEntryCount,
+    "changedShare" to share,
+    "thresholdShare" to thresholdShare,
+)

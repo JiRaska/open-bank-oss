@@ -4,6 +4,7 @@
 
 package com.openbank.sanctions.application.usecase
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListChangeSet
@@ -155,6 +156,69 @@ class SanctionsListServiceTest {
     }
 
     // ──── refresh ────────────────────────────────────────────────────────────
+
+    // ── ADR-0256 D1 storm guard ──────────────────────────────────────────────────────────
+    // An upstream schema reformat rewrites every row and is indistinguishable, entry by entry,
+    // from "the whole list changed". Without the guard the diff raises SANCTIONS_LIST_CHANGED and
+    // the consumer re-screens the entire customer book off a formatting change.
+
+    private fun changeSetOf(type: SanctionsListType, n: Int) =
+        SanctionsListChangeSet(type, changedExternalIds = (1..n).map { "id-$it" }.toSet())
+
+    @Test
+    fun `a diff above the storm threshold withholds the re-screening trigger`(): Unit = runBlocking {
+        val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml", lastEntryCount = 100)
+        coEvery { repo.findByListType("OFAC_SDN") } returns list
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
+            changeSetOf(SanctionsListType.OFAC_SDN, 80)
+        coEvery { repo.markUpdated("OFAC_SDN", 80) } returns list.copy(lastEntryCount = 80)
+
+        service.refresh("OFAC_SDN")
+
+        val published = mutableListOf<OutboxMessage>()
+        coVerify { outbox.persistStandalone(capture(published)) }
+        assertThat(published.map { it.eventType })
+            .describedAs("80 of 100 entries is a reformat, not a regime action")
+            .containsExactly(SanctionsListService.EVENT_SANCTIONS_LIST_CHANGE_STORM)
+        assertThat(published.single().payload)
+            .describedAs("the storm event carries counts, never the id list")
+            .doesNotContain("id-1\"")
+    }
+
+    @Test
+    fun `a diff below the storm threshold still raises the re-screening trigger`(): Unit = runBlocking {
+        val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml", lastEntryCount = 100)
+        coEvery { repo.findByListType("OFAC_SDN") } returns list
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
+            changeSetOf(SanctionsListType.OFAC_SDN, 3)
+        coEvery { repo.markUpdated("OFAC_SDN", 3) } returns list.copy(lastEntryCount = 3)
+
+        service.refresh("OFAC_SDN")
+
+        val published = mutableListOf<OutboxMessage>()
+        coVerify { outbox.persistStandalone(capture(published)) }
+        assertThat(published.map { it.eventType })
+            .describedAs("a handful of edits is exactly what the trigger exists for")
+            .containsExactly(SanctionsListService.EVENT_SANCTIONS_LIST_CHANGED)
+    }
+
+    @Test
+    fun `a first import is not a storm even though it changes everything`(): Unit = runBlocking {
+        // baseline null: the list has never been imported. Share is undefined, and treating that
+        // as a storm would mean a newly configured list could never raise its first trigger.
+        val list = sampleList(listType = "OFAC_SDN", sourceUrl = "https://example.com/sdn.xml", lastEntryCount = null)
+        coEvery { repo.findByListType("OFAC_SDN") } returns list
+        coEvery { importer.importList(SanctionsListType.OFAC_SDN, any()) } returns
+            changeSetOf(SanctionsListType.OFAC_SDN, 5000)
+        coEvery { repo.markUpdated("OFAC_SDN", 5000) } returns list.copy(lastEntryCount = 5000)
+
+        service.refresh("OFAC_SDN")
+
+        val published = mutableListOf<OutboxMessage>()
+        coVerify { outbox.persistStandalone(capture(published)) }
+        assertThat(published.map { it.eventType })
+            .containsExactly(SanctionsListService.EVENT_SANCTIONS_LIST_CHANGED)
+    }
 
     @Test
     fun `refresh throws NotFoundException when list is unknown`(): Unit = runBlocking {
