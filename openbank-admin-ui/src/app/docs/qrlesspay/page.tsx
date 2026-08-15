@@ -4,7 +4,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash } from 'lucide-react'
+import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const ACCENT = '#6366f1'
@@ -45,6 +45,9 @@ export default function QrlessPayPage() {
           <Pill color={ACCENT} bg="var(--accent-bg)" border="var(--accent-border)" Icon={Hash} label="ADR-0095" />
         </Link>
         <Pill color="#7c3aed" bg="#f5f3ff" border="#ddd6fe" Icon={ShieldCheck} label={t('money-path', 'money-path')} />
+        <Link href="/docs/qrlesspay-readiness" style={{ textDecoration: 'none' }}>
+          <Pill color="#d97706" bg="#fffbeb" border="#fcd34d" Icon={ScrollText} label={t('Posouzení připravenosti', 'Readiness assessment')} />
+        </Link>
       </div>
 
       {/* What it is */}
