@@ -14,7 +14,8 @@ import org.junit.jupiter.api.Test
 import java.io.File
 
 /**
- * The producer/consumer seam for the `CardIssuanceOutboxDeadLettered` alert (#4005).
+ * The producer/consumer seam for every `*OutboxDeadLettered` alert (#4005 card-issuance,
+ * #4701 billing).
  *
  * An alert whose selector names a metric, label or value the exporter does not produce fires
  * never — and a never-firing alert is indistinguishable from a healthy service, which is the exact
@@ -39,35 +40,90 @@ class OutboxDeadLetterAlertNamingTest {
         return DomainMetrics().apply { registryInstance = inst }
     }
 
-    /** The PrometheusRule the alert lives in, relative to this module's project dir. */
-    private val rulesFile = File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml")
+    /**
+     * Every service that binds [AbstractOutboxDeadLetterGauge], paired with the PrometheusRule its
+     * alert lives in (paths relative to this module's project dir).
+     *
+     * This is a hand-kept list of the thing it checks, which is normally the shape that reads as
+     * *passing* when it is short rather than as *unchecked* — so it is deliberately paired with
+     * [every dead-letter gauge binding is covered here] below, which derives the real set from the
+     * source tree and fails when a service adds a gauge without adding its row.
+     */
+    private val alertRules = mapOf(
+        "card-issuance" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
+        "billing" to File("../openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"),
+    )
 
     @Test
     fun `the alert selector is exactly what a real gauge registration exports`() {
-        val reg = SimpleMeterRegistry()
-        withRegistry(reg).registerOutboxDeadLettered("card-issuance") { 24L }
+        assertThat(alertRules).isNotEmpty()
 
-        val meter = reg.meters.single { it.id.name == "openbank.outbox.dead_lettered" }
-        val convention = PrometheusNamingConvention()
-        val series = convention.name(meter.id.name, meter.id.type, meter.id.baseUnit)
-        val tag = meter.id.getTag("service")
+        alertRules.forEach { (serviceTag, rulesFile) ->
+            val reg = SimpleMeterRegistry()
+            withRegistry(reg).registerOutboxDeadLettered(serviceTag) { 24L }
 
-        assertThat(series).isEqualTo("openbank_outbox_dead_lettered")
-        assertThat(tag).isEqualTo("card-issuance")
+            val meter = reg.meters.single { it.id.name == "openbank.outbox.dead_lettered" }
+            val convention = PrometheusNamingConvention()
+            val series = convention.name(meter.id.name, meter.id.type, meter.id.baseUnit)
+            val tag = meter.id.getTag("service")
 
-        val selector = """$series{service="$tag"}"""
-        assertThat(rulesFile).exists()
-        val exprLines = rulesFile.readLines()
-            .map { it.trim() }
-            .filter { it.startsWith("expr:") }
+            assertThat(series).isEqualTo("openbank_outbox_dead_lettered")
+            assertThat(tag).isEqualTo(serviceTag)
 
-        assertThat(exprLines)
+            val selector = """$series{service="$tag"}"""
+            assertThat(rulesFile).describedAs("rule file for $serviceTag").exists()
+            val exprLines = rulesFile.readLines()
+                .map { it.trim() }
+                .filter { it.startsWith("expr:") }
+
+            assertThat(exprLines)
+                .describedAs(
+                    "the dead-letter alert for '$serviceTag' must select the series the exporter " +
+                        "really produces — a selector naming a label the metric does not carry " +
+                        "fires never, and reads exactly like 'no problem'",
+                )
+                .contains("expr: $selector > 0")
+        }
+    }
+
+    /**
+     * The scope guard for [alertRules].
+     *
+     * A gate whose coverage set is maintained separately from the artifacts it covers goes green
+     * about work it never did: a service that binds the gauge but is missing from the map above
+     * simply is not checked, and the suite still passes. So the real set is derived — every
+     * concrete `*OutboxDeadLetterGauge.kt` under a service module — and compared against the map.
+     * Adding a binding without an alert now fails here rather than being discovered later by an
+     * audit.
+     */
+    @Test
+    fun `every dead-letter gauge binding is covered here`() {
+        val repoRoot = File("..")
+        val bindings = repoRoot.listFiles { f: File -> f.isDirectory && f.name.startsWith("openbank-") }
+            .orEmpty()
+            .flatMap { module ->
+                File(module, "src/main/kotlin").walkTopDown()
+                    // `Abstract...` is the base this module declares, not a service binding.
+                    .filter { it.isFile && it.name.endsWith("OutboxDeadLetterGauge.kt") }
+                    .filterNot { it.name.startsWith("Abstract") }
+                    .map { module.name }
+                    .toList()
+            }
+            .toSortedSet()
+
+        assertThat(bindings)
             .describedAs(
-                "CardIssuanceOutboxDeadLettered must select the series the exporter really " +
-                    "produces — a selector naming a label the metric does not carry fires never, " +
-                    "and reads exactly like 'no problem'",
+                "the probe must find the known bindings — an empty set here means it is broken, not that none exist",
             )
-            .contains("expr: $selector > 0")
+            .isNotEmpty()
+
+        val covered = alertRules.keys.map { "openbank-$it-service" }.toSortedSet()
+        assertThat(bindings)
+            .describedAs(
+                "every service binding AbstractOutboxDeadLetterGauge needs a row in `alertRules` " +
+                    "(and therefore an alert) — otherwise its gauge is exported and nothing reads it",
+            )
+            .isEqualTo(covered)
     }
 
     /**

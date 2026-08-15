@@ -52,6 +52,20 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
     }.awaitSuspending()
 
     /**
+     * Count of terminal DEAD rows, for the `openbank.outbox.dead_lettered` gauge (#4701).
+     *
+     * Deliberately NOT part of [countProcessable]: DEAD is excluded from the backlog by design
+     * (ADR-0050 N5 parks a poison row so it cannot starve the batch), which is exactly why a
+     * fully-parked outbox reads `openbank_outbox_backlog{service="billing"} == 0` — the same
+     * value a perfectly healthy service publishes. Measured 2026-08-15: two
+     * `billing.fee.post-intent.v1` rows have sat DEAD since 2026-07-13 with the backlog gauge at
+     * a healthy-looking zero the whole time.
+     */
+    suspend fun countDead(): Long = Panache.withSession {
+        count("status = ?1", OutboxStatus.DEAD.name)
+    }.awaitSuspending()
+
+    /**
      * Reference implementation for the [OutboxRepository.claimProcessable] atomic-claim
      * override (#1201). One statement: the inner `SELECT ... FOR UPDATE SKIP LOCKED` locks and
      * skips-past whatever a concurrently running claim has already locked, and the outer
