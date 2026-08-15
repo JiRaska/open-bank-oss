@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.137.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.136.0...admin-ui-v0.137.0) (2026-08-15)
+
+
+### Features
+
+* **admin-ui:** guide catalog authoring ([#4928](https://github.com/JiRaska/open-bank-oss/issues/4928)) ([553cdfa](https://github.com/JiRaska/open-bank-oss/commit/553cdfaea5f731afb7b8ef26c06a36c8f0862438)), closes [#4501](https://github.com/JiRaska/open-bank-oss/issues/4501)
+
 ## [0.136.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.2...admin-ui-v0.136.0) (2026-08-15)
 
 
