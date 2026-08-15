@@ -153,7 +153,11 @@ class CaseCoordinatorResource(
         if (!temporalConfig.enabled()) return temporalUnavailable()
         if (!capable(type, agentId)) {
             return Response.status(Response.Status.FORBIDDEN)
-                .entity(errorBody("signal '$type' denied for agent '$agentId'")).build()
+                // agentId is NOT echoed (#4834), matching the openCase denial. It is free-form
+                // request-body input, and reflecting it verbatim tells the caller nothing it did
+                // not just send. `type` stays: reaching this line means capable() already matched
+                // it against the four known signal literals, so it is a bounded server-side value.
+                .entity(errorBody("signal '$type' denied for the requested agent")).build()
         }
         return deliver(id, type, agentId, request)
     }
