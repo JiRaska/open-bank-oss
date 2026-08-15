@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.35.0
+  version: 1.36.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2018,6 +2018,19 @@ components:
           type: number
         arrangedOverdraftLimit:
           type: number
+        notYetEffectiveCredit:
+          type: number
+          description: >-
+            Posted-but-not-yet-value-dated credit tail (#1745) — a future-dated own-account
+            transfer or deposit already in the ledger but not yet effective. Zero when nothing is
+            outstanding.
+        effectiveAvailableAmount:
+          type: number
+          description: >-
+            The actually-spendable figure: availableAmount less notYetEffectiveCredit. This route
+            is a passthrough of balance-service's response, so this field has been on the wire
+            since #1745 — undocumented here until now, which is what let the app read
+            availableAmount alone and show a balance the customer could not fully spend.
         updatedAt:
           type: string
           format: date-time
