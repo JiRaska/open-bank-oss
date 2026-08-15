@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.134.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.133.0...admin-ui-v0.134.0) (2026-08-15)
+
+
+### Features
+
+* **campaign:** add explicit decision graph journeys ([#4781](https://github.com/JiRaska/open-bank-oss/issues/4781)) ([3cc3fe0](https://github.com/JiRaska/open-bank-oss/commit/3cc3fe087e4dccd29ec7f54a36b5e8318fbaa01f))
+
 ## [0.133.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.132.0...admin-ui-v0.133.0) (2026-08-14)
 
 
