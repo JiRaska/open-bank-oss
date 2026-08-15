@@ -31,7 +31,9 @@ class AudienceResource(private val service: AudienceService, private val jwt: Js
     @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "campaign.create", resource = "")
     suspend fun create(request: CreateAudienceRequest): Response = try {
-        Response.status(201).entity(service.summary(service.create(request.name, request.toRules(), jwt.audiencePrincipal()))).build()
+        Response.status(
+            201,
+        ).entity(service.summary(service.create(request.name, request.toRules(), jwt.audiencePrincipal()))).build()
     } catch (e: IllegalArgumentException) {
         Response.status(Response.Status.BAD_REQUEST).entity(mapOf("error" to e.message)).build()
     }
@@ -71,8 +73,16 @@ data class CreateAudienceRequest(val name: String, val rules: List<AudienceRuleR
 /** The wire rule vocabulary is deliberately smaller than the domain's unsupported rule set. */
 data class AudienceRuleRequest(val type: AudienceRuleType, val status: String? = null, val minDays: Long? = null) {
     fun toRule(): SegmentRule = when (type) {
-        AudienceRuleType.PARTY_STATUS_IS -> SegmentRule.PartyStatusIs(requireNotNull(status) { "PARTY_STATUS_IS requires status" })
-        AudienceRuleType.TENURE_AT_LEAST_DAYS -> SegmentRule.TenureAtLeastDays(requireNotNull(minDays) { "TENURE_AT_LEAST_DAYS requires minDays" })
+        AudienceRuleType.PARTY_STATUS_IS -> SegmentRule.PartyStatusIs(
+            requireNotNull(status) {
+                "PARTY_STATUS_IS requires status"
+            },
+        )
+        AudienceRuleType.TENURE_AT_LEAST_DAYS -> SegmentRule.TenureAtLeastDays(
+            requireNotNull(minDays) {
+                "TENURE_AT_LEAST_DAYS requires minDays"
+            },
+        )
     }
 }
 

@@ -40,7 +40,9 @@ export default function SegmentsPage() {
   const loadAudiences = useCallback(() => {
     fetch('/api/audiences').then(r => r.json()).then((d: { items: Segment[]; state: string }) => {
       if (d.state !== 'ok') { setUnavailable(d.state === 'unauthorized' ? 'unauthorized' : d.state === 'not_deployed' ? 'not_deployed' : 'unreachable'); return }
-      setItems(d.items ?? [])
+      // Older catalogue rows were approved before lifecycle metadata existed. Treating an omitted
+      // state as a draft would remove a previously targetable audience during a rolling rollout.
+      setItems((d.items ?? []).map(item => ({ ...item, state: item.state ?? 'APPROVED' })))
     }).catch(() => setUnavailable('unreachable')).finally(() => setLoading(false))
   }, [])
 

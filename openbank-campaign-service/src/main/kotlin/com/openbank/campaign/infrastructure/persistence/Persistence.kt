@@ -6,6 +6,7 @@ package com.openbank.campaign.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.campaign.application.port.out.AudienceRegistry
 import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignEngagementEvent
 import com.openbank.campaign.application.port.out.CampaignEngagementEventType
@@ -16,7 +17,6 @@ import com.openbank.campaign.application.port.out.CampaignExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignInteractionAttribution
 import com.openbank.campaign.application.port.out.CampaignOutcomeCount
 import com.openbank.campaign.application.port.out.CampaignRepository
-import com.openbank.campaign.application.port.out.AudienceRegistry
 import com.openbank.campaign.application.port.out.ContentVariantMetrics
 import com.openbank.campaign.application.port.out.ConversionContext
 import com.openbank.campaign.application.port.out.EnrolmentRepository
@@ -24,9 +24,9 @@ import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
-import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Audience
 import com.openbank.campaign.domain.model.AudienceState
+import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
@@ -790,7 +790,8 @@ class PanacheAudienceRegistry(private val mapper: ObjectMapper) :
     override suspend fun list(): List<Audience> {
         val stored = Panache.withSession { listAll() }.awaitSuspending().map { it.toAudience(mapper) }
         val catalogueKeys = SegmentCatalog.ALL.map { it.name to it.version }.toSet()
-        return SegmentCatalog.ALL.map(Audience::catalogue) + stored.filterNot { (it.segment.name to it.segment.version) in catalogueKeys }
+        return SegmentCatalog.ALL.map(Audience::catalogue) +
+            stored.filterNot { (it.segment.name to it.segment.version) in catalogueKeys }
     }
 
     override suspend fun nextVersion(name: String): Int {
