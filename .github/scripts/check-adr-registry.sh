@@ -104,8 +104,20 @@ if [ "${1:-}" = "--self-test" ]; then
     out=$(cd "$td" && bash "$SELF" "$d" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then
       echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
-      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
+    # Here-string, NOT `printf | grep -q` (#4850). Under `set -o pipefail` a `-q` early exit can
+    # SIGPIPE the writer and the pipeline then reports failure even though grep matched — this
+    # repo documents that footgun, and services-ci.yml carries the same note. It is written here
+    # as a precaution, not as a diagnosis: the one observed failure (#4850) could not be
+    # reproduced under bash 3.2 or 5.2 with the match at the head of a 5 MB payload, so the
+    # mechanism is unconfirmed. Removing the pipeline costs nothing and closes the candidate.
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<<"$out"; then
+      # Carry the evidence, so a recurrence diagnoses itself instead of needing a repro. The
+      # failure this replaces printed an $out that visibly CONTAINED the substring it said was
+      # missing, and nothing in the log could explain the contradiction.
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2
+      echo "::error::self-test: matcher PIPESTATUS=${PIPESTATUS[*]-n/a}; \$out as bytes:" >&2
+      od -c <<<"$out" | head -20 >&2
+      fails=$((fails+1))
     fi
   }
 
