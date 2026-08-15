@@ -31,9 +31,9 @@ class AudienceResource(private val service: AudienceService, private val jwt: Js
     @Consumes(MediaType.APPLICATION_JSON)
     @Authorize(action = "campaign.create", resource = "")
     suspend fun create(request: CreateAudienceRequest): Response = try {
-        Response.status(
-            201,
-        ).entity(service.summary(service.create(request.name, request.toRules(), jwt.audiencePrincipal()))).build()
+        Response.status(Response.Status.CREATED)
+            .entity(service.summary(service.create(request.name, request.toRules(), jwt.audiencePrincipal())))
+            .build()
     } catch (e: IllegalArgumentException) {
         Response.status(Response.Status.BAD_REQUEST).entity(mapOf("error" to e.message)).build()
     }
