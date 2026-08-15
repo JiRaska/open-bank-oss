@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.3](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.2...case-coordinator-agent-v0.4.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **case-coordinator:** the signal denial stops echoing the caller's agentId ([#4834](https://github.com/JiRaska/open-bank-oss/issues/4834)) ([#4863](https://github.com/JiRaska/open-bank-oss/issues/4863)) ([f3e692a](https://github.com/JiRaska/open-bank-oss/commit/f3e692aae70f3f6e2b3b53a9d225abf0e255c7eb))
+
 ## [0.4.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.1...case-coordinator-agent-v0.4.2) (2026-08-14)
 
 
