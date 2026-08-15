@@ -51,7 +51,7 @@
   "openbank-statement-service": "0.8.4",
   "openbank-swift-service": "0.7.4",
   "openbank-tpp-registry-service": "0.6.13",
-  "openbank-transaction-service": "1.16.2",
+  "openbank-transaction-service": "1.16.3",
   "openbank-vop-service": "0.3.4",
   "openbank-campaign-service": "0.33.0",
   "openbank-tax-reporting-service": "0.9.1",
