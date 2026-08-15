@@ -22,8 +22,10 @@ import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.workflow.PaymentWorkflow
 import com.openbank.transaction.domain.model.Transaction
 import com.openbank.transaction.domain.model.TransactionStatus
+import com.openbank.transaction.domain.model.TransactionType
 import com.openbank.transaction.domain.saga.SagaState
 import com.openbank.transaction.domain.settlement.SettlementDateResolver
+import com.openbank.transaction.domain.settlement.SettlementDates
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import io.vertx.pgclient.PgException
@@ -104,12 +106,38 @@ class TransactionService(
 
         val (fxRate, baseAmount) = resolveSettlement(amount, command.settlementCurrencyCode, command.settlementAmount)
 
-        val dates = SettlementDateResolver.resolve(
-            now = Instant.now(clock),
-            paymentCurrency = amount.currency.code,
-            settlementCurrency = baseAmount.currency.code,
-            requestedValueDate = command.valueDate,
-        )
+        // Own-account TRANSFER (checking <-> savings, pocket moves) never goes through
+        // SettlementDateResolver's cutoff/business-day rules. Those rules exist for payments that
+        // leave the bank on an external rail with a real submission deadline and a clearing
+        // calendar; a TRANSFER never leaves the ledger. Routing it through the same resolver meant
+        // a transfer submitted after the 16:00 cutoff — or on a Friday evening at all — booked on
+        // the next business day, so the money "arrived" in the app immediately (optimistic UI) but
+        // was not actually spendable until Monday: balance-service's effectiveAvailable() correctly
+        // excludes a not-yet-effective credit, so the reverse transfer back out then failed 422
+        // insufficient-funds and the optimistic UI reverted a few seconds later — reported directly
+        // as "I moved money into savings and now can't move it back, this can't work like this."
+        // Same-day for both legs: an internal transfer has no clearing window to miss.
+        //
+        // `rail == null` is the discriminator, NOT the type alone. openbank-sepa-payment books its
+        // settlement leg as type=TRANSFER with rail=SEPA_CT (the other three rails --
+        // domestic-payment, sepa-instant, swift -- book DEBIT, so SEPA is the odd one out). On type
+        // alone this branch would force every SEPA credit transfer to same-day and bypass exactly
+        // the cutoff and business-day rules the paragraph above says it must not touch: money that
+        // really does leave the bank on an external rail with a real clearing calendar. An
+        // own-account move carries no rail -- customer-edge sets none on any of its three TRANSFER
+        // payloads -- so the pair (TRANSFER, no rail) is what "never leaves the ledger" actually
+        // means here.
+        val dates = if (command.type == TransactionType.TRANSFER && command.rail == null) {
+            val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+            SettlementDates(bookingDate = today, valueDate = today)
+        } else {
+            SettlementDateResolver.resolve(
+                now = Instant.now(clock),
+                paymentCurrency = amount.currency.code,
+                settlementCurrency = baseAmount.currency.code,
+                requestedValueDate = command.valueDate,
+            )
+        }
 
         val transaction = Transaction(
             id = UUID.randomUUID(),
@@ -202,7 +230,7 @@ class TransactionService(
         return initiateTransaction(
             InitiateTransactionCommand(
                 idempotencyKey = command.idempotencyKey,
-                type = com.openbank.transaction.domain.model.TransactionType.REVERSAL,
+                type = TransactionType.REVERSAL,
                 sourceAccountId = null,
                 targetAccountId = targetAccountId,
                 amount = original.amount.amount,
