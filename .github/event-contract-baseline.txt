@@ -36,7 +36,6 @@ openbank-sca-service:openbank.notification.requests
 openbank-sca-service:openbank.sca.events
 openbank-sdd-service:openbank.sdd.event
 openbank-security-scanner:openbank.security.ict.incident
-openbank-security-scanner:openbank.security.scan.event
 openbank-sepa-instant:openbank.sepa.instant.events
 openbank-sepa-payment:openbank.sepa.payment.events
 openbank-standing-order-service:openbank.standing-orders.order.event
