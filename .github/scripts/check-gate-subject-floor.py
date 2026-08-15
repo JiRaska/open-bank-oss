@@ -64,6 +64,7 @@ NO_CORPUS = {
     "governance-script-unit-tests",
     "libs-change-dependents",
     "pact-version-probe-fail-closed-unit-test",
+    "pact-provider-version-proof-unit-test",
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
