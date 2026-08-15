@@ -106,7 +106,7 @@ export default function NewCampaignPage() {
   const [goal, setGoal] = useState('')
   const [segment, setSegment] = useState('')
   const [segments, setSegments] = useState<Segment[]>([])
-  const [segmentSource, setSegmentSource] = useState<'audiences' | 'segments'>('audiences')
+  const [segmentSource, setSegmentSource] = useState<'audiences' | 'segments' | null>(null)
   const [cadences, setCadences] = useState<Cadence[]>([])
   const [triggers, setTriggers] = useState<CampaignTrigger[]>([])
   const [contentCatalogue, setContentCatalogue] = useState<CampaignTemplate[]>([])
@@ -185,7 +185,7 @@ export default function NewCampaignPage() {
   function previewReach(ref: string) {
     setReach(null)
     const [segName, segVersion] = ref.split('@')
-    if (!segName) return
+    if (!segName || !segmentSource) return
     fetch(`/api/${segmentSource}/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
@@ -294,6 +294,16 @@ export default function NewCampaignPage() {
       })
       .catch(() => undefined)
   }, [requestedAudience, segments, segmentSource])
+
+  // Draft hydration can finish before the rolling audience catalogue tells us which preview
+  // endpoint exists. Re-run only once that source is known; otherwise an old deployment renders
+  // a real legacy draft with a permanently unknown reach.
+  useEffect(() => {
+    if (segment && segmentSource) previewReach(segment)
+  // previewReach is intentionally a closure: only the selected immutable ref and resolved source
+  // determine this external lookup.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segment, segmentSource])
 
   // Entry catalogues come from campaign-service rather than a second hard-coded list: an event
   // whose consumer was removed must disappear from Studio, and a cadence may never become a raw
