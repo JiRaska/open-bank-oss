@@ -42,7 +42,12 @@ export async function POST(request: NextRequest) {
       // infrastructure detail. Preserve only this narrow, documented contract;
       // every other agent error stays behind the generic BFF envelope.
       const failure = await response.json().catch(() => null) as { error?: unknown } | null
-      if (response.status === 503 && failure?.error === 'model unavailable') {
+      // Agent Service returns the more specific public message below. Keep accepting the
+      // original short form while a rolling deployment may contain either version.
+      if (
+        response.status === 503 &&
+        (failure?.error === 'model unavailable' || failure?.error === 'catalog review model is unavailable')
+      ) {
         return NextResponse.json({ error: 'model unavailable' }, { status: 503 })
       }
       return NextResponse.json({ error: 'upstream_error' }, { status: response.status })
