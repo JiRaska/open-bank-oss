@@ -168,10 +168,10 @@ export default function NewCampaignPage() {
   }
 
   useEffect(() => {
-    fetch('/api/segments')
+    fetch('/api/audiences')
       .then(r => r.json())
-      .then((d: { items: Segment[]; state: string }) => {
-        if (d.state === 'ok') setSegments(d.items ?? [])
+      .then((d: { items: Array<Segment & { state?: string }>; state: string }) => {
+        if (d.state === 'ok') setSegments((d.items ?? []).filter(item => (item.state ?? 'APPROVED') === 'APPROVED'))
       })
       .catch(() => undefined)
   }, [])
@@ -182,7 +182,7 @@ export default function NewCampaignPage() {
     setReach(null)
     const [segName, segVersion] = ref.split('@')
     if (!segName) return
-    fetch(`/api/segments/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
+    fetch(`/api/audiences/${encodeURIComponent(segName)}/${encodeURIComponent(segVersion)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
         if (d.state === 'ok') setReach(d.size ?? 0)
@@ -283,7 +283,7 @@ export default function NewCampaignPage() {
     if (!requestedAudience || !segments.some(s => `${s.name}@${s.version}` === requestedAudience)) return
     setSegment(requestedAudience)
     const [name, version] = requestedAudience.split('@')
-    fetch(`/api/segments/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
+    fetch(`/api/audiences/${encodeURIComponent(name)}/${encodeURIComponent(version)}/preview`)
       .then(r => r.json())
       .then((d: { size?: number; state: string }) => {
         if (d.state === 'ok') setReach(d.size ?? 0)

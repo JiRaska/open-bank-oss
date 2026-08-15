@@ -20,10 +20,17 @@ async function forward(request: NextRequest, context: Context) {
   if (!session?.user?.accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
   const { name, version, action } = await context.params
   if (!isSupportedAction(action)) return NextResponse.json({ error: 'unknown action' }, { status: 404 })
-  const response = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, `/api/v1/audiences/${encodeURIComponent(name)}/${encodeURIComponent(version)}/${action}`), {
-    method: request.method, headers: { authorization: `Bearer ${session.user.accessToken}` }, signal: AbortSignal.timeout(5000), cache: 'no-store',
-  })
-  return NextResponse.json(await response.json(), { status: response.status })
+  try {
+    const response = await fetch(serverSvcUrl('campaign-service', 'campaign', 8128, `/api/v1/audiences/${encodeURIComponent(name)}/${encodeURIComponent(version)}/${action}`), {
+      method: request.method, headers: { authorization: `Bearer ${session.user.accessToken}` }, signal: AbortSignal.timeout(5000), cache: 'no-store',
+    })
+    const body = await response.json()
+    if (action !== 'preview') return NextResponse.json(body, { status: response.status })
+    if (response.ok) return NextResponse.json({ ...body, state: 'ok' })
+    return NextResponse.json({ state: response.status === 401 || response.status === 403 ? 'unauthorized' : response.status === 404 ? 'unknown_segment' : 'unreachable' })
+  } catch {
+    return action === 'preview' ? NextResponse.json({ state: 'unreachable' }) : NextResponse.json({ error: 'unreachable' }, { status: 502 })
+  }
 }
 
 export async function GET(request: NextRequest, context: Context) { return forward(request, context) }
