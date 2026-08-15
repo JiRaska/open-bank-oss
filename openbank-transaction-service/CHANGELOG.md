@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.2...transaction-service-v1.16.3) (2026-08-15)
+
+
+### Bug Fixes
+
+* **transaction:** own-account transfers book and value same-day, always ([#4869](https://github.com/JiRaska/open-bank-oss/issues/4869)) ([79a88b9](https://github.com/JiRaska/open-bank-oss/commit/79a88b931827c447d08f64481f75a13c225521e4))
+
 ## [1.16.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.1...transaction-service-v1.16.2) (2026-08-09)
 
 
