@@ -11,14 +11,25 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.ledger.domain.model.GlAccountType
+import com.openbank.ledger.domain.model.PeriodTrialBalance
+import com.openbank.ledger.domain.model.PeriodType
+import com.openbank.ledger.domain.model.TrialBalanceLine
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.math.BigDecimal
+import java.sql.Timestamp
+import java.time.Instant
+import java.time.LocalDate
+import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * Broker-side provider verification for ledger-service, published-result counterpart to
@@ -53,6 +64,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class LedgerPactBrokerProviderVerificationTest {
 
+    @Inject
+    lateinit var dataSource: DataSource
+
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
@@ -66,6 +80,60 @@ class LedgerPactBrokerProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         context?.verifyInteraction()
+    }
+
+    @State("ledger has frozen monthly trial balance for the reporting date")
+    fun stateWithFrozenMonthlyTrialBalance() {
+        val period = PeriodType.MONTH.of(LocalDate.of(2026, 6, 30))
+        val lines = listOf(
+            TrialBalanceLine(
+                ASSET_ID,
+                "1100",
+                "Cash",
+                GlAccountType.ASSET,
+                "CZK",
+                BigDecimal("150000"),
+                BigDecimal.ZERO,
+            ),
+            TrialBalanceLine(
+                LIABILITY_ID,
+                "2100",
+                "Deposits",
+                GlAccountType.LIABILITY,
+                "CZK",
+                BigDecimal.ZERO,
+                BigDecimal("150000"),
+            ),
+        )
+        val balance = PeriodTrialBalance(period, lines)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "insert into ledger_closed_period (id, period_type, period_from, period_to, status, evidence_state, computed_at, total_debits, total_credits, account_count, content_hash, drafted_by, frozen_by, frozen_at, created_at, updated_at) values (?, 'MONTH', '2026-06-01', '2026-06-30', 'FROZEN', 'LINES_V1', ?, 150000, 150000, 2, ?, 'maker', 'checker', ?, ?, ?) on conflict (period_type, period_from) do nothing",
+            ).use { s ->
+                s.setObject(1, PERIOD_ID)
+                s.setTimestamp(2, Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")))
+                s.setString(3, balance.contentHash())
+                s.setTimestamp(4, Timestamp.from(Instant.parse("2026-07-02T00:00:00Z")))
+                s.setTimestamp(5, Timestamp.from(Instant.parse("2026-07-01T00:00:00Z")))
+                s.setTimestamp(6, Timestamp.from(Instant.parse("2026-07-02T00:00:00Z")))
+                s.executeUpdate()
+            }
+            connection.prepareStatement(
+                "insert into ledger_closed_period_trial_balance_line (period_id, gl_account_id, currency, code, name, account_type, total_debit, total_credit) values (?, ?, 'CZK', ?, ?, ?, ?, ?) on conflict do nothing",
+            ).use { s ->
+                lines.forEach { l ->
+                    s.setObject(1, PERIOD_ID)
+                    s.setObject(2, l.glAccountId)
+                    s.setString(3, l.code)
+                    s.setString(4, l.name)
+                    s.setString(5, l.type.name)
+                    s.setBigDecimal(6, l.totalDebit)
+                    s.setBigDecimal(7, l.totalCredit)
+                    s.addBatch()
+                }
+                s.executeBatch()
+            }
+        }
     }
 
     /**
@@ -100,5 +168,11 @@ class LedgerPactBrokerProviderVerificationTest {
     @State("ledger has no journal entries")
     fun stateWithNoJournalEntries() {
         // No setup needed — a fresh Testcontainer DB has no journals by default.
+    }
+
+    private companion object {
+        val PERIOD_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009601")
+        val ASSET_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009602")
+        val LIABILITY_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009603")
     }
 }
