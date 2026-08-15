@@ -955,6 +955,40 @@ gates:
     run: |
       python3 .github/scripts/check-advisory-gate-registration.py --expect-manifest
 
+  # A VEX verdict resting on a single `< X` advisory bound (issue #4716). An advisory that
+  # writes its affected range as one open interval misclassifies every dependency with
+  # PARALLEL RELEASE LINES: Maven ordering says `3.4.2 < 4.2.1`, so a 3.x release branched
+  # AFTER the fix reads as affected. hibernate-reactive did exactly that (#4533/#4707 —
+  # 4.2.1.Final on 2025-12-21, 3.4.0.Final five months LATER off a patched branch), and the
+  # "obvious" remediation of forcing >= 4.2.1 was both unsatisfiable on every candidate
+  # quarkus-bom and a guaranteed boot failure against a different Hibernate ORM.
+  #
+  # It sits HERE and not in the VEX tooling because there is nothing upstream to intercept:
+  # build-release-evidence.sh writes every finding as `under_investigation` by design — a
+  # machine never asserts not_affected. The classification is entirely human, written straight
+  # into openbank-libs/governance/vex/*.openvex.json, so the committed statement is the first
+  # and only artifact a gate can see. A checklist was the alternative and is weaker by
+  # construction: it needs someone to remember, and remembering is what produced both
+  # occurrences.
+  #
+  # Falsified in BOTH directions against the real corpus, not only fixtures: removing the
+  # sha256 from the 47 real hibernate-reactive statements reddens exactly those 47, and the
+  # 777 others — netty's `>=4.2.0, <4.2.16` two-sided citations included — stay clean, which
+  # is the direction that matters, because a guard that only ever says "no" would make the
+  # wrong classification the shipping one.
+  - id: vex-open-interval-evidence
+    name: "a VEX verdict on a one-sided `< X` advisory range carries evidence (issue #4716, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "A single `< X` advisory interval cannot classify a dependency with parallel release lines, and both directions are expensive: #4533 sat 47 statements at `affected` behind an exit criterion no platform can satisfy, whose remediation would have broken the boot, while the mirror case — an unpatched older line whose version string sorts above the bound — reads as safe."
+    review_after: "2027-02-15"
+    min_subjects: 700   # 824 OpenVEX statements today (2026-08-15)
+    selftest: |
+      python3 .github/scripts/check-vex-open-interval-evidence.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-vex-open-interval-evidence.py --root .
+
   # ==== registry =======================================================
   # issue #669 scope item 3 / rules.yaml: slo. Every money_path_services entry needs a
   # matching availability + latency Pyrra ServiceLevelObjective whose target/window match

@@ -29,6 +29,41 @@ statuses and what each requires:
 
 Keep statements truthful and reviewed like code — this is a regulator-facing audit artifact.
 
+## A single `< X` advisory range does not settle anything (issue #4716)
+
+**Enforced** by `check-vex-open-interval-evidence.py` (gate `vex-open-interval-evidence`).
+
+An advisory that writes its affected range as one open interval — `< X`, with no lower bound —
+cannot classify a dependency that maintains **parallel release lines**. Maven/semver ordering says
+`3.4.2 < 4.2.1`, so a 3.x release branched *after* the fix sorts below the bound and reads as
+affected when it is not. The mirror case is worse: an older, genuinely unpatched line whose
+version string sorts *above* the bound reads as safe.
+
+This fleet has hit it twice. `GHSA-frpp-8pwq-hjrx` states `< 4.2.1`; hibernate-reactive
+`4.2.1.Final` released 2025-12-21 and `3.4.0.Final` released 2026-05-27 — five months later, off a
+branch that already carried the patch. The 47 statements that read the range alone landed on
+`affected`, behind an exit criterion no candidate `quarkus-bom` can satisfy, and forcing
+`>= 4.2.1` would have traded a non-existent DoS for a certain boot failure (#4533, PR #4707).
+netty's 4.1.x-vs-4.2.x statements are the same shape.
+
+So a statement citing a **one-sided** `< X` bound — for *any* verdict, `affected` included; only
+`under_investigation` is exempt — must settle it one of two ways:
+
+- **Artifact evidence.** Identify the advisory's fix commit and its observable effects, then
+  `javap -p -c` the jar for them. **Run the probe against a known-negative and a known-positive**
+  (the last unfixed release and the first patched one) so it is shown to discriminate rather than
+  always answering yes — in #4533 the first attempt used `strings`, which fails on BSD and
+  returned `0` for every jar including the known-fixed control. Quote the jar's `sha256`, and it
+  must be the value already pinned for that artifact in `gradle/verification-metadata.xml`, so
+  the bytes inspected are provably the bytes shipped. The gate checks that pairing.
+- **`"resolved_version": "<x.y.z>"`** on the statement, when the fleet genuinely resolves the
+  bound's own release line (`major.minor`) and plain arithmetic settles it. An OpenBank-local
+  annotation, carried through into the released VEX document as provenance; JSON-LD ignores
+  undefined terms, so it does not affect OpenVEX consumers.
+
+A **two-sided** range (`>=4.2.0, <4.2.16`) names its release line and cannot sweep in a parallel
+one — cite it that way and no evidence is required.
+
 ## Example
 
 ```json
