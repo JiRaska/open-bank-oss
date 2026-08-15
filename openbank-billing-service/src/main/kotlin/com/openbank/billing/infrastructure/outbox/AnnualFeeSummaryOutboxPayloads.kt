@@ -31,9 +31,14 @@ internal object AnnualFeeSummaryOutboxPayloads {
     /** `"AnnualFeeSummaryReady"` — the contract's `eventType` literal (ADR-0248). */
     const val EVENT_TYPE_LITERAL: String = "AnnualFeeSummaryReady"
 
-    private val mapper = jacksonObjectMapper().findAndRegisterModules().apply {
-        setSerializationInclusion(JsonInclude.Include.NON_NULL)
-    }
+    // setDefaultPropertyInclusion, not setSerializationInclusion: the latter is deprecated
+    // (CodeQL alert 413) and this is the only call site in the fleet, so there was no local
+    // convention to follow. Same effect — NON_NULL default inclusion — and the serialized
+    // output is asserted unchanged by AnnualFeeSummaryOutboxPayloadsTest, which matters here
+    // because this payload carries money.
+    private val mapper = jacksonObjectMapper()
+        .findAndRegisterModules()
+        .setDefaultPropertyInclusion(JsonInclude.Include.NON_NULL)
 
     fun toJson(summary: AnnualFeeSummary, occurredAt: Instant): String = mapper.writeValueAsString(
         AnnualFeeSummaryReadyPayload(
