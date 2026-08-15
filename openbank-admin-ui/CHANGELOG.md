@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.136.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.2...admin-ui-v0.136.0) (2026-08-15)
+
+
+### Features
+
+* **admin-ui:** derive a qrless-pay status signal, and make the deriver testable ([#4922](https://github.com/JiRaska/open-bank-oss/issues/4922)) ([3edfb66](https://github.com/JiRaska/open-bank-oss/commit/3edfb66d401d1ceb08a84d07c6bcc6067a801a74))
+
 ## [0.135.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.1...admin-ui-v0.135.2) (2026-08-15)
 
 
