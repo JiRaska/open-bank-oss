@@ -72,6 +72,12 @@ spec:
               value: jdbc:postgresql://campaign-db-rw.campaign.svc:5432/openbank_campaigns
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: vertx-reactive:postgresql://campaign-db-rw.campaign.svc:5432/openbank_campaigns
+            # V15 (Stories) was deployed before the additive graph migrations V13/V14.  Flyway
+            # otherwise refuses to start rather than backfilling those safe, additive columns.
+            # Keep this explicit until all environments have recorded V13/V14; then remove it in
+            # a separately reviewed cleanup rather than making out-of-order migrations implicit.
+            - name: QUARKUS_FLYWAY_OUT_OF_ORDER
+              value: "true"
             - name: DB_USER
               value: openbank
             - name: DB_PASSWORD
