@@ -1,4 +1,4 @@
-%% title: Security Scanner — Životní cyklus scanu (ServiceScanResult + SecurityOutbox)
+%% title: Security Scanner — Životní cyklus scanu (ServiceScanResult, pouze in-memory)
 stateDiagram-v2
     [*] --> Triggered : POST /scan\nnebo Scheduler (každých 30 min)
 
@@ -41,20 +41,16 @@ stateDiagram-v2
         ComplianceCheck --> [*]
     }
 
-    ReportBuilt --> Stored : lastReport = PlatformSecurityReport
+    ReportBuilt --> Held : lastReport = PlatformSecurityReport
 
-    state Stored {
-        [*] --> OutboxPending : SecurityOutboxEntity status=PENDING
-        OutboxPending --> OutboxSending : SecurityOutboxDispatcher poll
-        OutboxSending --> OutboxSent : Kafka publish OK\nstatus=SENT, sent_at=now
-        OutboxSending --> OutboxFailed : publish error\nattempt_count++, last_error set
-        OutboxFailed --> OutboxPending : retry (attempt_count < max)
-        OutboxFailed --> OutboxDead : attempt_count ≥ max\nstatus=DEAD
-        OutboxSent --> [*]
-        OutboxDead --> [*]
+    state Held {
+        [*] --> InMemory : drženo v ConcurrentHashMap\nžádný zápis do DB, žádný event
+        InMemory --> Lost : restart podu\nreport zaniká
+        InMemory --> [*]
+        Lost --> [*]
     }
 
-    Stored --> [*] : report dostupný přes GET /api/v1/security/report
+    Held --> [*] : report dostupný přes GET /api/v1/security/report
 
     note right of Scored
         Severity mapping:
@@ -71,4 +67,10 @@ stateDiagram-v2
         GDPR: žádný CRITICAL v A02
         OWASP_TOP10: žádný CRITICAL finding
         CNB_SECURITY: platformScore≥70
+    end note
+
+    note right of Held
+        Sken nevysílá žádný event.
+        Outbox byl odstraněn (#4709) —
+        nikdy do něj nikdo nezapsal.
     end note

@@ -1,19 +1,10 @@
-%% title: Security Scanner — ER Schema (odvozeno z Flyway migrací V2–V3 + doménového modelu)
+%% title: Security Scanner — doménový model (žádné DB tabulky; #4709)
+%% Služba nic neperzistuje. Jediná tabulka `security_outbox` (V2/V3) neměla nikdy zapisovatele
+%% a byla zahozena migrací V4 — databáze drží už jen flyway_schema_history. Všechny entity níže
+%% žijí v paměti (ConcurrentHashMap) a po restartu podu zanikají; nejde tedy o ER schéma
+%% databáze, ale o tvar doménového modelu za REST reportem.
 erDiagram
 
-    security_outbox {
-        BIGINT id PK "BIGSERIAL; alokace přes security_outbox_seq (INCREMENT 50)"
-        UUID event_id UK "NOT NULL UNIQUE"
-        UUID aggregate_id "NOT NULL, idx: idx_security_outbox_aggregate_id"
-        VARCHAR_128 event_type "NOT NULL"
-        TEXT payload "NOT NULL — JSON tělo události"
-        VARCHAR_16 status "NOT NULL — PENDING | SENT | FAILED | DEAD"
-        INTEGER attempt_count "NOT NULL DEFAULT 0"
-        TIMESTAMPTZ sent_at "nullable"
-        TEXT last_error "nullable"
-        TIMESTAMPTZ created_at "NOT NULL DEFAULT NOW()"
-        TIMESTAMPTZ updated_at "NOT NULL DEFAULT NOW()"
-    }
 
     SecurityScanResult {
         UUID id PK "in-memory / report context"
@@ -57,4 +48,3 @@ erDiagram
 
     PlatformSecurityReport ||--o{ SecurityScanResult : "serviceResults"
     SecurityScanResult ||--o{ SecurityFinding : "findings"
-    SecurityScanResult ||--o| security_outbox : "events published via outbox (aggregate_id = scan UUID)"
