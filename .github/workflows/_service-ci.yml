@@ -142,16 +142,33 @@ jobs:
       # ephemeral GitHub-hosted runners. This self-hosted sandbox instance enforces
       # egress at the infra layer (egress-only SG in an isolated VPC, ADR-0027), a
       # stronger control, so the shim is redundant (and unsupported on this host).
+      # P predates the proof runner. Before replacing the workspace with P, save the runner from
+      # this workflow's trusted checkout outside the workspace; F is never checked out for code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: inputs.provider_version != ''
+        with:
+          ref: ${{ github.sha }}
+          path: provider-proof-source
+          fetch-depth: 1
+
+      - name: Save trusted provider proof runner outside the P workspace
+        if: inputs.provider_version != ''
+        run: |
+          set -euo pipefail
+          cp provider-proof-source/.github/scripts/prove-pact-provider-version.sh \
+            "$RUNNER_TEMP/prove-pact-provider-version.sh"
+          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Blank resolves to the triggering ref, so the default path is byte-identical to before.
-          ref: ${{ inputs.ref }}
-          # A verification published for a sha is a claim about code; it must be code that is ON
-          # main, never an arbitrary branch tip. fetch-depth 0 so the ancestry check below can run.
-          fetch-depth: ${{ inputs.ref == '' && 1 || 0 }}
+          # Default: F (or the triggering ref) is checked out and published, unchanged. The
+          # exceptional mode checks out deployed P; its one approved fixture is later read as a
+          # named blob from F, never by merging/checking out F's runtime.
+          ref: ${{ inputs.provider_version != '' && inputs.provider_version || inputs.ref }}
+          fetch-depth: ${{ inputs.ref == '' && inputs.provider_version == '' && 1 || 0 }}
 
-      - name: Refuse a ref that is not an ancestor of main
-        if: inputs.ref != ''
+      - name: Refuse a default ref that is not an ancestor of main
+        if: inputs.ref != '' && inputs.provider_version == ''
         env:
           REF: ${{ inputs.ref }}
         run: |
@@ -166,28 +183,28 @@ jobs:
           fi
           echo "$REF is on main — publishing the verification against it."
 
-      - name: Prove provider version is the checked-out ref or a test-only ancestor
+      - name: Check out P and overlay the one approved Ledger provider fixture from F
         env:
           SERVICE: ${{ inputs.service }}
+          REQUESTED_FIXTURE_REF: ${{ inputs.ref }}
           REQUESTED_PROVIDER_VERSION: ${{ inputs.provider_version }}
         run: |
           set -euo pipefail
-          # The checkout is the code and tests that will run. With no override, publishing that
-          # exact SHA is the normal path. Do not infer an older version from a broker result.
-          VERIFY_REF="$(git rev-parse HEAD)"
+          PROVIDER_VERSION="$(git rev-parse HEAD)"
           if [ -n "$REQUESTED_PROVIDER_VERSION" ]; then
-            # Never forward a raw workflow input to Gradle or the Pact broker. Git resolves
-            # short SHAs and named refs once, then only the canonical full SHA is used below.
-            PROVIDER_VERSION="$(bash .github/scripts/prove-pact-provider-version.sh --resolve "$REQUESTED_PROVIDER_VERSION")"
+            PROOF_RUNNER="$RUNNER_TEMP/prove-pact-provider-version.sh"
+            [ -x "$PROOF_RUNNER" ] || { echo "::error::trusted provider proof runner is absent"; exit 1; }
+            PROVIDER_VERSION="$(bash "$PROOF_RUNNER" --resolve "$REQUESTED_PROVIDER_VERSION")"
+            FIXTURE_REF="${REQUESTED_FIXTURE_REF:-$GITHUB_SHA}"
+            git fetch --quiet origin main "$FIXTURE_REF"
+            FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
+            # The script proves P/F/main ancestry, requires this checkout to be P, and writes
+            # exactly LedgerPactBrokerProviderVerificationTest.kt from F into the P worktree.
+            bash "$PROOF_RUNNER" --prepare-overlay \
+              "$SERVICE" "$PROVIDER_VERSION" "$FIXTURE_VERSION" origin/main
           else
-            PROVIDER_VERSION="$VERIFY_REF"
-          fi
-          if [ "$PROVIDER_VERSION" != "$VERIFY_REF" ]; then
-            # PR merge refs are intentionally not ancestors of main and never publish. Only the
-            # exceptional distinct-version dispatch needs the on-main, test-only proof.
-            git fetch --quiet origin main
-            bash .github/scripts/prove-pact-provider-version.sh \
-              "$SERVICE" "$PROVIDER_VERSION" "$VERIFY_REF" origin/main
+            # No override: retain the original one-SHA verification contract.
+            PROVIDER_VERSION="$(git rev-parse HEAD)"
           fi
           echo "PACT_PROVIDER_VERSION=$PROVIDER_VERSION" >> "$GITHUB_ENV"
 
