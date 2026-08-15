@@ -93,13 +93,23 @@ class CardOutboxAdminResource(private val outbox: CardOutboxRepository) {
         val remaining = outbox.countDead()
         log.warnf(
             "card.outbox.requeue operator=%s event_id=%s requeued=%d dead_remaining=%d",
-            operatorId,
+            operatorId.sanitizeForLog(),
             parsed?.toString() ?: "ALL",
             requeued,
             remaining,
         )
         return Response.ok(OutboxRequeueResponse(requeued = requeued, deadRemaining = remaining)).build()
     }
+
+    // CodeQL java/log-injection (alert 420): operatorId is the raw X-Operator-Id header, so a
+    // caller can put CR/LF in it and forge additional log lines (CWE-117). `parsed` needs no
+    // such treatment — it is already through UUID.fromString above.
+    //
+    // Deliberately a member of this class, NOT a top-level extension. A top-level declaration
+    // placed between @Path and the class binds the annotation to the FUNCTION: McpEndpoint
+    // shipped exactly that shape, RESTEasy never registered the resource, and every POST /mcp
+    // answered 404 on a running pod while its unit tests stayed green (#3371).
+    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
 
     private companion object {
         private val log: Logger = Logger.getLogger(CardOutboxAdminResource::class.java)
