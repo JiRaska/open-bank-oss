@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
-import { ROLES } from '@/lib/auth/roles'
+import { hasPermission, ROLES } from '@/lib/auth/roles'
 
 describe('personaForRoles (ADR-0229 D4)', () => {
   it('platform admin wins over every other role', () => {
@@ -50,6 +50,22 @@ describe('workspaceFor / personaLabel', () => {
     expect(personaLabel('compliance', 'cs')).toBe('Compliance')
     expect(personaLabel('payments', 'en')).toBe('Payments Ops')
   })
+
+  it('does not give a primary persona a shortcut outside its RBAC grant', () => {
+    const representativeRoles = {
+      backoffice: [ROLES.OPERATOR],
+      payments: [ROLES.PAYMENTS],
+      compliance: [ROLES.COMPLIANCE],
+      supervisor: [ROLES.SUPERVISOR],
+      platform: [ROLES.ADMIN],
+    } as const
+
+    for (const [persona, roles] of Object.entries(representativeRoles) as [keyof typeof representativeRoles, readonly string[]][]) {
+      for (const link of workspaceFor(persona)) {
+        expect(hasPermission([...roles], link.permission), `${persona} -> ${link.href} exceeds its RBAC grant`).toBe(true)
+      }
+    }
+  })
 })
 
 // The Sidebar looks each workspace link up in its nav by href and inherits that entry's
@@ -68,4 +84,3 @@ describe('workspace links resolve to a real nav destination', () => {
     }
   })
 })
-

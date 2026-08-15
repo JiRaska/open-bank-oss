@@ -8,7 +8,7 @@ import { Bell, Search, HelpCircle, LogOut, ChevronDown } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { ROLE_LABELS } from '@/lib/auth/roles'
+import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CommandPalette } from '@/components/search/CommandPalette'
 import styles from './Header.module.css'
@@ -46,9 +46,11 @@ export function Header() {
   const user = session?.user
   const roles: string[] = user?.roles ?? []
   // Show highest-privilege role badge
-  const primaryRole = ['ROLE_ADMIN','ROLE_COMPLIANCE','ROLE_PAYMENTS','ROLE_AUDITOR','ROLE_OPERATOR','ROLE_VIEWER']
+  const primaryRole = ['ROLE_ADMIN', 'ROLE_SUPERVISOR', 'ROLE_COMPLIANCE', 'ROLE_KYC_REVIEWER', 'ROLE_KYC_OPENER', 'ROLE_KYC', 'ROLE_PAYMENTS', 'ROLE_AUDITOR', 'ROLE_OPERATOR', 'ROLE_VIEWER']
     .find(r => roles.includes(r))
   const roleInfo = primaryRole ? ROLE_LABELS[primaryRole] : null
+  const canReadDocs = hasPermission(roles, 'docs:view')
+  const canViewApprovals = hasPermission(roles, 'system:view')
   const initials = user?.name
     ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
     : user?.email?.[0]?.toUpperCase() ?? 'U'
@@ -119,19 +121,24 @@ export function Header() {
         >
           {language.toUpperCase()}
         </button>
-        <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} /></HeaderLink>
-        <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} /></HeaderLink>
+        {canReadDocs && <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} /></HeaderLink>}
+        {canViewApprovals && <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} /></HeaderLink>}
         <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 6px' }} />
 
         {/* User menu */}
         <div style={{ position: 'relative' }}>
-          <div
+          <button
+            type="button"
             onClick={() => setMenuOpen(v => !v)}
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label={t('Otevřít uživatelskou nabídku', 'Open user menu')}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px',
-              padding: '4px 8px 4px 4px', borderRadius: '20px', cursor: 'pointer',
+              padding: '4px 8px 4px 4px', border: 'none', borderRadius: '20px', cursor: 'pointer',
               transition: 'background 0.12s',
               background: menuOpen ? 'var(--surface-3)' : 'transparent',
+              font: 'inherit', textAlign: 'left',
             }}
             onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
             onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.background = 'transparent' }}
@@ -155,11 +162,11 @@ export function Header() {
               )}
             </div>
             <ChevronDown size={12} style={{ color: 'var(--text-tertiary)', marginLeft: '2px' }} />
-          </div>
+          </button>
 
           {/* Dropdown */}
           {menuOpen && (
-            <div style={{
+            <div role="menu" aria-label={t('Uživatelská nabídka', 'User menu')} style={{
               position: 'absolute', top: 'calc(100% + 6px)', right: 0,
               width: '240px', background: 'var(--surface)', border: '1px solid var(--border)',
               borderRadius: '10px', boxShadow: 'var(--shadow-lg)', padding: '8px',

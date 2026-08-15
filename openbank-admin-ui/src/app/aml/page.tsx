@@ -11,6 +11,7 @@ import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader, StatusBadge } from '@/components/ui'
 
 interface AmlCase {
   id: string;
@@ -20,21 +21,6 @@ interface AmlCase {
   status: string;
   score: number;
   timestamp: string;
-}
-
-const RISK_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  CRITICAL: { bg: '#fef2f2', text: '#991b1b', border: '#fecaca' },
-  HIGH:     { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
-  MEDIUM:   { bg: 'var(--warning-bg)',  text: 'var(--warning-text)',  border: 'var(--warning-border)' },
-  LOW:      { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
-  INFO:     { bg: 'var(--surface-3)',   text: 'var(--text-tertiary)', border: 'var(--border)' },
-}
-
-const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  PENDING_REVIEW: { bg: 'var(--warning-bg)',  text: 'var(--warning-text)',  border: 'var(--warning-border)' },
-  ESCALATED:      { bg: 'var(--danger-bg)',   text: 'var(--danger-text)',   border: 'var(--danger-border)' },
-  RESOLVED:       { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
-  CLEAN:          { bg: 'var(--surface-3)',   text: 'var(--text-secondary)', border: 'var(--border)' },
 }
 
 export default function AmlPage() {
@@ -71,16 +57,11 @@ export default function AmlPage() {
   return (
     <AuthGuard permission="compliance:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('AML Monitoring', 'AML Monitoring')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Prevence praní špinavých peněz — monitoring transakcí a správa případů', 'Anti-Money Laundering — transaction monitoring & case management')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader
+          title={t('AML Monitoring', 'AML Monitoring')}
+          subtitle={t('Prevence praní špinavých peněz — monitoring transakcí a správa případů', 'Anti-Money Laundering — transaction monitoring & case management')}
+          icon={<ShieldAlert size={20} aria-hidden="true" />}
+          actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <ServiceStatusBadge
               label="aml-service :8117"
               loading={loading}
@@ -97,8 +78,8 @@ export default function AmlPage() {
               <Play size={13} style={{ animation: scanning ? 'pulse 1s infinite' : 'none' }} />
               {scanning ? t('Kontroluji…', 'Scanning…') : t('Spustit AML kontrolu', 'Run AML scan')}
             </button>
-          </div>
-        </div>
+          </div>}
+        />
 
         {escalated.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
@@ -170,8 +151,6 @@ export default function AmlPage() {
                 ))}
               </tr></thead>
               <tbody>{filtered.map(c => {
-                const rStyle = RISK_COLORS[c.riskLevel] || RISK_COLORS.INFO
-                const sStyle = STATUS_COLORS[c.status] || STATUS_COLORS.CLEAN
                 return (
                   <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
                     onMouseEnter={e => e.currentTarget.style.background = 'var(--surface-2)'}
@@ -184,8 +163,7 @@ export default function AmlPage() {
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.customerType}</td>
                     <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '10px', fontWeight: 700,
-                        background: rStyle.bg, color: rStyle.text, border: `1px solid ${rStyle.border}` }}>{c.riskLevel}</span>
+                      <StatusBadge status={c.riskLevel} />
                     </td>
                     <td style={{ padding: '12px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -197,8 +175,7 @@ export default function AmlPage() {
                       </div>
                     </td>
                     <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
-                        background: sStyle.bg, color: sStyle.text, border: `1px solid ${sStyle.border}` }}>{c.status.replace('_', ' ')}</span>
+                      <StatusBadge status={c.status} label={c.status.replace('_', ' ')} />
                     </td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.timestamp ? new Date(c.timestamp).toLocaleString('cs-CZ') : '—'}</td>
                   </tr>

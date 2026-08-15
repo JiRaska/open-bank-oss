@@ -10,6 +10,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ShieldCheck, Search, RefreshCw, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
+import { PageHeader, StatusBadge } from '@/components/ui'
 
 const KYC_SERVICE = '/api/svc/kyc-service'
 
@@ -17,11 +18,6 @@ interface KycCase {
   id: string; partyId: string; status: string
   checks: { checkType: string; status: string }[]
   reviewedBy?: string; createdAt: string; updatedAt: string
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  APPROVED: 'var(--green)', PENDING: 'var(--yellow)', REJECTED: 'var(--red)',
-  IN_REVIEW: 'var(--accent)', OPEN: 'var(--text-muted)',
 }
 
 export default function KycPage() {
@@ -66,23 +62,15 @@ export default function KycPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">KYC</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
-            {t('KYC Případy', 'KYC Cases')}
-          </h1>
-          <p className="page-subtitle">{t('Ověření totožnosti zákazníka — přehled případů', 'Know Your Customer verification cases')}</p>
-        </div>
-        <button className="btn btn-secondary" onClick={load} disabled={loading}>
+      <PageHeader
+        title={t('KYC Případy', 'KYC Cases')}
+        subtitle={t('Ověření totožnosti zákazníka — přehled případů', 'Know Your Customer verification cases')}
+        icon={<ShieldCheck size={20} aria-hidden="true" />}
+        actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
           <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
@@ -146,16 +134,12 @@ export default function KycPage() {
                   <Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.partyId.slice(0, 8)}…</Link>
                 </td>
                 <td>
-                  <span className="pill" style={{ background: `${STATUS_COLOR[c.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[c.status] ?? 'var(--text-muted)' }}>
-                    {c.status}
-                  </span>
+                  <StatusBadge status={c.status} />
                 </td>
                 <td>
                   <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
                     {c.checks?.map(ch => (
-                      <span key={ch.checkType} className="tag" style={{ fontSize: '10px', color: STATUS_COLOR[ch.status] ?? 'var(--text-muted)' }}>
-                        {ch.checkType?.replace(/_/g, ' ') ?? ch.checkType}
-                      </span>
+                      <StatusBadge key={ch.checkType} status={ch.status} label={ch.checkType?.replace(/_/g, ' ') ?? ch.checkType} />
                     ))}
                   </div>
                 </td>
