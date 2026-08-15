@@ -29,7 +29,7 @@ import java.time.format.DateTimeFormatter
 internal object AnnualFeeSummaryOutboxPayloads {
 
     /** `"AnnualFeeSummaryReady"` — the contract's `eventType` literal (ADR-0248). */
-    const val EVENT_TYPE_LITERAL: String = "AnnualFeeSummaryReady"
+    const val EVENT_TYPE: String = "AnnualFeeSummaryReady"
 
     // setDefaultPropertyInclusion, not setSerializationInclusion: the latter is deprecated
     // (CodeQL alert 413) and this is the only call site in the fleet, so there was no local
@@ -63,11 +63,11 @@ internal object AnnualFeeSummaryOutboxPayloads {
 
 /**
  * The `billing.annual-fee-summary.ready` outbox/Kafka payload shape (ADR-0248) — field names,
- * types and the [AnnualFeeSummaryOutboxPayloads.EVENT_TYPE_LITERAL] value are the exact contract
+ * types and the [AnnualFeeSummaryOutboxPayloads.EVENT_TYPE] value are the exact contract
  * document-service's consumer is built against; do not rename without coordinating that change.
  */
 internal data class AnnualFeeSummaryReadyPayload(
-    val eventType: String = AnnualFeeSummaryOutboxPayloads.EVENT_TYPE_LITERAL,
+    val eventType: String = AnnualFeeSummaryOutboxPayloads.EVENT_TYPE,
     val accountId: String,
     val partyRef: String,
     val year: Int,

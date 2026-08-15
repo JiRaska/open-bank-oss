@@ -5,11 +5,16 @@
 package com.openbank.billing.infrastructure.scheduler
 
 import com.openbank.billing.application.usecase.AnnualFeeSummaryService
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 
 /**
@@ -34,6 +39,7 @@ import java.time.LocalDate
 @ApplicationScoped
 class AnnualFeeSummaryScheduler(
     private val annualFeeSummaryService: AnnualFeeSummaryService,
+    private val domainMetrics: DomainMetrics,
     private val clock: Clock,
     @ConfigProperty(name = "openbank.billing.annual-fee-summary.scheduler.enabled", defaultValue = "false")
     private val enabled: Boolean,
@@ -43,6 +49,20 @@ class AnnualFeeSummaryScheduler(
     private val discoveryPageSize: Int,
 ) {
     private val log = Logger.getLogger(AnnualFeeSummaryScheduler::class.java)
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    // ADR-0237. Registration hangs off StartupEvent, not @PostConstruct: @ApplicationScoped is
+    // LAZY, so a @PostConstruct would first run when the cron first fires — and for an ANNUAL
+    // job that is up to a year of an absent gauge, which is a different signal from stale.
+    //
+    // Registered only when `enabled`. A disabled scheduler publishes nothing on purpose, and a
+    // heartbeat there would assert exactly the work this class is not doing — the shape that let
+    // PushResult.skipped() count undelivered pushes as delivered. Absent is the honest reading
+    // for "this environment does not run this job".
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     // Europe/Prague explicit (matches PeriodCloseScheduler's own rule, #1302): an unset
     // @Scheduled timeZone means JVM-default, and "which calendar year just closed" must be
@@ -70,5 +90,18 @@ class AnnualFeeSummaryScheduler(
             result.published,
             result.skipped,
         )
+        // Only here: after publishForAllAccounts actually returned. Never on the disabled branch
+        // above, and never in a catch — a heartbeat on a path that did no work asserts the very
+        // thing it exists to disprove.
+        liveness?.recordSuccess()
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "billing-annual-fee-summary"
+
+        // The cron fires once a year (early in Y+1, covering Y). An operator who reschedules
+        // `openbank.billing.annual-fee-summary.scheduler.cron` must widen this with it, or the
+        // staleness rule fires on a job that is running exactly as configured.
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(365)
     }
 }
