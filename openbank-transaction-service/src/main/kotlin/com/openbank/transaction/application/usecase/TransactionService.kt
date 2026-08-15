@@ -116,8 +116,18 @@ class TransactionService(
         // excludes a not-yet-effective credit, so the reverse transfer back out then failed 422
         // insufficient-funds and the optimistic UI reverted a few seconds later — reported directly
         // as "I moved money into savings and now can't move it back, this can't work like this."
-        // Same-day for both legs, always: an internal transfer has no clearing window to miss.
-        val dates = if (command.type == TransactionType.TRANSFER) {
+        // Same-day for both legs: an internal transfer has no clearing window to miss.
+        //
+        // `rail == null` is the discriminator, NOT the type alone. openbank-sepa-payment books its
+        // settlement leg as type=TRANSFER with rail=SEPA_CT (the other three rails --
+        // domestic-payment, sepa-instant, swift -- book DEBIT, so SEPA is the odd one out). On type
+        // alone this branch would force every SEPA credit transfer to same-day and bypass exactly
+        // the cutoff and business-day rules the paragraph above says it must not touch: money that
+        // really does leave the bank on an external rail with a real clearing calendar. An
+        // own-account move carries no rail -- customer-edge sets none on any of its three TRANSFER
+        // payloads -- so the pair (TRANSFER, no rail) is what "never leaves the ledger" actually
+        // means here.
+        val dates = if (command.type == TransactionType.TRANSFER && command.rail == null) {
             val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
             SettlementDates(bookingDate = today, valueDate = today)
         } else {

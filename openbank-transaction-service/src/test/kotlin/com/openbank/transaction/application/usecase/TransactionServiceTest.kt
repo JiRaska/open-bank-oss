@@ -175,6 +175,37 @@ class TransactionServiceTest {
             assertThat(result.bookingDate).isEqualTo(today)
         }
 
+    /**
+     * The other half of the rule above, and the reason the discriminator is not the type alone.
+     *
+     * `openbank-sepa-payment` books its settlement leg as **type=TRANSFER with rail=SEPA_CT** — the
+     * other three rails (domestic-payment, sepa-instant, swift) book DEBIT, so SEPA is the odd one
+     * out. Keyed on the type alone, the own-account same-day branch would swallow every SEPA credit
+     * transfer and bypass precisely the cutoff and business-day rules that exist because that money
+     * really does leave the bank on an external rail with a clearing calendar.
+     *
+     * A requested value date one month out must therefore still be honoured here — the assertion is
+     * that this transaction did NOT take the same-day branch.
+     */
+    @Test
+    fun `a SEPA settlement booked as TRANSFER still honours the requested value date`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val requested = today.plusMonths(1)
+        val command = initiateCommand().copy(valueDate = requested, rail = PaymentRail.SEPA_CT)
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate)
+            .describedAs("a railed TRANSFER must keep going through SettlementDateResolver")
+            .isNotEqualTo(today)
+        assertThat(result.valueDate).isEqualTo(requested)
+    }
+
     @Test
     fun `initiate cross-currency transaction via fx-service carries the applied rate`(): Unit = runBlocking {
         val command = initiateCommand().copy(
