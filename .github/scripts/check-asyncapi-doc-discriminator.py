@@ -83,6 +83,8 @@ import pathlib
 import sys
 import tempfile
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 DOC = REPO / "docs" / "asyncapi" / "openbank-events.yaml"
 
@@ -326,7 +328,9 @@ def main() -> int:
     findings = audit(DOC, REPO)
     doc = _yaml().safe_load(DOC.read_text(encoding="utf-8")) or {}
     count = len(doc.get("channels") or {})
-    print(f"subjects: {count} channels in {DOC.relative_to(REPO)}")
+    # Unconditionally, and BEFORE the failure path: a gate that found its corpus and then failed
+    # on it must not also read as having lost its corpus.
+    gatelib.subjects(count, f"channels in {DOC.relative_to(REPO)}")
 
     if findings:
         print(f"\nFAIL: {len(findings)} channel(s) contradict themselves or name an unspoken topic:\n")
