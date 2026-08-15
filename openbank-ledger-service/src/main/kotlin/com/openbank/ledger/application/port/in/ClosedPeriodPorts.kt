@@ -43,6 +43,9 @@ data class ListClosedPeriodsQuery(val from: LocalDate, val to: LocalDate)
  */
 interface ClosedPeriodUseCase {
     suspend fun getTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
+
+    /** Regulatory reader: only immutable `LINES_V1` evidence may cross this boundary. */
+    suspend fun getFrozenTrialBalance(query: GetPeriodTrialBalanceQuery): PeriodTrialBalance
     suspend fun createDraft(command: CreateClosedPeriodDraftCommand): ClosedPeriodRecord
     suspend fun freeze(command: FreezeClosedPeriodCommand): ClosedPeriodRecord
     suspend fun get(query: GetClosedPeriodQuery): ClosedPeriodRecord

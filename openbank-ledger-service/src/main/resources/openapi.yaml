@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Ledger Service API
-  version: 1.13.0
+  version: 1.15.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -698,7 +698,11 @@ paths:
   /api/v1/ledger/periods/{type}/{date}/trial-balance:
     get:
       tags: [ClosedPeriod]
-      summary: Trial balance for the period containing the date (computed on demand)
+      summary: Operational trial balance for the period
+      description: >
+        Operational read. It returns LINES_V1 evidence for a new FROZEN close, but may recompute
+        the current journal for DRAFT/no-close or historical HASH_ONLY closes. Regulatory readers
+        MUST use frozen-trial-balance, which fails closed unless immutable LINES_V1 exists.
       operationId: getPeriodTrialBalance
       parameters:
         - $ref: '#/components/parameters/PeriodTypePath'
@@ -714,6 +718,31 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/ledger/periods/{type}/{date}/frozen-trial-balance:
+    get:
+      tags: [ClosedPeriod]
+      summary: Immutable FROZEN LINES_V1 trial balance for regulatory reporting
+      description: >
+        Fail-closed evidence read. DRAFT, missing and pre-V23 HASH_ONLY closes return 409 instead
+        of a mutable recomputation. FINREP/COREP consumes this endpoint exclusively.
+      operationId: getFrozenPeriodTrialBalance
+      parameters:
+        - $ref: '#/components/parameters/PeriodTypePath'
+        - $ref: '#/components/parameters/PeriodDatePath'
+      responses:
+        '200':
+          description: Hash-attested immutable period trial balance
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PeriodTrialBalanceResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
 
   /api/v1/ledger/periods/{type}/{date}/verify:
     get:
@@ -899,7 +928,7 @@ components:
     PeriodTrialBalanceResponse:
       type: object
       description: Trial balance for one statutory period, with its attestation anchor (ADR-0096 D1).
-      required: [period, from, to, totalDebit, totalCredit, balanced, accountCount, contentHash]
+      required: [period, from, to, totalDebit, totalCredit, balanced, accountCount, contentHash, lines]
       properties:
         period: { type: string, description: "Stable label, e.g. MONTH:2026-05 / QUARTER:2026-Q2 / YEAR:2026." }
         from: { type: string, format: date }
@@ -909,11 +938,27 @@ components:
         balanced: { type: boolean, description: "Double-entry holds over the period: debits == credits." }
         accountCount: { type: integer }
         contentHash: { type: string, description: "SHA-256 of the canonical trial-balance JSON." }
+        lines:
+          type: array
+          description: Exact persisted evidence for FROZEN periods; computed only for DRAFT/no close.
+          items:
+            $ref: '#/components/schemas/PeriodTrialBalanceLineResponse'
+
+    PeriodTrialBalanceLineResponse:
+      type: object
+      required: [code, type, currency, totalDebit, totalCredit, net]
+      properties:
+        code: { type: string }
+        type: { type: string }
+        currency: { type: string }
+        totalDebit: { type: string }
+        totalCredit: { type: string }
+        net: { type: string }
 
     ClosedPeriodResponse:
       type: object
       description: The persisted statutory close for one period (ADR-0096 D1).
-      required: [id, period, periodType, from, to, status, computedAt, contentHash]
+      required: [id, period, periodType, from, to, status, evidenceState, computedAt, contentHash]
       properties:
         id: { type: string, format: uuid }
         period: { type: string }
@@ -923,7 +968,11 @@ components:
         status:
           type: string
           enum: [DRAFT, FROZEN]
-          description: DRAFT is recomputable; FROZEN is immutable evidence.
+          description: DRAFT is recomputable; FROZEN has an immutable hash anchor.
+        evidenceState:
+          type: string
+          enum: [NONE, HASH_ONLY, LINES_V1]
+          description: HASH_ONLY is a V22 historical close; only LINES_V1 is line-level regulatory evidence.
         computedAt: { type: string, format: date-time }
         totalDebits: { type: string }
         totalCredits: { type: string }

@@ -30,6 +30,8 @@ Assets protected, in priority order:
    accounts tie out per customer (CNB zákon 563/1991 Sb., vyhláška 501/2002 Sb.).
 4. **Trial balance / sub-ledger balances** — derived reporting that auditors and reconciliation rely on.
 5. **Idempotency + outbox** — exactly-once posting and reliable event emission (ADR-0050).
+6. **Frozen period evidence** — line-level statutory source for FINREP/COREP; V22 historical
+   close hashes remain evidence anchors but do not contain reproducible lines.
 
 ## 2. Data-flow diagram (textual)
 
@@ -98,6 +100,13 @@ isolation from transport/persistence.
   `SKIP`); a posted row's event is published exactly once per successful tick or bounded to `DEAD` (ADR-0050).
 - Domain-metric labels are **low-cardinality and PII-free** (currency + a closed `type` set; gauge by `service`);
   never an account id, IBAN, amount, party, or entry id (ADR-0077 cardinality contract).
+- **Closed-period evidence:** a new freeze persists the re-verified lines, FROZEN status flip and
+  `PeriodFrozen` outbox row in one transaction. The database rejects UPDATE/DELETE of persisted
+  evidence. FINREP/COREP calls only `frozen-trial-balance`, which rejects DRAFT, missing and V22
+  `HASH_ONLY` records; the operational endpoint may recompute those historical rows but is never a
+  regulatory source. During rollout the count of `HASH_ONLY` frozen records is an explicit report
+  availability gate. No backfill is automatic: historical reproduction needs a separately approved,
+  controlled evidence-import procedure and cannot be inferred from mutable journals.
 
 ## 5. Open items / follow-ups
 
@@ -323,3 +332,14 @@ set) apply equally to the new `ledger.approval.decide` action.
   entry and reports success while every position marked that day keeps the superseded rate's CZK
   counter-value. That needs a correcting-entry decision, not a patch, and #3921 stays open for it.
   Rollback: revert; the field is read-only on this side and nothing persists it.
+
+- **2026-08-14** — Closed-period freezes now retain their exact trial-balance lines for FINREP/COREP
+  (ADR-0096 D1 expand stage). The security boundary is the evidence write: `freeze` re-computes and
+  hash-compares the DRAFT, then writes the exact reverified lines, status transition and outbox row
+  in one reactive transaction. **Tampering:** the new table has a database trigger rejecting update
+  and delete, its FK is `ON DELETE RESTRICT`, and FROZEN reads use those rows rather than a mutable
+  journal aggregate. **Repudiation:** the stable existing hash is retained and callers can reproduce
+  the lines it anchored; the endpoint's DRAFT/no-record behavior remains live computation. **DoS:**
+  line inserts occur only during an operator four-eyes freeze, not on the posting path. **Rollback:**
+  before FINREP depends on the source, stop writers and archive frozen evidence, then remove the
+  trigger/function/table; never delete attested evidence as a convenience rollback.
