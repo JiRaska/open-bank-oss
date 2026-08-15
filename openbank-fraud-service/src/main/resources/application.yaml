@@ -62,6 +62,10 @@ quarkus:
   swagger-ui:
     always-include: true
     path: /api/docs
+  rest-client:
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://localhost:8100}
+      scope: jakarta.inject.Singleton
   management:
     enabled: true
     port: 8085
@@ -69,6 +73,15 @@ quarkus:
     root-path: /q
   dev-ui:
     enabled: false
+  # Outbound M2M token for the account-service partyId lookup (ContactPolicyGate-style pattern
+  # every other rest-client caller in this fleet uses — see aml-service's identical block).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080}/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
 
 mp:
   messaging:
@@ -116,6 +129,15 @@ mp:
         # org.apache.kafka.common.errors.GroupAuthorizationException forever, fail-silent until the
         # failure landed inside Quarkus's synchronous startup window, which is fatal (PR #635's
         # sandbox "Failed to start application" crash-loop; PR #635 did not cause this bug).
+    outgoing:
+      fraud-outbox-out:
+        connector: smallrye-kafka
+        client.id: fraud-service-${quarkus.uuid}
+        topic: openbank.fraud.hold.changed
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 "%dev":
   quarkus:
@@ -131,6 +153,8 @@ mp:
       enabled: false
     oidc:
       enabled: false
+    oidc-client:
+      enabled: false
     devservices:
       enabled: false
   mp:
@@ -139,7 +163,22 @@ mp:
         transaction-signal:
           connector: smallrye-kafka
           enabled: false
+  openbank:
+    outbox:
+      dispatch-enabled: false
 openbank:
+  # Every service with an outbox entity must flip this explicitly — it defaults to false, and a
+  # service that forgets ships an outbox that fills forever with no error anywhere.
+  outbox:
+    dispatch-enabled: true
+  fraud-hold:
+    # ADR-0220 D3.5's targeting-exclusion signal (issue #2749) — deliberately conservative:
+    # triggers on repeated REVIEW, not a new DECLINE rule (no rule in FraudRuleEngine produces
+    # DECLINE today, and adding one changes real scoring behaviour, not just adds a signal).
+    # Marketing-suppression-only: this never touches account/payment restrictions.
+    review-threshold: 3
+    window-days: 30
+    ttl-days: 30
   # ML / shadow scoring (ADR-0139 phase-1b) — READ THIS BEFORE TRUSTING A "shadow score" NUMBER.
   # The in-process ONNX adapter had NEVER loaded in a deployed environment up to #3618: the
   # fleet runtime image was eclipse-temurin:*-jre-alpine (musl) and onnxruntime's

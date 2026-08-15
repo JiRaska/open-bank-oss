@@ -1,6 +1,6 @@
 ---
 date: 2026-07-06
-decision-status: accepted
+decision-status: deprecated
 delivery-status: shipped
 authors: [jiri.raska]
 supersedes: []
@@ -11,6 +11,21 @@ summary: "Run an Agent review workflow that submits a real approve or request-ch
 ---
 
 # 154. Independent agent PR approval for non-sensitive changes
+
+> **Withdrawn 2026-08-09 (#2161).** This decision shipped and then stopped being executable, with
+> nothing going red. GitHub Models was retired on 2026-07-30 and answers every inference call with
+> HTTP 410; that sets `ghmodels_retired=true`, and the Claude fallback carried `retired != 'true'`
+> in its own `if:` — so the fallback was switched off in exactly the case it existed to cover.
+> Measured over the last 10 runs from step conclusions: the review step and the step named "Verify
+> the Claude fallback actually reviewed" were both `skipped` 10/10, and all 10 runs concluded
+> `success`.
+>
+> The workflow is removed rather than repaired. Re-minting the credential would have produced a
+> valid secret feeding a step that never runs — a green control that reviews nothing, which is
+> worse than none because it reads as coverage. Restoring independent review is a new decision, and
+> it depends on #2183: this ADR's "sensitive scopes always deferred to humans" clause defers to a
+> ruleset whose `required_approving_review_count` is 0.
+
 
 ## Context
 

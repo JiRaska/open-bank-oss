@@ -94,18 +94,19 @@ class CaseActivitiesImpl(
             conn.prepareStatement(
                 """
                 INSERT INTO case_workflow
-                    (id, case_class, disposition_target, opened_at, deadline_at, status,
+                    (id, workflow_id, case_class, disposition_target, opened_at, deadline_at, status,
                      budget_tokens, budget_contributions, contested_rate)
-                VALUES (?, ?, ?, ?, ?, 'OPEN', ?, ?, 0.0)
+                VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, ?, 0.0)
                 """.trimIndent(),
             ).use { ps ->
                 ps.setObject(P1, caseUuid(start.caseId))
-                ps.setString(P2, start.caseClass.name)
-                ps.setString(P3, start.dispositionTarget)
-                ps.setTimestamp(P4, Timestamp.from(Instant.ofEpochMilli(openedAtEpochMs)))
-                ps.setTimestamp(P5, Timestamp.from(Instant.ofEpochMilli(start.deadlineEpochMs)))
-                ps.setInt(P6, TOKENS_PER_CASE)
-                ps.setInt(P7, start.maxContributions)
+                ps.setString(P2, start.caseId)
+                ps.setString(P3, start.caseClass.name)
+                ps.setString(P4, start.dispositionTarget)
+                ps.setTimestamp(P5, Timestamp.from(Instant.ofEpochMilli(openedAtEpochMs)))
+                ps.setTimestamp(P6, Timestamp.from(Instant.ofEpochMilli(start.deadlineEpochMs)))
+                ps.setInt(P7, TOKENS_PER_CASE)
+                ps.setInt(P8, start.maxContributions)
                 ps.executeUpdate()
             }
         }
@@ -118,8 +119,10 @@ class CaseActivitiesImpl(
         dataSource.connection.use { conn ->
             conn.prepareStatement(
                 """
-                INSERT INTO case_contribution (id, case_id, agent_id, contributed_at, tokens_used, preemption_vote)
-                VALUES (?, ?, ?, ?, 0, ?)
+                INSERT INTO case_contribution
+                    (id, case_id, agent_id, contributed_at, tokens_used, preemption_vote,
+                     summary, draft_version, contested, evidence_refs)
+                VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?, ?::jsonb)
                 """.trimIndent(),
             ).use { ps ->
                 contributions.forEach { c ->
@@ -130,6 +133,10 @@ class CaseActivitiesImpl(
                     // A contribution on a superseded draft is recorded history (D5), flagged so
                     // the Phase 2 thread view can render the fork instead of a flat list.
                     ps.setString(P5, if (c.draftVersion < finalDraft) "SUPERSEDED" else null)
+                    ps.setString(P6, c.summary)
+                    ps.setInt(P7, c.draftVersion)
+                    ps.setBoolean(P8, c.contested)
+                    ps.setString(P9, objectMapper.writeValueAsString(c.evidenceRefs))
                     ps.addBatch()
                 }
                 ps.executeBatch()
@@ -166,6 +173,8 @@ class CaseActivitiesImpl(
         const val P5 = 5
         const val P6 = 6
         const val P7 = 7
+        const val P8 = 8
+        const val P9 = 9
 
         /** Deterministic correlation UUID for a workflow id — the V1 schema keys on UUID. */
         fun caseUuid(caseId: String): UUID {

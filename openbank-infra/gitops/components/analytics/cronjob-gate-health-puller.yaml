@@ -1,0 +1,112 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Pulls recent ci.yml gate-run history into ClickHouse for the Grafana trend dashboard
+# (ADR-0255 Tier 2). Same class as rum-attribute-audit.yaml: a small, infrequent, read-only
+# audit-style CronJob.
+#
+# Schedule: every 30 minutes. ci.yml runs far more often than that on a busy day (this repo's
+# own measured commit velocity), so this is a SAMPLE of run history, not a complete one — the
+# `--runs 20` window (pull.py's default) means a burst of more than 20 completed runs between
+# two pulls loses the middle ones. Acceptable for a TREND dashboard (wall-time-over-time,
+# pass-rate-over-time), unacceptable if this were ever used as an audit-of-record — it is not;
+# `main-red-watch` and the required-status-check rollup remain the systems of record for "did
+# this gate pass on this PR", this is trend data only.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: gate-health-puller
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+spec:
+  schedule: "*/30 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  # failedJobsHistoryLimit: 1 — see rum-attribute-audit.yaml's comment on why more than 1
+  # turns a single recurring failure into multiple permanent KubeJobFailed alerts.
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 300
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: ci-gate-observability
+            # Distinct from the shared component label: the egress NetworkPolicy scopes its
+            # GitHub-API rule to exactly this name, NOT to the component label — the
+            # schema-apply Job (ci-gate-runs-schema-apply-job.yaml) shares the component
+            # label but only needs ClickHouse egress, and must not inherit an internet hole
+            # it has no use for.
+            app.kubernetes.io/name: gate-health-puller
+        spec:
+          restartPolicy: OnFailure
+          # No Kubernetes API calls — only GitHub REST (egress) and ClickHouse HTTP
+          # (in-namespace). Drop the token.
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 65534
+            runAsGroup: 65534
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: puller
+              # Slim, not alpine: musl's DNS resolver has bitten this fleet before on
+              # cross-namespace/external lookups elsewhere; glibc-based slim avoids re-litigating
+              # that here for a job whose whole job IS a DNS lookup to api.github.com.
+              image: docker.io/library/python:3.12-slim
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              env:
+                # readOnlyRootFilesystem is on and /scripts is a read-only mount; point HOME
+                # at the writable emptyDir (same reason as the temporal registration Job) and
+                # skip .pyc writes so Python never even attempts one next to the mounted script.
+                - name: HOME
+                  value: /tmp
+                - name: PYTHONDONTWRITEBYTECODE
+                  value: "1"
+                - name: GITHUB_REPOSITORY
+                  value: JiRaska/open-bank-oss
+                - name: GITHUB_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: gate-health-puller-github-token
+                      key: token
+                - name: CLICKHOUSE_URL
+                  value: http://clickhouse.analytics.svc:8123
+                - name: CLICKHOUSE_USER
+                  value: analytics
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: clickhouse-auth
+                      key: password
+              command:
+                - python3
+                - /scripts/pull.py
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 128Mi
+              volumeMounts:
+                - name: tmp
+                  mountPath: /tmp
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: tmp
+              emptyDir: {}
+            - name: scripts
+              configMap:
+                name: gate-health-puller-script
+                defaultMode: 0555

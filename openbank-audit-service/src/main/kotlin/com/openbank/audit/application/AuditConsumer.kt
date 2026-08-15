@@ -6,13 +6,20 @@ package com.openbank.audit.application
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.audit.domain.model.ActorProvenance
+import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
+import org.eclipse.microprofile.reactive.messaging.Message
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -31,43 +38,134 @@ class AuditConsumer {
 
     private val log = Logger.getLogger(AuditConsumer::class.java)
 
+    /**
+     * Records one audit event.
+     *
+     * **Why `Message<String>` and not `String` (#3994).** The old signature saw the message body
+     * and nothing else, so two facts the transport was already carrying were discarded at ingest:
+     * the outbox `ce-type` header (the event type — the body of an outbox-relayed event is the bare
+     * domain event and usually has no `eventType` key at all) and the topic (which names the
+     * producing service). Both fell through to the `"UNKNOWN"`/`"unknown"` sentinels, and 76% of
+     * the live trail is that `"unknown"`. Same signature, same two defaults and the same fix as the
+     * analytics sink's #2598.
+     *
+     * Body-first ordering is deliberate: broker metadata is consulted ONLY where the body yielded
+     * nothing. A producer that populates the field keeps its own value, so this can only turn a
+     * sentinel into a value — it can never re-attribute a row that is already attributed.
+     *
+     * **Nothing is rejected.** Every message that was stored before is still stored, with the same
+     * or better attribution; a message with no metadata and no body fields still lands on the
+     * sentinels rather than being dropped. An audit path that drops events is worse than one that
+     * under-attributes them, so the fallbacks stay and only become visible ([AttributionSource],
+     * `openbank.audit.attribution.missing`) instead of silent.
+     */
     @Incoming("audit-events-in")
-    suspend fun consume(payload: String) {
+    suspend fun consume(message: Message<String>) {
+        val payload = message.payload
+        try {
+            consume(payload, addressOf(message))
+        } finally {
+            // Switching the signature from `String` to `Message<String>` also switches SmallRye
+            // from auto-ack to MANUAL ack, so the ack must be explicit — and in a `finally`, or an
+            // un-storable message would stall the partition forever and the audit trail would stop
+            // dead. (`consume` already swallows its own exceptions, so this is belt-and-braces.)
+            Uni.createFrom().completionStage(message.ack()).awaitSuspending()
+        }
+    }
+
+    /** Lifts the broker metadata this consumer used to discard. Absent metadata is not an error. */
+    private fun addressOf(message: Message<String>): EventAddress {
+        val meta = message.getMetadata(IncomingKafkaRecordMetadata::class.java).orElse(null)
+            ?: return EventAddress.NONE
+
+        @Suppress("UNCHECKED_CAST")
+        val record = meta as IncomingKafkaRecordMetadata<Any?, String>
+        val ceType = record.headers
+            ?.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
+            ?.value()
+            ?.toString(Charsets.UTF_8)
+            ?.takeIf { it.isNotBlank() }
+        return EventAddress(
+            topic = record.topic?.takeIf { it.isNotBlank() },
+            ceType = ceType,
+        )
+    }
+
+    /**
+     * As above, for a record with no broker addressing to offer. Visible for tests and for any
+     * replay path that has only the stored body.
+     */
+    suspend fun consume(payload: String): Unit = consume(payload, EventAddress.NONE)
+
+    suspend fun consume(payload: String, address: EventAddress) {
         try {
             val node: JsonNode = objectMapper.readTree(payload)
             val eventTime = eventTime(node)
+            val resolvedSource = resolveSourceService(node, address)
+            val actor = resolveActor(node)
             val entry = AuditEntry(
                 id = UUID.randomUUID(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
                 // not "eventType" — the only #996-consumed producer that does so.
-                eventType = node["eventType"]?.asText() ?: node["type"]?.asText() ?: "UNKNOWN",
-                aggregateType = node["aggregateType"]?.asText() ?: inferAggregateType(node),
+                // `ce-type` is the outbox event type, and it is the LAST resort before the
+                // sentinel: it is the producer's own value, carried by the transport rather than
+                // the body, so it is a recovery of a fact and not an inference (#3994).
+                eventType = node.textOrNull("eventType")
+                    ?: node.textOrNull("type")
+                    ?: address.ceType
+                    ?: "UNKNOWN",
+                // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
+                // own "aggregateType" field survives verbatim while inferAggregateType's table below
+                // is all uppercase, so the column records WHICH resolution path fired, not what the
+                // aggregate is. Measured on the live audit_entries table before this fix:
+                // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
+                // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
+                // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
+                // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
+                // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
+                // this stops the split growing, it does not backfill the 10-year tamper-evident
+                // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
+                // its own decision, not a drive-by fix here).
+                aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
                 aggregateId = inferAggregateId(node),
-                actorId = node["requestedBy"]?.asText()
-                    ?: node["actorId"]?.asText()
-                    // transaction.initiated events carry the customer identity here (ADR-0021).
-                    ?: node["initiatedByPartyId"]?.asText(),
-                actorType = node["actorType"]?.asText(),
+                actorId = actor.first,
+                actorType = actor.second,
                 payload = payload,
-                sourceService = node["sourceService"]?.asText() ?: "unknown",
-                correlationId = node["correlationId"]?.asText(),
+                sourceService = resolvedSource.first,
+                sourceServiceSource = resolvedSource.second,
+                correlationId = node.textOrNull("correlationId"),
                 occurredAt = eventTime ?: Instant.now(clock),
                 recordedAt = Instant.now(clock),
                 occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
-                // ADR-0226: cross-channel dimensions, additive — producers adopt them channel by
-                // channel, so absence stays null (unknown), never a guessed default.
-                channel = node["channel"]?.asText(),
+                // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
+                // sweep after #4553 found the bare JSON key "channel" independently populated by
+                // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
+                // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
+                // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
+                // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
+                // (dispute-service, via openbank.dispute.events — the only one confirmed live
+                // before this fix, all rows spelled "APP"). Storing the bare value made the column
+                // ungroupable: a caller reading "API" could not tell an onboarding channel from an
+                // ingress one. See resolveChannel() for the mapping.
+                channel = resolveChannel(node.textOrNull("channel"), address.topic),
                 actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
-                sessionId = node["sessionId"]?.asText(),
+                sessionId = node.textOrNull("sessionId"),
                 // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
                 // the grant that permitted it. customer-edge flattens its audit details into the
                 // event JSON, so both arrive as top-level fields. Absent = a direct action.
-                // (`takeIf { !it.isNull }` because Jackson's asText() on an explicit JSON null
-                // yields the STRING "null", which would index a delegated action that is not one.)
-                onBehalfOf = node["onBehalfOf"]?.takeIf { !it.isNull }?.asText(),
-                delegationId = node["delegationId"]?.takeIf { !it.isNull }?.asText(),
+                onBehalfOf = node.textOrNull("onBehalfOf"),
+                delegationId = node.textOrNull("delegationId"),
             )
             if (eventTime == null) countMissingEventTime(entry.sourceService)
+            if (::meterRegistry.isInitialized) {
+                meterRegistry.countActorProvenance(
+                    entry.sourceService,
+                    actorProvenance(entry.actorId, entry.actorType),
+                )
+            }
+            if (entry.sourceServiceSource != AttributionSource.EVENT) {
+                countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
+            }
             repo.save(entry)
         } catch (e: Exception) {
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
@@ -93,6 +191,49 @@ class AuditConsumer {
     }
 
     /**
+     * The producing service, and who said so (#3994).
+     *
+     * Ordered strongest claim first:
+     *  1. the producer's own `sourceService` field — [AttributionSource.EVENT];
+     *  2. the Kafka topic, via the verified [TopicAttribution] table — [AttributionSource.TOPIC].
+     *     Sound because the topic is transport addressing rather than anything the producer chose
+     *     to omit, but it identifies the service and is not the service's own assertion;
+     *  3. neither — the `"unknown"` sentinel, [AttributionSource.ABSENT], exactly as before.
+     *
+     * The pair is returned together on purpose: a caller cannot take the value without also taking
+     * the provenance, so a derived attribution cannot be stored as if it were declared. That is
+     * the whole defect — `?: "unknown"` was a *successful parse* with no exception, no metric and
+     * no log line, and 76% of the trail went that way unnoticed.
+     */
+    private fun resolveSourceService(node: JsonNode, address: EventAddress): Pair<String, AttributionSource> {
+        node.textOrNull("sourceService")?.let {
+            return it to AttributionSource.EVENT
+        }
+        TopicAttribution.sourceService(address.topic)?.let { return it to AttributionSource.TOPIC }
+        return "unknown" to AttributionSource.ABSENT
+    }
+
+    /**
+     * `openbank.audit.attribution.missing{source_service,provenance}` — rows whose producing
+     * service was not stated by the producer (#3994).
+     *
+     * Counted for TOPIC as well as ABSENT, not only the sentinel. A topic-derived row is a
+     * correctly attributed row AND an outstanding producer gap; folding the two together would
+     * make the gap disappear from the dashboard the moment this fix ships, which is precisely the
+     * kind of silence that let the original defect run to 76%.
+     */
+    private fun countMissingAttribution(sourceService: String, provenance: AttributionSource) {
+        if (!::meterRegistry.isInitialized) return
+        meterRegistry.counter(
+            "openbank.audit.attribution.missing",
+            "source_service",
+            sourceService,
+            "provenance",
+            provenance.name,
+        ).increment()
+    }
+
+    /**
      * The producer's own event time, or null when the payload does not carry one (#3883).
      *
      * `occurredAt` is the fleet's canonical key — it is declared on
@@ -112,7 +253,7 @@ class AuditConsumer {
      *    operation entirely. It is now an INGEST-sourced row: a degraded entry beats no entry.
      */
     private fun eventTime(node: JsonNode): Instant? {
-        val raw = node["occurredAt"]?.asText() ?: return null
+        val raw = node.textOrNull("occurredAt") ?: return null
         return runCatching { Instant.parse(raw) }.getOrElse {
             log.warnf("Unparseable occurredAt %s; recording ingest time instead", raw.take(MAX_LOGGED_RAW_TIME_CHARS))
             null
@@ -146,18 +287,23 @@ class AuditConsumer {
         "id" to "SANCTIONS_CHECK",
     )
 
+    // Both halves test the SAME predicate ([textOrNull], not `has`) on purpose. `has` is true for a
+    // field explicitly set to JSON null, so the old pair disagreed on exactly that input: the type
+    // side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
+    // string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
+    // predicate identical is what makes the two sides answer about the same field (#3994).
     private fun inferAggregateId(node: JsonNode): String {
-        node["incident"]?.get("id")?.asText()?.let { return it }
+        node["incident"]?.textOrNull("id")?.let { return it }
         for ((field, _) in aggregateFields) {
-            node[field]?.asText()?.let { return it }
+            node.textOrNull(field)?.let { return it }
         }
         return "unknown"
     }
 
     private fun inferAggregateType(node: JsonNode): String {
-        if (node.has("incident")) return "ICT_INCIDENT"
+        if (node["incident"]?.textOrNull("id") != null) return "ICT_INCIDENT"
         for ((field, type) in aggregateFields) {
-            if (node.has(field)) return type
+            if (node.textOrNull(field) != null) return type
         }
         return "UNKNOWN"
     }
@@ -167,3 +313,171 @@ class AuditConsumer {
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
 }
+
+/** Matches AuditRepository's `@Column(name = "channel", length = 32)` (V14, issue #4660). */
+private const val MAX_CHANNEL_CHARS = 32
+
+/**
+ * Namespaces a raw "channel" value by the topic it arrived on (issue #4660), rather than
+ * trusting the bare value's vocabulary. Keyed on the TOPIC, not on inferred aggregate type or
+ * event shape: the topic is the one signal every producer already agrees on (it is how they
+ * get subscribed to in the first place), so this needs no per-producer parsing and stays
+ * correct for a producer neither of us has read the code of yet — an unrecognised topic still
+ * gets its own disjoint namespace ("$topic:$raw"), it just isn't given a friendly name.
+ *
+ * The two known mappings exist only to keep the common rows short and readable within the
+ * VARCHAR(32) column (V14) — "onboarding:MOBILE_APP" (22 chars) fits; a full topic name would
+ * not ("openbank.party.events:MOBILE_APP" is 33). A top-level function, not a class member: it
+ * needs no instance state, and `AuditConsumer` was already at detekt's TooManyFunctions threshold.
+ */
+private fun resolveChannel(raw: String?, topic: String?): String? {
+    if (raw == null) return null
+    val namespace = when (topic) {
+        "openbank.party.events" -> "onboarding"
+        "openbank.dispute.events" -> "complaint"
+        // Not "openbank.customer.audit" -> "ingress": that topic exists and is subscribed, but
+        // its one real publisher (EdgeAuditPublisher) sets no "channel" field today, and
+        // AuditChannel (ADR-0226's ui/mcp/api) has no live Kafka path at all yet — McpCallAuditor
+        // only reaches LoggingAuditEventPublisher. Naming a topic for a wiring that does not
+        // exist would be a guess about where it eventually lands, not a fact. The catch-all
+        // below already gives it a disjoint namespace the day it does.
+        else -> topic ?: "unscoped"
+    }
+    return "$namespace:$raw".take(MAX_CHANNEL_CHARS)
+}
+
+/**
+ * `openbank.audit.actor.missing{source_service,provenance}` — the third leg of #3994, and the
+ * only one of the three that had no signal at all.
+ *
+ * The issue asked for three things in increasing cost: make the gap loud, fix the producers,
+ * and decide whether an actor can be REQUIRED. This is the first, for the actor dimension:
+ * `openbank.audit.event.time.missing` and `openbank.audit.attribution.missing` already exist,
+ * and the actor gap — 75% of the live trail, the larger of the two halves in this issue's
+ * title — was observable only by hand-running a `GROUP BY` against the audit database.
+ *
+ * **What the counter can and cannot fix, and how that was established.** Asking the live
+ * database which actor-ish keys appear in actor-less payloads is the obvious probe and it
+ * gives the WRONG answer:
+ *
+ * ```
+ * SELECT DISTINCT k FROM audit_entries, jsonb_object_keys(payload::jsonb) k
+ *  WHERE actor_id IS NULL AND (k ILIKE '%by%' OR k ILIKE '%actor%' OR ...);
+ *   -> initiatedByPartyId, reviewedBy      (and reviewedBy is JSON-null on all 53 rows)
+ * ```
+ *
+ * That reads as "no actor is recoverable, every gap is a producer omission" — and it is a
+ * measurement of sandbox TRAFFIC, not of the wire contract. `openbank.cards.events`,
+ * `openbank.lending.events` and account-service's savings path have no rows here at all, and
+ * sanctions' `reviewedBy` is null only because no manual review has run. Enumerating the
+ * producers' serialised TYPES instead found three actor spellings genuinely on the wire and
+ * unread — `reviewedBy`, `changedBy`, `actorKind` — all three in data classes where the JSON
+ * key exists only as a Kotlin property name, so no grep for a quoted field name would have
+ * found them either. Those are recovered above.
+ *
+ * What remains after that is a genuine producer-side omission — the actor is known to the
+ * service and never reaches the wire (consent's `createdBy`/`revokedBy`, dispute's
+ * `resolvedBy`, domestic-payment's command `actorId` from the JWT, statement's
+ * `period.restated.v1`). This consumer must not paper over those: `actor_id` is chain-hashed
+ * into `record_hash`, so a fabricated actor is not a lesser evil than an honest NULL. This
+ * counter is what makes each producer's fix — or regression — visible without another manual
+ * query.
+ *
+ * Counted for DECLARED too, not only the two absences: a ratio needs its denominator, and a
+ * counter that only ever increments on failure cannot distinguish "no gaps" from "no traffic"
+ * — the exact shape of the zero-denials-from-an-idle-service trap. Tag cardinality is bounded
+ * by the fixed 21-topic service list times three enum values.
+ */
+internal fun MeterRegistry.countActorProvenance(sourceService: String, provenance: ActorProvenance) {
+    counter(
+        "openbank.audit.actor.missing",
+        "source_service",
+        sourceService,
+        "provenance",
+        provenance.name,
+    ).increment()
+}
+
+/**
+ * The actor identity and kind a producer put on the wire: `(actorId, actorType)` (#3994).
+ *
+ * **The first three id spellings are unchanged and stay FIRST**, so no row that is attributed
+ * today changes actor — a fix that improves 1359 unattributed rows by silently moving the 425
+ * already-correct ones is a regression, not a fix.
+ *
+ * The last two are additive recoveries: real actor identities that were already on the wire and
+ * that this consumer simply was not reading, so they landed as NULL in a column chain-hashed into
+ * `record_hash` and served to data subjects by the GDPR Art. 15 access log.
+ *
+ *  - `reviewedBy` — sanctions.screening.event serialises the `SanctionsCheck` aggregate whole, so
+ *    the four-eyes manual-review identity (the highest-value actor in the fleet) rides as a Kotlin
+ *    property name with no string literal anywhere in the producer to grep for.
+ *  - `changedBy` — cards.events: `CardStatusChanged`, `CardLimitsChanged` and `CardControlsChanged`
+ *    all carry it; only `CardIssued` omits it.
+ *  - `actorKind` — lending's transition events emit `actorId` AND `actorKind`, so the id was
+ *    already caught while the TYPE beside it was dropped. The row named the actor but could not
+ *    say whether it was a human or the automated policy engine, which is exactly what a four-eyes
+ *    or DORA Art. 17 reconstruction asks of a credit decision.
+ *
+ * Deliberately NOT recovered, though both are actor-ish and tempting: `partyId` (a data SUBJECT on
+ * most topics, an actor only on dispute/fx — a per-topic rule, not a spelling) and
+ * `delegatePartyId` (a delegate belongs in ADR-0232's `onBehalfOf`/`delegationId` pair, which this
+ * consumer already reads separately). Guessing either would write a confident wrong actor into a
+ * tamper-evident record — the same failure mode `TopicAttribution` exists to avoid.
+ *
+ * Free-standing to keep [AuditConsumer] under detekt's function-count threshold, which fires AT
+ * the threshold and not above it.
+ */
+private fun resolveActor(node: JsonNode): Pair<String?, String?> = Pair(
+    node.textOrNull("requestedBy")
+        ?: node.textOrNull("actorId")
+        // transaction.initiated events carry the customer identity here (ADR-0021).
+        ?: node.textOrNull("initiatedByPartyId")
+        ?: node.textOrNull("reviewedBy")
+        ?: node.textOrNull("changedBy"),
+    node.textOrNull("actorType") ?: node.textOrNull("actorKind"),
+)
+
+/**
+ * Classifies one row's actor claim for the [AuditConsumer.countActorProvenance] counter (#3994).
+ *
+ * Reads the RESOLVED entry fields rather than the payload, so it classifies exactly what was
+ * stored — a second pass over the JSON could disagree with the row it is supposed to describe,
+ * which is the drift that made `inferAggregateId`/`inferAggregateType` contradict each other.
+ *
+ * Free-standing to keep [AuditConsumer] under detekt's function-count threshold.
+ */
+internal fun actorProvenance(actorId: String?, actorType: String?): ActorProvenance = when {
+    actorId != null -> ActorProvenance.DECLARED
+    actorType != null -> ActorProvenance.SYSTEM
+    else -> ActorProvenance.ABSENT
+}
+
+/**
+ * One string field of a producer's payload, or null when the producer did not supply one (#3994).
+ *
+ * **Why this exists rather than `node[field]?.asText()`.** Jackson's `asText()` on a `NullNode`
+ * returns the four-character STRING `"null"`, so `{"actorId": null}` — a producer explicitly
+ * saying it has no actor — stored `actorId = "null"` as though that were somebody. Measured on the
+ * live audit database: **7 rows carry `actor_id = 'null'`**, all `TransactionInitiated`, all
+ * money-path. That is worse than the NULL it replaces and is why it survived: a NULL actor reads
+ * as a known gap and gets counted, whereas `"null"` reads as an attributed row. It is also
+ * chain-hashed into `record_hash` (`actorId` is in `chainHash`'s canonical string), returned by
+ * the ADR-0226 `findByActorId` cross-channel person query, and served to data subjects by the
+ * GDPR Art. 15 access log — so a query for actor `"null"` returns seven real transactions
+ * belonging to nobody, and a real actor's own access log is missing them.
+ *
+ * The trap was already known here — [AuditConsumer]'s `onBehalfOf`/`delegationId` carried a
+ * hand-written `takeIf { !it.isNull }` guard and a comment explaining precisely this — but the
+ * guard was applied at two of the eleven call sites that needed it. That is the argument for one
+ * shared accessor over eleven guards: a guard that has to be remembered per field is a guard that
+ * documents the defect at the two places it does not occur.
+ *
+ * Blank is folded in with null for the same reason: `""` is not an actor, an event type or a
+ * service name, and letting it through only moves the empty value one layer downstream.
+ *
+ * Free-standing rather than a member so it also reads on the nested `incident` node, and so the
+ * class stays under detekt's function-count threshold.
+ */
+private fun JsonNode.textOrNull(field: String): String? =
+    this[field]?.takeIf { !it.isNull }?.asText()?.takeIf { it.isNotBlank() }

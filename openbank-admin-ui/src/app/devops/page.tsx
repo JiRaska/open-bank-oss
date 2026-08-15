@@ -16,6 +16,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
+import { QualityGateHealthPanel } from '@/components/devops/QualityGateHealthPanel'
 import type { TestResultsResponse, ServiceTestResult } from '@/lib/types/test-results'
 import type { DevOpsFinding } from '@/app/api/devops/insights/route'
 
@@ -424,6 +425,9 @@ function DevOpsContent() {
               noDataMsg={t('Roadmapa: z ICT incident registru (ADR-0061 fáze 3)', 'Roadmap: from the ICT incident register (ADR-0061 phase 3)')}
             />
           </div>
+
+          {/* ── CI quality-gate health — ADR-0254/0253 — self-fetching, degrades quietly ── */}
+          <QualityGateHealthPanel />
 
           {/* ── DevOps Insights (AI) — ADR-0119 — shared AgentInsightsPanel (admin-ui agent-output rule) ── */}
           <AgentInsightsPanel

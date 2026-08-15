@@ -22,8 +22,8 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 ## Dependencies
 
-- **Upstream (this service consumes):** `transaction-service`, `interest-service`, `card-issuance-service`, `consent-service`, `agent-service`
-- **Downstream (depends on this service):** `balance-service`, `audit-service`
+- **Upstream (this service consumes):** `interest-service`, `agent-service`
+- **Downstream (depends on this service):** `transaction-service`, `balance-service`, `audit-service`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `account`.

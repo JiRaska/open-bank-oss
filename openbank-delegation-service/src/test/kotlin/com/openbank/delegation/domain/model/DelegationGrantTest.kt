@@ -185,4 +185,51 @@ class DelegationGrantTest {
         ).isFalse()
         assertThat(grant.covers(DelegationCapability.ACCOUNT_READ_BALANCES, null)).isFalse()
     }
+
+    @Test
+    fun `covers denies an unpriced question against a grant that carries a ceiling`() {
+        // The #3800 defect: covers(capability, null) returned true, so a caller that omits the
+        // amount -- which customer-edge's hasGrant does on every call -- was told the grant covers
+        // the action for any sum, with perTransactionLimit sitting unread.
+        val priced = DelegationGrant(
+            grantorPartyId = grantor,
+            granteePartyId = grantee,
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = accountId,
+            capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT),
+            perTransactionLimit = Money.of("5000".toBigDecimal(), "CZK"),
+            validFrom = now,
+            validTo = null,
+            status = DelegationStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now,
+        )
+        assertThat(priced.covers(DelegationCapability.ACCOUNT_INITIATE_PAYMENT, null)).isFalse()
+        // …and the capability it does hold is still covered once a sum is supplied, so this is a
+        // denial of the UNPRICED question, not of the grant.
+        assertThat(
+            priced.covers(DelegationCapability.ACCOUNT_INITIATE_PAYMENT, Money.of("10".toBigDecimal(), "CZK")),
+        ).isTrue()
+    }
+
+    @Test
+    fun `covers still answers on capability alone when the grant carries no ceiling`() {
+        // The near-miss this must NOT break: read paths and unpriced grants ask without an amount
+        // and must keep working. A rule that denied every null amount would take those out too.
+        val unpriced = DelegationGrant(
+            grantorPartyId = grantor,
+            granteePartyId = grantee,
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = accountId,
+            capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
+            perTransactionLimit = null,
+            validFrom = now,
+            validTo = null,
+            status = DelegationStatus.ACTIVE,
+            createdAt = now,
+            updatedAt = now,
+        )
+        assertThat(unpriced.covers(DelegationCapability.ACCOUNT_READ_BALANCES, null)).isTrue()
+        assertThat(unpriced.covers(DelegationCapability.ACCOUNT_INITIATE_PAYMENT, null)).isFalse()
+    }
 }

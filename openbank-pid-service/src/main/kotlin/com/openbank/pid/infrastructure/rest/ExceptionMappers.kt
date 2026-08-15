@@ -16,6 +16,7 @@ import com.openbank.pid.domain.model.IllegalCaseTransition
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import java.time.Instant
 import java.util.UUID
 
 private fun errorResponse(code: ErrorCode, message: String) = ApiError(
@@ -23,6 +24,7 @@ private fun errorResponse(code: ErrorCode, message: String) = ApiError(
     status = code.httpStatus,
     code = code.code,
     message = message,
+    timestamp = Instant.now(),
 )
 
 @Provider

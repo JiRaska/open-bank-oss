@@ -11,6 +11,7 @@ import com.openbank.document.domain.model.SignatureCeremony
 import com.openbank.document.domain.model.SignatureLevel
 import com.openbank.document.domain.model.SignerStatus
 import com.openbank.document.domain.model.TemplateEngine
+import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
@@ -128,6 +129,36 @@ interface OnboardingDocumentUseCase {
      * signing. [lang] is an ISO-639-1 code (`cs`/`en`); anything else falls back to the default.
      */
     suspend fun ensureOnboardingAgreement(partyRef: String, lang: String): OnboardingAgreement
+}
+
+/** One fee line of an [AnnualFeeSummaryReadyCommand] — the subset the ROCNI_VYPIS_POPLATKU template needs. */
+data class AnnualFeeLine(val name: String, val category: String, val amount: BigDecimal)
+
+/**
+ * The `AnnualFeeSummaryReady` billing-outbox event, parsed and validated by
+ * [com.openbank.document.infrastructure.kafka.AnnualFeeSummaryReadyConsumer] (ADR-0248 — event
+ * contract is authoritative and shared with `billing-service`'s producer side; do not evolve this
+ * shape without updating both). `interestRate` is nullable because the source event may omit it.
+ */
+data class AnnualFeeSummaryReadyCommand(
+    val accountId: UUID,
+    val partyRef: String,
+    val year: Int,
+    val currency: String,
+    val fees: List<AnnualFeeLine>,
+    val totalFees: BigDecimal,
+    val interestRate: BigDecimal?,
+)
+
+/**
+ * Reacts to `AnnualFeeSummaryReady` (ADR-0248): renders the year's ROCNI_VYPIS_POPLATKU statement
+ * via the non-persisting preview path (never stored, never emits `document.generated` — a PAD
+ * Art. 5 push duty, not a document a customer requests later) and hands the bytes to
+ * [com.openbank.document.application.port.out.StatementDeliveryPort]. Idempotent per
+ * (accountId, year) under at-least-once Kafka redelivery.
+ */
+interface AnnualStatementDeliveryUseCase {
+    suspend fun deliverAnnualStatement(cmd: AnnualFeeSummaryReadyCommand)
 }
 
 /**

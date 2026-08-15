@@ -1,26 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { productCatalogUpstream } from '@/lib/productCatalog/upstream'
 
 // Fees are served by the product catalog (system of record for pricing). The
 // admin UI fetches them here instead of hardcoding a price list in the web tier.
-const BASE = process.env.PRODUCT_CATALOG_URL ?? 'http://openbank-product-catalog:8104'
-
 export const dynamic = 'force-dynamic'
 
 export async function GET(req: NextRequest) {
   const search = req.nextUrl.search
-  try {
-    const res = await fetch(`${BASE}/api/v1/fees${search}`, {
-      headers: { Accept: 'application/json' },
-      cache: 'no-store',
-      signal: AbortSignal.timeout(10_000),
-    })
-    const data = await res.json().catch(() => ({ error: 'Invalid JSON' }))
-    return NextResponse.json(data, { status: res.status, headers: { 'Cache-Control': 'no-store' } })
-  } catch (err: unknown) {
-    const detail = err instanceof Error ? err.message : String(err)
-    return NextResponse.json({ error: 'upstream_unreachable', detail }, { status: 502 })
-  }
+  return productCatalogUpstream(`/api/v1/fees${search}`)
 }

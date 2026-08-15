@@ -11,9 +11,11 @@ retentionPolicy: 7 years
 evidenceExported: true
 lineage:
   upstream:
-    - serviceName: fx-service
-      relationType: api
-      description: rates
+    # Removed (issue #3982): `standing-order-service (api, "creates")` — the founding example of
+    # this gate (ADR-0160 mechanism 2): standing-order-service's only outbound client is
+    # sepa-payment-service, and its Deployment env carries SEPA_PAYMENT_SERVICE_URL, never a
+    # transaction-service URL. Also removed `clearing-service (api, "settles")` — clearing-service
+    # has no @RegisterRestClient at all and its Deployment env lists only keycloak and tempo.
     - serviceName: sepa-payment
       relationType: api
       description: creates
@@ -23,19 +25,19 @@ lineage:
     - serviceName: domestic-payment
       relationType: api
       description: creates
-    - serviceName: standing-order-service
-      relationType: api
-      description: creates
     - serviceName: swift-service
       relationType: api
       description: creates
-    - serviceName: clearing-service
-      relationType: api
-      description: settles
     - serviceName: agent-service
       relationType: api
       description: MCP tool
   downstream:
+    # Direction corrected (issue #3982): declared as `upstream: fx-service ("rates")`, i.e.
+    # fx-service calling transaction-service. FxRateClient(configKey = "fx-service") lives in
+    # transaction-service; fx-service's own clients are aml-service and sanctions-service only.
+    - serviceName: fx-service
+      relationType: api
+      description: rates via FxRateClient
     - serviceName: account-service
       relationType: api
       description: validates

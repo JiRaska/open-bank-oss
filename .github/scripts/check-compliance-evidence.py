@@ -39,6 +39,8 @@ import re
 import subprocess
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 PAGE = REPO / "openbank-admin-ui/src/app/docs/compliance/page.tsx"
 
@@ -86,7 +88,7 @@ def code_corpus() -> str:
 
 
 def rows() -> list[tuple[str, str, str]]:
-    text = PAGE.read_text(encoding="utf-8")
+    text = gatelib.read_text(PAGE)
     return [(m.group("req"), m.group("status"), m.group("note")) for m in ROW.finditer(text)]
 
 

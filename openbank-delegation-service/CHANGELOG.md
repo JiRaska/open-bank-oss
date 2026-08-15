@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.2...delegation-service-v0.6.0) (2026-08-09)
+
+
+### Features
+
+* **delegation:** count delegated spend before the money moves ([#4196](https://github.com/JiRaska/open-bank-oss/issues/4196)) ([9d12fa0](https://github.com/JiRaska/open-bank-oss/commit/9d12fa0cd34038cfdd5c20c55d9f3e935d68910d))
+
+
+### Bug Fixes
+
+* **delegation:** an unpriced check against a priced grant is a denial, not coverage ([#4101](https://github.com/JiRaska/open-bank-oss/issues/4101)) ([3ba3f15](https://github.com/JiRaska/open-bank-oss/commit/3ba3f15e38c635a3f46261ab8c9004986dcfb909))
+
 ## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.1...delegation-service-v0.5.2) (2026-08-07)
 
 

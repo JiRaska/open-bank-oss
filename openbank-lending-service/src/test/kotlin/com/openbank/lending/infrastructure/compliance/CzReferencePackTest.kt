@@ -5,7 +5,7 @@
 package com.openbank.lending.infrastructure.compliance
 
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackParser
+import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.PackProductType
 import com.openbank.libs.lending.origination.OriginationState
 import org.assertj.core.api.Assertions.assertThat
@@ -23,7 +23,7 @@ class CzReferencePackTest {
         val json = requireNotNull(javaClass.getResource("/compliance-packs/cz-consumer-credit-v1.json")) {
             "cz-consumer-credit-v1.json missing from resources"
         }.readText()
-        CompliancePackCompiler.compile(CompliancePackParser.fromJson(json))
+        CompliancePackCompiler.compile(CompliancePackJson.fromJson(json))
     }
 
     @Test

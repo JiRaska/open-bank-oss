@@ -10,10 +10,12 @@ dataClassification: restricted
 retentionPolicy: 10 years
 evidenceExported: true
 lineage:
-  upstream:
-    - serviceName: party-service
-      relationType: api
-      description: documents
+  upstream: []
+    # Removed (issue #3982): `party-service (api, "documents")` — party-service's clients are
+    # account-service, kyc-service, card-service, consent-service and transaction-service, none
+    # of them pid-service, and its Deployment env carries no PID_SERVICE_URL. pid-service has no
+    # party-service client either. The services that DO call pid-service are customer-edge and
+    # delegation-service, and both edges are declared on their own side.
 databaseLineage:
   ownedDatabases:
     - openbank_pid

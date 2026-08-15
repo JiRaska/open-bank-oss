@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 import { NextRequest, NextResponse } from 'next/server'
+import { auth } from '@/auth'
 
 export const dynamic = 'force-dynamic'
 
@@ -12,11 +13,6 @@ export const dynamic = 'force-dynamic'
 // `platform-admin` until #2418 — a role no Keycloak realm has ever issued, so the endpoint 403'd
 // for everyone).
 //
-// NOTE: the fetch below sends no Authorization header, unlike the sibling proxies under
-// src/app/api/agent/ and src/app/api/svc/. An unauthenticated request cannot satisfy any
-// @RolesAllowed, so this path stays broken on the agent side even now that the role name is real —
-// the M2M token story is issue #2442. Do not read the corrected comment as "this works".
-
 function devopsBase(): string {
   if (process.env.SERVICES_HOST === 'container') {
     return 'http://devops-agent.devops-agent.svc:8142'
@@ -25,6 +21,9 @@ function devopsBase(): string {
 }
 
 export async function POST(req: NextRequest) {
+  const accessToken = (await auth())?.user?.accessToken
+  if (!accessToken) return NextResponse.json({ error: 'unauthorized' }, { status: 401 })
+
   const { id, action } = (await req.json()) as { id?: string; action?: string }
   if (!id || (action !== 'approve' && action !== 'reject')) {
     return NextResponse.json({ error: 'id and action (approve|reject) are required' }, { status: 400 })
@@ -32,14 +31,14 @@ export async function POST(req: NextRequest) {
   try {
     const res = await fetch(`${devopsBase()}/api/v1/devops/findings/${encodeURIComponent(id)}/${action}`, {
       method: 'POST',
+      headers: { Authorization: `Bearer ${accessToken}` },
       signal: AbortSignal.timeout(10_000),
     })
     if (!res.ok) {
-      return NextResponse.json({ error: `devops-agent returned ${res.status}` }, { status: res.status })
+      return NextResponse.json({ error: 'upstream_error' }, { status: res.status })
     }
     return NextResponse.json({ finding: await res.json() })
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e)
-    return NextResponse.json({ error: `decision failed: ${msg}` }, { status: 502 })
+  } catch {
+    return NextResponse.json({ error: 'upstream_unreachable' }, { status: 502 })
   }
 }

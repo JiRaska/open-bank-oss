@@ -15,6 +15,7 @@ import com.openbank.statement.domain.model.CreditDebit
 import com.openbank.statement.domain.model.PeriodCloseStatus
 import com.openbank.statement.domain.model.StatementEntry
 import com.openbank.statement.domain.model.StatementPeriod
+import com.openbank.statement.domain.model.StatementSnapshot
 import com.openbank.statement.domain.reconcile.ReconciliationPolicy
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -107,7 +108,7 @@ class StatementRestatementService(
                             // Nothing to correct — do not burn a legal sequence on a no-op.
                             Uni.createFrom().item(standing)
                         } else {
-                            supersede(account, currency, from, to, standing, entries.size, opening, r.closingBalance)
+                            supersede(account, currency, from, to, standing, entries, opening, r.closingBalance)
                         }
                 }
             }
@@ -131,7 +132,7 @@ class StatementRestatementService(
         from: LocalDate,
         to: LocalDate,
         standing: StatementPeriod,
-        entryCount: Int,
+        entries: List<StatementEntry>,
         opening: BigDecimal,
         closing: BigDecimal,
     ): Uni<StatementPeriod> = periods.nextLegalSequence(account.accountId, currency).flatMap { seq ->
@@ -145,10 +146,13 @@ class StatementRestatementService(
             electronicSequenceNumber = seq,
             openingBalance = opening,
             closingBalance = closing,
-            entryCount = entryCount,
+            entryCount = entries.size,
             closedAt = clock(),
             status = PeriodCloseStatus.CLOSED,
             supersedesSequence = standing.legalSequenceNumber,
+            // The superseding page freezes its own render inputs, exactly as a first close does
+            // (#3986). Without this the correction would be born with the defect it corrects.
+            snapshot = StatementSnapshot(account.iban, account.holderName, entries),
         )
         periods.supersedeAndReplace(standing.id, replacement, periodRestatedEvent(account, replacement, standing))
     }

@@ -131,6 +131,8 @@ import re
 import sys
 from pathlib import Path
 
+import gatelib
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - CI always has PyYAML
@@ -294,8 +296,8 @@ def gitops_facts(gitops: Path):
     if not gitops.is_dir():
         return services, namespaces, corroborated, env_sites
 
-    for path in sorted(gitops.rglob("*.yaml")):
-        text = path.read_text(encoding="utf-8", errors="ignore")
+    for path in gatelib.rglob(gitops, "*.yaml"):
+        text = gatelib.read_text(path, errors="ignore")
         if not KIND_LINE.search(text):
             continue  # declares nothing this guard reads — see READ_KINDS
         try:
@@ -364,7 +366,7 @@ def scan(files, services, namespaces, corroborated):
     known_bare = {n for n, _ns in services}
     for path in files:
         try:
-            docs = [d for d in yaml.safe_load_all(path.read_text(encoding="utf-8")) if isinstance(d, dict)]
+            docs = [d for d in gatelib.load_yaml_all(path) if isinstance(d, dict)]
         except yaml.YAMLError as exc:
             findings.append((path, "<file>", "-", f"unparseable YAML: {exc}"))
             continue

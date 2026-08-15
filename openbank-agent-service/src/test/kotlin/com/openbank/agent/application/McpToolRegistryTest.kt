@@ -21,6 +21,26 @@ class McpToolRegistryTest {
 
     private val registry = McpToolRegistry()
 
+    /**
+     * Charter stub for AI attribution (ADR-0031 D5, #3667). McpToolRegistry derives the acting
+     * model id from the charter, so every fixture must supply one or the audit event cannot say
+     * which model acted.
+     */
+    private fun stubCharters(model: String = "llama-3.3-70b-versatile"): CharterRegistry {
+        val config = mockk<CharterConfig>()
+        every { config.charters() } returns listOf(
+            mockk<CharterConfig.CharterEntry> {
+                every { agentId() } returns "ui-assistant"
+                every { this@mockk.model() } returns model
+                every { tokensPerRun() } returns Long.MAX_VALUE
+                every { runsPerDay() } returns Long.MAX_VALUE
+                every { allowedCapabilities() } returns emptyList()
+                every { enabled() } returns true
+            },
+        )
+        return CharterRegistry().also { it.config = config }
+    }
+
     /** Captures audit events in-memory so the AI-attribution (D5) can be asserted without Kafka. */
     private class CapturingAuditPublisher : AuditEventPublisher {
         val events = mutableListOf<AuditEvent>()
@@ -51,6 +71,7 @@ class McpToolRegistryTest {
         assertThat(registry.serviceOf("get_account_balance")).isEqualTo("balance-service")
         assertThat(registry.serviceOf("list_transactions")).isEqualTo("transaction-service")
         assertThat(registry.serviceOf("list_products")).isEqualTo("product-catalog")
+        assertThat(registry.serviceOf("get_catalog_revision")).isEqualTo("product-catalog")
         assertThat(registry.serviceOf("list_ledger_journals")).isEqualTo("ledger-service")
         assertThat(registry.domainOf("get_account")).isEqualTo("Core Banking")
     }
@@ -60,6 +81,14 @@ class McpToolRegistryTest {
         assertThat(registry.capabilityOf("get_account")).isEqualTo("query.ledger.readonly")
         assertThat(registry.capabilityOf("list_transactions")).isEqualTo("query.ledger.readonly")
         assertThat(registry.capabilityOf("get_balance_holds")).isEqualTo("query.ledger.readonly")
+    }
+
+    @Test
+    fun `catalog revision review is a read-only catalog capability`() {
+        assertThat(registry.capabilityOf("get_catalog_revision")).isEqualTo("query.catalog.readonly")
+        assertThat(registry.tools.single { it.name == "get_catalog_revision" }.description)
+            .contains("Read-only")
+            .contains("cannot create")
     }
 
     @Test
@@ -142,6 +171,7 @@ class McpToolRegistryTest {
         val proposalSvc = mockk<CreateProposalUseCase>()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
+        registry.charters = stubCharters()
         registry.proposals = proposalSvc
 
         val prohibitedKeys = listOf(
@@ -177,6 +207,7 @@ class McpToolRegistryTest {
         val proposalSvc = mockk<CreateProposalUseCase>()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
+        registry.charters = stubCharters()
         registry.proposals = proposalSvc
 
         val proposalId = java.util.UUID.randomUUID()
@@ -246,6 +277,7 @@ class McpToolRegistryTest {
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
+        registry.charters = stubCharters()
         registry.downstream = downstream("get_account", mapper.createObjectNode().put("id", "acc-1"))
 
         val args = mapper.createObjectNode().put("accountId", "acc-1")
@@ -268,6 +300,7 @@ class McpToolRegistryTest {
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
+        registry.charters = stubCharters()
         registry.downstream = downstream("get_account", failWith = RuntimeException("downstream 503"))
 
         val args = mapper.createObjectNode().put("accountId", "acc-1")
@@ -286,6 +319,7 @@ class McpToolRegistryTest {
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
+        registry.charters = stubCharters()
         registry.downstream = downstream(
             "get_account",
             failWith = IllegalArgumentException("Required field 'accountId' is missing or blank"),
@@ -304,6 +338,7 @@ class McpToolRegistryTest {
         val audit = CapturingAuditPublisher()
         registry.objectMapper = mapper
         registry.auditPublisher = audit
+        registry.charters = stubCharters()
         // The port serves get_account only — a registered tool it cannot reach must not silently
         // resolve to some other service, and must never be reported as a success.
         registry.downstream = downstream("get_account", mapper.createObjectNode())
@@ -325,6 +360,7 @@ class McpToolRegistryTest {
             val port = downstream(tool, mapper.createObjectNode().put("status", "success"))
             registry.objectMapper = mapper
             registry.auditPublisher = audit
+            registry.charters = stubCharters()
             registry.downstream = port
 
             val args = mapper.createObjectNode().put("limit", 99999).put("query", "up")

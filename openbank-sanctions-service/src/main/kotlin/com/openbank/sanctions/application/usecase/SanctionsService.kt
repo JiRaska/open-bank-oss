@@ -91,12 +91,42 @@ class SanctionsService(
             reviewedBy = null, reviewNote = null,
             checkedAt = Instant.now(clock), reviewedAt = null,
         )
-        return repo.saveWithEvent(check, "SanctionChecked")
+        return repo.saveWithEvent(check, EVENT_SCREENED)
     }
 
     companion object {
         private const val HIT_THRESHOLD = 0.85
         private const val POTENTIAL_HIT_THRESHOLD = 0.65
+
+        /**
+         * Emitted by [screen]: an automated screening produced a status from list matching.
+         *
+         * Unchanged on purpose — audit-service already archives this topic, and renaming the
+         * existing type would be a breaking change for no gain. The differentiation is achieved
+         * by giving the OTHER path its own type, below.
+         */
+        const val EVENT_SCREENED = "SanctionChecked"
+
+        /**
+         * Emitted by [review]: a human analyst manually dispositioned an existing check.
+         *
+         * These two events are not the same business fact, and a consumer must be able to tell
+         * them apart from the envelope alone. Until #1035 they shared `"SanctionChecked"`, so the
+         * topic carried two meanings under one name and any consumer switching on `eventType` —
+         * which is how every consumer in this fleet dispatches, `PartyEventConsumer` included —
+         * could not route them differently.
+         *
+         * Discriminating on the payload instead is not a substitute: it would mean inferring the
+         * path from `reviewedAt != null`, i.e. deriving an event's identity from a nullable
+         * aggregate field that stays set forever after the first review. That is the sentinel
+         * trap this repo has already paid for elsewhere; the envelope has to carry the fact.
+         *
+         * Differentiating BEFORE any consumer exists is the whole point: aml-service has no
+         * consumer for this topic today (`@Incoming` count in `openbank-aml-service/src/main` is
+         * 1, and it is the party-events one), so this change breaks nothing. Once a consumer
+         * exists it cannot be retrofitted without a coordinated rollout.
+         */
+        const val EVENT_REVIEWED = "SanctionReviewed"
     }
 
     override suspend fun review(cmd: ReviewCommand): SanctionsCheck {
@@ -110,7 +140,7 @@ class SanctionsService(
         // updateWithEvent, not saveWithEvent: this check already exists, and the aggregate's id is
         // application-assigned, so the insert path would schedule an INSERT and collide with its
         // own primary key (ADR-0126 D3).
-        return repo.updateWithEvent(updated, "SanctionChecked")
+        return repo.updateWithEvent(updated, EVENT_REVIEWED)
     }
 
     override suspend fun getById(id: UUID) = repo.findById(id)

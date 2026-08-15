@@ -57,7 +57,7 @@ sealed class SegmentRule {
     data class PartyStatusIs(val status: String) : SegmentRule() {
         override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String {
             params["${paramPrefix}_status"] = status
-            return "(aggregate_type = 'PARTY' AND " +
+            return "(upper(aggregate_type) = 'PARTY' AND " +
                 "JSONExtractString(payload, 'status') = {${paramPrefix}_status:String})"
         }
     }
@@ -76,9 +76,9 @@ sealed class SegmentRule {
 
         override fun toSql(paramPrefix: String, params: MutableMap<String, Any>): String {
             params["${paramPrefix}_days"] = minDays
-            return "(aggregate_type = 'PARTY' AND aggregate_id IN (" +
+            return "(upper(aggregate_type) = 'PARTY' AND aggregate_id IN (" +
                 "SELECT aggregate_id FROM openbank_analytics.bronze_events " +
-                "WHERE aggregate_type = 'PARTY' GROUP BY aggregate_id " +
+                "WHERE upper(aggregate_type) = 'PARTY' GROUP BY aggregate_id " +
                 "HAVING min(occurred_at) <= now64(3) - INTERVAL {${paramPrefix}_days:UInt32} DAY))"
         }
     }

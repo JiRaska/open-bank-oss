@@ -4,16 +4,21 @@
 
 package com.openbank.transaction.infrastructure.temporal
 
+import com.openbank.transaction.application.workflow.PaymentActivities
+import com.openbank.transaction.application.workflow.PaymentActivitiesImpl
 import com.openbank.transaction.application.workflow.PaymentWorkflow
 import com.openbank.transaction.domain.saga.SagaState
+import io.temporal.activity.ActivityOptions
 import io.temporal.client.WorkflowClient
 import io.temporal.testing.TestWorkflowEnvironment
+import io.temporal.workflow.Workflow
 import jakarta.annotation.PostConstruct
 import jakarta.annotation.PreDestroy
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import jakarta.enterprise.inject.Produces
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -25,22 +30,26 @@ import java.util.UUID
  * TemporalClientProducer so no network connection is ever attempted.
  *
  * The in-process [TestWorkflowEnvironment] starts before the first use of the produced bean (in
- * @PostConstruct) and closes on CDI context shutdown (@PreDestroy). A no-op [PaymentWorkflow]
- * worker is registered that immediately returns COMPLETED — sufficient for HTTP and contract tests
- * that need the transaction flow to succeed without real saga infrastructure.
+ * @PostConstruct) and closes on CDI context shutdown (@PreDestroy). A stub [PaymentWorkflow]
+ * worker is registered that skips the hold/journal legs (no real saga infrastructure in a
+ * @QuarkusTest) but still performs the REAL terminal write through the real
+ * [PaymentActivitiesImpl] — since #4238 that write belongs to the workflow, so a stub workflow
+ * that only returned COMPLETED would leave every test transaction PENDING and would be lying
+ * about the production shape.
  */
 @ApplicationScoped
 @Alternative
 @Priority(1)
-class WorkflowClientTestProducer {
+class WorkflowClientTestProducer(private val activities: PaymentActivitiesImpl) {
 
     private lateinit var testEnv: TestWorkflowEnvironment
 
     @PostConstruct
     fun start() {
         testEnv = TestWorkflowEnvironment.newInstance()
-        testEnv.newWorker("openbank-payment-execution")
-            .registerWorkflowImplementationTypes(NoOpPaymentWorkflow::class.java)
+        val worker = testEnv.newWorker("openbank-payment-execution")
+        worker.registerWorkflowImplementationTypes(NoOpPaymentWorkflow::class.java)
+        worker.registerActivitiesImplementations(activities)
         testEnv.start()
     }
 
@@ -54,6 +63,16 @@ class WorkflowClientTestProducer {
     }
 
     class NoOpPaymentWorkflow : PaymentWorkflow {
-        override fun execute(transactionId: UUID): SagaState = SagaState.COMPLETED
+        private val finalisation: PaymentActivities = Workflow.newActivityStub(
+            PaymentActivities::class.java,
+            ActivityOptions.newBuilder()
+                .setScheduleToCloseTimeout(Duration.ofMinutes(1))
+                .build(),
+        )
+
+        override fun execute(transactionId: UUID): SagaState {
+            finalisation.markCompleted(transactionId)
+            return SagaState.COMPLETED
+        }
     }
 }

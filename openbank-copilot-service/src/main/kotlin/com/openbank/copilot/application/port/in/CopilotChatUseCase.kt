@@ -14,8 +14,9 @@ import com.openbank.copilot.domain.ChatTurn
  * [customerId] is always the authenticated subject the resource resolved from the bearer — never a
  * value the request body carried, so a turn can never be attributed to another customer.
  *
- * `partyId` is the same token's `party_id` claim (`sub` as fallback — the resolution customer-edge
- * already uses). It is recorded with the conversation purely so `PARTY_ERASED` can find it later,
+ * `partyId` is the same token's `party_id` claim, or null when it carries none — never `sub`
+ * substituted for one, which would fabricate an erasure identity without widening the erasure's
+ * reach by a row (#4175). It is recorded with the conversation purely so `PARTY_ERASED` can find it later,
  * and never participates in lookup: which conversation a customer resumes is still decided by
  * [customerId] alone. See `ConversationStore.deleteForParty` for why the two must both be kept.
  */

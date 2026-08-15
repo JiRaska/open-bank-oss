@@ -65,7 +65,7 @@ labels:
     description: "Dedup marker for the deployed==main drift watch. One open issue per drifted service."
   - name: main-red
     color: "b60205"
-    description: "Dedup marker for the main-red watch (#4019). One open issue per watched workflow, closed when main goes green."
+    description: "main-red watch (#4019): one open issue per watched workflow, closed when main goes green."
 
   # --- Triage / workflow state ---------------------------------------------------------
   - name: triage

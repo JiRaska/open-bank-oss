@@ -46,6 +46,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 GITOPS = Path("openbank-infra/gitops")
 
 # Kinds whose pod template consumes Secrets/ConfigMaps.
@@ -131,13 +133,91 @@ def component_of(path):
     return parts[parts.index("components") + 1] if "components" in parts else str(path.parent)
 
 
+def self_test():
+    """Falsify the reference extractor and the declaration index.
+
+    What this prevents: a workload consuming a Secret or ConfigMap that nothing in the repo
+    declares. The pod does not crash-loop visibly — it fails to start with a
+    CreateContainerConfigError that reads like a transient scheduling problem, and in a
+    progressive rollout the OLD replicaset keeps serving, so the deploy looks healthy.
+
+    The two silent directions: an extractor that misses a reference SHAPE reports full
+    coverage of the shapes it does see, and `optional: true` refs must be excluded or every
+    deliberately-optional mount becomes a finding and the gate gets switched off.
+    """
+    fails = []
+
+    def refs(ps):
+        return sorted(set(refs_in(ps)))
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # Every consumption shape, because missing one is invisible: the gate keeps reporting
+    # clean about the shapes it still reads.
+    case("env.valueFrom.secretKeyRef",
+         refs({"containers": [{"env": [{"valueFrom": {"secretKeyRef": {"name": "s1", "key": "k"}}}]}]}),
+         [("Secret", "s1")])
+    case("env.valueFrom.configMapKeyRef",
+         refs({"containers": [{"env": [{"valueFrom": {"configMapKeyRef": {"name": "c1", "key": "k"}}}]}]}),
+         [("ConfigMap", "c1")])
+    case("envFrom.secretRef",
+         refs({"containers": [{"envFrom": [{"secretRef": {"name": "s2"}}]}]}), [("Secret", "s2")])
+    case("envFrom.configMapRef",
+         refs({"containers": [{"envFrom": [{"configMapRef": {"name": "c2"}}]}]}), [("ConfigMap", "c2")])
+    case("volumes.secret",
+         refs({"containers": [], "volumes": [{"secret": {"secretName": "s3"}}]}), [("Secret", "s3")])
+
+    # INIT CONTAINERS are the classic miss: they run before the app and fail the pod just the
+    # same, but a loop over `containers` alone never sees them.
+    case("initContainers are read too",
+         refs({"initContainers": [{"envFrom": [{"secretRef": {"name": "s4"}}]}], "containers": []}),
+         [("Secret", "s4")])
+
+    # `optional: true` is a DECLARED intent to tolerate absence. Flagging it turns every
+    # deliberate optional mount into a finding, which is how a gate gets disabled.
+    case("an optional secretKeyRef is not a requirement",
+         refs({"containers": [{"env": [{"valueFrom": {"secretKeyRef": {"name": "s5", "key": "k", "optional": True}}}]}]}),
+         [])
+    case("an optional volume secret is not a requirement",
+         refs({"containers": [], "volumes": [{"secret": {"secretName": "s6", "optional": True}}]}), [])
+
+    # A ref with no name declares nothing to look up.
+    case("a nameless ref yields nothing",
+         refs({"containers": [{"envFrom": [{"secretRef": {}}]}]}), [])
+
+    # --- pod_specs: CronJob nests one level deeper than every other workload ---------------
+    dep = {"kind": "Deployment", "spec": {"template": {"spec": {"containers": [{"name": "x"}]}}}}
+    if [ps.get("containers")[0]["name"] for ps in pod_specs(dep)] != ["x"]:
+        fails.append("a Deployment PodSpec was not found")
+    cron = {"kind": "CronJob", "spec": {"jobTemplate": {"spec": {"template": {"spec": {"containers": [{"name": "y"}]}}}}}}
+    if [ps.get("containers")[0]["name"] for ps in pod_specs(cron)] != ["y"]:
+        fails.append("a CronJob PodSpec was not found — it nests one level deeper, and a "
+                     "walker written for Deployments alone silently skips every CronJob")
+    # A doc with no template yields nothing rather than raising.
+    if list(pod_specs({"kind": "Service", "spec": {}})) != []:
+        fails.append("a non-workload doc produced a PodSpec")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: gitops secret/configmap ref extractor is falsifiable (12 cases)")
+    return 0
+
+
 def main():
+    if "--self-test" in sys.argv:
+        return self_test()
+
     if not GITOPS.is_dir():
         print(f"ERROR: {GITOPS} not found -- run from the repo root.", file=sys.stderr)
         return 2
 
     declared, consumed = set(), []
-    for path in sorted(GITOPS.rglob("*.yaml")):
+    for path in gatelib.rglob(GITOPS, "*.yaml"):
         try:
             docs = [d for d in yaml.safe_load_all(path.read_text()) if isinstance(d, dict)]
         except yaml.YAMLError as exc:
@@ -176,7 +256,7 @@ def main():
     for ns, kind, name, path, owner in out:
         print(f"  {kind} {ns}/{name}", file=sys.stderr)
         print(f"    consumed by {owner} in {path}", file=sys.stderr)
-        print(f"    nothing declares it -- the pod will sit in CreateContainerConfigError.",
+        print("    nothing declares it -- the pod will sit in CreateContainerConfigError.",
               file=sys.stderr)
         if kind == "Secret":
             print(f"    fix: add an ExternalSecret with target.name: {name} "

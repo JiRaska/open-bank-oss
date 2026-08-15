@@ -22,7 +22,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 ## Dependencies
 
-- **Upstream (this service consumes):** `psd2-service`
+- **Upstream (this service consumes):** _none declared_
 - **Downstream (depends on this service):** _none declared_
 
 A failure here propagates to the downstream services above — check them when

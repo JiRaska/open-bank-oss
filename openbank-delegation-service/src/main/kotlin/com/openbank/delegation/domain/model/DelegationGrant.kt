@@ -135,28 +135,41 @@ data class DelegationGrant(
 
     fun hasCapability(capability: DelegationCapability): Boolean = capability in capabilities
 
+    /**
+     * May this grant cover [capability] for [amount]?
+     *
+     * A null [amount] means the caller did not say what the action is worth. That is fine for a
+     * capability with no ceiling — a read has no sum — and it is NOT fine when the grant carries a
+     * [perTransactionLimit]: answering `true` there tells the caller the ceiling is satisfied
+     * without ever comparing anything to it, and the ceiling is the whole reason the grantor set it.
+     *
+     * So an unpriced question against a priced grant is a DENIAL, not coverage (issue #3800). It
+     * reads as strict, and the alternative is worse: `customer-edge`'s `hasGrant` omits the amount
+     * on every call, so under the old rule the first caller to put a payment path behind a grant
+     * would have got `true` for any sum with the limit sitting unread (#3615). Failing closed here
+     * makes the ceiling real regardless of which caller forgets, rather than depending on every
+     * caller remembering.
+     *
+     * Unchanged for everything without a ceiling: a grant with `perTransactionLimit == null` still
+     * answers on capability alone, so read paths and unpriced grants behave exactly as before.
+     */
     fun covers(capability: DelegationCapability, amount: Money?): Boolean {
         if (!hasCapability(capability)) return false
-        if (amount == null) return true
+        if (amount == null) return perTransactionLimit == null
         return withinLimits(amount)
     }
 
     /**
-     * Limit checks are per-amount ceilings only — [dailyLimit] and [monthlyLimit] are NOT consulted
-     * here and are not consulted anywhere else either.
+     * The PER-AMOUNT ceiling only. [dailyLimit] and [monthlyLimit] are deliberately not consulted
+     * here, and this is no longer the omission it used to be: a cumulative ceiling cannot be
+     * decided from an amount alone — it needs the spend already counted inside a window — so it
+     * lives in [SpendCeilings.evaluate], which calls THIS function for the per-transaction half so
+     * the two can never disagree (ADR-0249 D3).
      *
-     * This KDoc used to say cumulative tracking was "the enforcing product service's job against
-     * its own projection (ADR-0232 D3) — the grant carries the ceilings, the resource owner counts
-     * the spend". No product service counts it. `DelegationOffered` does not carry the two fields,
-     * so no projection can even learn them, and account-service's `DelegatedAccessGrant` has no
-     * equivalent of them. The sentence described an intent as though it were a division of labour,
-     * which is how two ceilings survived from the request DTO all the way into the database with
-     * nothing between them and the customer's belief that they had capped their delegate.
-     *
-     * The two fields therefore survive only on rows written before
-     * `DelegationService.rejectUnenforcedCeilings` refused them; the offer API no longer accepts
-     * either. Anything that starts counting spend must make this function consult it — a caller
-     * reading a non-null [dailyLimit] off a grant today is reading a stored number, not a control.
+     * Consequently `covers()`, and the `/check` endpoint built on it, still answer the
+     * per-transaction question only. A rail that moves money on a delegated grant must reserve
+     * (`POST /{id}/reservations`) rather than merely check: the check is advisory about ONE amount,
+     * the reservation is the authoritative claim on the cumulative headroom.
      */
     fun withinLimits(amount: Money): Boolean {
         if (perTransactionLimit == null) return true

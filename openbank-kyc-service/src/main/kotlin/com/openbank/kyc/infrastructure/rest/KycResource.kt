@@ -16,6 +16,7 @@ import com.openbank.kyc.domain.model.KycCaseStatus
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -37,6 +38,7 @@ import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.net.URI
+import java.time.Instant
 import java.util.UUID
 
 @Path("/api/v1/kyc")
@@ -241,7 +243,15 @@ data class KycCaseApprovalRequest(val reason: String)
 @Provider
 class KycNotFoundMapper : ExceptionMapper<KycCaseNotFoundException> {
     override fun toResponse(e: KycCaseNotFoundException) = Response.status(404)
-        .entity(ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, e.message ?: "Not found")).build()
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                404,
+                ErrorCode.NOT_FOUND.code,
+                e.message ?: "Not found",
+                timestamp = Instant.now(),
+            ),
+        ).build()
 }
 
 @Provider
@@ -249,10 +259,11 @@ class KycConflictMapper : ExceptionMapper<KycCaseConflictException> {
     override fun toResponse(e: KycCaseConflictException) = Response.status(ErrorCode.CONFLICT.httpStatus)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 ErrorCode.CONFLICT.httpStatus,
                 ErrorCode.CONFLICT.code,
                 e.message ?: "Conflict",
+                timestamp = Instant.now(),
             ),
         ).build()
 }
@@ -262,10 +273,11 @@ class KycInvalidStateTransitionMapper : ExceptionMapper<InvalidStateTransitionEx
     override fun toResponse(e: InvalidStateTransitionException) = Response.status(422)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 422,
                 "INVALID_STATE_TRANSITION",
                 e.message ?: "Invalid state transition",
+                timestamp = Instant.now(),
             ),
         ).build()
 }
@@ -275,10 +287,11 @@ class KycInvalidApprovalReasonMapper : ExceptionMapper<InvalidApprovalReasonExce
     override fun toResponse(e: InvalidApprovalReasonException) = Response.status(422)
         .entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 422,
                 "INVALID_APPROVAL_REASON",
                 e.message ?: "Invalid approval reason",
+                timestamp = Instant.now(),
             ),
         ).build()
 }

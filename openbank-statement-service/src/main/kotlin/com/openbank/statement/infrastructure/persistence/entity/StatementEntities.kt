@@ -64,6 +64,16 @@ class StatementPeriodEntity : PanacheEntityBase {
 
     @Column(name = "closed_at", nullable = false)
     lateinit var closedAt: Instant
+
+    /**
+     * JSON of the frozen render inputs (`StatementSnapshot`: iban, holderName, entries) — #3986.
+     * Serialised/parsed by `StatementMapper`, never by the domain.
+     *
+     * NULL for every period closed before V7, and it must stay nullable: those rows cannot be
+     * backfilled from live data without freezing whatever drift has already occurred.
+     */
+    @Column(name = "model_snapshot")
+    var modelSnapshot: String? = null
 }
 
 /**

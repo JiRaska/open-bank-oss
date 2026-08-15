@@ -1,4 +1,4 @@
-FROM kong:3.9.3@sha256:62721edc9669e2a96fe9d188ab8950b9105e69abb033129624a72d3e10da6777
+FROM kong:3.9.3@sha256:4d6a4ead594e9bf468d07a54d30a57991904b220403af1a43c5a3679615d11de
 
 COPY docker/kong/kong.yml /etc/kong/kong.yml
 USER kong

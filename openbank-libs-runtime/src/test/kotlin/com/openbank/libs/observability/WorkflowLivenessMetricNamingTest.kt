@@ -55,10 +55,11 @@ class WorkflowLivenessMetricNamingTest {
             .contains(
                 WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SECONDS,
                 WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS,
+                WorkflowLivenessMetrics.SUCCESS_RECORDED,
             )
         assertThat(reg.meters.mapNotNull { it.id.getTag(WorkflowLivenessMetrics.WORKFLOW_TAG) })
-            .describedAs("both gauges must carry the workflow tag the sentinel keys its map by")
-            .containsOnly("standing-order-execution", "standing-order-execution")
+            .describedAs("every gauge must carry the workflow tag the sentinel keys its map by")
+            .containsOnly("standing-order-execution")
     }
 
     @Test
@@ -70,6 +71,8 @@ class WorkflowLivenessMetricNamingTest {
             .isEqualTo(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SERIES)
         assertThat(convention.name(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS, Meter.Type.GAUGE))
             .isEqualTo(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SERIES)
+        assertThat(convention.name(WorkflowLivenessMetrics.SUCCESS_RECORDED, Meter.Type.GAUGE))
+            .isEqualTo(WorkflowLivenessMetrics.SUCCESS_RECORDED_SERIES)
     }
 
     @Test
@@ -81,6 +84,8 @@ class WorkflowLivenessMetricNamingTest {
             .isEqualTo("openbank_workflow_last_success_age_seconds")
         assertThat(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SERIES)
             .isEqualTo("openbank_workflow_expected_interval_seconds")
+        assertThat(WorkflowLivenessMetrics.SUCCESS_RECORDED_SERIES)
+            .isEqualTo("openbank_workflow_success_recorded")
     }
 
     @Test
@@ -90,5 +95,6 @@ class WorkflowLivenessMetricNamingTest {
         // Prometheus exposes. Pin the precondition rather than discover it in production.
         assertThat(WorkflowLivenessMetrics.isRenderableName(WorkflowLivenessMetrics.LAST_SUCCESS_AGE_SECONDS)).isTrue()
         assertThat(WorkflowLivenessMetrics.isRenderableName(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)).isTrue()
+        assertThat(WorkflowLivenessMetrics.isRenderableName(WorkflowLivenessMetrics.SUCCESS_RECORDED)).isTrue()
     }
 }

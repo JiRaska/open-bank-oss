@@ -53,6 +53,8 @@ import re
 import sys
 from pathlib import Path
 
+import gatelib
+
 LIBS_GLOB = "openbank-libs*"
 
 # Markdown trees whose statements are cited as governance evidence (ADR-0029/0030).
@@ -154,7 +156,7 @@ def strip_comments(src: str) -> str:
 def kotlin_sources(root: Path) -> list[Path]:
     return [
         p
-        for p in root.rglob("*.kt")
+        for p in gatelib.rglob(root, "*.kt")
         if "/build/" not in str(p) and "/.git/" not in str(p)
     ]
 
@@ -167,7 +169,7 @@ def declared_annotations(root: Path) -> dict[str, Path]:
         if not main.is_dir():
             continue
         for path in kotlin_sources(main):
-            text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+            text = strip_comments(gatelib.read_text(path, errors="replace"))
             for name in ANNOTATION_DECL.findall(text):
                 found[name] = path
     return found
@@ -175,7 +177,7 @@ def declared_annotations(root: Path) -> dict[str, Path]:
 
 def is_interceptor_binding(path: Path, name: str) -> bool:
     """True when the declaration of `name` in `path` is preceded by @InterceptorBinding."""
-    text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+    text = strip_comments(gatelib.read_text(path, errors="replace"))
     m = re.search(rf"^\s*annotation\s+class\s+{re.escape(name)}\b", text, re.M)
     if not m:
         return False
@@ -189,14 +191,14 @@ def usages(root: Path, name: str, declaring: Path) -> list[Path]:
     """Files under any module's src/main (other than the declaring file) that APPLY @name."""
     applied = re.compile(rf"@{re.escape(name)}\s*[(\s@\n]")
     hits: list[Path] = []
-    for module in sorted(root.glob("openbank-*")):
+    for module in gatelib.glob(root, "openbank-*"):
         main = module / "src" / "main"
         if not main.is_dir():
             continue
         for path in kotlin_sources(main):
             if path.resolve() == declaring.resolve():
                 continue
-            text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+            text = strip_comments(gatelib.read_text(path, errors="replace"))
             if applied.search(text):
                 hits.append(path)
     return hits
@@ -211,7 +213,7 @@ def has_interceptor(root: Path, name: str, declaring: Path) -> bool:
         for path in kotlin_sources(main):
             if path.resolve() == declaring.resolve():
                 continue
-            text = strip_comments(path.read_text(encoding="utf-8", errors="replace"))
+            text = strip_comments(gatelib.read_text(path, errors="replace"))
             if "@Interceptor" in text and re.search(rf"@{re.escape(name)}\s*\(", text):
                 return True
     return False
@@ -227,7 +229,7 @@ def real_annotation_names(root: Path) -> set[str]:
         if not module.is_dir() or module.name.startswith("."):
             continue
         for path in kotlin_sources(module):
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = gatelib.read_text(path, errors="replace")
             names.update(ANNOTATION_DECL.findall(text))
             names.update(IMPORT_TAIL.findall(text))
     return names
@@ -263,9 +265,9 @@ def check_rule_b(
         base = root / rel_dir
         if not base.is_dir():
             continue
-        for path in sorted(base.rglob("*.md")):
+        for path in gatelib.rglob(base, "*.md"):
             rel = str(path.relative_to(root))
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = gatelib.read_text(path, errors="replace")
             lines = text.splitlines()
             paragraphs = paragraph_of(lines)
             in_fence = False

@@ -22,6 +22,9 @@ interface FraudScoreRepository {
 
     /** REVIEW-queue read (ADR-0230 D1): newest scoring rows with the given verdict. */
     suspend fun findRecentByVerdict(verdict: String, limit: Int): List<ScoredRecord>
+
+    /** ADR-0220 D3.5 fraud-hold trigger (issue #2749): how many [verdict] rows [accountId] has since [since]. */
+    suspend fun countRecentByAccountAndVerdict(accountId: UUID, verdict: String, since: Instant): Long
 }
 
 /** One persisted scoring row as the review queue renders it (the reasons payload stays server-side). */

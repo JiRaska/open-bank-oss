@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
+import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
@@ -83,6 +84,12 @@ export default function Customer360Page() {
       />
 
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
+
+      {/* Issue #4265. Deliberately OUTSIDE every `data`/`loading`/`failure` branch below: this panel
+          reads engagement-service, not ClickHouse, so a silver layer that is down or a party with no
+          projected events must not hide an active fraud hold. Those are independent sources and the
+          page now degrades independently for each. */}
+      {selected && <AdverseStatePanel key={selected.id} partyId={selected.id} />}
 
       {loading && (
         <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>

@@ -466,7 +466,9 @@ class ServiceReadiness:
 
 def collect(short: str, att, today: str) -> ServiceReadiness:
     r = ServiceReadiness(service=short, money_path=short in money_path())
-    for (code, _), scorer in zip(DIMENSIONS, SCORERS):
+    # strict: a dimension without a scorer would otherwise be silently skipped and the
+    # readiness score computed over fewer cells than it claims.
+    for (code, _), scorer in zip(DIMENSIONS, SCORERS, strict=True):
         s, ev = scorer(short, att, today)
         r.scores[code] = s
         r.evidence[code] = ev

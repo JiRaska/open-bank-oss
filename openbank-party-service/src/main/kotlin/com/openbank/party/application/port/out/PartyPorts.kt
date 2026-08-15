@@ -5,8 +5,10 @@
 package com.openbank.party.application.port.out
 
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyChangeMateriality
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
+import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyStatus
 import java.time.Instant
 import java.util.UUID
@@ -15,6 +17,16 @@ import java.util.UUID
 interface PartyRepository {
 
     suspend fun save(party: Party): Party
+
+    /**
+     * Persists [party] AND [event] in one transaction (issue #4007). This — not a Kafka emitter —
+     * is how a party lifecycle event leaves the service: the row and the `party_outbox` entry
+     * commit together, or neither does, and the dispatcher relays the entry afterwards.
+     *
+     * The event-free [save] above stays for the paths that legitimately publish nothing (test
+     * fixtures, pact provider states). Prefer this one for anything a consumer must hear about.
+     */
+    suspend fun save(party: Party, event: PartyEvent): Party
 
     suspend fun findById(id: UUID): Party?
 
@@ -27,6 +39,9 @@ interface PartyRepository {
     suspend fun updateDiscoverable(partyId: UUID, discoverable: Boolean, at: Instant): Boolean
 
     suspend fun update(party: Party): Party
+
+    /** Transactional-outbox counterpart of [update] — see [save] with a [PartyEvent]. */
+    suspend fun update(party: Party, event: PartyEvent): Party
 
     suspend fun listAll(page: Int, size: Int): List<Party>
 
@@ -48,6 +63,9 @@ interface PartyRepository {
 
     /** GDPR Art. 17 erasure: anonymize the party's personal data in place. */
     suspend fun anonymize(id: UUID)
+
+    /** Transactional-outbox counterpart of [anonymize] — see [save] with a [PartyEvent]. */
+    suspend fun anonymize(id: UUID, event: PartyEvent)
 
     suspend fun findByKeycloakSub(sub: String): Party?
 
@@ -153,21 +171,21 @@ interface PartyAccountGuardPort {
     suspend fun findOpenAccounts(partyId: UUID): List<String>
 }
 
-/** Outbound port for party domain events. */
-interface PartyEventPublisher {
+// The `PartyEventPublisher` port that used to live here — a bare `@Channel("party-events-out")`
+// emitter fired after the repository had already committed — was removed with issue #4007. Party
+// events are now written to `party_outbox` inside the state-change transaction (see
+// [PartyRepository.save] with a [PartyEvent]) and relayed by `PartyOutboxDispatcher`. Two
+// publishers on the same topic would race, and only one of them can be atomic.
 
-    suspend fun publishPartyCreated(party: Party)
-
-    suspend fun publishPartyUpdated(party: Party)
-
-    suspend fun publishKycStatusChanged(party: Party)
-
-    suspend fun publishPartyErased(id: UUID)
-
-    /**
-     * ADR-0179: [merged] is the retired duplicate (status MERGED); [survivingPartyId] is the party
-     * consumers should follow from now on. Deliberately NOT PARTY_ERASED — nothing was anonymized
-     * and no subject-rights request occurred.
-     */
-    suspend fun publishPartyMerged(merged: Party, survivingPartyId: UUID)
+/**
+ * Counts party master-data changes by their materiality classification (ADR-0256 D1, #4458).
+ *
+ * A port rather than a direct `MeterRegistry` call so the use case stays framework-free, and a
+ * dedicated counter rather than a flag on an existing one because the whole point of the
+ * classification is that its three outcomes are separable: an environment where every update is
+ * `NO_CHANGE`, and one where a name edit path exists but never fires `MATERIAL`, look identical
+ * on any success/failure metric and different on this one.
+ */
+interface PartyChangeMetricsPort {
+    fun changeClassified(materiality: PartyChangeMateriality)
 }

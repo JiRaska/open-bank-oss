@@ -1,0 +1,17 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/security-scanner",
+  "author": "OpenBank Security",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "not_affected",
+      "timestamp": "2026-08-13T21:46:28Z",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The advisory expresses its affected range as a single interval (< 4.2.1), which under Maven version ordering sweeps in the entire hibernate-reactive 3.x line. That expression misclassifies this fleet. Hibernate Reactive maintains two parallel release lines, and 3.4.x was branched and released AFTER the fix, not before it: 4.2.1.Final was released 2025-12-21, while 3.4.0.Final was released 2026-05-27 and 3.4.2.Final on 2026-06-16 (Maven Central publication dates). The upstream fix commit cd7f104e10de918004707ca0e26e3840976f780a ('[#2926] Roll back open transactions on close', 2025-12-18), the only code change the advisory references, is PRESENT in the 3.4.2.Final artifact this fleet resolves. Measured by disassembling the exact jar the build verifies (sha256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, the value already pinned for this artifact in gradle/verification-metadata.xml, so the inspected bytes are the shipped bytes): SqlClientConnection.close() calls the post-fix validateNoTransactionInProgressOnClose(); the class carries the post-fix 'private boolean closed' field in place of the pre-fix 'private io.vertx.sqlclient.Transaction transaction'; and Log declares the fix's new liveTransactionDetectedOnClose() message. Control for the probe: the same javap check reports the fix ABSENT in 4.2.0.Final (the last release before the patch) and PRESENT in 4.2.1.Final (the advisory's stated first patched version), so it discriminates fixed from unfixed rather than always answering yes. No Quarkus platform ships hibernate-reactive-core >= 4.2.1 (quarkus-bom 3.38.0, 3.38.1, 3.38.2 and 3.39.0.CR1 all resolve 3.4.2.Final), and none is needed: the vulnerable code is not present in the resolved artifact. This supersedes the earlier 'affected' statements, which reasoned from the advisory's version range alone and did not inspect the artifact."
+    }
+  ]
+}

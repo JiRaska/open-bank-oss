@@ -155,7 +155,17 @@ jobs:
             exit 0
           fi
 
-          count() { gh api "${runs_api}?head_sha=$1&status=success" --jq '.total_count' 2>/dev/null || echo ""; }
+          # `status=success` is NOT a usable filter on this endpoint: measured on the real API,
+          # `?head_sha=<sha>&status=success` answers total_count 0 for a run whose own JSON reads
+          # status=completed, conclusion=success, while the identical query WITHOUT the filter
+          # answers 1. So this step failed PRs for a condition that was satisfied — #4397 had a
+          # successful submission 22 minutes before the assertion ran and was still told there
+          # was none. Filter on `conclusion` client-side instead, which is the field that
+          # actually carries the verdict.
+          count() {
+            gh api "${runs_api}?head_sha=$1&per_page=100" \
+              --jq '[.workflow_runs[]|select(.conclusion=="success")]|length' 2>/dev/null || echo ""
+          }
           base_runs="$(count "${mb}")"
           head_runs="$(count "${HEAD_SHA}")"
           if [ -z "${base_runs}" ] || [ -z "${head_runs}" ]; then

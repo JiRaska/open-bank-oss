@@ -59,6 +59,10 @@ dependencies {
     // Synthesizes the customer JWT (party_id claim) @TestSecurity alone cannot set for a
     // quarkus-oidc-backed resource server — same mechanism openbank-mcp-service already uses.
     testImplementation(libs.quarkus.test.security.oidc)
+    // CustomerEdgeMissingParamStatusIT (#3624): the missing-parameter defect lives in JAX-RS
+    // parameter injection, so it is only observable over real HTTP — a unit test calling the
+    // handler supplies the very argument the framework does not.
+    testImplementation(libs.rest.assured.kotlin)
 }
 
 // Pact: read consumer pacts from the shared pacts/ dir at the repo root (git-pact, ADR-0063).

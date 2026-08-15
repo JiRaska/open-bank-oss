@@ -5,11 +5,7 @@
 package com.openbank.lending.infrastructure.compliance
 
 import com.openbank.lending.application.port.out.CompliancePackActivationRepository
-import com.openbank.libs.governance.Proposal
-import com.openbank.libs.governance.ProposalState
 import com.openbank.libs.lending.compliance.CompiledCompliancePack
-import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackParser
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.lending.compliance.PackProductType
 import io.quarkus.runtime.StartupEvent
@@ -36,6 +32,9 @@ class CompliancePackConfig {
  * reconstructed four-eyes proposal it was approved as. A corrupt row fails the boot
  * loudly — silently starting without a jurisdiction's pack would let origination run
  * unprotected, which is the worse failure (ADR-0212 D2).
+ *
+ * Boot is no longer the ONLY reader of that table: [CompliancePackRefresher] re-reads it on a
+ * schedule, so a pack activated by a sibling replica converges here without a restart (#3467).
  */
 @ApplicationScoped
 class CompliancePackBootLoader(
@@ -50,21 +49,9 @@ class CompliancePackBootLoader(
         val rows = io.quarkus.vertx.VertxContextSupport.subscribeAndAwait {
             sessionFactory.withSession { activations.findActivated() }
         }
-        rows.forEach { row ->
-            val compiled = CompliancePackCompiler.compile(CompliancePackParser.fromJson(row.payload))
-            registry.activate(
-                Proposal(
-                    id = "boot-${row.id}",
-                    action = compiled,
-                    proposedBy = row.proposedBy,
-                    proposedAt = row.proposedAt.toInstant(),
-                    state = ProposalState.EXECUTED,
-                    decidedBy = row.decidedBy ?: "boot:unknown-checker",
-                    decidedAt = row.decidedAt?.toInstant(),
-                    decisionReason = row.decisionReason,
-                ),
-            )
-        }
+        // The same row -> proposal mapping the refresher uses. Two copies of it would be free to
+        // disagree about what a persisted activation means, which is the drift this fix exists to end.
+        rows.forEach { row -> registry.activate(row.toProposal()) }
         if (rows.isNotEmpty()) {
             log.infof("compliance packs rehydrated: %d activation(s)", rows.size)
         }

@@ -26,8 +26,16 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.redis.client)
+    // ADR-0220 D3.5 fraud-hold signal: FraudOutboxDispatcher (outbox drain) and
+    // FraudHoldService.sweepExpired (TTL expiry) both need @Scheduled — first use in this service.
+    implementation(libs.quarkus.scheduler)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
+    // ADR-0220 D3.5 fraud-hold signal: resolving partyId from accountId (AccountServiceClient)
+    // needs an outbound M2M client, which fraud-service has never had before.
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))

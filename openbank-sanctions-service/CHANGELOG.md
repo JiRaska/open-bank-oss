@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.3...sanctions-service-v0.9.0) (2026-08-13)
+
+
+### Features
+
+* **sanctions:** differentiate the analyst-review event from the screening event ([#4552](https://github.com/JiRaska/open-bank-oss/issues/4552)) ([b341777](https://github.com/JiRaska/open-bank-oss/commit/b341777dbe31f451c33b88c34258bb8f5d200f78)), closes [#1035](https://github.com/JiRaska/open-bank-oss/issues/1035)
+
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.2...sanctions-service-v0.8.3) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.8.1...sanctions-service-v0.8.2) (2026-08-08)
 
 

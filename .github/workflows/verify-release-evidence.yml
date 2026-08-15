@@ -8,13 +8,24 @@ name: Verify release evidence
 # before flipping enforcement at deploy.
 #
 # Manual (a specific tag) by default; non-destructive, read-only on the repo.
+#
+# WEEKLY SCHEDULE (#4026). This workflow was `workflow_dispatch`-only for its whole life
+# and had therefore been run exactly ZERO times — so the tool built to verify release
+# provenance had never verified a release, and every bundle was unverified by it. Nothing
+# was wrong with the workflow: the first dispatch (run 31278713964, tag
+# notification-service-v0.18.1) verified 4 cosign/KMS signatures and 3 manifest digests
+# and passed. A control whose only trigger is a human remembering is a control that does
+# not run; the cron makes it run against the newest release each week. The tag input still
+# takes precedence, so auditing a specific tag by hand is unchanged.
 
 on:
+  schedule:
+    - cron: "0 8 * * 1"   # weekly Monday 08:00 UTC — after vex-triage (07:00)
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to verify, e.g. pid-service-v0.5.0"
-        required: true
+        description: "Release tag to verify (default on a schedule: the newest release)"
+        required: false
         type: string
 
 permissions:
@@ -23,13 +34,37 @@ permissions:
 
 jobs:
   verify:
-    name: Verify ${{ inputs.tag }}
+    # Not `Verify ${{ inputs.tag }}` any more: on a schedule there is no input and the job
+    # rendered as a bare "Verify ".
+    name: Verify release evidence bundle
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 15
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAG: ${{ inputs.tag }}
     steps:
+      # TAG is resolved here, not in job-level `env:`, so the scheduled run has one at all.
+      # An empty tag must FAIL rather than fall through to a URL ending in `/tags/`, which
+      # 404s into a "no signed evidence found" error that reads like a provenance defect
+      # instead of an unresolved input.
+      - name: Resolve tag
+        env:
+          REQUESTED: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          tag="${REQUESTED:-}"
+          if [ -z "$tag" ]; then
+            tag="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" \
+              | jq -r '.tag_name // empty')"
+          fi
+          if [ -z "$tag" ]; then
+            echo "::error::could not resolve a release tag to verify (no input, and the repo reported no latest release)"
+            exit 1
+          fi
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+          echo "::notice::verifying evidence bundle for ${tag}"
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:

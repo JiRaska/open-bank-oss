@@ -59,6 +59,9 @@ spec:
               kubernetes.io/metadata.name: documents
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: fraud
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: interest
         - namespaceSelector:
             matchLabels:

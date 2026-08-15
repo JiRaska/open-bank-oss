@@ -8,21 +8,28 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
+import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDecision
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignSchedule
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
+import com.openbank.campaign.domain.model.ContentVariant
 import com.openbank.campaign.domain.model.ConversionCatalog
 import com.openbank.campaign.domain.model.Enrolment
 import com.openbank.campaign.domain.model.EnrolmentState
+import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.ScheduleCatalog
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.StopCondition
 import com.openbank.campaign.domain.model.TriggerCatalog
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Instant
 import java.util.UUID
@@ -35,6 +42,12 @@ import java.util.UUID
  */
 data class EnrolmentOutcome(val enrolled: Int, val failed: Int)
 
+/** A missing campaign is distinct from a source definition that is no longer reusable. */
+class CampaignNotFoundException(id: UUID) : NoSuchElementException("campaign $id not found")
+
+/** A reviewed catalogue entry required by a draft is missing or no longer available. */
+class CampaignReferenceNotFoundException(message: String) : NoSuchElementException(message)
+
 /**
  * Campaign lifecycle use cases (ADR-0200). State transitions are deterministic domain operations;
  * four-eyes approval for activation is enforced at the REST layer (`campaign.activate`,
@@ -42,13 +55,21 @@ data class EnrolmentOutcome(val enrolled: Int, val failed: Int)
  * [Campaign.activate] — a domain rule, not a UI convention.
  */
 @ApplicationScoped
-class CampaignService(
+@Suppress("TooManyFunctions") // Lifecycle actions are separate authenticated use cases, not helpers.
+class CampaignService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val enrolments: EnrolmentRepository,
     private val segments: SegmentRegistry,
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
+    /**
+     * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
+     * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
+     * graph work rather than replaying its new commands in an older binary.
+     */
+    @ConfigProperty(name = "openbank.campaign.explicit-graph-activation-enabled", defaultValue = "false")
+    private val explicitGraphActivationEnabled: Boolean,
 ) {
 
     private val log = Logger.getLogger(CampaignService::class.java)
@@ -61,11 +82,83 @@ class CampaignService(
         createdBy: String,
         stopCondition: StopCondition? = null,
         conversionRule: String? = null,
+        holdoutPercent: Int = 0,
         schedule: CampaignSchedule? = null,
         trigger: String? = null,
+        decisions: List<CampaignDecision> = emptyList(),
     ): Campaign {
+        val resolvedSegment = validateDraftReferences(segmentRef, conversionRule, trigger)
+        val campaign = Campaign(
+            id = Ids.newId(),
+            name = name,
+            goal = goal,
+            segmentRef = resolvedSegment,
+            steps = steps.sortedBy { it.order },
+            stopCondition = stopCondition,
+            conversionRule = conversionRule,
+            holdoutPercent = holdoutPercent,
+            // Stored on the DRAFT, but no Temporal schedule is created until activation: a schedule
+            // firing against a campaign that has not passed four-eyes would enrol real people into
+            // an unapproved journey (ADR-0200 D5).
+            schedule = schedule,
+            trigger = trigger,
+            decisions = decisions,
+            state = CampaignState.DRAFT,
+            createdBy = createdBy,
+            approvedBy = null,
+            createdAt = Instant.now(),
+            updatedAt = Instant.now(),
+        )
+        return campaigns.save(campaign)
+    }
+
+    /** A draft belongs to its maker until submitted; the request never supplies that identity. */
+    suspend fun reviseDraft(id: UUID, definition: CampaignDefinition, revisedBy: String): Campaign {
+        val existing = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
+        require(existing.createdBy == revisedBy) { "only the campaign maker can revise this draft" }
+        val resolvedSegment = validateDraftReferences(
+            definition.segmentRef,
+            definition.conversionRule,
+            definition.trigger,
+        )
+        return campaigns.save(
+            existing.revise(definition.copy(segmentRef = resolvedSegment)),
+        )
+    }
+
+    /**
+     * Reuses a reviewed journey as a fresh maker-owned draft.  It deliberately delegates to
+     * [createDraft] instead of copying the aggregate: a reusable campaign must pass today's
+     * segment, conversion-rule and trigger catalogues again, and may never inherit an approval, lifecycle
+     * state, enrolment, delivery record or active Temporal schedule.  A recurring schedule remains a
+     * visible DRAFT setting only; it still cannot exist in Temporal until the new draft passes
+     * its own four-eyes activation.
+     */
+    suspend fun duplicateAsDraft(id: UUID, createdBy: String): Campaign {
+        val source = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
+        return createDraft(
+            name = "Copy of ${source.name}",
+            goal = source.goal,
+            segmentRef = source.segmentRef,
+            steps = source.steps,
+            createdBy = createdBy,
+            stopCondition = source.stopCondition,
+            conversionRule = source.conversionRule,
+            holdoutPercent = source.holdoutPercent,
+            schedule = source.schedule,
+            trigger = source.trigger,
+            decisions = source.decisions,
+        )
+    }
+
+    /** Keeps create and draft revision tied to the same reviewed catalogue boundary. */
+    private suspend fun validateDraftReferences(
+        segmentRef: SegmentRef,
+        conversionRule: String?,
+        trigger: String?,
+    ): SegmentRef {
         val segment = segments.load(segmentRef.name, segmentRef.version)
-            ?: throw NoSuchElementException("segment ${segmentRef.name}@${segmentRef.version} not found")
+            ?: throw CampaignReferenceNotFoundException("segment ${segmentRef.name}@${segmentRef.version} not found")
         // Rejected here rather than at the consumer: a campaign carrying a key nobody watches would
         // be approved, run, and report nothing, and the first person to notice would be whoever
         // asked why it converted zero people (ADR-0245 D1).
@@ -77,26 +170,7 @@ class CampaignService(
         require(trigger == null || TriggerCatalog.exists(trigger)) {
             "unknown trigger '$trigger' — must be one of ${TriggerCatalog.ALL.keys.sorted()}"
         }
-        val campaign = Campaign(
-            id = Ids.newId(),
-            name = name,
-            goal = goal,
-            segmentRef = SegmentRef(segment.name, segment.version),
-            steps = steps.sortedBy { it.order },
-            stopCondition = stopCondition,
-            conversionRule = conversionRule,
-            // Stored on the DRAFT, but no Temporal schedule is created until activation: a schedule
-            // firing against a campaign that has not passed four-eyes would enrol real people into
-            // an unapproved journey (ADR-0200 D5).
-            schedule = schedule,
-            trigger = trigger,
-            state = CampaignState.DRAFT,
-            createdBy = createdBy,
-            approvedBy = null,
-            createdAt = Instant.now(),
-            updatedAt = Instant.now(),
-        )
-        return campaigns.save(campaign)
+        return SegmentRef(segment.name, segment.version)
     }
 
     suspend fun get(id: UUID): Campaign? = campaigns.findById(id)
@@ -120,6 +194,9 @@ class CampaignService(
      */
     suspend fun activate(id: UUID, approver: String): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
+        require(campaign.decisions.isEmpty() || explicitGraphActivationEnabled) {
+            "explicit decision journeys are held until the rollback-compatible Temporal worker rollout is enabled"
+        }
         val activated = campaigns.save(campaign.activate(approver))
         activated.schedule?.let { schedule ->
             val cadence = ScheduleCatalog[schedule.cadence]
@@ -140,12 +217,15 @@ class CampaignService(
     suspend fun pause(id: UUID): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         if (campaign.schedule != null) scheduler.pause(id)
-        return campaigns.save(campaign.pause())
+        val paused = campaigns.save(campaign.pause())
+        signalActiveEnrolments(enrolments, id) { partyId -> journeys.signalCampaignPaused(id, partyId) }
+        return paused
     }
 
     suspend fun resume(id: UUID): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         val resumed = campaigns.save(campaign.resume())
+        signalActiveEnrolments(enrolments, id) { partyId -> journeys.signalCampaignResumed(id, partyId) }
         if (resumed.schedule != null) scheduler.unpause(id)
         return resumed
     }
@@ -159,7 +239,9 @@ class CampaignService(
     suspend fun close(id: UUID): Campaign {
         val campaign = campaigns.findById(id) ?: throw NoSuchElementException("campaign $id not found")
         if (campaign.schedule != null) scheduler.delete(id)
-        return campaigns.save(campaign.close())
+        val closed = campaigns.save(campaign.close())
+        signalActiveEnrolments(enrolments, id) { partyId -> journeys.signalCampaignClosed(id, partyId) }
+        return closed
     }
 
     /**
@@ -186,25 +268,50 @@ class CampaignService(
         for (partyId in partyIds) {
             if (enrolments.findByCampaignAndParty(id, partyId) != null) continue
             try {
-                // Start FIRST, persist on success. The workflow id is the idempotency key
-                // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
-                // crash between these two lines costs a duplicate start that is a no-op, and the
-                // next `enrol` completes the pair. The reverse order costs a party: the row is
-                // already committed, the skip below sees it, and that party is never contacted and
-                // never retried (#2953).
-                journeys.startJourney(id, partyId)
-                enrolments.save(
-                    Enrolment(
-                        id = Ids.newId(),
-                        campaignId = id,
-                        partyId = partyId,
-                        state = EnrolmentState.ACTIVE,
-                        currentStep = 0,
-                        startedAt = Instant.now(),
-                        completedAt = null,
-                    ),
-                )
-                started++
+                val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
+                if (cohort == ExperimentCohort.HOLDOUT) {
+                    // A control cohort must never receive a workflow: storing it as ACTIVE and
+                    // merely hoping every future activity checks a flag would leak a send on the
+                    // first new path. It is a completed, observable no-contact assignment.
+                    enrolments.save(
+                        Enrolment(
+                            id = Ids.newId(),
+                            campaignId = id,
+                            partyId = partyId,
+                            state = EnrolmentState.HOLDOUT,
+                            currentStep = 0,
+                            startedAt = Instant.now(),
+                            completedAt = Instant.now(),
+                            experimentCohort = cohort,
+                            contentVariant = null,
+                        ),
+                    )
+                    started++
+                } else {
+                    // Start FIRST, persist on success. The workflow id is the idempotency key
+                    // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
+                    // crash between these two lines costs a duplicate start that is a no-op, and the
+                    // next `enrol` completes the pair. The reverse order costs a party: the row is
+                    // already committed, the skip below sees it, and that party is never contacted and
+                    // never retried (#2953).
+                    journeys.startJourney(id, partyId, campaign.journeyType())
+                    val contentVariant = ContentVariant.assign(campaign.id, partyId)
+                        .takeIf { campaign.hasContentExperiment }
+                    enrolments.save(
+                        Enrolment(
+                            id = Ids.newId(),
+                            campaignId = id,
+                            partyId = partyId,
+                            state = EnrolmentState.ACTIVE,
+                            currentStep = 0,
+                            startedAt = Instant.now(),
+                            completedAt = null,
+                            experimentCohort = cohort,
+                            contentVariant = contentVariant,
+                        ),
+                    )
+                    started++
+                }
             } catch (e: Exception) {
                 // Per party, so one bad party is local rather than fatal: the loop used to abort on
                 // the first failure, leaving every party after it unenrolled by a fault that had
@@ -217,4 +324,18 @@ class CampaignService(
     }
 
     suspend fun listEnrolments(id: UUID): List<Enrolment> = enrolments.listByCampaign(id)
+}
+
+private fun Campaign.journeyType(): JourneyType =
+    if (decisions.isEmpty()) JourneyType.LINEAR else JourneyType.DECISION_GRAPH
+
+/**
+ * Campaign control targets only live journeys. Completed enrolments have no workflow to wake and
+ * signalling them turns an O(actively running) operation into O(all historical recipients).
+ */
+private suspend fun signalActiveEnrolments(enrolments: EnrolmentRepository, campaignId: UUID, signal: (UUID) -> Unit) {
+    enrolments.listByCampaign(campaignId)
+        .asSequence()
+        .filter { it.state == EnrolmentState.ACTIVE }
+        .forEach { signal(it.partyId) }
 }

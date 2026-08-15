@@ -22,5 +22,19 @@ interface SchemeGatewayPort {
  */
 data class SchemeSubmissionOutcome(val accepted: Boolean, val reasonCode: String?)
 
-/** Thrown when the scheme gateway is unreachable; the rail holds the payment in VALIDATED. */
-class SchemeGatewayUnavailableException(cause: Throwable) : RuntimeException("scheme gateway unavailable", cause)
+/**
+ * Thrown when the scheme gateway is unreachable; the rail holds the payment in VALIDATED.
+ *
+ * [requestLeftThisProcess] answers the only question that matters for #4218: may the scheme be
+ * holding a live clearing item for this payment? `false` is a POSITIVE claim that it cannot — the
+ * connection was refused, the host did not resolve, or the circuit breaker rejected before any I/O
+ * — and only that claim makes the payment safe to submit again. Every other failure, a timeout
+ * above all, is ambiguous and must be treated as "possibly delivered": the default is `true`.
+ *
+ * The claim is made across ALL attempts of one call, not from the final exception. `@Retry` makes
+ * up to three attempts and only the last one's exception escapes, so an earlier timeout the gateway
+ * accepted would otherwise be hidden behind a later `ConnectException` — and that reading is what
+ * authorises re-submission.
+ */
+class SchemeGatewayUnavailableException(cause: Throwable, val requestLeftThisProcess: Boolean = true) :
+    RuntimeException("scheme gateway unavailable", cause)

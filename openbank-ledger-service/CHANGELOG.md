@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.2...ledger-service-v1.21.0) (2026-08-15)
+
+
+### Features
+
+* **ledger:** persist frozen trial balance evidence ([#4826](https://github.com/JiRaska/open-bank-oss/issues/4826)) ([22d8120](https://github.com/JiRaska/open-bank-oss/commit/22d812083c1c1f5d177e4718bdb1e95e12c6f06e))
+
+## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.1...ledger-service-v1.20.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **ledger:** resolve the ČNB fixing by business day and let a corrected one supersede ([#4397](https://github.com/JiRaska/open-bank-oss/issues/4397)) ([e2c5d87](https://github.com/JiRaska/open-bank-oss/commit/e2c5d87e21e913d24ff6e1558eff8425f5abf4a7)), closes [#1302](https://github.com/JiRaska/open-bank-oss/issues/1302)
+
+## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.0...ledger-service-v1.20.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **ledger:** make the ČNB fixing's age observable at the point of revaluation ([#4219](https://github.com/JiRaska/open-bank-oss/issues/4219)) ([368b2fe](https://github.com/JiRaska/open-bank-oss/commit/368b2fe33f98b28aaba07305df0e035fc0243cc2))
+
 ## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.19.0...ledger-service-v1.20.0) (2026-08-07)
 
 

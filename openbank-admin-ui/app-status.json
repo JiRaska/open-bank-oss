@@ -12,7 +12,7 @@
   "asOf": "2026-07-29",
   "appRepo": "JiRaska/openbank-app",
   "derived": {
-    "version": "0.19.0",
+    "version": "0.22.0",
     "useFakeData": false,
     "edgeBaseUrl": "https://customer.open-bank.tech",
     "keycloakIssuer": "https://kc.open-bank.tech/realms/openbank-customers",
@@ -247,13 +247,13 @@
         "technology",
         "security"
       ],
-      "status": "planned",
+      "status": "partial",
       "adr": [
         "ADR-0095"
       ],
       "gap": {
-        "cs": "Otevřený BLE profil pro platbu telefon-telefon bez skenování: příjemce vysílá křestní jméno + session-id, plátce stáhne přes GATT podepsaný SPAYD (Ed25519) a otevře předvyplněný návrh platby na existujícím IBAN/okamžitém railu. Banka-agnostické, backend volitelný; cíl je otevřený standard (pitch ČBA/EPC). Zatím jen návrh — ADR-0095 + wire spec + threat-model napsané, BEZ implementace. Identita stojí na potvrzení plátce; VOP (jméno↔IBAN) a bank-atestace jsou volitelné a pro CZ domácí platby zatím nedostupné (TODO/watch). Bezpečnostně ~ na úrovni skenování QR, ale soukromější (IBAN není ve vzduchu) a UX bez kamery.",
-        "en": "Open BLE phone-to-phone profile for scan-less pay: the payee advertises a first name + session-id, the payer pulls a signed SPAYD (Ed25519) over GATT and opens a pre-filled proposal on the existing IBAN/instant rail. Bank-agnostic, backend-optional; aims to be an open standard (ČBA/EPC pitch). Design only so far — ADR-0095 + wire spec + threat model written, NO implementation. Identity rests on payer confirmation; VOP (name↔IBAN) and bank attestation are optional and not yet available for CZ domestic (TODO/watch). Security ≈ a QR scan, but more private (no IBAN on air) and camera-free UX."
+        "cs": "Otevřený BLE profil pro platbu telefon-telefon bez skenování: příjemce vysílá křestní jméno + session-id, plátce stáhne přes GATT podepsaný SPAYD (Ed25519) a otevře předvyplněný návrh platby na existujícím IBAN/okamžitém railu. Banka-agnostické, backend volitelný; cíl je otevřený standard (pitch ČBA/EPC). Implementované, ale záměrně spící: protokolové jádro (NearPay/BeaconCodec/NearPayBundle/NearPayProtocol/NearPayController) i oba transporty (AndroidNearPayTransport, IosNearPayTransport) jsou v mainu s unit testy; příjemce se reálně spouští z RequestScreen (nearPayCtrl.startReceiving). Cesta plátce zapojená NENÍ — startDiscovery nevolá žádná obrazovka, takže seznam nearby dlaždic zůstává prázdný a resolve() je v UI nedosažitelné. Chybí SAS/verifikační kód, bank-atestace (FLAG_SAS/FLAG_ATTESTED jsou jen konstanty) a obrana proti replay nad rámec TTL 90 s (žádná seen-sid množina). Odemknutí plátce blokují rollout gates z open-bank-oss docs/threat-models/qrlesspay.md §8 (nezávislý krypto review, fuzzing CBOR dekodéru, ADR-0030 security review + druhé schválení, DPIA na vysílání křestního jména). Identita stojí na potvrzení plátce; VOP (jméno↔IBAN) a bank-atestace jsou volitelné a pro CZ domácí platby zatím nedostupné (TODO/watch). Bezpečnostně ~ na úrovni skenování QR, ale soukromější (IBAN není ve vzduchu) a UX bez kamery.",
+        "en": "Open BLE phone-to-phone profile for scan-less pay: the payee advertises a first name + session-id, the payer pulls a signed SPAYD (Ed25519) over GATT and opens a pre-filled proposal on the existing IBAN/instant rail. Bank-agnostic, backend-optional; aims to be an open standard (ČBA/EPC pitch). Implemented but deliberately dormant: the protocol core (NearPay/BeaconCodec/NearPayBundle/NearPayProtocol/NearPayController) and both platform transports (AndroidNearPayTransport, IosNearPayTransport) are merged with unit tests, and the receiver side really runs from RequestScreen (nearPayCtrl.startReceiving). The payer path is NOT wired — no screen calls startDiscovery, so the nearby-tile list stays empty and resolve() is unreachable from the UI. Absent: SAS/verification code, bank attestation (FLAG_SAS/FLAG_ATTESTED are constants only) and replay defence beyond the 90 s TTL (no seen-sid set). Unlocking the payer path is gated on the rollout gates in open-bank-oss docs/threat-models/qrlesspay.md §8 (independent crypto review, CBOR-decoder fuzzing, ADR-0030 security review + second approval, DPIA on the first-name broadcast). Identity rests on payer confirmation; VOP (name↔IBAN) and bank attestation are optional and not yet available for CZ domestic (TODO/watch). Security ≈ a QR scan, but more private (no IBAN on air) and camera-free UX."
       }
     },
     {
@@ -373,8 +373,7 @@
     "total": 18,
     "byStatus": {
       "live": 13,
-      "partial": 4,
-      "planned": 1
+      "partial": 5
     },
     "decisionMissing": []
   },

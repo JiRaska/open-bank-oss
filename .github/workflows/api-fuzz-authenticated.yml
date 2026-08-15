@@ -94,6 +94,48 @@ jobs:
           for svc, why in skipped:
               print(f"::warning::api-fuzz-authenticated: {svc} EXCLUDED — {why}")
           print(f"fuzzing {len(keep)} service(s); {len(skipped)} excluded")
+
+          # A run's CONCLUSION is not a coverage statement, and this lane proved it: run
+          # 31688625829 (2026-08-13) is the first green this workflow ever produced, and it
+          # fuzzed ONE service — a `services:` override narrowed the matrix and nothing in the
+          # run name, conclusion or log said so. "API fuzz (authenticated): success" read
+          # identically to a full 18-service pass (#3039). So the scope is stated as a fraction
+          # of the money path, in the step summary where a reader lands, and an override is
+          # labelled as one instead of silently replacing the derived set.
+          denom = len(money)
+          summary = [
+              "## Authenticated fuzz scope",
+              "",
+              f"**{len(keep)} of {denom} money-path services actually fuzzed.**",
+              "",
+          ]
+          if override:
+              summary += [
+                  f"> ⚠️ **Scope was OVERRIDDEN by dispatch input** to {len(override)} requested "
+                  f"service(s) — this run does NOT measure the money path. "
+                  f"Requested: `{' '.join(override)}`",
+                  "",
+              ]
+              print(
+                  "::warning::api-fuzz-authenticated: scope OVERRIDDEN by dispatch input "
+                  f"({len(keep)} of {denom} money-path services) — this run is not a coverage measurement"
+              )
+          if skipped:
+              summary += ["| Excluded | Why |", "|---|---|"]
+              summary += [f"| `{svc}` | {why} |" for svc, why in skipped]
+              summary += [""]
+          summary += [f"Fuzzed: {', '.join(f'`{s}`' for s in keep) or '_none_'}"]
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a") as fh:
+              fh.write("\n".join(summary) + "\n")
+
+          # An empty scope must never read as a pass. Every candidate being excluded is the one
+          # state where this lane fuzzes nothing at all, and a zero-length matrix is precisely
+          # the shape that produces a green run about no subject — the failure mode this repo
+          # keeps rediscovering. Fail here, where the reason is still in hand.
+          if not keep:
+              print("::error::api-fuzz-authenticated: derived scope is EMPTY — nothing would be fuzzed")
+              raise SystemExit(1)
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("services=" + json.dumps(keep) + "\n")
           PY
@@ -125,9 +167,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
 
-      - uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
           cache-read-only: true
 
@@ -172,8 +214,26 @@ jobs:
           SPEC="${svc}/src/main/resources/openapi.yaml"
           PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
           DB="$(grep -m1 'jdbc:postgresql://\|postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
-          DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
+          # `${VAR:default}` is a MicroProfile config EXPRESSION, not a literal. The harness sets
+          # no env, so the DEFAULT is what the service will actually use, and the raw string must
+          # never be handed to docker. settlement-service writes its username that way; the literal
+          # reached `docker run -e POSTGRES_USER=${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}`,
+          # initdb rejected it, the container exited, and the boot log then blamed Flyway
+          # ("Connection to localhost:5432 refused") — never the container that was already gone.
+          # Credentials are then passed EXPLICITLY below rather than left to whichever env var
+          # the service happens to read: the fleet mostly reads ${POSTGRES_PASSWORD}, which this
+          # job sets, while settlement-service reads ${QUARKUS_DATASOURCE_PASSWORD}, which it does
+          # not — so settlement met "password authentication failed" once its container did start.
+          resolve_expr() {
+            printf '%s' "$1" | sed -E 's/^"//; s/"$//; s/^\$\{[A-Za-z0-9_]+:([^}]*)\}$/\1/'
+          }
+          DBUSER="$(resolve_expr "$(grep -m1 '^    username:' "$APP_YAML" | sed -E 's/^[^:]*:[[:space:]]*//')")"
           DBUSER="${DBUSER:-openbank}"
+          case "$DBUSER" in
+            *[!A-Za-z0-9_]*)
+              echo "::error::[${svc}] datasource username did not resolve to a plain identifier: ${DBUSER}"
+              exit 1 ;;
+          esac
           echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
 
           docker run -d --name fuzz-pg -p 5432:5432 \
@@ -186,28 +246,88 @@ jobs:
             docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && break; sleep 2
           done
 
+          # Four money-path services register a Temporal worker AT BOOT and the harness provided no
+          # Temporal server: dev mode retried gRPC to :7233 (or to the cluster DNS name, which does
+          # not resolve on a runner) until the readiness window expired, so they never reached the
+          # fuzz step. 4 of the 5 boot failures in run 30804842325 — sepa-payment, transaction,
+          # domestic-payment, lending (#3039). The CLI image's `server start-dev` is IN-MEMORY, so
+          # this costs no extra database, and it creates the namespaces it is given — a worker
+          # registering against a namespace that does not exist fails the same way.
+          # The namespace is READ FROM THE SERVICE's own config, never a list kept here.
+          TEMPORAL_NS="$(resolve_expr "$(grep -m1 -A6 '^  temporal:' "$APP_YAML" \
+            | grep -m1 'namespace:' | sed -E 's/^[^:]*:[[:space:]]*//')")"
+          TEMPORAL_ARGS=""
+          if [ -n "${TEMPORAL_NS:-}" ]; then
+            echo "==> [${svc}] starting Temporal dev server (namespace ${TEMPORAL_NS})"
+            docker run -d --name fuzz-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            TEMPORAL_UP=0
+            for i in $(seq 1 30); do
+              if docker exec fuzz-temporal temporal operator namespace describe \
+                   --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1; then
+                TEMPORAL_UP=1; break
+              fi
+              sleep 2
+            done
+            if [ "$TEMPORAL_UP" != "1" ]; then
+              echo "::error::[${svc}] Temporal dev server never became ready"
+              docker logs fuzz-temporal 2>&1 | tail -20; exit 1
+            fi
+            # domestic-payment and lending default to the in-cluster frontend DNS name; the
+            # override points every target at the throwaway server regardless of its default.
+            TEMPORAL_ARGS="-Dopenbank.temporal.server-url=localhost:7233"
+          fi
+
           # Boot with OIDC ENABLED (override the %dev oidc.enabled=false) pointed at
           # the throwaway Keycloak. authz.enforce stays false for this target, so no
           # OPA sidecar is needed — OIDC authN is the only gate being exercised.
+          #
+          # DEV SERVICES OFF (#3039). Dev mode starts containers for anything it thinks is
+          # unconfigured, and on a cold hosted runner the PULL is what blows the readiness
+          # window: run 31746030097 left account-service mid-`Extracting 250.7MB/638.7MB` of
+          # docker.io/grafana/otel-lgtm at the exact second the loop gave up, and pulled
+          # apache/kafka-native alongside it. Neither is reachable from the fuzzed surface.
+          # The backing services this lane actually needs are provisioned explicitly above
+          # (Postgres, Redis, Keycloak, Temporal) and are already suppressing their own dev
+          # service by explicit config — the log says so per component ("Not starting Dev
+          # Services for default datasource as it has explicit configuration"). Kafka is lazy
+          # behind the outbox, so no broker is needed to serve a request. What was left was an
+          # observability stack and a Kafka image, pulled on every one of 18 jobs, for nothing.
           echo "==> [${svc}] starting quarkusDev with OIDC on"
           ./gradlew ":${svc}:quarkusDev" \
             -Dquarkus.console.basic=true --console=plain --quiet \
             -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.username="${DBUSER}" \
+            -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
             -Dquarkus.oidc.enabled=true \
             -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
             -Dquarkus.oidc.client-id=openbank-services \
             -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
+            -Dquarkus.devservices.enabled=false \
+            ${TEMPORAL_ARGS} \
             > "fuzz-reports/${svc}-boot.log" 2>&1 &
           DEV_PID=$!
           UP=0
-          for i in $(seq 1 90); do
+          # 90x2s=180s had to cover a cold Gradle build AND the boot; with dev-service pulls
+          # gone the boot is short, but the build is not, so keep real margin.
+          READY_ITERS=180; READY_TIMEOUT_S=$((READY_ITERS * 2))
+          for i in $(seq 1 "$READY_ITERS"); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
             if [ "$code" != "000" ]; then UP=1; break; fi
             kill -0 "$DEV_PID" 2>/dev/null || break
             sleep 2
           done
           if [ "$UP" != "1" ]; then
-            echo "::error::[${svc}] failed to boot"
+            # "failed to boot" is two different states and they need different fixes. A CRASH
+            # leaves a dead process and an error chain; a TIMEOUT leaves the JVM alive and
+            # still working, and its ERROR grep prints NOTHING — which is exactly how six
+            # triage passes on #3039 recorded "cause not determined" for a service that had
+            # not failed at all. Say which one happened.
+            if kill -0 "$DEV_PID" 2>/dev/null; then
+              echo "::error::[${svc}] did not become ready within ${READY_TIMEOUT_S}s — the process is STILL ALIVE (timeout, not a crash: look at what the log is doing at its end, not for an ERROR)"
+            else
+              echo "::error::[${svc}] failed to boot — the dev-mode process exited"
+            fi
             # A blind `tail` puts the root cause above the window — every ERROR and every
             # `Caused by:` is what actually identifies it (issue #3039: six of seven services
             # were "not determined" purely because of this).
@@ -245,7 +365,7 @@ jobs:
 
           kill "$DEV_PID" 2>/dev/null || true
           pkill -f "quarkusDev" 2>/dev/null || true
-          docker rm -f fuzz-pg fuzz-redis fuzz-keycloak >/dev/null 2>&1 || true
+          docker rm -f fuzz-pg fuzz-redis fuzz-keycloak fuzz-temporal >/dev/null 2>&1 || true
           exit "$RC"
 
       - name: Upload fuzz reports

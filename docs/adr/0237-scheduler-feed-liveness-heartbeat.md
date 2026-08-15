@@ -63,6 +63,23 @@ is skipped for lack of a rate — correct as a heartbeat, useless as feed eviden
    standing criticals" a goal, so a daily job missing one run must not page.
    The sentinel (ADR-0163) continues to correlate staleness across controls into one
    finding; the rule is the raw signal, the sentinel is the triage.
+   **The age gauge is seeded at registration time, and that is a precondition of this
+   point rather than an implementation detail** (amended 2026-08-08). ADR-0160's
+   primitive seeded it from `Instant.EPOCH`, so a workflow that had not yet recorded a
+   success read ~1.8e9 seconds — decades — on every fresh pod. That is survivable for a
+   sentinel that runs daily and files a finding, and fatal for an alert: the rule above
+   would fire 15 minutes after every deploy or restart, for every daily workflow, and
+   keep firing until that workflow's next success (up to 24h for a daily job), across
+   all ~28 registration sites. No `for:` duration helps, because the condition genuinely
+   persists. The rule and `DomainMetrics`' own KDoc were shipped describing opposite
+   behaviours; seeding the gauge at registration is what reconciles them. Two
+   consequences that follow and are accepted here: a job whose pod restarts *more often*
+   than 2× its interval can never accumulate enough age to alert — covered statically by
+   point 4's gate instead — and "has this job ever succeeded" no longer follows from the
+   age, so the primitive publishes it separately as
+   `openbank_workflow_success_recorded` (0 until the first `recordSuccess`, 1 after).
+   That gauge changes no verdict; the sentinel reads it so a finding can say "no success
+   since this pod registered it" rather than assert a last success that never happened.
 4. **Adoption is gated, or it rots.** A new CI check (advisory-first per ADR-0144,
    with a `target_enforce_date` in rules.yaml) fails when a domain `@Scheduled`
    method has no liveness registration — otherwise the fleet slides back to
@@ -108,6 +125,11 @@ is skipped for lack of a rate — correct as a heartbeat, useless as feed eviden
 **Neutral**
 - The 2× multiplier moves from an implicit convention to the alert expression; a job
   with a special cadence can set its own `expectedInterval` accordingly.
+- The boot-seed (point 3's amendment) makes "age" mean *time since the last success or
+  this pod's registration, whichever is later*. Every consumer already treats it that
+  way, since both readings cross the same threshold; only the wording of a sentinel
+  finding depended on the difference, and that now comes from
+  `openbank_workflow_success_recorded` instead of from the age's magnitude.
 
 ## Compliance impact
 

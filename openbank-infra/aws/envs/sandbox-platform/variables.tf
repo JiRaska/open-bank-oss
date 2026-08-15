@@ -134,7 +134,23 @@ variable "arc_max_runners" {
   # just means more concurrent phantom holds, not more real throughput. Root cause
   # #1149 already stops new inert-push waste at the source, so paying for 12 idle-
   # capable spot runners no longer buys a proportional drain-speed benefit. Back to 6.
-  default = 6
+  #
+  # Raised 6 -> 12 (2026-08-09, #4317 / ADR-0250). The 2026-07-15 revert above rested on
+  # the phantom-claim bug, and that premise is gone: it was root-caused in #1152 to ARC
+  # 0.9.3 and fixed by the arc_controller_version bump to 0.14.2, which is what runs.
+  # Verified rather than assumed — all six runner pods were confirmed to be executing
+  # real jobs (WORKER frames in the runner container log) while the listener reported
+  # `"assigned job"=6 decision=6 min=0 max=6`. So the pool is genuinely saturated, not
+  # holding phantoms, and extra slots now buy proportional throughput.
+  # Measured backlog at the time of the change: 42 queued Services CI runs, p50 age 7.0h,
+  # max 23.4h, per-build queue p50 85 min against 4-11 min of execution.
+  # FinOps: this is close to cost-NEUTRAL, because raising concurrency does not raise
+  # total runner-hours — the same ~17.4 runner-h/day of build work runs on more nodes for
+  # less wall-clock (the only delta is per-node cold-start overhead, and the ECR
+  # pull-through cache made that cheap). It is funded several times over by retiring
+  # runners-warm in the same PR (~$197/month). Bounded by the runners NodePool cpu limit
+  # of 64: 12 build x 4 vCPU = 48, plus 0 warm now, within limit.
+  default = 12
 }
 
 variable "arc_deploy_max_runners" {

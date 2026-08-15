@@ -247,22 +247,22 @@ STUB
     echo "$? $(wc -l < "${tmp}/calls" | tr -d ' ')"
   }
 
-  local bad
+  local bad name_rc name_calls
   for bad in "evil-repo" "docker-hub/nginx" "openbank-" "openbank-UPPER" "openbank-trailing-" \
              "openbank-svc; rm -rf /" "../openbank-escape" ""; do
-    set -- $(run_name_case "$bad")
-    if [ "$1" = "0" ]; then
+    read -r name_rc name_calls <<<"$(run_name_case "$bad")"
+    if [ "$name_rc" = "0" ]; then
       echo "selftest FAIL: name '${bad}' was accepted"; rm -rf "$tmp"; return 1
     fi
-    if [ "${2:-0}" != "0" ]; then
+    if [ "${name_calls:-0}" != "0" ]; then
       echo "selftest FAIL: name '${bad}' was rejected but only AFTER calling aws"; rm -rf "$tmp"; return 1
     fi
   done
 
   # ...and a legitimate name still goes through.
-  set -- $(run_name_case "openbank-delegation-service")
-  if [ "$1" != "0" ]; then
-    echo "selftest FAIL: a valid fleet name was rejected (rc=$1)"; rm -rf "$tmp"; return 1
+  read -r name_rc _ <<<"$(run_name_case "openbank-delegation-service")"
+  if [ "$name_rc" != "0" ]; then
+    echo "selftest FAIL: a valid fleet name was rejected (rc=${name_rc})"; rm -rf "$tmp"; return 1
   fi
 
   rm -rf "$tmp"

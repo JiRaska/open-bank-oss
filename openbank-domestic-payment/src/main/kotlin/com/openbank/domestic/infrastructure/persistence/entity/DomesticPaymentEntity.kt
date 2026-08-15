@@ -90,6 +90,12 @@ class DomesticPaymentEntity : PanacheEntity() {
     @Column(name = "submitted_at")
     var submittedAt: Instant? = null
 
+    // #4218. Set before the pacs.008 leaves for the scheme, so it outlives any failure of the
+    // bookkeeping that follows. Distinct from submittedAt above, which is already non-null by the
+    // time a payment reaches the scheme hop and so cannot record it.
+    @Column(name = "scheme_dispatched_at")
+    var schemeDispatchedAt: Instant? = null
+
     @Column(name = "settled_at")
     var settledAt: Instant? = null
 

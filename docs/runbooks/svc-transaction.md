@@ -22,8 +22,8 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 ## Dependencies
 
-- **Upstream (this service consumes):** `fx-service`, `sepa-payment`, `sepa-instant`, `domestic-payment`, `standing-order-service`, `swift-service`, `clearing-service`, `agent-service`
-- **Downstream (depends on this service):** `account-service`, `ledger-service`, `balance-service`, `audit-service`
+- **Upstream (this service consumes):** `sepa-payment`, `sepa-instant`, `domestic-payment`, `swift-service`, `agent-service`
+- **Downstream (depends on this service):** `fx-service`, `account-service`, `ledger-service`, `balance-service`, `audit-service`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `transaction`.

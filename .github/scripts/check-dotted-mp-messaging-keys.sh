@@ -53,6 +53,74 @@
 # stdlib-only (POSIX awk + shell); no PyYAML/yamllint dependency.
 # Usage: check-dotted-mp-messaging-keys.sh [root-dir] [--enforce]
 set -euo pipefail
+# --- self-test ------------------------------------------------------------------------
+# A literal dot in an `mp.messaging.(incoming|outgoing).<channel>` leaf key registers as a
+# QUOTED MicroProfile property that the Kafka connector's plain getters never read — the value
+# silently falls back to a default. `group.id` written this way caused the #686 incident
+# chain, and `auto.offset.reset` has no coincidence to hide behind at all.
+#
+# The trap this guard exists for is subtle enough that its own falsification matters: six
+# services look correct and are not the same kind of correct.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+
+  put() { mkdir -p "$(dirname "$1")"; printf '%b' "$2" > "$1"; }
+  expect() { # expect <label> <root> <want-rc> [substring]
+    local label="$1" root="$2" want="$3" sub="${4:-}" out rc
+    out=$(bash "$0" "$root" --enforce 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then
+      echo "::error::self-test: $label — expected rc=$want, got rc=$rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1))
+    fi
+  }
+  y() { echo "openbank-$1/src/main/resources/application.yaml"; }
+
+  # THE DEFECT: a dotted leaf under an incoming channel.
+  a="$td/dotted"; put "$a/$(y x)" 'mp:\n  messaging:\n    incoming:\n      ch:\n        group.id: svc\n'
+  expect "a dotted leaf under incoming is FLAGGED" "$a" 1 "leaf key contains a literal dot"
+
+  # ...and outgoing, which is the same wire and the same silence.
+  b="$td/outgoing"; put "$b/$(y x)" 'mp:\n  messaging:\n    outgoing:\n      ch:\n        key.serializer: k\n'
+  expect "a dotted leaf under outgoing is FLAGGED" "$b" 1 "leaf key contains a literal dot"
+
+  # The correct nested spelling must be clean, or the gate blocks the fix it demands.
+  c="$td/nested"; put "$c/$(y x)" 'mp:\n  messaging:\n    incoming:\n      ch:\n        connector: smallrye-kafka\n        topic: t\n'
+  expect "an undotted leaf is clean" "$c" 0 "no dotted mp.messaging leaf keys"
+
+  # SCOPE: a dot in a key OUTSIDE mp.messaging is ordinary YAML and must not be reported —
+  # `quarkus.http.port` style keys are everywhere and flagging them makes the gate unusable.
+  d="$td/elsewhere"; put "$d/$(y x)" 'quarkus:\n  http:\n    port: 8080\nsome:\n  other.key: v\n'
+  expect "a dotted key outside mp.messaging is ignored" "$d" 0 "no dotted mp.messaging leaf keys"
+
+  # A dotted CHANNEL NAME (depth 4) is not a leaf property and is not this defect.
+  e="$td/channel"; put "$e/$(y x)" 'mp:\n  messaging:\n    incoming:\n      my.channel:\n        topic: t\n'
+  expect "a dotted channel name is not reported as a leaf" "$e" 0 "no dotted mp.messaging leaf keys"
+
+  # Comments must not trip it — the fix comments in this fleet name the very keys involved.
+  f="$td/comment"; put "$f/$(y x)" 'mp:\n  messaging:\n    incoming:\n      ch:\n        # group.id: never write it here\n        topic: t\n'
+  expect "the key named in a comment is not a hit" "$f" 0 "no dotted mp.messaging leaf keys"
+
+  # ADVISORY vs ENFORCE must actually differ, or `mode:` means nothing.
+  out=$(bash "$0" "$a" 2>&1); rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "::error::self-test: advisory mode should exit 0, got $rc" >&2; fails=$((fails+1))
+  elif ! printf '%s' "$out" | grep -qF "ADVISORY mode"; then
+    echo "::error::self-test: advisory mode did not say so: $out" >&2; fails=$((fails+1))
+  fi
+
+  # EMPTY SCOPE is not a pass. This script reported one until the same commit that added this
+  # self-test — its sibling over the same corpus had already been fixed (#4339).
+  g="$td/empty"; mkdir -p "$g"
+  expect "an empty scope FAILS rather than reporting clean" "$g" 1 "scope moved"
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: dotted mp.messaging key guard is falsifiable (8 cases)"
+  exit 0
+fi
+
 ROOT="."
 ENFORCE=0
 for arg in "$@"; do
@@ -69,8 +137,13 @@ files="$(
 )"
 
 if [ -z "$files" ]; then
-  echo "check-dotted-mp-messaging-keys: no service application.yaml found under '$ROOT' — nothing to check."
-  exit 0
+  # NOT "nothing to check". The corpus is every service's application.yaml — dozens of files —
+  # so an empty list means the scope moved, not that the fleet is clean. Its sibling over the
+  # same corpus (check-duplicate-yaml-keys.sh) already fails here for that reason (#4339);
+  # this one still reported a pass, which is the same defect the two gates exist to catch.
+  echo "::error::check-dotted-mp-messaging-keys: no service application.yaml found under" \
+       "'$ROOT' — the scope moved, the gate did not."
+  exit 1
 fi
 
 count_files=0

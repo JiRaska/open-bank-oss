@@ -24,7 +24,7 @@ the downstream payment rail (covered by domestic-payment / instant threat models
 [Payer app] --verify(sig,binding,proximity)--> [Payer prefilled proposal] --VOP+SCA--> [Payer bank rail]
 ```
 
-- **External entities:** payee device, payer device, payer's bank (VOP + rail), optional payee bank (attestation).
+- **External entities:** payee device, payer device, payer's bank (VOP + rail). No third party participates in the exchange itself (spec §11).
 - **Trust boundaries:** the **air** (untrusted, observable, injectable); payer↔payer-bank (authenticated); device keystore.
 - **Assets:** payee first name (low-sensitivity PII), IBAN (in the bundle, not on air), requested amount, session keypair, payer authorisation.
 
@@ -39,7 +39,7 @@ the downstream payment rail (covered by domestic-payment / instant threat models
 
 | Threat | Vector | Mitigation |
 |---|---|---|
-| **S**poofing (impersonate payee) | Attacker advertises same service UUID with own first name/IBAN | Payer always confirms name+masked IBAN; **VOP** name↔IBAN at payer bank; optional bank attestation (`att` JWS) |
+| **S**poofing (impersonate payee) | Attacker advertises same service UUID with own first name/IBAN | Payer always confirms name+masked IBAN; **VOP** name↔IBAN at payer bank where a scheme exists; payer-side warning when two visible tiles share a display name (§6) |
 | **S**poofing (swap GATT payload) | Nearby device answers the GATT read with a different bundle | advert `kh` = SHA-256(pk)[:2] binds advert to bundle; `sid` must match; `sig` over the bundle |
 | **T**ampering (alter amount/IBAN in flight) | Modify CBOR between read and display | Ed25519 `sig` covers SPAYD+nonce+exp+sid+pk; any edit fails verify |
 | **R**epudiation | Payer denies authorising | SCA evidence + audit on the payer-bank rail (existing) |
@@ -61,26 +61,44 @@ the downstream payment rail (covered by domestic-payment / instant threat models
 - **Baseline identity authenticity is weak — be honest about it.** The per-session
   Ed25519 key proves *device/session continuity*, not *who owns the IBAN*: anyone
   can sign their own SPAYD with their own key. The two stronger identity controls
-  are **both optional and frequently absent today**: bank attestation (needs both
-  banks to support it) and **VOP**, which the EU mandates only for euro/SEPA —
-  **CZ CZK domestic instant payments are not yet covered** (TODO/watch, spec §6.2).
-  With neither, identity rests **entirely on the payer's §6 confirmation** — i.e.
-  the same trust model as scanning a QR off a stranger's screen (see §7), which is
-  phishing-grade. **Mitigation:** prefer attestation/VOP where available; where
-  both are absent, treat the transfer as display-assist only and lean on proximity
-  + explicit confirmation, exactly as a QR scan does.
+  are **both unavailable, and one of them permanently**: **bank attestation is out
+  of the protocol** — it required a trust anchor, every anchor is interbank
+  coordination, and without one the check decides nothing (spec §11); and **VOP**,
+  which the EU mandates only for euro/SEPA, so **CZ CZK domestic instant payments
+  are not covered** (TODO/watch, spec §6.2). Identity therefore rests **entirely on
+  the payer's §6 confirmation** on the CZ domestic rail — i.e. the same trust model
+  as scanning a QR off a stranger's screen (see §7), which is phishing-grade. This
+  is a deliberate trade: the profile keeps SPAYD's property that any two banks'
+  apps interoperate off the bytes alone, and pays for it here. **Mitigation:** use
+  VOP where a scheme exists; otherwise treat the transfer as display-assist only
+  and lean on proximity + explicit confirmation, exactly as a QR scan does, plus
+  the payer-side warnings below.
 - **First-name discovery is ambiguous and impersonable.** Two nearby "Jiří"s, or
   an attacker who advertises the victim's first name with *their own* IBAN (VOP
   passes — it is genuinely their account), can get the payer to pick the wrong
   tile. The name is **not** an authenticator. **Mitigation:** proximity gate
-  (strongest signal / "touch phones") is the real binding, not the name; offer an
-  optional short verification code shown on both screens before the proposal; show
-  masked IBAN prominently on the confirm screen. **Open:** decide whether a
-  verification code is default-on for payer→payee mismatch-prone contexts.
+  (strongest signal / "touch phones") is the real binding, not the name; **warn the
+  payer explicitly when two or more visible tiles share a display name**, and show
+  the masked IBAN at the point of choice rather than only on the confirm screen;
+  offer a short verification code shown on both screens before the proposal. With
+  attestation retired this is now the primary control on this axis, so it is not
+  optional polish. **Open:** decide whether the verification code is default-on for
+  payer→payee mismatch-prone contexts.
+- **Duplicate payment.** A payer can be shown, and tap, a request they already
+  paid — whether by re-reading the same bundle or by a fresh bundle for the same
+  request. **Mitigation (device-local, no coordination):** when this device has
+  recently paid the same (IBAN, amount), say so and require an explicit override;
+  reject a bundle whose `sid`/`nonce` this device has already verified (spec §3
+  step 3). Tracked as openbank-app#443 and #4830.
 - RSSI alone does not stop a determined relay; **UWB/BT6 coverage is partial**
   (UWB only on iPhone 11+ and a minority of flagship Android — see spec §5) → it
   can never be assumed. High-value transfers SHOULD require SAS or fall back to
   QR. **Open:** define the value threshold.
+- **MITM-hardening proposals from design review are recorded in spec §10**
+  (encrypted bundle via X25519+HKDF→ChaCha20-Poly1305 over the existing `sas`
+  DH, 6-digit SAS with default-on above the value threshold, LE Secure
+  Connections as defence-in-depth). Draft, additive, gated on the same §8
+  reviews — kept in the spec so the decision survives outside chat history.
 - First-name broadcast is a deliberate privacy/UX trade-off → DPIA sign-off
   pending; offer "initials only" opt-out.
 - Android peripheral-role hardware gaps → payee role degrades to QR; document per-device.
@@ -91,15 +109,18 @@ the downstream payment rail (covered by domestic-payment / instant threat models
 QR Platba scanned with the camera is the incumbent. Both flows ultimately end the
 same way — the payer reads a name + (masked) IBAN and confirms — so for the
 **"did I pay the right person" risk they are roughly equivalent**, and both are
-phishing-grade where no VOP/attestation backs them. The differences are per-axis,
-and on one axis the BLE baseline is *worse*, which we must not hide.
+phishing-grade where no VOP backs them. That the comparison is to QR Platba is
+the point rather than a coincidence: QRlessPay is the same SPAYD descriptor
+carried over BLE, so it inherits both QR's portability and its identity ceiling
+(spec §11). The differences are per-axis, and on one axis the BLE baseline is
+*worse*, which we must not hide.
 
 | Axis | Optical QR scan | QRlessPay (BLE) baseline | Honest verdict |
 |---|---|---|---|
-| Identity (does payee own the IBAN?) | Unsigned; payer confirms name+IBAN | Signed payload, but key ≠ identity; payer confirms name+IBAN | **Tie** — both rest on confirmation (+ VOP/attestation when present) |
+| Identity (does payee own the IBAN?) | Unsigned; payer confirms name+IBAN | Signed payload, but key ≠ identity; payer confirms name+IBAN | **Tie** — both rest on confirmation (+ VOP where a scheme exists) |
 | **Physical targeting** (is this the person in front of me?) | **Strong** — you aim at a code you can *see*; hard to relay | **Weaker** — you tap a *name* in a list; can't see the radio, RSSI is spoofable | **QR wins** unless UWB/SAS/verification-code added |
 | Payload tampering in transit | n/a (you photograph the final code) | Prevented (Ed25519 + advert↔bundle binding) | Tie / slight BLE edge |
-| Classic attack | **Sticker-swap** (attacker pastes own QR over a legit one — real-world fraud) | **Tile impersonation** (attacker advertises same first name + own IBAN) | Analogous; both beaten only by attention + VOP |
+| Classic attack | **Sticker-swap** (attacker pastes own QR over a legit one — real-world fraud) | **Tile impersonation** (attacker advertises same first name + own IBAN) | Analogous; both beaten by attention + VOP — BLE additionally warns on a duplicate name, which a sticker cannot |
 | Privacy of payee account | IBAN+name printed/shown on the visible code to anyone | **Only first name on air**; IBAN never broadcast, only in payer-initiated read | **BLE wins** |
 | UX | Aim camera, find code in frame | Tap a named tile, prefilled proposal | **BLE wins** (the point of the feature) |
 
@@ -108,17 +129,33 @@ prefilled) and a privacy gain (no IBAN on air). On raw security it is **not
 automatically safer than a QR scan** — its weak axis is *physical targeting*
 (a name-list + spoofable RSSI is a looser "this is the person in front of me"
 binding than aiming a camera at a visible code). To be *clearly safer* than QR it
-must add the optional layers — bank attestation, VOP (when it exists for CZ),
-strong proximity (UWB) or a verification code — none of which can be assumed
-today. The baseline should therefore be positioned as **"as safe as a QR scan,
-more private, nicer to use"**, not as "more secure", until those layers land.
+must add the layers that remain available — VOP (when it exists for CZ), strong
+proximity (UWB), a verification code, and the payer-side duplicate/same-name
+warnings — none of which can be assumed on every device today. Attestation is no
+longer on that list, and that ceiling is now permanent rather than pending: on
+identity, QRlessPay can be as good as a QR scan and not better, because it made
+the same portability choice SPAYD did (spec §11). The baseline is therefore
+positioned as **"as safe as a QR scan, more private, nicer to use"**, not as
+"more secure".
 
 ## 8. Rollout gates (what must be true before code ships)
 
-The app-side implementation state (2026-07): protocol core, controller and the
-nearby-tiles UI exist; the **Android GATT receive/write paths are deliberate
-stubs** (`ProximityBeacon.android.kt` — `startListeningForSpayd` TODO, `pushSpayd`
-returns false). Those stubs must NOT be filled until all of the following hold:
+The app-side implementation state (re-audited 2026-08-14; code name in the app
+repo is **NearPay**, `tech.openbank.app.payment.nearpay`): the protocol core
+(beacon codec, CBOR bundle, Ed25519 mint/verify with sid/kh/exp/SPAYD checks) is
+complete and unit-tested, and **both** platform transports (GATT server + client,
+Android and iOS) are complete and at parity. The feature is nonetheless
+**dormant by construction**: the payer discovery path has no caller in the UI
+(the nearby-tiles list is never populated), so only the payee "receive" half is
+reachable. Relative to this spec the app is missing: **SAS** (flag bit reserved,
+no DH/no code; `0x2` and CBOR key 8 are reserved-unused by decision, spec §11),
+**nonce/sid replay defence** (nonce minted + signed but never checked — a
+captured pair replays within the 90 s TTL), and UWB ranging exists but is wired
+to the *legacy ADR-0087 nearby-pay stack*, not to this protocol. The 2026-07
+note about `ProximityBeacon.android.kt` stubs described that legacy stack, and
+those stubs have since been filled (openbank-app #339) — the gates below
+therefore now bind on **wiring the payer path** (populating the tiles list and
+calling `resolve()`), which must NOT happen until all of the following hold:
 
 1. **Independent cryptographic review** of the Ed25519 bundle format, the
    advert↔bundle `kh` binding, and the in-memory session keypair handling (§6).

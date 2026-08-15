@@ -235,6 +235,10 @@ openbank-admin-ui/origination-graph.json
 # Generated git-derived DORA snapshot baked at build time
 # (scripts/collect-dora.mjs, ADR-0061). Derived — never committed.
 openbank-admin-ui/dora.json
+# Generated CI gate-estate health snapshot baked at build time from the GitHub Actions
+# API (openbank-admin-ui/scripts/collect-gate-health.mjs, ADR-0255). Derived — never
+# committed.
+openbank-admin-ui/gate-health.json
 # Generated code-derived dependency graph baked at build time
 # (scripts/generate-service-graph.mjs, ADR-0029 D1). Derived — never committed.
 openbank-admin-ui/service-graph.json

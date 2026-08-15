@@ -1,0 +1,81 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Egress for gate-health-puller (ADR-0255 Tier 2). READ THIS BEFORE APPROVING.
+#
+# THIS IS THE SECOND DIRECT-INTERNET-EGRESS HOLE IN THE WHOLE FLEET. Today there is exactly
+# one: `ai-platform/networkpolicy-litellm-egress.yaml`'s 0.0.0.0/0:443, and its own comment
+# states the fleet's actual posture plainly — "the whole point of centralising the choke
+# point here." `agent/networkpolicy-agent-egress.yaml` makes the same point from the other
+# side: agent-service explicitly does NOT get its own internet hole, because "the gateway
+# [LiteLLM] holds the provider key and is the only workload with an internet hole; this pod
+# reaches a hosted model exclusively through it."
+#
+# This CronJob needs the GitHub REST API, which is not an LLM call and cannot route through
+# LiteLLM. Standard Kubernetes NetworkPolicy has no FQDN-selector — only CIDR/IP-block — so
+# "allow only api.github.com" is not expressible as written; the honest choices are:
+#   (a) 0.0.0.0/0:443, scoped as tightly as the podSelector allows (what this file does);
+#   (b) pin GitHub's published IP ranges (https://api.github.com/meta, `actions`/`api`
+#       blocks) — narrower, but those ranges rotate and this fleet has no automation to keep
+#       a pinned CIDR list current, so a stale list is a silent outage waiting to happen, not
+#       a security improvement;
+#   (c) a real egress proxy (the `agent`/`litellm` shape generalised) — the correct answer if
+#       a SECOND service ever needs arbitrary internet access, at which point the choke point
+#       should be widened rather than each caller getting its own hole. One caller today does
+#       not justify building that yet.
+# Chose (a), least-privilege via podSelector (only this CronJob's own pods, nothing else in
+# the namespace) rather than via destination, since destination can't be narrowed here.
+# A reviewer who disagrees with that trade should say so — this is exactly the kind of
+# decision this comment exists to surface, not bury.
+#
+# Hand-written and named networkpolicy-*.yaml (not network-policies.yaml), same convention as
+# the two precedents above: gen-network-policies.py owns and overwrites network-policies.yaml
+# and emits INGRESS only, so a hand-written EGRESS file in a differently-named file survives
+# every regeneration. Additive: this does not touch the generated ingress allow-list.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: gate-health-puller-egress-allow-list
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: ci-gate-observability
+spec:
+  # By NAME, not by the shared `ci-gate-observability` component label: the schema-apply Job
+  # (ci-gate-runs-schema-apply-job.yaml) carries that same component label and needs ONLY
+  # the ClickHouse rule below — it must not inherit the GitHub-API internet hole this file
+  # exists to grant, which a component-label selector would hand it for free.
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: gate-health-puller
+  policyTypes:
+    - Egress
+  egress:
+    # DNS. Every other rule depends on this one resolving first.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # ClickHouse HTTP, in-namespace. Port 8123 only — same reasoning as
+    # clickhouse-grafana-network-policy.yaml: the native protocol on 9000 is not opened.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: clickhouse
+      ports:
+        - protocol: TCP
+          port: 8123
+    # GitHub REST API. See the file header for why this cannot be narrower than 0.0.0.0/0:443
+    # with today's tooling, and why podSelector scoping (this CronJob's pods only) is the
+    # least-privilege lever actually available.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 443

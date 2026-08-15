@@ -1,0 +1,50 @@
+# Case store for case-coordinator-agent (ADR-0244): the Temporal case history —
+# case_workflow / case_contribution / proposal_event rows the swarm thread view reads.
+# Single-owner CNPG Postgres in the platform namespace; generates
+# case-coordinator-db-app (username/password) + case-coordinator-db-rw Service.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: case-coordinator-db
+  namespace: platform
+spec:
+  monitoring:
+    enablePodMonitor: true
+  instances: 1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  storage:
+    storageClass: gp3
+    size: 1Gi
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+  bootstrap:
+    initdb:
+      database: openbank_casecoordinator
+      owner: openbank
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS Pod
+  # Identity on the case-coordinator-db ServiceAccount (aws/envs/sandbox-platform/db-backups.tf).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/case-coordinator-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: case-coordinator-db-daily
+  namespace: platform
+spec:
+  schedule: "0 23 2 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: case-coordinator-db

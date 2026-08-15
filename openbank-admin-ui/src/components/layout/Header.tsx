@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CommandPalette } from '@/components/search/CommandPalette'
+import styles from './Header.module.css'
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
@@ -53,30 +54,12 @@ export function Header() {
     : user?.email?.[0]?.toUpperCase() ?? 'U'
 
   return (
-    <header style={{
-      height: '52px',
-      background: 'var(--surface)',
-      borderBottom: '1px solid var(--border)',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      padding: '0 20px',
-      flexShrink: 0,
-      boxShadow: 'var(--shadow-xs)',
-      position: 'relative',
-      zIndex: 10,
-    }}>
+    <header className={styles.header}>
       {/* Search — ADR-0228 D3: the painted placeholder is now a real palette. */}
       <button
         onClick={() => setPaletteOpen(true)}
         aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
-        style={{
-          display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)',
-          background: 'none', border: 'none', cursor: 'pointer', padding: '6px 10px',
-          borderRadius: '8px', font: 'inherit',
-        }}
-        onMouseEnter={e => { e.currentTarget.style.background = 'var(--surface-3)' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'none' }}
+        className={styles.searchTrigger}
       >
         <Search size={14} />
         <span style={{ fontSize: '13px' }}>{t('Rychlé hledání…', 'Quick search…')}</span>
@@ -89,7 +72,7 @@ export function Header() {
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
 
       {/* Actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+      <div className={styles.actions}>
         {build && (
           <Link
             href="/docs/release-notes/admin-ui"
@@ -136,8 +119,8 @@ export function Header() {
         >
           {language.toUpperCase()}
         </button>
-        <IconBtn><HelpCircle size={15} /></IconBtn>
-        <IconBtn><Bell size={15} /></IconBtn>
+        <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} /></HeaderLink>
+        <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} /></HeaderLink>
         <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 6px' }} />
 
         {/* User menu */}
@@ -239,17 +222,10 @@ export function Header() {
   )
 }
 
-function IconBtn({ children }: { children: React.ReactNode }) {
+function HeaderLink({ href, label, children }: { href: string; label: string; children: React.ReactNode }) {
   return (
-    <button style={{
-      width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      borderRadius: '6px', border: 'none', background: 'transparent',
-      color: 'var(--text-secondary)', cursor: 'pointer', transition: 'background 0.12s',
-    }}
-      onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-3)')}
-      onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-    >
+    <Link href={href} aria-label={label} title={label} className={styles.headerLink}>
       {children}
-    </button>
+    </Link>
   )
 }

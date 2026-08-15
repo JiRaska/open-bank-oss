@@ -24,6 +24,8 @@ from pathlib import Path
 
 import yaml
 
+import gatelib
+
 REPO = Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra" / "gitops" / "components"
 MASTER = "LITELLM_MASTER_KEY"
@@ -54,7 +56,7 @@ def offenders_in(doc: dict, rel: str) -> list[str]:
 
 def audit() -> list[str]:
     findings: list[str] = []
-    for path in sorted(COMPONENTS.rglob("*.yaml")):
+    for path in gatelib.rglob(COMPONENTS, "*.yaml"):
         rel_to_components = path.relative_to(COMPONENTS).as_posix()
         try:
             docs = list(yaml.safe_load_all(path.read_text()))

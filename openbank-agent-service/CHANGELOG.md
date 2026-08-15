@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.19.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.18.0...agent-service-v1.19.0) (2026-08-14)
+
+
+### Features
+
+* **product-catalog:** ship standalone platform and intelligence studio ([#4501](https://github.com/JiRaska/open-bank-oss/issues/4501)) ([cdd4af2](https://github.com/JiRaska/open-bank-oss/commit/cdd4af291b1f88500cdbcfdd3cf55dc316f94029))
+
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.17.0...agent-service-v1.18.0) (2026-08-09)
+
+
+### Features
+
+* **agent:** populate model_id on every AI-attributed audit event ([#3813](https://github.com/JiRaska/open-bank-oss/issues/3813)) ([0a4528c](https://github.com/JiRaska/open-bank-oss/commit/0a4528c95a08df85db9e822958d48f67c04ddb55))
+
 ## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.16.3...agent-service-v1.17.0) (2026-08-07)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.3...sca-service-v0.13.4) (2026-08-14)
+
+
+### Bug Fixes
+
+* **sca:** DEVICE_ENROLLED carries no eventType in the payload body, so onboarding has never projected one ([#4692](https://github.com/JiRaska/open-bank-oss/issues/4692)) ([e36e5a5](https://github.com/JiRaska/open-bank-oss/commit/e36e5a505ad1ab3352ab4b40ed53e5ceb5c22725))
+
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.2...sca-service-v0.13.3) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.1...sca-service-v0.13.2) (2026-08-07)
 
 

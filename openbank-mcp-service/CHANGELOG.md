@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.15.0...mcp-service-v0.15.1) (2026-08-13)
+
+
+### Security
+
+* **mcp-service:** record CVE-2025-14969 VEX verdict as affected ([#4536](https://github.com/JiRaska/open-bank-oss/issues/4536)) ([40f01ad](https://github.com/JiRaska/open-bank-oss/commit/40f01ad45539bd81a0de5f46758aa2b34f1a85bd)), closes [#4443](https://github.com/JiRaska/open-bank-oss/issues/4443) [#4533](https://github.com/JiRaska/open-bank-oss/issues/4533)
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.14.5...mcp-service-v0.15.0) (2026-08-07)
 
 

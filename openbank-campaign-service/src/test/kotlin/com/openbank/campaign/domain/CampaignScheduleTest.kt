@@ -55,6 +55,20 @@ class CampaignScheduleTest {
 class ScheduleCatalogTest {
 
     @Test
+    fun `planning windows follow the reviewed Prague cadence after its morning slot`() {
+        // Winter avoids a hidden system-zone dependency while still proving the catalogue uses
+        // Europe/Prague rather than UTC. 09:30 Prague means today's 09:00 slot is already gone.
+        val afterMorning = Instant.parse("2026-02-03T08:30:00Z")
+
+        assertThat(ScheduleCatalog.nextWindowAfter("DAILY_MORNING", afterMorning))
+            .isEqualTo(Instant.parse("2026-02-04T08:00:00Z"))
+        assertThat(ScheduleCatalog.nextWindowAfter("WEEKLY_MONDAY_MORNING", afterMorning))
+            .isEqualTo(Instant.parse("2026-02-09T08:00:00Z"))
+        assertThat(ScheduleCatalog.nextWindowAfter("MONTHLY_FIRST_MORNING", afterMorning))
+            .isEqualTo(Instant.parse("2026-03-01T08:00:00Z"))
+    }
+
+    @Test
     fun `every cadence declares a five-field cron and a human sentence`() {
         ScheduleCatalog.ALL.forEach { (key, cadence) ->
             assertThat(cadence.cron.trim().split(Regex("\\s+")))

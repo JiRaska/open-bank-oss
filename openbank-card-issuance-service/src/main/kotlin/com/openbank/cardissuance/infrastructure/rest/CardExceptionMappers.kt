@@ -13,6 +13,7 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
 import org.jboss.logging.MDC
+import java.time.Instant
 
 /**
  * Card-issuance business exceptions → HTTP. JAX-RS picks the most specific mapper, so these win
@@ -25,7 +26,7 @@ import org.jboss.logging.MDC
 private fun traceId(): String = (MDC.get("correlationId") as? String) ?: Ids.randomId().toString()
 
 private fun apiError(status: Int, code: String, message: String) =
-    ApiError(traceId = traceId(), status = status, code = code, message = message)
+    ApiError(traceId = traceId(), status = status, code = code, message = message, timestamp = Instant.now())
 
 /** A product rule forbids this issue — 409, the state of the world conflicts with the request. */
 @Provider

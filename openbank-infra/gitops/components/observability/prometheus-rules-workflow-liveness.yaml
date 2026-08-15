@@ -1,10 +1,21 @@
 # Workflow-liveness staleness alerts (ADR-0237, issue #3345).
 #
 # Every domain @Scheduled job and every external feed registers the ADR-0160
-# mechanism-3 primitive (DomainMetrics.registerWorkflowLiveness), which emits two
+# mechanism-3 primitive (DomainMetrics.registerWorkflowLiveness), which emits three
 # gauges per workflow: openbank_workflow_last_success_age_seconds (scrape-time age
 # of the last recordSuccess, seeded at registration — a never-run job reads as old
-# as its pod, never as decades) and openbank_workflow_expected_interval_seconds.
+# as its pod, never as decades), openbank_workflow_expected_interval_seconds, and
+# openbank_workflow_success_recorded (0 until the first recordSuccess, 1 after).
+#
+# That seeding is load-bearing and was NOT true when these rules first shipped: the
+# age gauge seeded from Instant.EPOCH, so every fresh pod read ~1.8e9 seconds and
+# WorkflowLivenessStale below would have fired 15 minutes after every deploy, for
+# every daily workflow, until its next success — with no `for:` able to help, since
+# the condition genuinely persisted. These comments asserted the property; the code
+# acquired it later. Do not restore an EPOCH-like seed without deleting the rule.
+# The third gauge is what the boot-seed gives up, published rather than lost: the
+# alert does not read it (a never-run job crosses the same threshold once its grace
+# elapses), the control-liveness-sentinel does, to say which of the two it is.
 #
 # The two rules below are deliberately not one rule, and deliberately warnings.
 # absent() catches a fleet-level registration/scrape collapse; the staleness rule
@@ -53,8 +64,15 @@ spec:
         # registerWorkflowLiveness with identical tags, so no join modifier is
         # needed or wanted. Boot-safe by construction (ADR-0237): the age gauge is
         # seeded at registration time, so a fresh pod cannot read as stale until
-        # its own grace period elapses. for: 15m absorbs one slow run overrunning
-        # its slot; it cannot absorb a missed run — that is the point.
+        # its own grace period elapses — see the file header for what that seed
+        # cost and why this rule cannot be run against an EPOCH-seeded gauge.
+        # for: 15m absorbs one slow run overrunning its slot; it cannot absorb a
+        # missed run — that is the point.
+        #
+        # The residual gap the seed leaves: a job whose pod restarts more often
+        # than 2x its interval never accumulates enough age to alert here. That is
+        # covered statically instead, by the registration gate
+        # (check-scheduler-liveness.py) and the HR000068 guards, not by this rule.
         - alert: WorkflowLivenessStale
           expr: openbank_workflow_last_success_age_seconds > 2 * openbank_workflow_expected_interval_seconds
           for: 15m

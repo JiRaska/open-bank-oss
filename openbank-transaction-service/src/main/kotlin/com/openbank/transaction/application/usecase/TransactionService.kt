@@ -65,8 +65,8 @@ class TransactionService(
 
     companion object {
         private const val TRANSACTION_INITIATED_EVENT = "openbank.transactions.transaction.initiated"
-        private const val TRANSACTION_COMPLETED_EVENT = "openbank.transactions.transaction.completed"
-        private const val TRANSACTION_FAILED_EVENT = "openbank.transactions.transaction.failed"
+        // The completed/failed event types moved with the terminal write into
+        // PaymentActivitiesImpl (#4238) — they are emitted by the workflow, not by this caller.
 
         // Scale for the implied FX rate on a sell-specified conversion (ADR-0107): rate is
         // derived as settlement/payment and only carried for the ledger's FX posting.
@@ -165,31 +165,15 @@ class TransactionService(
             stub.execute(saved.id)
         }
 
-        // The workflow runs to a terminal state synchronously: COMPLETED on a successful
-        // ledger posting, otherwise COMPENSATED/FAILED. Close the transaction lifecycle to match
-        // and emit the corresponding domain event through the outbox.
-        return if (state == SagaState.COMPLETED) {
-            val completed = saved.complete(clock)
-            transactionRepository.update(
-                transaction = completed,
-                outboxMessage = OutboxMessage(
-                    aggregateId = completed.id,
-                    eventType = TRANSACTION_COMPLETED_EVENT,
-                    payload = eventPublisher.completedPayload(completed),
-                ),
-            )
-        } else {
-            val reason = "Payment workflow did not complete (state=$state)"
-            val failed = saved.fail(reason, clock)
-            transactionRepository.update(
-                transaction = failed,
-                outboxMessage = OutboxMessage(
-                    aggregateId = failed.id,
-                    eventType = TRANSACTION_FAILED_EVENT,
-                    payload = eventPublisher.failedPayload(failed, reason),
-                ),
-            )
-        }
+        // #4238: the terminal status write and its outbox message are NOT done here. The workflow
+        // owns them (PaymentWorkflowImpl's markCompleted/markFailed activity), so the record of a
+        // settlement is as durable as the settlement itself — losing this request can no longer
+        // strand a settled transaction on PENDING. By the time execute() returns, that activity has
+        // committed, so re-reading the row is the whole of this method's remaining job: it reports
+        // the state the workflow persisted rather than computing a second one. The DB row stays the
+        // single source of truth for status.
+        return transactionRepository.findById(saved.id)
+            ?: error("Transaction ${saved.id} vanished while its payment workflow ran (state=$state)")
     }
 
     override suspend fun getTransaction(query: GetTransactionQuery): Transaction =

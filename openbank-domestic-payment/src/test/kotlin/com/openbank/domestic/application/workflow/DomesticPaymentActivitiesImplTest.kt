@@ -34,6 +34,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coJustRun
 import io.mockk.coVerify
+import io.mockk.coVerifyOrder
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -87,6 +88,8 @@ class DomesticPaymentActivitiesImplTest {
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         coJustRun { amlCasePort.openCase(any()) }
+        coEvery { paymentRepository.claimSchemeDispatch(any(), any()) } returns true
+        coJustRun { paymentRepository.clearSchemeDispatch(any()) }
 
         schemeGatewayPort = mockk()
         settlementPort = mockk()
@@ -310,12 +313,128 @@ class DomesticPaymentActivitiesImplTest {
         val validated = payment(status = DomesticPaymentStatus.VALIDATED)
         coEvery { paymentRepository.findById(validated.id) } returns validated
         coEvery { schemeGatewayPort.submit(any()) } throws
-            SchemeGatewayUnavailableException(RuntimeException("connection refused"))
+            SchemeGatewayUnavailableException(
+                RuntimeException("connection refused"),
+                requestLeftThisProcess = false,
+            )
 
         val result = activitiesWithScheme.submitScheme(validated.id)
 
         assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    // ---- #4218: a payment already dispatched to the scheme must never be dispatched twice ----
+
+    @Test
+    fun `submitScheme refuses to re-submit a VALIDATED payment that was already dispatched`() {
+        // The #4218 shape exactly: a successful submit whose status write failed leaves the row
+        // VALIDATED with the dispatch marker set. Before the guard this re-submitted, producing a
+        // second clearing item for one payment.
+        val stranded = payment(
+            status = DomesticPaymentStatus.VALIDATED,
+            schemeDispatchedAt = Instant.parse("2026-08-09T10:15:30Z"),
+        )
+        coEvery { paymentRepository.findById(stranded.id) } returns stranded
+        // The claim is what refuses now, not a read of the row: `false` is the database saying the
+        // dispatch is already held.
+        coEvery { paymentRepository.claimSchemeDispatch(stranded.id, any()) } returns false
+
+        val result = activitiesWithScheme.submitScheme(stranded.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
+    }
+
+    @Test
+    fun `submitScheme does not submit when a concurrent attempt won the dispatch claim`() {
+        // The case a read-then-write guard cannot refuse: both attempts read a null marker, both
+        // pass, both submit. Here the loser is told so by the claim's return value and stops before
+        // the gateway — the row is untouched, and the winner owns the outcome.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { paymentRepository.claimSchemeDispatch(validated.id, any()) } returns false
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 0) { schemeGatewayPort.submit(any()) }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
+    }
+
+    @Test
+    fun `submitScheme marks the dispatch BEFORE calling the gateway`() {
+        // Ordering is the whole mechanism: a marker written after the call cannot survive a failure
+        // of the call's own bookkeeping, which is the case the guard above exists for.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+
+        activitiesWithScheme.submitScheme(validated.id)
+
+        coVerifyOrder {
+            paymentRepository.claimSchemeDispatch(validated.id, any())
+            schemeGatewayPort.submit(any())
+            paymentRepository.update(any(), any())
+        }
+    }
+
+    @Test
+    fun `submitScheme clears the dispatch marker only when the request provably never left`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } throws
+            SchemeGatewayUnavailableException(
+                java.net.ConnectException("Connection refused"),
+                requestLeftThisProcess = false,
+            )
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        // Scheme is simply down: no clearing item exists, so the payment must stay re-drivable.
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        coVerify(exactly = 1) { paymentRepository.clearSchemeDispatch(validated.id) }
+    }
+
+    @Test
+    fun `submitScheme keeps the dispatch marker when the failure is ambiguous`() {
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        // A timeout: the gateway may have accepted the pacs.008 and merely answered too late.
+        coEvery { schemeGatewayPort.submit(any()) } throws
+            SchemeGatewayUnavailableException(java.util.concurrent.TimeoutException("read timeout"))
+
+        val result = activitiesWithScheme.submitScheme(validated.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.VALIDATED)
+        // BOTH halves, deliberately. Asserting only "never released" passes against code that
+        // never claims either — which is exactly what the pre-#4218 implementation did, so the
+        // assertion held while proving nothing.
+        coVerify(exactly = 1) { paymentRepository.claimSchemeDispatch(validated.id, any<Instant>()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
+    }
+
+    @Test
+    fun `submitScheme lets a failure of the status write propagate instead of hiding it`() {
+        // The defect was that this exception was caught and reported as "holding in VALIDATED",
+        // which is what made a submitted payment look unsubmitted. It must now surface, so Temporal
+        // retries the activity — and the marker written above makes that retry safe.
+        val validated = payment(status = DomesticPaymentStatus.VALIDATED)
+        coEvery { paymentRepository.findById(validated.id) } returns validated
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        coEvery { paymentRepository.update(any(), any()) } throws RuntimeException("db blip")
+
+        assertThatThrownBy { activitiesWithScheme.submitScheme(validated.id) }
+            .isInstanceOf(RuntimeException::class.java)
+            .hasMessageContaining("db blip")
+
+        coVerify(exactly = 1) { paymentRepository.claimSchemeDispatch(validated.id, any<Instant>()) }
+        coVerify(exactly = 0) { paymentRepository.clearSchemeDispatch(any()) }
     }
 
     @Test
@@ -440,28 +559,72 @@ class DomesticPaymentActivitiesImplTest {
         coVerify(exactly = 1) { settlementPort.settle(any()) }
     }
 
+    // The two tests below replace a pair that asserted the defect (#4182). They read as coverage of
+    // the outage path and were the reason it survived: both called settlePayment during a simulated
+    // settlement outage and asserted it RETURNED SENT_TO_CLEARING — which is exactly the swallow
+    // that made the activity a success, put the retry policy out of reach, and completed the
+    // workflow on a non-terminal state. A green test asserting the bug is worse than no test.
+
     @Test
-    fun `settlePayment holds in SENT_TO_CLEARING when settlement unavailable`() {
+    fun `settlePayment FAILS the activity when settlement is unavailable so Temporal retries`() {
         val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
         coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
         coEvery { settlementPort.settle(any()) } throws
             SettlementUnavailableException("transaction-service down")
 
-        val result = activitiesWithScheme.settlePayment(sentToClearing.id)
+        // Temporal drives the activity retry policy off activity FAILURE. An activity that returns
+        // normally is a success, so this must throw or the retries are structurally unreachable.
+        assertThatThrownBy { activitiesWithScheme.settlePayment(sentToClearing.id) }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+            .hasMessageContaining("transaction-service down")
 
-        assertThat(result).isEqualTo(DomesticPaymentStatus.SENT_TO_CLEARING)
+        // The durable record still says SENT_TO_CLEARING — no status is invented from a fault.
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
     @Test
-    fun `settlePayment holds in SENT_TO_CLEARING on unexpected exception`() {
+    fun `settlePayment propagates an unexpected exception instead of absorbing it into a status`() {
         val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
         coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
         coEvery { settlementPort.settle(any()) } throws RuntimeException("unexpected crash")
 
-        val result = activitiesWithScheme.settlePayment(sentToClearing.id)
+        // The blanket catch(Exception) is the actual defect: it made a settlement BUG
+        // indistinguishable from a planned degradation, both reported as a terminal-looking
+        // success. An unexpected fault must surface with its own type.
+        assertThatThrownBy { activitiesWithScheme.settlePayment(sentToClearing.id) }
+            .isInstanceOf(RuntimeException::class.java)
+            .hasMessageContaining("unexpected crash")
 
-        assertThat(result).isEqualTo(DomesticPaymentStatus.SENT_TO_CLEARING)
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `settlePayment fails rather than reporting SETTLED when the status write fails`() {
+        val sentToClearing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        coEvery { paymentRepository.findById(sentToClearing.id) } returns sentToClearing
+        coEvery { settlementPort.settle(any()) } returns
+            SettlementOutcome(settled = true, transactionId = UUID.randomUUID())
+        coEvery { paymentRepository.update(any(), any()) } throws RuntimeException("db write failed")
+
+        // Booked but not recorded. Retrying is safe (payment-scoped idempotency key, 409 = already
+        // booked — see SettlementAdapterTest), so failing the activity re-attempts the write rather
+        // than leaving a booked payment behind a row that still says SENT_TO_CLEARING.
+        assertThatThrownBy { activitiesWithScheme.settlePayment(sentToClearing.id) }
+            .isInstanceOf(RuntimeException::class.java)
+            .hasMessageContaining("db write failed")
+    }
+
+    @Test
+    fun `settlePayment is re-entrant on an already SETTLED payment and does not book twice`() {
+        // This is what makes retrying safe at the activity level: once the status write has landed,
+        // a Temporal retry (or an operator re-drive) never reaches the settlement port again.
+        val settled = payment(status = DomesticPaymentStatus.SETTLED)
+        coEvery { paymentRepository.findById(settled.id) } returns settled
+
+        val result = activitiesWithScheme.settlePayment(settled.id)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.SETTLED)
+        coVerify(exactly = 0) { settlementPort.settle(any()) }
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
@@ -477,7 +640,10 @@ class DomesticPaymentActivitiesImplTest {
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
 
-    private fun payment(status: DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED) = DomesticPayment(
+    private fun payment(
+        status: DomesticPaymentStatus = DomesticPaymentStatus.RECEIVED,
+        schemeDispatchedAt: Instant? = null,
+    ) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "dom-idem-activity",
         status = status,
@@ -505,5 +671,6 @@ class DomesticPaymentActivitiesImplTest {
         settledAt = null,
         createdAt = Instant.now(),
         updatedAt = Instant.now(),
+        schemeDispatchedAt = schemeDispatchedAt,
     )
 }

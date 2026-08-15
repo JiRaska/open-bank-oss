@@ -14,19 +14,35 @@ import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
-import java.util.UUID
+import java.time.Instant
 
 @Provider
 class DomesticPaymentNotFoundMapper : ExceptionMapper<DomesticPaymentNotFoundException> {
     override fun toResponse(exception: DomesticPaymentNotFoundException): Response = Response.status(404)
-        .entity(ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, exception.message ?: "Not found"))
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                404,
+                ErrorCode.NOT_FOUND.code,
+                exception.message ?: "Not found",
+                timestamp = Instant.now(),
+            ),
+        )
         .build()
 }
 
 @Provider
 class InvalidDomesticPaymentStateTransitionMapper : ExceptionMapper<InvalidDomesticPaymentStateTransitionException> {
     override fun toResponse(exception: InvalidDomesticPaymentStateTransitionException): Response = Response.status(409)
-        .entity(ApiError(UUID.randomUUID().toString(), 409, ErrorCode.CONFLICT.code, exception.message ?: "Conflict"))
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                409,
+                ErrorCode.CONFLICT.code,
+                exception.message ?: "Conflict",
+                timestamp = Instant.now(),
+            ),
+        )
         .build()
 }
 
@@ -39,6 +55,7 @@ class PaymentNotSettledMapper : ExceptionMapper<PaymentNotSettledException> {
                 HTTP_CONFLICT,
                 ErrorCode.CONFLICT.code,
                 exception.message ?: "Conflict",
+                timestamp = Instant.now(),
             ),
         )
         .build()
@@ -57,6 +74,7 @@ class PaymentConfirmationRenderMapper : ExceptionMapper<PaymentConfirmationRende
                 HTTP_BAD_GATEWAY,
                 "DOCUMENT_SERVICE_UNAVAILABLE",
                 exception.message ?: "Confirmation rendering is temporarily unavailable",
+                timestamp = Instant.now(),
             ),
         )
         .build()

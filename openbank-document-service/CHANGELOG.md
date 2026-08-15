@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.0...document-service-v0.11.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **document-service:** a stub delivery must not record the statement as delivered ([#4659](https://github.com/JiRaska/open-bank-oss/issues/4659)) ([77ebab0](https://github.com/JiRaska/open-bank-oss/commit/77ebab08e3cafc0c99fa0480595d417fa6c3bf03)), closes [#4109](https://github.com/JiRaska/open-bank-oss/issues/4109)
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.10.1...document-service-v0.11.0) (2026-08-09)
+
+
+### Features
+
+* **document-service:** consume annual fee-summary events and deliver statement documents ([#4122](https://github.com/JiRaska/open-bank-oss/issues/4122)) ([02e4373](https://github.com/JiRaska/open-bank-oss/commit/02e43736724d0e383546a4d382798d981a90a0ab))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.10.0...document-service-v0.10.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* send occurredAt on the four non-money-path domain-event producers ([#3926](https://github.com/JiRaska/open-bank-oss/issues/3926)) ([4a2080c](https://github.com/JiRaska/open-bank-oss/commit/4a2080c3a4de10b2a858b7111ac83d63c60114d1))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.9.1...document-service-v0.10.0) (2026-08-07)
 
 

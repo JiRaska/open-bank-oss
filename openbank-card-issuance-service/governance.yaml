@@ -10,10 +10,11 @@ dataClassification: restricted
 retentionPolicy: 7 years
 evidenceExported: true
 lineage:
-  upstream:
-    - serviceName: dispute-service
-      relationType: api
-      description: blocks
+  upstream: []
+    # Removed (issue #3982): `dispute-service (api, "blocks")` — dispute-service has no
+    # @RegisterRestClient at all and its Deployment env lists only keycloak and tempo. The one
+    # service that does hold a card-issuance client is delegation-service
+    # (ResourceOwnershipClient), and that edge is declared on delegation-service's own side.
 databaseLineage:
   ownedDatabases:
     - openbank_cards

@@ -5,6 +5,12 @@
 # its DLQ topic. KafkaUser `fraud-service` in `messaging` covers both plus
 # the consumer group. ESO ExternalSecrets in `fraud` project the keystore
 # and cluster CA truststore into the pod.
+#
+# fraud-service's FIRST-EVER Kafka PRODUCER grant (ADR-0220 D3.5 fraud-hold signal, issue #2749):
+# Write/Describe on openbank.fraud.hold.changed. Every prior grant here was Read-only. See
+# kafka-security-scanner-mtls.yaml's own war-story before trusting this without a real publish —
+# that service's own first producer grant pointed at a listener that silently denied everything
+# and nothing was ever caught by a test.
 ---
 # ── KafkaUser: fraud-service ────────────────────────────────────────────────
 apiVersion: kafka.strimzi.io/v1
@@ -40,6 +46,12 @@ spec:
           name: openbank-fraud-service-velocity
           patternType: literal
         operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.fraud.hold.changed
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
 ---
 # ── ExternalSecret: fraud-service keystore ──────────────────────────────────

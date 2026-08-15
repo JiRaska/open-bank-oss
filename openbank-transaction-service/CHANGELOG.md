@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.16.2](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.1...transaction-service-v1.16.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **transaction:** move the terminal status write inside the payment workflow ([#4306](https://github.com/JiRaska/open-bank-oss/issues/4306)) ([2946fa3](https://github.com/JiRaska/open-bank-oss/commit/2946fa3d971f6033c26974b975e24fe707b61493))
+
 ## [1.16.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.0...transaction-service-v1.16.1) (2026-08-08)
 
 

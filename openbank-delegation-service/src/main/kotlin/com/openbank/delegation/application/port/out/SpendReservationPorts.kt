@@ -1,0 +1,59 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.delegation.application.port.out
+
+import com.openbank.delegation.domain.model.CountedSpend
+import com.openbank.delegation.domain.model.SpendDecision
+import com.openbank.delegation.domain.model.SpendReservation
+import com.openbank.delegation.domain.model.SpendReservationState
+import com.openbank.delegation.domain.model.SpendWindow
+import java.time.OffsetDateTime
+import java.util.UUID
+
+/** What one reserve attempt produced. [Replayed] carries the reservation an earlier call created. */
+sealed interface ReserveOutcome {
+    data class Created(val reservation: SpendReservation) : ReserveOutcome
+    data class Replayed(val reservation: SpendReservation) : ReserveOutcome
+    data class Refused(val decision: SpendDecision.Refused) : ReserveOutcome
+}
+
+/**
+ * ADR-0249 D3 — the authoritative counter, and the one place its atomicity lives.
+ *
+ * The port takes a DECIDE callback rather than a plain "insert this row" method because the read
+ * of the counters and the write that changes them must be one indivisible step. Splitting them
+ * across two port calls would put the check-then-act race back exactly where reserve-before-move
+ * exists to remove it. The domain keeps the arithmetic ([com.openbank.delegation.domain.model.SpendCeilings]);
+ * the adapter keeps the transaction.
+ */
+interface SpendReservationRepository {
+
+    /**
+     * Count, decide and (if allowed) insert [candidate] — atomically.
+     *
+     * [decide] is invoked with the totals of every RESERVED and CONFIRMED reservation on this grant
+     * inside [window], denominated in [candidate]'s currency. It is called at most once, and only
+     * after the concurrency guarantee is in place.
+     */
+    suspend fun reserve(
+        candidate: SpendReservation,
+        window: SpendWindow,
+        decide: (CountedSpend) -> SpendDecision,
+    ): ReserveOutcome
+
+    suspend fun findById(grantId: UUID, reservationId: UUID): SpendReservation?
+
+    /**
+     * Move a reservation out of RESERVED under a compare-and-set on its current state, so a
+     * confirm and a release racing on the same reservation cannot both land. Returns null when the
+     * row was not in RESERVED — the caller decides whether that is a replay or a conflict.
+     */
+    suspend fun settle(
+        grantId: UUID,
+        reservationId: UUID,
+        target: SpendReservationState,
+        settledAt: OffsetDateTime,
+    ): SpendReservation?
+}

@@ -144,7 +144,7 @@ class PartyEventPactProviderVerificationTest {
 
     @PactVerifyProvider("a PARTY_CREATED event")
     fun producePartyCreatedEvent(): String {
-        // Mirrors KafkaPartyEventPublisher.publish("PARTY_CREATED", party): the flat envelope, with
+        // Mirrors PartyEvents.created(party, at): the flat envelope, with
         // enums serialized to their names (partyType -> "INDIVIDUAL", etc.).
         val event = linkedMapOf(
             "eventType" to "PARTY_CREATED",
@@ -206,7 +206,7 @@ class PartyEventPactProviderVerificationTest {
 
     @PactVerifyProvider("a PARTY_ERASED event")
     fun producePartyErasedEvent(): String {
-        // Mirrors KafkaPartyEventPublisher.publishPartyErased: the separate, narrower envelope
+        // Mirrors PartyEvents.erased(id, at): the separate, narrower envelope
         // (no partyType/status/kycStatus/legalName/email — those are gone by the time GDPR
         // Art. 17 erasure runs).
         val event = linkedMapOf(

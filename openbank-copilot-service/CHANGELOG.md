@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.1...copilot-service-v0.11.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **copilot:** stop fabricating an erasure identity from sub, and count what erasure actually did ([#4372](https://github.com/JiRaska/open-bank-oss/issues/4372)) ([bdbaa03](https://github.com/JiRaska/open-bank-oss/commit/bdbaa035c25518752474c6db98b14ab54495713c)), closes [#4175](https://github.com/JiRaska/open-bank-oss/issues/4175)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.0...copilot-service-v0.11.1) (2026-08-08)
 
 

@@ -62,6 +62,13 @@ class FraudScoringService @Inject constructor(
     private val shadowEnabled: Boolean,
 ) : ScoreFraudUseCase {
 
+    // Field injection, not a constructor parameter: detekt's LongParameterList fires AT
+    // constructorThreshold: 9, and the constructor above is already at the ceiling — the fleet
+    // convention for one more collaborator is a field (see McpEndpoint/VopRateLimitFilter/
+    // LoanStageEventConsumer).
+    @Inject
+    lateinit var fraudHoldService: FraudHoldService
+
     private val log = Logger.getLogger(FraudScoringService::class.java)
 
     override suspend fun score(request: ScoreRequest): FraudScore {
@@ -70,6 +77,9 @@ class FraudScoringService @Inject constructor(
         repository.save(enriched, result)
         metrics.recordVerdict(result.verdict, enriched.rail)
         runShadow(enriched, result) // logs + metrics only; its outcome is discarded
+        // ADR-0220 D3.5 (issue #2749): same fire-and-forget, side-effect-only slot as runShadow —
+        // never affects the returned FraudScore.
+        fraudHoldService.maybeRaise(enriched.accountId, result.verdict)
         return result // byte-identical to rules-only
     }
 

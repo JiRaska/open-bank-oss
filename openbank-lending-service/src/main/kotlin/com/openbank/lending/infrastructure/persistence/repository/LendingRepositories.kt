@@ -110,6 +110,58 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             s.persist(e).map { mapper.toDomain(e) }
         }
     }
+
+    /**
+     * The origination transitions do NOT go through [update].
+     *
+     * [update] is a blind write: it stores whatever the caller loaded, whenever the caller gets
+     * round to it. Every origination transition reads the row in one transaction ([findById],
+     * `@WithSession`), computes the next state from that snapshot in memory, and writes in another
+     * — so two `advance` calls arriving together both observe the same status, both compute the
+     * same forward edge, both pass the state machine, and both write. A lost update on the money
+     * path's approval gate: the status column ends up holding the right value, and the transition
+     * has been claimed twice, with two evidence records and two workflow signals for one step
+     * (issue #3850). On `decide()` the same window lets two checkers each cast what each believes
+     * is the deciding four-eyes vote, and the later write owns `decidedBy`/`decisionReason`.
+     *
+     * Making the expected state part of the UPDATE closes the window with no lock, no `@Version`
+     * column and no schema change: the database evaluates `status = :from` and the assignment in
+     * one statement, so exactly one of any number of concurrent callers claims the row and the rest
+     * get `0`. `OriginationConcurrentAdvanceIT` measures it; on the previous code it observed both
+     * advances accepted in 12 of 12 rounds.
+     *
+     * Same remedy, same reasoning as `JpaCompliancePackActivationRepository.compareAndSetDecision`.
+     */
+    @WithTransaction
+    override fun compareAndSetStatus(
+        id: LoanApplicationId,
+        from: OriginationState,
+        to: OriginationState,
+        decidedBy: String?,
+        decisionReason: String?,
+        decidedAt: OffsetDateTime?,
+    ): Uni<Int> = sf.withTransaction { s ->
+        s.createMutationQuery(ADVANCE_HQL)
+            .setParameter("to", to)
+            .setParameter("decidedBy", decidedBy)
+            .setParameter("reason", decisionReason)
+            .setParameter("decidedAt", decidedAt)
+            .setParameter("id", id.value)
+            .setParameter("from", from)
+            .executeUpdate()
+    }
+
+    private companion object {
+        /**
+         * The `and status = :from` clause is the whole point — without it this is [update] with
+         * extra steps. Named parameters because `decidedBy`, `decisionReason` and `decidedAt` are
+         * all nullable and a positional vararg cannot carry a null.
+         */
+        const val ADVANCE_HQL =
+            "update LoanApplicationEntity " +
+                "set status = :to, decidedBy = :decidedBy, decisionReason = :reason, decidedAt = :decidedAt " +
+                "where id = :id and status = :from"
+    }
 }
 
 @ApplicationScoped

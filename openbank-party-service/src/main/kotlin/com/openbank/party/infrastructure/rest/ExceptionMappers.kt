@@ -16,18 +16,34 @@ import io.vertx.pgclient.PgException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
-import java.util.UUID
+import java.time.Instant
 
 @Provider
 class PartyNotFoundMapper : ExceptionMapper<PartyNotFoundException> {
     override fun toResponse(e: PartyNotFoundException) = Response.status(404)
-        .entity(ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, e.message ?: "Not found")).build()
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                404,
+                ErrorCode.NOT_FOUND.code,
+                e.message ?: "Not found",
+                timestamp = Instant.now(),
+            ),
+        ).build()
 }
 
 @Provider
 class PartyAlreadyExistsMapper : ExceptionMapper<PartyAlreadyExistsException> {
     override fun toResponse(e: PartyAlreadyExistsException) = Response.status(409)
-        .entity(ApiError(UUID.randomUUID().toString(), 409, ErrorCode.CONFLICT.code, e.message ?: "Conflict")).build()
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                409,
+                ErrorCode.CONFLICT.code,
+                e.message ?: "Conflict",
+                timestamp = Instant.now(),
+            ),
+        ).build()
 }
 
 /**
@@ -46,6 +62,7 @@ class PartyMergeRejectedMapper : ExceptionMapper<PartyMergeRejectedException> {
                 Response.Status.CONFLICT.statusCode,
                 ErrorCode.CONFLICT.code,
                 e.message ?: "Merge rejected",
+                timestamp = Instant.now(),
             ),
         ).build()
 }
@@ -62,19 +79,21 @@ class PgUniqueConstraintMapper : ExceptionMapper<PgException> {
         if (e.sqlState == "23505" && e.detail?.contains("rc_blind_index") == true) {
             return Response.status(Response.Status.CONFLICT).entity(
                 ApiError(
-                    UUID.randomUUID().toString(),
+                    Ids.randomId().toString(),
                     Response.Status.CONFLICT.statusCode,
                     ErrorCode.CONFLICT.code,
                     "party already exists",
+                    timestamp = Instant.now(),
                 ),
             ).build()
         }
         return Response.status(Response.Status.INTERNAL_SERVER_ERROR).entity(
             ApiError(
-                UUID.randomUUID().toString(),
+                Ids.randomId().toString(),
                 Response.Status.INTERNAL_SERVER_ERROR.statusCode,
                 "INTERNAL_ERROR",
                 e.message ?: "Database error",
+                timestamp = Instant.now(),
             ),
         ).build()
     }
@@ -89,7 +108,13 @@ class PgUniqueConstraintMapper : ExceptionMapper<PgException> {
 @Provider
 class FeatureDisabledMapper : ExceptionMapper<FeatureDisabledException> {
     override fun toResponse(e: FeatureDisabledException) = Response.status(404).entity(
-        ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, "feature '${e.flag}' is not enabled"),
+        ApiError(
+            Ids.randomId().toString(),
+            404,
+            ErrorCode.NOT_FOUND.code,
+            "feature '${e.flag}' is not enabled",
+            timestamp = Instant.now(),
+        ),
     ).build()
 }
 
@@ -105,13 +130,14 @@ class GdprAggregationAuthMapper : ExceptionMapper<GdprAggregationAuthException> 
     override fun toResponse(e: GdprAggregationAuthException) = Response.status(BAD_GATEWAY).entity(
         ApiError(
             // Error-response correlation id, not a durable entity id — Ids.randomId() (ADR-0106).
-            // The pre-existing mappers above still mint via bare UUID.randomUUID(); left
+            // The pre-existing mappers above still mint via bare Ids.randomId(); left
             // untouched (out of scope here, and the ADR-0106 guard is diff-scoped so it only
             // flags new call sites, not the ~100 pre-existing ones fleet-wide).
             Ids.randomId().toString(),
             BAD_GATEWAY,
             "GDPR_AGGREGATION_DENIED",
             e.message ?: "GDPR aggregation refused by a downstream service",
+            timestamp = Instant.now(),
         ),
     ).build()
 

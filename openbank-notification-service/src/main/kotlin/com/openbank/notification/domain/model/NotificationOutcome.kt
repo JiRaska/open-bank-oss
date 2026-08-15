@@ -61,6 +61,15 @@ data class NotificationOutcomeEvent(
         const val REASON_PUSH_REJECTED: String = "push_rejected_by_provider"
         const val REASON_PREFERENCE_MUTED: String = "channel_muted_by_preference"
 
+        /**
+         * ADR-0252 phase 0: every device's push adapter was disabled, so nothing left the process.
+         * Previously this case was recorded as SENT — a disabled adapter returns a *successful*
+         * skipped result, and the fan-out counted `success` — which made an environment with no
+         * push credentials indistinguishable from a working one in both the status column and the
+         * outcome stream.
+         */
+        const val REASON_PUSH_ADAPTER_DISABLED: String = "push_adapter_disabled"
+
         /** ADR-0219 D4: `ContactPolicyGate` reasons a MARKETING send can now also be denied for. */
         const val REASON_SEND_CAP_REACHED: String = "send_cap_reached"
         const val REASON_QUIET_HOURS: String = "quiet_hours"

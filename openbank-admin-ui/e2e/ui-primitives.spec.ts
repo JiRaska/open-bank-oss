@@ -58,6 +58,57 @@ const CONSENTS = [
 ]
 
 test.describe('ADR-0208 primitives render with real CSS applied', () => {
+  test('dashboard distinguishes current health from unobserved operational and compliance claims', async ({ page }) => {
+    await page.route('**/api/services/governance', route =>
+      route.fulfill({
+        status: 200,
+        body: JSON.stringify({ items: [
+          { serviceName: 'account-service', dataDomain: 'core' },
+          { serviceName: 'ledger-service', dataDomain: 'core' },
+          { serviceName: 'aml-service', dataDomain: 'compliance' },
+        ] }),
+      }),
+    )
+    await page.route('**/api/services/health', route =>
+      route.fulfill({
+        status: 200,
+        body: JSON.stringify({ services: [
+          { name: 'account-service', label: 'Accounts', group: 'core', status: 'UP', latencyMs: 12 },
+          { name: 'ledger-service', label: 'Ledger', group: 'core', status: 'DOWN', latencyMs: 28 },
+        ] }),
+      }),
+    )
+
+    await page.goto('/dashboard')
+
+    await expect(page.getByText('Healthy services', { exact: true })).toBeVisible()
+    await expect(page.getByText('1/2', { exact: true })).toBeVisible()
+    await expect(page.getByText('Average check latency', { exact: true })).toBeVisible()
+    // Health discovery does not measure any of these. Rendering a proxy as a fact is unsafe.
+    await expect(page.getByText('Security Grade', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Error Rate', { exact: true })).toHaveCount(0)
+    await expect(page.getByText('Throughput', { exact: true })).toHaveCount(0)
+
+    await expect(page.getByRole('link', { name: 'Help and documentation' })).toHaveAttribute('href', '/docs')
+    await expect(page.locator('header').getByRole('link', { name: 'Approvals' })).toHaveAttribute('href', '/approvals')
+
+    // The approved dashboard direction is deliberately denser than the old generic-card
+    // layout: four factual metrics at desktop, then a two-column service overview. These
+    // geometry checks make that information hierarchy a browser-observable contract.
+    const metricGrid = page.locator('[aria-label="Platform key metrics"]')
+    expect(await metricGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(4)
+    expect(await metricGrid.locator('.stat-card').first().evaluate(el => getComputedStyle(el).borderTopLeftRadius)).toBe('14px')
+
+    const serviceGrid = page.locator('[aria-label="Services by group"]')
+    expect(await serviceGrid.evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length)).toBe(2)
+
+    // The shell is part of the operator experience, not decorative page chrome: the
+    // navigation rail and command bar must retain their deliberate working geometry.
+    expect(Math.round((await page.locator('aside').boundingBox())!.width)).toBe(264)
+    expect(Math.round((await page.locator('header').boundingBox())!.height)).toBe(60)
+    expect(await page.locator('.page-header').evaluate(el => getComputedStyle(el).backgroundImage)).toContain('linear-gradient')
+  })
+
   test('tone swatches are square with zero padding, at both sizes', async ({ page }) => {
     await page.route('**/api/prod-readiness', route =>
       route.fulfill({ status: 200, body: JSON.stringify(READINESS) }),

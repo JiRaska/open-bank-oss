@@ -6,7 +6,18 @@
 
 package com.openbank.party.application.port.out
 
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
+import io.smallrye.mutiny.Uni
 
-/** Outbound port for draining the transactional outbox (read pending, mark sent/failed). */
-interface PartyOutboxRepository : OutboxRepository
+/** Outbound port for the transactional outbox: write, then drain (read pending, mark sent/failed). */
+interface PartyOutboxRepository : OutboxRepository {
+
+    /**
+     * Writes [message] using the CALLER's reactive session, so it joins whatever
+     * `Panache.withTransaction` block invoked it — that join is the whole point (issue #4007):
+     * the party state change and its event either both commit or neither does. Returns a `Uni`
+     * rather than suspending precisely so it can be chained inside that block.
+     */
+    fun persistInTransaction(message: OutboxMessage): Uni<Void>
+}

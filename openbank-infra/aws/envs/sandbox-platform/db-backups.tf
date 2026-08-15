@@ -169,6 +169,7 @@ locals {
     standing-order   = { namespace = "payments", sa = "standing-order-db" }
     pid              = { namespace = "pid", sa = "pid-db" }
     agent            = { namespace = "platform", sa = "agent-db" }
+    case-coordinator = { namespace = "platform", sa = "case-coordinator-db" }
     psd2             = { namespace = "psd2", sa = "psd2-db" }
     security-scanner = { namespace = "security-scanner", sa = "security-scanner-db" }
     temporal         = { namespace = "temporal", sa = "temporal-db" }

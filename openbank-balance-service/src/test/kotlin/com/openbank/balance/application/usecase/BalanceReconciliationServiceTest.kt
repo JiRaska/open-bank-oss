@@ -224,6 +224,11 @@ class BalanceReconciliationServiceTest {
             askedPipelineAsOf = asOf
             return futureValueDated
         }
+        override suspend fun sumNotYetEffectiveCredit(accountId: UUID, currency: String, asOf: LocalDate): BigDecimal =
+            BigDecimal.ZERO
+        override suspend fun findCreditsMaturingOn(
+            date: LocalDate,
+        ): List<com.openbank.balance.application.port.out.AccountCurrency> = emptyList()
     }
 
     private class FakeRecordRepository : ReconciliationRecordRepository {

@@ -1,0 +1,82 @@
+# ČNB fixing freshness at the point of use (issue #3921, ADR-0237 point 2).
+#
+# openbank-ledger-service publishes openbank_fx_fixing_age_seconds{currency} — the
+# scrape-time age of the fixing its daily FX revaluation last marked positions at,
+# per currency (FxFixingFreshnessGauge). It is deliberately NOT the same signal as
+# the two rules already covering this job:
+#
+#   * openbank_workflow_last_success_age_seconds{workflow="ledger-fx-revaluation"}
+#     answers "did the job run". A run that marked every position at a three-day-old
+#     fixing calls recordSuccess() and is indistinguishable from a healthy one.
+#   * FxRevaluationSkippedAllLegs (loki-rules-silent-failures.yaml) answers "was any
+#     rate available at all". A stale-but-valid rate logs nothing — fx-service's
+#     validity window is three days and date-blind, so a Friday fixing marking a
+#     Monday position is silent on every existing signal.
+#
+# Boot-safe by construction: the gauge's holder is seeded at registration, not at
+# Instant.EPOCH, so a fresh pod reads as old as itself rather than as decades. That
+# is what allows a plain threshold here with no pod-uptime guard — the trap the
+# workflow-liveness KDoc documents at length (#2239 Gap 2).
+#
+# severity: warning throughout, per ADR-0237 point 3 and #3346: a stale valuation is
+# a correctness gap to work in hours, not a page. Note what this rule does NOT do —
+# a corrected fixing arriving after the run can never be incorporated, because the
+# revaluation's idempotency key is the business date alone with no rate identity, so
+# a re-run returns the original entry and reports success. This alert makes that
+# condition visible; it does not fix it (#3921, still open).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-fx-fixing-freshness
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.fx.fixing
+      interval: 5m
+      rules:
+        # 1. The series is gone fleet-wide. Not "all rates fresh" — either ledger
+        # stopped being scraped or the revaluation never reached a currency loop, and
+        # in both cases every freshness verdict below is void. 25h so a single missed
+        # daily run does not trip it on its own; that is rule 2's job.
+        - alert: FxFixingAgeAbsent
+          expr: absent(openbank_fx_fixing_age_seconds)
+          for: 25h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "No FX fixing-age series from ledger-service for 25h"
+            description: >-
+              openbank_fx_fixing_age_seconds is absent. The daily FX revaluation
+              reports one sample per currency per run, including currencies it could
+              not resolve, so an absent series means the run itself is not reaching
+              that code — check WorkflowLivenessStale for workflow="ledger-fx-revaluation"
+              and the ledger pod log for HR000068 before reading any other FX signal.
+
+        # 2. A position is being valued at a fixing older than two ČNB publication
+        # cycles. 60h absorbs a normal weekend (a Friday fixing is legitimately ~63h
+        # old by Monday morning, so the threshold sits just above one weekend and
+        # below two) plus a public holiday. for: 1h keeps a single stale scrape during
+        # ingestion from firing.
+        - alert: FxFixingStale
+          expr: openbank_fx_fixing_age_seconds > 60 * 3600
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.currency }} positions valued at a fixing {{ $value | humanizeDuration }} old"
+            description: >-
+              The last FX revaluation marked {{ $labels.currency }} positions at a ČNB
+              fixing older than 60h, or could not resolve one at all (an unresolved
+              attempt deliberately leaves the age climbing rather than blanking the
+              series). fx-service serves any fixing inside a three-day validity window
+              without regard to the date being revalued, so this is silent everywhere
+              else. Check the ČNB ingestion in namespace fx first
+              (workflow="fx-cnb-ingestion"), then the fx→ledger call. Positions in this
+              currency carry a valuation from a superseded rate until a run succeeds
+              with a current one — and a re-run for a date already posted returns the
+              original entry unchanged (#3921), so a correcting entry is a manual
+              decision, not a retry.

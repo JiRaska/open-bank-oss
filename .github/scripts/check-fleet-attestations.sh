@@ -25,21 +25,44 @@
 # sidecars alike. The image regex is intentionally position-blind (it does not care which
 # YAML key an image hangs off) precisely so a sidecar or initContainer cannot slip through.
 #
-# TWO FAILURE CLASSES, kept distinct on purpose:
-#   UNATTESTED — the image IS in the registry but carries no valid attestation. This is the
-#                outage class: pods run now, die forever on the next reschedule. Always fatal.
+# THREE OUTCOME CLASSES, kept distinct on purpose:
+#   UNATTESTED — cosign REACHED the artifact and returned an attestation verdict: no valid
+#                CycloneDX attestation for this key. This is the outage class: pods run now,
+#                die forever on the next reschedule. Always fatal (exit 1).
 #   ABSENT     — the image is not in the registry at all (a first-registration placeholder
 #                tag that was never built). Also broken, but a different bug with a different
 #                fix, and it is NOT an attestation regression. Fatal unless the image is
 #                listed in the placeholder allowlist below.
-# Conflating the two would make this gate permanently red on a known placeholder — and a
+#   UNKNOWN    — the PROBE could not run: ECR throttle, 5xx, expired credentials, DNS, a
+#                cosign crash. This is NOT a verdict about the image and must never be
+#                reported as one. Exit 2, mirroring
+#                `.github/scripts/check-verification-metadata-complete.py` (0 = clean,
+#                1 = real gap, 2 = could not run).
+# Conflating the first two would make this gate permanently red on a known placeholder — and a
 # permanently-red check is one nobody reads. That is exactly how sbom-drift-scanner's
 # `sepa-payment: no-pod-found` sat unactioned on the morning of the outage.
+#
+# WHY UNKNOWN EXISTS (#1915, measured 2026-08-13): the loop used to special-case only the
+# registry-absence strings and let EVERY other non-zero cosign exit fall through to
+# UNATTESTED. Run 31729895636 therefore reported
+# `UNATTESTED openbank-release-steward:sandbox-e80f4bc7 … 61 attested / 1 unattested / 62
+# total` while 24 of the 25 most recent runs of the same gate passed on the identical,
+# unchanged image, and a hand `cosign verify-attestation` against digest sha256:31d626…
+# answered "The signatures were verified against the specified public key". A transient
+# registry failure was published as a supply-chain verdict. Classification is now POSITIVE
+# in both directions — an image is called UNATTESTED only when cosign says so in words —
+# and every candidate failure is retried before being classified at all.
 #
 # Usage:
 #   .github/scripts/check-fleet-attestations.sh              # verify the whole fleet
 #   COSIGN_BIN=/path/to/cosign-v2 ... check-fleet-attestations.sh
 #   FLEET_ATTEST_JSON=out.json ...                           # also emit a JSON report
+#   VERIFY_ATTEMPTS=3 VERIFY_RETRY_SLEEP=5 ...               # bounded retry (defaults)
+#   .github/scripts/check-fleet-attestations.sh --selftest   # prove the classifier both ways
+#
+# Exit codes: 0 = every declared image attested; 1 = a real gap (UNATTESTED and/or ABSENT);
+#             2 = the check COULD NOT RUN for at least one image (registry/credential/tool
+#             failure). 2 is not a verdict — callers must not report it as a fleet gap.
 #
 # Requires: AWS credentials with ECR read access, cosign v2.x, jq (report only).
 # Read-only: never pushes, retags, signs, or mutates any image.
@@ -47,11 +70,236 @@
 set -uo pipefail
 
 GITOPS_DIR="${GITOPS_DIR:-openbank-infra/gitops}"
+VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-3}"
+VERIFY_RETRY_SLEEP="${VERIFY_RETRY_SLEEP:-5}"
 PLACEHOLDER_FILE="${PLACEHOLDER_FILE:-.github/scripts/fleet-attestation-placeholders.txt}"
 COSIGN_KEY="${COSIGN_KEY:-awskms:///alias/openbank-cosign-signing}"
 COSIGN_VERSION="${COSIGN_VERSION:-v2.4.3}"
 ECR_REGISTRY="${ECR_REGISTRY:-265175468565.dkr.ecr.eu-north-1.amazonaws.com}"
 FLEET_ATTEST_JSON="${FLEET_ATTEST_JSON:-}"
+
+# Classify one failed `cosign verify-attestation` by its stderr. POSITIVE in both directions:
+# ABSENT and UNATTESTED each require cosign to have SAID so; anything else is UNKNOWN, because
+# a probe that could not reach a verdict has not produced one. The old shape had a positive
+# rule for ABSENT and used UNATTESTED as the fallback, which is what turned an ECR throttle
+# into a supply-chain finding (#1915).
+classify_failure() {
+  local err="$1"
+  if printf '%s' "$err" | grep -qE 'NAME_UNKNOWN|MANIFEST_UNKNOWN|does not exist|not found|404'; then
+    printf 'ABSENT\n'
+    return 0
+  fi
+  # cosign's own attestation verdicts. `no matching attestations` covers both "none at all"
+  # and "none this key/type accepts"; the signature/certificate wordings cover a payload that
+  # exists but does not verify. All of these mean the artifact WAS fetched.
+  if printf '%s' "$err" | grep -qE 'no matching attestations|no attestations|none of the attestations matched|signature not found|invalid signature|failed to verify signature|unable to verify signature|no signatures found|error validating.*signature|crypto/rsa: verification error'; then
+    printf 'UNATTESTED\n'
+    return 0
+  fi
+  printf 'UNKNOWN\n'
+}
+
+selftest() {
+  # `cases` is the SUBJECT COUNT this gate reports (gates.yaml min_subjects). A checker whose
+  # corpus is its own fixtures examines nothing the day someone deletes them, and the floor is
+  # what makes that a failure instead of a faster green.
+  local failures=0 got cases=0
+  check_case() {
+    local name="$1" expected="$2" input="$3"
+    got="$(classify_failure "$input")"
+    cases=$((cases + 1))
+    if [ "$got" = "$expected" ]; then
+      printf '  ok: %s (%s)\n' "$name" "$got"
+    else
+      printf '  FAIL: %s — expected %s, got %s\n' "$name" "$expected" "$got"
+      failures=$((failures + 1))
+    fi
+  }
+
+  # ABSENT — the registry says the reference is not there.
+  check_case "MANIFEST_UNKNOWN" ABSENT \
+    'GET https://265175468565.dkr.ecr.eu-north-1.amazonaws.com/v2/openbank-x/manifests/t: MANIFEST_UNKNOWN'
+  check_case "NAME_UNKNOWN" ABSENT 'NAME_UNKNOWN: The repository with name openbank-x does not exist'
+
+  # UNATTESTED — cosign reached the artifact and returned a verdict.
+  check_case "no matching attestations" UNATTESTED \
+    'Error: no matching attestations:
+main.go:74: error during command execution: no matching attestations:'
+  check_case "invalid signature" UNATTESTED 'Error: invalid signature when validating ASN.1 encoded signature'
+
+  # UNKNOWN — the probe could not run. Each of these used to be published as UNATTESTED.
+  check_case "ECR throttle" UNKNOWN \
+    'Error: GET https://...amazonaws.com/v2/: TOOMANYREQUESTS: Rate exceeded'
+  check_case "registry 5xx" UNKNOWN \
+    'Error: unexpected status code 503 Service Unavailable'
+  check_case "expired credentials" UNKNOWN \
+    'Error: unable to get credentials: ExpiredToken: The security token included in the request is expired'
+  check_case "DNS failure" UNKNOWN \
+    'Error: Get "https://...amazonaws.com/v2/": dial tcp: lookup ...: no such host'
+  check_case "KMS unreachable" UNKNOWN \
+    'Error: loading public key: getting signer: kms get: RequestCanceled: request context canceled'
+
+  # ---------------------------------------------------------------------------------------
+  # END-TO-END: the classifier is only half the fix. What the caller acts on is the EXIT
+  # CODE, and no PR can summon an ECR throttle to prove exit 2 is reachable — so the whole
+  # loop is driven here against a stub `cosign` that fails per-image in each way. Without
+  # this, the exit-2 branch is code nobody has ever run, which is the repo's oldest CI rule
+  # (a gate that has only ever passed is unfalsified) applied to the gate's own plumbing.
+  # ---------------------------------------------------------------------------------------
+  local tmp stub reg
+  tmp="$(mktemp -d)"
+  reg="$ECR_REGISTRY"
+  mkdir -p "$tmp/gitops"
+  stub="$tmp/cosign"
+  cat > "$stub" <<'STUB'
+#!/usr/bin/env bash
+# Stub cosign: version says v2 (the script refuses anything else), and each fixture image
+# fails the way its name declares. Deliberately writes to stderr, as the real one does.
+if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
+img="${!#}"
+case "$img" in
+  *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
+  *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
+  *fixture-flaky*)  echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
+esac
+echo "Error: stub reached with an unexpected image: $img" >&2; exit 1
+STUB
+  chmod +x "$stub"
+
+  run_fixture() {
+    local name="$1" expected_exit="$2" expected_summary="$3"; shift 3
+    local out code
+    cases=$((cases + 1))
+    : > "$tmp/gitops/images.yaml"
+    for img in "$@"; do
+      printf 'image: %s/%s\n' "$reg" "$img" >> "$tmp/gitops/images.yaml"
+    done
+    # The threshold is passed EXPLICITLY rather than inherited: `VAR=x run_fixture` sets it on
+    # the function, not on the grandchild process, so an inherited value would silently be the
+    # default and the systemic case would prove nothing.
+    out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
+           VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
+           SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
+           bash "$SELF" 2>&1)"
+    code=$?
+    if [ "$code" != "$expected_exit" ]; then
+      printf '  FAIL: %s — expected exit %s, got %s\n' "$name" "$expected_exit" "$code"
+      failures=$((failures + 1))
+      return
+    fi
+    if ! printf '%s' "$out" | grep -qF "$expected_summary"; then
+      printf '  FAIL: %s — exit %s correct, but summary missing: %s\n' \
+        "$name" "$code" "$expected_summary"
+      failures=$((failures + 1))
+      return
+    fi
+    LAST_OUT="$out"
+    printf '  ok: %s (exit %s)\n' "$name" "$code"
+  }
+
+  # Every declared image attested -> 0.
+  run_fixture "all attested -> exit 0" 0 \
+    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  # A real gap -> 1. Both fatal classes, so the summary carries each count.
+  run_fixture "unattested + absent -> exit 1" 1 \
+    "1 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t" "openbank-fixture-bare:t" "openbank-fixture-gone:t"
+  # ONLY a probe failure -> 2, and crucially NOT 1: this is the case that used to be
+  # published as a fleet gap, and the exit code is the only thing the caller reads.
+  run_fixture "probe failure only -> exit 2 (not 1)" 2 \
+    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "openbank-fixture-ok:t" "openbank-fixture-flaky:t"
+  # A REAL gap alongside a probe failure must still be 1 — "could not run" never masks a
+  # verdict that was reached, or an unlucky throttle would downgrade a live outage.
+  run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \
+    "0 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "openbank-fixture-bare:t" "openbank-fixture-flaky:t"
+  # A TOTAL outage must short-circuit the retries rather than multiply them past the job
+  # timeout — a killed job reports no exit code at all, and the caller then cannot tell a gap
+  # from a probe failure, which is the whole distinction this file exists to keep.
+  fixture_threshold=3
+  run_fixture "systemic outage -> retries off, still exit 2" 2 \
+    "images in a row could not be probed: this is systemic" \
+    "openbank-fixture-flaky:1" "openbank-fixture-flaky:2" "openbank-fixture-flaky:3" \
+    "openbank-fixture-flaky:4"
+  # ...and the SHORT-CIRCUIT itself, which the message above cannot prove: with the threshold
+  # at 3, the first three images retry once each and the fourth must not retry at all. Asserted
+  # as a count, because a fixture that only greps the banner passes with the retry suppression
+  # deleted — measured, not assumed.
+  cases=$((cases + 1))
+  retries="$(printf '%s' "${LAST_OUT:-}" | grep -c '  retry ' || true)"
+  if [ "$retries" -eq 3 ]; then
+    printf '  ok: systemic outage stops retrying (3 retries, not 4)\n'
+  else
+    printf '  FAIL: systemic outage stops retrying — expected 3 retry lines, got %s\n' "$retries"
+    failures=$((failures + 1))
+  fi
+  fixture_threshold=""
+
+  rm -rf "$tmp"
+
+  printf 'SUBJECTS=%s\n' "$cases"
+  if [ "$failures" -gt 0 ]; then
+    printf 'selftest FAILED (%s case(s))\n' "$failures"
+    return 1
+  fi
+  printf 'selftest OK — classifier proven on all three classes, and exit 0/1/2 driven end to end.\n'
+  return 0
+}
+
+# ---------------------------------------------------------------------------------------
+# The LIVE control the stub cannot give: the UNATTESTED branch is matched on cosign's own
+# wording, so a wording change in a future cosign silently re-routes every real gap to
+# UNKNOWN — the gate would then exit 2 forever, never file a gap, and read as an infra
+# problem. Ask the real binary, against a real image in the real registry, for a verdict we
+# know is negative: the same image with an attestation type it has never carried. If that
+# does not classify as UNATTESTED, the vocabulary has moved and the gate is blind.
+# No side effects — verify-attestation is read-only.
+# ---------------------------------------------------------------------------------------
+vocabulary_control() {
+  local image="$1" err verdict
+  printf '==> Vocabulary control: %s with --type spdx (never attested; must read UNATTESTED)\n' \
+    "${image#"${ECR_REGISTRY}"/}"
+  if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+              --key "$COSIGN_KEY" --type spdx "$image" 2>&1)"; then
+    echo "ERROR: control image verified against a type it should not carry — the control is" >&2
+    echo "       no longer negative. Pick a type this fleet genuinely never attests." >&2
+    return 1
+  fi
+  verdict="$(classify_failure "$err")"
+  if [ "$verdict" != "UNATTESTED" ]; then
+    echo "ERROR: cosign's not-attested wording no longer classifies as UNATTESTED (got ${verdict})." >&2
+    echo "       Every real gap would now be reported as UNKNOWN and the gate would never fail" >&2
+    echo "       on one. Update classify_failure() against this output:" >&2
+    printf '%s\n' "$err" | sed 's/^/       | /' | tail -5 >&2
+    return 1
+  fi
+  printf '    OK — a known-negative verdict still reads UNATTESTED.\n'
+  return 0
+}
+
+SELF="$0"
+MODE=verify
+case "${1:-}" in
+  --selftest | --self-test)
+    selftest
+    exit $?
+    ;;
+  # Needs cosign + a real registry, so it runs as its own step in fleet-attestation.yml
+  # rather than inside the fleet loop — a vocabulary failure must be reported as itself,
+  # not as 62 UNKNOWN images.
+  --vocabulary-control)
+    MODE=vocabulary-control
+    ;;
+  "") ;;
+  *)
+    echo "ERROR: unknown argument: $1" >&2
+    echo "       usage: $0 [--selftest|--self-test|--vocabulary-control]" >&2
+    exit 1
+    ;;
+esac
 
 # cosign v2 is pinned on purpose: kyverno 3.2.6 discovers attestations only via the legacy
 # `sha256-<digest>.att` tag scheme; cosign v3 writes OCI 1.1 referrers it cannot read. This
@@ -119,6 +367,11 @@ fi
 echo "==> ${#IMAGES[@]} distinct openbank-* image(s) declared"
 echo
 
+if [ "$MODE" = vocabulary-control ]; then
+  vocabulary_control "${IMAGES[0]}"
+  exit $?
+fi
+
 is_allowed_placeholder() {
   [ -f "$PLACEHOLDER_FILE" ] || return 1
   grep -vE '^[[:space:]]*(#|$)' "$PLACEHOLDER_FILE" | grep -qxF "$1"
@@ -128,41 +381,93 @@ PASS=0
 UNATTESTED=0
 ABSENT=0
 ALLOWED=0
+UNKNOWN=0
 UNATTESTED_IMAGES=()
 ABSENT_IMAGES=()
+UNKNOWN_IMAGES=()
+CONSECUTIVE_UNKNOWN=0
+RETRIES_DISABLED=0
+
+# Retry is per-image, so a TOTAL registry outage would multiply: 62 images x (attempts-1) x
+# sleep, on top of every call's own latency, which overruns the job timeout — and a killed
+# job produces no exit code at all, so the careful 1-vs-2 distinction is lost exactly when it
+# matters most. Retrying is worth it for a flaky registry and worthless for a dead one, so
+# after this many images in a row have failed the probe, stop retrying and let the run finish
+# and report exit 2 honestly.
+SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
 for image in "${IMAGES[@]}"; do
   short="${image#"${ECR_REGISTRY}"/}"
-  if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
-              --key "$COSIGN_KEY" --type cyclonedx "$image" 2>&1)"; then
-    printf '  OK          %s\n' "$short"
-    PASS=$((PASS + 1))
-    continue
-  fi
 
-  # Distinguish "not in the registry" from "in the registry, not attested". cosign surfaces
-  # the former as a registry NAME_UNKNOWN / MANIFEST_UNKNOWN / 404 from the manifest GET.
-  if printf '%s' "$err" | grep -qE 'NAME_UNKNOWN|MANIFEST_UNKNOWN|does not exist|not found|404'; then
-    if is_allowed_placeholder "$image"; then
-      printf '  PLACEHOLDER %s  (allowlisted: never built, cannot be admitted)\n' "$short"
-      ALLOWED=$((ALLOWED + 1))
-    else
-      printf '  ABSENT      %s  <-- declared in gitops but NOT in the registry\n' "$short"
-      ABSENT=$((ABSENT + 1))
-      ABSENT_IMAGES+=("$image")
+  # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
+  # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
+  # retried, so a genuinely unattested image still fails fast and no result is retried into
+  # existence. Attempts are logged so a flaky registry is visible rather than smoothed over.
+  verdict=""
+  attempt=1
+  while :; do
+    if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+                --key "$COSIGN_KEY" --type cyclonedx "$image" 2>&1)"; then
+      verdict=OK
+      break
     fi
-    continue
-  fi
+    verdict="$(classify_failure "$err")"
+    [ "$verdict" != "UNKNOWN" ] && break
+    [ "$RETRIES_DISABLED" -eq 1 ] && break
+    [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
+    printf '  retry %s/%s  %s  (probe failed, not a verdict)\n' \
+      "$attempt" "$VERIFY_ATTEMPTS" "$short"
+    sleep "$VERIFY_RETRY_SLEEP"
+    attempt=$((attempt + 1))
+  done
 
-  printf '  UNATTESTED  %s  <-- no valid CycloneDX SBOM attestation\n' "$short"
-  UNATTESTED=$((UNATTESTED + 1))
-  UNATTESTED_IMAGES+=("$image")
+  case "$verdict" in
+    OK)
+      printf '  OK          %s\n' "$short"
+      PASS=$((PASS + 1))
+      ;;
+    ABSENT)
+      if is_allowed_placeholder "$image"; then
+        printf '  PLACEHOLDER %s  (allowlisted: never built, cannot be admitted)\n' "$short"
+        ALLOWED=$((ALLOWED + 1))
+      else
+        printf '  ABSENT      %s  <-- declared in gitops but NOT in the registry\n' "$short"
+        ABSENT=$((ABSENT + 1))
+        ABSENT_IMAGES+=("$image")
+      fi
+      ;;
+    UNATTESTED)
+      printf '  UNATTESTED  %s  <-- no valid CycloneDX SBOM attestation\n' "$short"
+      UNATTESTED=$((UNATTESTED + 1))
+      UNATTESTED_IMAGES+=("$image")
+      ;;
+    *)
+      printf '  UNKNOWN     %s  <-- probe failed %s time(s), NO verdict about this image\n' \
+        "$short" "$VERIFY_ATTEMPTS"
+      printf '%s\n' "$err" | sed 's/^/                  | /' | tail -5
+      UNKNOWN=$((UNKNOWN + 1))
+      UNKNOWN_IMAGES+=("$image")
+      ;;
+  esac
+
+  if [ "$verdict" = "UNKNOWN" ]; then
+    CONSECUTIVE_UNKNOWN=$((CONSECUTIVE_UNKNOWN + 1))
+    if [ "$RETRIES_DISABLED" -eq 0 ] && [ "$CONSECUTIVE_UNKNOWN" -ge "$SYSTEMIC_UNKNOWN_THRESHOLD" ]; then
+      RETRIES_DISABLED=1
+      printf '  ---- %s images in a row could not be probed: this is systemic, not flaky.\n' \
+        "$CONSECUTIVE_UNKNOWN"
+      printf '       Retries OFF for the rest of the run so it finishes inside the job timeout —\n'
+      printf '       a killed job reports NO exit code, which loses the gap-vs-probe distinction.\n'
+    fi
+  else
+    CONSECUTIVE_UNKNOWN=0
+  fi
 done
 
 FAIL=$((UNATTESTED + ABSENT))
 
 echo
-echo "==> Fleet summary: ${PASS} attested / ${UNATTESTED} unattested / ${ABSENT} absent / ${ALLOWED} allowlisted placeholder / ${#IMAGES[@]} total"
+echo "==> Fleet summary: ${PASS} attested / ${UNATTESTED} unattested / ${ABSENT} absent / ${ALLOWED} allowlisted placeholder / ${UNKNOWN} unknown (probe failed) / ${#IMAGES[@]} total"
 
 if [ -n "$FLEET_ATTEST_JSON" ] && command -v jq >/dev/null 2>&1; then
   # `${arr[@]+"${arr[@]}"}` guards bash 3.2's unbound-variable error on an empty array
@@ -180,11 +485,14 @@ if [ -n "$FLEET_ATTEST_JSON" ] && command -v jq >/dev/null 2>&1; then
     --argjson placeholders "$ALLOWED" \
     --argjson unattestedImages "$(_json_arr ${UNATTESTED_IMAGES[@]+"${UNATTESTED_IMAGES[@]}"})" \
     --argjson absentImages "$(_json_arr ${ABSENT_IMAGES[@]+"${ABSENT_IMAGES[@]}"})" \
+    --argjson unknown "$UNKNOWN" \
+    --argjson unknownImages "$(_json_arr ${UNKNOWN_IMAGES[@]+"${UNKNOWN_IMAGES[@]}"})" \
     --arg scannedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --arg gateResult "$([ "$FAIL" -gt 0 ] && echo FAIL || echo PASS)" \
+    --arg gateResult "$([ "$FAIL" -gt 0 ] && echo FAIL || { [ "$UNKNOWN" -gt 0 ] && echo INCOMPLETE || echo PASS; })" \
     '{scannedAt: $scannedAt, gateResult: $gateResult, total: $total, attested: $attested,
       unattested: $unattested, absent: $absent, allowlistedPlaceholders: $placeholders,
-      unattestedImages: $unattestedImages, absentImages: $absentImages}' \
+      unknown: $unknown, unattestedImages: $unattestedImages, absentImages: $absentImages,
+      unknownImages: $unknownImages}' \
     > "$FLEET_ATTEST_JSON"
   echo "    JSON report: ${FLEET_ATTEST_JSON}"
 fi
@@ -214,13 +522,38 @@ if [ "$ABSENT" -gt 0 ]; then
   echo "  in ${PLACEHOLDER_FILE}."
 fi
 
+if [ "$UNKNOWN" -gt 0 ]; then
+  echo
+  echo "UNKNOWN (${UNKNOWN}) — the probe could not reach a verdict after ${VERIFY_ATTEMPTS} attempt(s):"
+  for image in "${UNKNOWN_IMAGES[@]}"; do
+    echo "  - ${image}"
+  done
+  echo
+  echo "  This says NOTHING about whether these images are attested — it is a registry,"
+  echo "  credential or tooling failure, not a supply-chain finding. Do not report it as a"
+  echo "  fleet gap and do not rebuild anything on the strength of it. Re-run; if it persists,"
+  echo "  verify one image by digest by hand and treat it as an infrastructure problem:"
+  echo "    cosign verify-attestation --key ${COSIGN_KEY} --type cyclonedx <image>@<digest>"
+fi
+
 if [ "$FAIL" -gt 0 ]; then
   echo
   echo "FLEET ATTESTATION GATE: FAIL — ${FAIL} of ${#IMAGES[@]} declared image(s) not deployable."
   echo
-  echo "No image-provenance policy may graduate Audit -> Enforce while this gate fails"
+  echo "Both image-provenance policies are already Enforce in-cluster"
+  echo "(verify-openbank-image-signatures; verify-openbank-image-sbom-attestation, graduated"
+  echo "2026-07-12), so this is a LATENT OUTAGE, not a graduation blocker: the affected pods"
+  echo "keep running until something reschedules them, and are then denied admission and can"
+  echo "never restart. Fix before a reschedule, not after"
   echo "(rules.yaml: provenance.enforce_criteria)."
   exit 1
+fi
+
+if [ "$UNKNOWN" -gt 0 ]; then
+  echo
+  echo "FLEET ATTESTATION GATE: INCOMPLETE — ${PASS} verified, ${UNKNOWN} could not be checked."
+  echo "  Exit 2 = 'could not run', NOT a verdict. Callers must not treat it as a fleet gap."
+  exit 2
 fi
 
 echo

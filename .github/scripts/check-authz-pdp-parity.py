@@ -68,6 +68,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 IMAGE_SVC = re.compile(r"openbank-([a-z0-9-]+-service)\b")
 WORKLOAD_KINDS = {"Deployment", "Rollout"}
 
@@ -133,9 +135,9 @@ def has_authorize_annotation(root: pathlib.Path, service_dir_name: str) -> bool:
     src_main = root / service_dir_name / "src" / "main"
     if not src_main.exists():
         return False
-    for kt in src_main.rglob("*.kt"):
+    for kt in gatelib.rglob(src_main, "*.kt"):
         try:
-            text = kt.read_text(encoding="utf-8")
+            text = gatelib.read_text(kt)
         except OSError:
             continue
         if "@Authorize" not in text:  # cheap pre-filter; the stripper is the authority
@@ -152,7 +154,7 @@ def app_enforce_default(root: pathlib.Path, service_dir_name: str) -> bool | Non
     if not app_yaml.exists():
         return None
     try:
-        data = yaml.safe_load(app_yaml.read_text(encoding="utf-8")) or {}
+        data = gatelib.load_yaml(app_yaml) or {}
     except yaml.YAMLError:
         return None
     enforce = (((data.get("authz") or {}) if isinstance(data.get("authz"), dict) else {}).get("enforce"))
@@ -175,9 +177,9 @@ def env_value(container: dict, name: str) -> str | None:
 
 
 def iter_workloads(components: pathlib.Path):
-    for path in sorted(components.rglob("*.yaml")):
+    for path in gatelib.rglob(components, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except yaml.YAMLError:
             continue
         for doc in docs:
@@ -192,11 +194,106 @@ def pod_containers(workload: dict) -> list[dict]:
     return [c for c in (pod_spec.get("containers") or []) if isinstance(c, dict)]
 
 
+def self_test() -> int:
+    """Falsify the annotation reader, the enforce-default resolver and the workload walker.
+
+    What this prevents: a service whose code calls @Authorize while its deployed pod has no
+    OPA sidecar. The interceptor then FAILS CLOSED — every authorized call 403s — and the
+    failure is total but reads as an authorization bug rather than a missing container. The
+    reverse gap is quieter still: enforce defaulting to false means the interceptor decides
+    nothing, so a service can look protected in code and be open in production.
+
+    Every branch below has a way of being wrong that yields the SAFE-LOOKING answer, which is
+    why the fixtures assert both directions of each.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    with tempfile.TemporaryDirectory() as td:
+        root = pathlib.Path(td)
+
+        def svc(name, kt=None, app=None):
+            d = root / name / "src" / "main"
+            (d / "kotlin").mkdir(parents=True, exist_ok=True)
+            (d / "resources").mkdir(parents=True, exist_ok=True)
+            if kt is not None:
+                (d / "kotlin" / "R.kt").write_text(kt)
+            if app is not None:
+                (d / "resources" / "application.yaml").write_text(app)
+
+        # --- @Authorize detection ---------------------------------------------------------
+        svc("openbank-a", kt='@Authorize\nfun a() {}\n')
+        case("a real @Authorize is found", has_authorize_annotation(root, "openbank-a"), True)
+
+        # PROSE. The KDoc explaining the annotation must not read as a use — every service
+        # that adopts it carries such a comment, so a stripper failure marks the whole fleet
+        # as annotated and the gate then demands a sidecar everywhere.
+        svc("openbank-b", kt='/** Uses @Authorize on write paths. */\nfun b() {}\n')
+        case("@Authorize in a KDoc is not a use", has_authorize_annotation(root, "openbank-b"), False)
+        svc("openbank-c", kt='// @Authorize\nfun c() {}\n')
+        case("@Authorize in a line comment is not a use", has_authorize_annotation(root, "openbank-c"), False)
+
+        # A module with no sources at all is not annotated — and must not raise.
+        case("a module with no src/main is not annotated",
+             has_authorize_annotation(root, "openbank-missing"), False)
+
+        # --- enforce default --------------------------------------------------------------
+        # NO authz block means the libs default applies, which is TRUE. Reading that as false
+        # would silently excuse every service from needing a sidecar.
+        svc("openbank-d", kt="fun d() {}\n", app="quarkus:\n  http:\n    port: 8080\n")
+        case("no authz block defaults to enforce=true", app_enforce_default(root, "openbank-d"), True)
+        svc("openbank-e", kt="fun e() {}\n", app="authz:\n  enforce: false\n")
+        case("an explicit false is false", app_enforce_default(root, "openbank-e"), False)
+        svc("openbank-f", kt="fun f() {}\n", app='authz:\n  enforce: "${AUTHZ_ENFORCE:true}"\n')
+        case("the env-default idiom resolves to its default (true)",
+             app_enforce_default(root, "openbank-f"), True)
+        svc("openbank-g", kt="fun g() {}\n", app='authz:\n  enforce: "${AUTHZ_ENFORCE:false}"\n')
+        case("the env-default idiom resolves to its default (false)",
+             app_enforce_default(root, "openbank-g"), False)
+        # No application.yaml at all is UNKNOWN, not false — a missing file must not be
+        # reported as a deliberate opt-out.
+        case("a module with no application.yaml is unknown",
+             app_enforce_default(root, "openbank-missing"), None)
+
+    # --- workload walking ------------------------------------------------------------------
+    dep = {"kind": "Deployment", "spec": {"template": {"spec": {"containers": [
+        {"name": "app", "env": [{"name": "AUTHZ_ENFORCE", "value": "true"}]},
+        {"name": "opa"},
+    ]}}}}
+    names = [c["name"] for c in pod_containers(dep)]
+    case("both containers are found", names, ["app", "opa"])
+    case("an env value is read", env_value(pod_containers(dep)[0], "AUTHZ_ENFORCE"), "true")
+    # A NAME with no value (valueFrom) is not a literal value — returning "" or the name would
+    # make a secret-sourced flag look like a literal "false"/"true".
+    case("a valueFrom env has no literal value",
+         env_value({"env": [{"name": "X", "valueFrom": {"secretKeyRef": {"name": "s", "key": "k"}}}]}, "X"), None)
+    case("an absent env is None", env_value({"env": []}, "X"), None)
+    # A non-workload doc must yield no containers rather than raising.
+    case("a doc with no template yields no containers", pod_containers({"kind": "Service"}), [])
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: authz PDP parity is falsifiable (14 cases)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("root", nargs="?", default=".", help="repo root (positional, default '.')")
     parser.add_argument("--enforce", action="store_true")
+    parser.add_argument("--self-test", action="store_true")
     args = parser.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     root = pathlib.Path(args.root)
     components = root / "openbank-infra" / "gitops" / "components"

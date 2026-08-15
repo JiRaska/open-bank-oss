@@ -56,6 +56,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra/gitops"
 ROLE_NAME = "eso-kafka-cert-reader"
@@ -63,9 +65,9 @@ STORE_NAME = "kafka-messaging-certs"
 
 
 def documents(root: pathlib.Path):
-    for path in sorted(root.rglob("*.yaml")):
+    for path in gatelib.rglob(root, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, OSError, UnicodeDecodeError):
             # A manifest this script cannot parse is not this script's finding — `yamllint` and
             # `Validate manifests` own that. Skipping keeps one broken file from masking the

@@ -95,23 +95,33 @@ def strip_comments(lines: list[str]) -> list[str]:
     Needed in both directions: a fix comment explaining *why* the method must never use
     `runBlocking` (every one of the #2187 fixes carries one) must not itself trip the guard, and
     a real violation must not be hideable by trailing a comment marker.
+
+    Block depth is COUNTED, not a boolean: Kotlin block comments NEST, so `/* a /* b */ c */`
+    ends at the LAST marker, not the first. With a boolean the comment closed early and its
+    remaining text was scanned as code — so a KDoc explaining "never wrap this in runBlocking"
+    became a violation of the rule it documents. This repo has paid for that exact confusion
+    once already (#2450), and it was found here by writing this script's first self-test.
     """
     out: list[str] = []
-    in_block = False
+    depth = 0
     for line in lines:
         buf = []
         i = 0
         while i < len(line):
             two = line[i:i + 2]
-            if in_block:
+            if depth > 0:
                 if two == "*/":
-                    in_block = False
+                    depth -= 1
+                    i += 2
+                    continue
+                if two == "/*":
+                    depth += 1
                     i += 2
                     continue
                 i += 1
                 continue
             if two == "/*":
-                in_block = True
+                depth += 1
                 i += 2
                 continue
             if two == "//":
@@ -181,11 +191,149 @@ def load_allowlist(rules_path: pathlib.Path, key: str = "runblocking_allowlist")
     return allow
 
 
+def self_test() -> int:
+    """Falsify the DETECTOR against Kotlin fixtures whose answer is known.
+
+    This gate owns the defect that silently stopped five schedulers, three of them money-path
+    (#2148, #2187): Quarkus invokes a non-suspend `@Scheduled` method on a bare executor-thread
+    with no Vert.x context, so a `runBlocking { … }` around a reactive Panache call throws
+    HR000068 and the job does nothing — before the per-item try/catch, so not even a log line.
+
+    It shipped with no self-test, which for a guard is the same bug one level up: its RED path
+    was code nobody had run. Every case below states what the detector must answer and why the
+    wrong answer is expensive — a false negative reinstates the original outage class, and a
+    false positive over a COMMENT is how a text guard gets disabled by the first person it
+    annoys (this repo has burnt that too: Kotlin block comments NEST, #2450).
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    def flagged(src: str) -> bool:
+        """Run the real pipeline — strip_comments + scheduled_method_bodies + RUNBLOCKING_RE —
+        never a re-implementation of it. A fixture that goes through a copy of the logic proves
+        nothing about the logic."""
+        code = strip_comments(src.splitlines())
+        for _name, _decl, start, end in scheduled_method_bodies(code):
+            if any(RUNBLOCKING_RE.search(code[j]) for j in range(start, end + 1)):
+                return True
+        return False
+
+    def case(label: str, src: str, want: bool) -> None:
+        got = flagged(src)
+        if got != want:
+            fails.append(f"{label}: expected flagged={want}, got {got}")
+
+    # THE DEFECT ITSELF. If this stops being flagged, the outage class is back.
+    case("a plain @Scheduled with runBlocking must be FLAGGED", """
+        @Scheduled(every = "60s")
+        fun sweep() {
+            runBlocking { repo.findDue() }
+        }
+    """, True)
+
+    # The documented fix must read as clean, or the gate blocks the very shape it demands.
+    case("a suspend @Scheduled without runBlocking is CLEAN", """
+        @Scheduled(every = "60s")
+        suspend fun sweep() {
+            repo.findDue()
+        }
+    """, False)
+
+    # Expression body — the same defect, a different spelling. `= runBlocking { … }` is exactly
+    # the Kotlin idiom that also makes JUnit5 silently drop a test, so it is common here.
+    case("an expression-body @Scheduled must be FLAGGED", """
+        @Scheduled(every = "60s")
+        fun sweep() = runBlocking { repo.findDue() }
+    """, True)
+
+    # SCOPE. runBlocking elsewhere in the same file is not this gate's business; flagging it
+    # would make the gate unusable in any file that also contains a scheduler.
+    case("runBlocking OUTSIDE any @Scheduled method is clean", """
+        @Scheduled(every = "60s")
+        suspend fun sweep() {
+            repo.findDue()
+        }
+        fun helper() {
+            runBlocking { repo.findDue() }
+        }
+    """, False)
+
+    # PROSE. A guard that flags the comment explaining the rule gets deleted by the next person
+    # who hits it. Kotlin block comments NEST, which is why stripping is not a one-liner.
+    case("runBlocking named in a LINE comment is not a hit", """
+        @Scheduled(every = "60s")
+        suspend fun sweep() {
+            // never wrap this in runBlocking { } — HR000068
+            repo.findDue()
+        }
+    """, False)
+    case("runBlocking inside a NESTED block comment is not a hit", """
+        @Scheduled(every = "60s")
+        suspend fun sweep() {
+            /* outer /* inner */ runBlocking { } still comment */
+            repo.findDue()
+        }
+    """, False)
+
+    # A default-argument lambda opens a brace inside the parameter list. If the body finder
+    # mistook it for the body, the real body would fall outside the scanned range and a genuine
+    # hit would be missed — the failure that reads as a pass.
+    case("a brace in the parameter list does not truncate the body", """
+        @Scheduled(every = "60s")
+        fun sweep(clock: () -> Long = { 0L }) {
+            runBlocking { repo.findDue() }
+        }
+    """, True)
+
+    # Several schedulers in one file: the second must still be seen.
+    case("a second @Scheduled in the same file is still scanned", """
+        @Scheduled(every = "60s")
+        suspend fun first() {
+            repo.a()
+        }
+        @Scheduled(every = "90s")
+        fun second() {
+            runBlocking { repo.b() }
+        }
+    """, True)
+
+    # The allowlist is keyed "<path>#<method>", and a malformed rules.yaml must not silently
+    # empty it — an empty allowlist turns every allowlisted scheduler red at once.
+    with tempfile.TemporaryDirectory() as td:
+        rules = pathlib.Path(td) / "rules.yaml"
+        rules.write_text(
+            "scheduled_methods:\n"
+            "  runblocking_allowlist:\n"
+            "    - method: 'openbank-x/src/main/kotlin/X.kt#sweep'\n"
+            "      reason: 'documented'\n"
+        )
+        allow = load_allowlist(rules)
+        if allow.get("openbank-x/src/main/kotlin/X.kt#sweep") != "documented":
+            fails.append("allowlist entry did not load")
+        empty = pathlib.Path(td) / "empty.yaml"
+        empty.write_text("scheduled_methods: {}\n")
+        if load_allowlist(empty) != {}:
+            fails.append("an empty allowlist did not read as empty")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: the @Scheduled runBlocking detector is falsifiable (10 cases)")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--rules", default="openbank-libs/governance/rules.yaml")
+    ap.add_argument("--self-test", action="store_true", help="falsify the detector, no repo scan")
     args = ap.parse_args()
+
+    if args.self_test:
+        return self_test()
 
     root = pathlib.Path(args.root)
     allow = load_allowlist(root / args.rules)

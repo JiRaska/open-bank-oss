@@ -37,6 +37,12 @@ class SddWorkflowLivenessTest {
         .gauge()
         ?.value()
 
+    private fun successRecordedOf(registry: MeterRegistry, workflow: String): Double? = registry
+        .find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
+        .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow)
+        .gauge()
+        ?.value()
+
     @Test
     fun `mandate expiry registers liveness and collapses after a successful run`() {
         val registry = SimpleMeterRegistry()
@@ -53,7 +59,10 @@ class SddWorkflowLivenessTest {
 
         val neverRan = ageOf(registry, "sdd-mandate-expiry")
         assertThat(neverRan).isNotNull()
-        assertThat(neverRan!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(neverRan!!)
+            .describedAs("the age gauge must be seeded at registration, not at Instant.EPOCH")
+            .isLessThan(BOOT_SEED_CEILING_SECONDS)
+        assertThat(successRecordedOf(registry, "sdd-mandate-expiry")).isEqualTo(NOT_YET_SUCCEEDED)
         assertThat(
             registry.find(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS)
                 .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, "sdd-mandate-expiry")
@@ -80,11 +89,18 @@ class SddWorkflowLivenessTest {
 
         runCatching { scheduler.sweep().await().indefinitely() }
 
-        assertThat(ageOf(registry, "sdd-mandate-expiry")!!).isGreaterThan(FIFTY_YEARS_SECONDS)
+        assertThat(successRecordedOf(registry, "sdd-mandate-expiry"))
+            .describedAs("a failed run must not record a success")
+            .isEqualTo(NOT_YET_SUCCEEDED)
     }
 
     private companion object {
         const val TOLERANCE_SECONDS = 5.0
-        val FIFTY_YEARS_SECONDS = Duration.ofDays(50 * 365).toSeconds().toDouble()
+
+        // A workflow registered moments ago is seconds old. This ceiling sits far below the
+        // tightest real threshold in the fleet (2x an hourly interval) and astronomically below
+        // the ~1.8e9 the EPOCH seed produced, so it fails loudly if the seed ever regresses.
+        val BOOT_SEED_CEILING_SECONDS = Duration.ofHours(1).toSeconds().toDouble()
+        const val NOT_YET_SUCCEEDED = 0.0
     }
 }

@@ -10,44 +10,18 @@ MANIFEST=$REPO/openbank-infra/opa/bundle.manifest
 
 # AnaCredit REST extension (ADR-0034 Phase 5 bootstrap, issue #938) — no OPA enforcement
 # infrastructure existed for this service before this bootstrap.
-ANACREDIT_REST_EXT=$(cat << 'REGO'
-# SPDX-License-Identifier: Apache-2.0
 # AnaCredit-service REST extension (ADR-0034 Phase 5 bootstrap, issue #938).
-# Extends openbank.rest with anacredit-domain allow reasons.
-# Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
-# Actions gated (AnaCreditResource):
-#   anacredit.create  — registerExposure (feed a credit exposure in)
-#   anacredit.list    — listAllExposures
-#   anacredit.read    — renderReturn (#referenceDate)
-#
-# Base rest.rego already grants operator-read-any (ROLE_OPERATOR/ROLE_ADMIN) and
-# compliance-read-any (ROLE_COMPLIANCE) for anacredit.list/.read — no extension needed for
-# those. anacredit.create has no generic base-rego grant (it is a non-resource-scoped write),
-# so this extension covers only that gap.
-#
-# No verified M2M caller exists for anacredit-service (audited: no REST client anywhere in the
-# fleet calls it, no NetworkPolicy ingress allow-list beyond the shared platform baseline) — the
-# exposure feed is fed in by an operator/compliance officer, not another service. Deliberately
-# NOT granting a "service-*" M2M rule here, unlike consent/sca's shared-client carve-outs, since
-# there is nothing to carve out for.
-
-package openbank.rest
-
-import rego.v1
-
-allowed_reasons contains "operator-anacredit-create" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	input.action == "anacredit.create"
-}
-REGO
-)
+# Extension extracted to a standalone .rego (mirroring vop_rest_ext.rego, #4239, and the #1322
+# pattern) so `opa test` can load and cover it — see anacredit_rest_ext_test.rego in this same
+# directory. It was a heredoc until #4228, which is why its rule had no test at all:
+# opa-policy.yml discovers suites by the *_rest_ext.rego / *_rest_ext_test.rego file PAIR, and a
+# heredoc has no file to pair with.
+ANACREDIT_REST_EXT=$REPO/openbank-infra/gitops/components/anacredit/anacredit_rest_ext.rego
 
 CHECKSUM=$(printf '%s\n' \
     "$(cat "$REST_REGO")" \
-    "$(echo "$ANACREDIT_REST_EXT")" \
+    "$(cat "$ANACREDIT_REST_EXT")" \
     "$(cat "$AGENTS_REGO")" \
     "$(cat "$AGENTS_YAML")" \
     "$(cat "$RULES_YAML")" \
@@ -73,7 +47,7 @@ OUT=$REPO/openbank-infra/gitops/components/anacredit/anacredit-opa-bundle.yaml
   echo "  rest.rego: |"
   sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
   echo "  anacredit_rest_ext.rego: |"
-  echo "$ANACREDIT_REST_EXT" | sed 's/^/    /' | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$ANACREDIT_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"
   sed 's/^/    /' "$AGENTS_REGO" | sed 's/[[:space:]]*$//'
   echo "  agents-data.yaml: |"

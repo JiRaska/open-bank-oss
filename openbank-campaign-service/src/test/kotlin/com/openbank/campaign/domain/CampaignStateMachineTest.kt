@@ -5,10 +5,12 @@
 package com.openbank.campaign.domain
 
 import com.openbank.campaign.domain.model.Campaign
+import com.openbank.campaign.domain.model.CampaignDefinition
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.SegmentRef
+import com.openbank.campaign.domain.model.StepCondition
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -33,6 +35,39 @@ class CampaignStateMachineTest {
     @Test
     fun `draft submits to pending approval`() {
         assertEquals(CampaignState.PENDING_APPROVAL, draft().submit().state)
+    }
+
+    @Test
+    fun `only a draft can be revised`() {
+        val revised = draft().revise(
+            CampaignDefinition(
+                name = "Jarní vklady",
+                goal = "Zvýšit spoření",
+                segmentRef = SegmentRef("saver-high-balance", 1),
+                steps = listOf(
+                    CampaignStep(
+                        order = 0,
+                        template = "MARKETING_PRODUCT_OFFER",
+                        channel = Channel.EMAIL,
+                        variables = mapOf("offerTitle" to "4 %"),
+                        delaySeconds = 0,
+                    ),
+                ),
+            ),
+        )
+
+        assertEquals("Jarní vklady", revised.name)
+        assertEquals("maker", revised.createdBy)
+        assertThrows<IllegalArgumentException> {
+            draft().submit().revise(
+                CampaignDefinition(
+                    name = "Nesmí projít",
+                    goal = "",
+                    segmentRef = SegmentRef("saver-high-balance", 1),
+                    steps = emptyList(),
+                ),
+            )
+        }
     }
 
     @Test
@@ -63,6 +98,28 @@ class CampaignStateMachineTest {
         }
     }
 
+    @Test
+    fun `a decision source must be an earlier existing step with a condition`() {
+        val source = CampaignStep(0, "MARKETING_PRODUCT_OFFER", Channel.EMAIL, emptyMap(), 0)
+        val target = CampaignStep(
+            order = 1,
+            template = "MARKETING_PRODUCT_OFFER",
+            channel = Channel.EMAIL,
+            variables = emptyMap(),
+            delaySeconds = 0,
+            condition = StepCondition.IF_PREVIOUS_CONFIRMED,
+            conditionSourceOrder = 0,
+        )
+        assertEquals(listOf(source, target), draft().copy(steps = listOf(source, target)).steps)
+
+        assertThrows<IllegalArgumentException> {
+            draft().copy(steps = listOf(source, target.copy(conditionSourceOrder = 1)))
+        }
+        assertThrows<IllegalArgumentException> {
+            draft().copy(steps = listOf(source, target.copy(condition = null)))
+        }
+    }
+
     /**
      * The channel set, asserted as a boundary rather than a count.
      *
@@ -76,7 +133,7 @@ class CampaignStateMachineTest {
      */
     @Test
     fun `only channels that actually deliver are representable`() {
-        assertEquals(setOf(Channel.EMAIL, Channel.PUSH), Channel.entries.toSet())
+        assertEquals(setOf(Channel.EMAIL, Channel.PUSH, Channel.BANNER), Channel.entries.toSet())
         assertThrows<IllegalArgumentException> { Channel.valueOf("SMS") }
         assertThrows<IllegalArgumentException> { Channel.valueOf("IN_APP") }
     }

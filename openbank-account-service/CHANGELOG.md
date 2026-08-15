@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.2...account-service-v0.20.3) (2026-08-14)
+
+
+### Bug Fixes
+
+* **account:** make the ADR-0232 dual-run's store disagreement observable ([#4634](https://github.com/JiRaska/open-bank-oss/issues/4634)) ([bca632f](https://github.com/JiRaska/open-bank-oss/commit/bca632fa2edcbc9bff0bc12174b61bb986f8b0a8)), closes [#2993](https://github.com/JiRaska/open-bank-oss/issues/2993)
+
+## [0.20.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.1...account-service-v0.20.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **balance:** stop a not-yet-effective credit being spendable before its value date ([#3916](https://github.com/JiRaska/open-bank-oss/issues/3916)) ([67ef850](https://github.com/JiRaska/open-bank-oss/commit/67ef8503ae469fd2fc95a97174b2f36ae1dba000))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.0...account-service-v0.20.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.19.1...account-service-v0.20.0) (2026-08-08)
 
 

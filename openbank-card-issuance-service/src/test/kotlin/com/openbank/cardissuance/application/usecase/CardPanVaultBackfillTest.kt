@@ -89,7 +89,12 @@ class CardPanVaultBackfillTest {
 
         assertThat(result.isEmpty).isTrue()
         coVerify(exactly = 0) { repo.storePanCredentialIfAbsent(any(), any(), any()) }
-        assertThat(Card.TERMINAL_STATUSES).containsExactlyInAnyOrder(CardStatus.CANCELLED, CardStatus.EXPIRED)
+        // Pinned on purpose: the backfill provisions a PAN for every non-terminal card, so growing
+        // this set silently would hand a live credential to a card that should be dead. CONSUMED
+        // joined it with the single-use lifecycle (D1) — a card that authorised once and closed
+        // itself must never be re-provisioned.
+        assertThat(Card.TERMINAL_STATUSES)
+            .containsExactlyInAnyOrder(CardStatus.CANCELLED, CardStatus.EXPIRED, CardStatus.CONSUMED)
     }
 
     // Idempotence has two layers: the query only returns NULL rows, and the write re-checks the

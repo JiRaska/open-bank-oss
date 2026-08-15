@@ -53,6 +53,8 @@ import sys
 
 import yaml
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 COMPONENTS = REPO / "openbank-infra/gitops/components"
 WORKLOADS = {"Deployment", "Rollout", "StatefulSet", "DaemonSet"}
@@ -76,9 +78,9 @@ def deployment_env() -> dict[str, set[str]]:
     out: dict[str, set[str]] = {}
     if not COMPONENTS.is_dir():
         return out
-    for path in COMPONENTS.rglob("*.yaml"):
+    for path in gatelib.rglob(COMPONENTS, "*.yaml"):
         try:
-            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
+            docs = gatelib.load_yaml_all(path)
         except (yaml.YAMLError, OSError, UnicodeDecodeError):
             continue
         for doc in docs:
@@ -130,15 +132,15 @@ def findings(repo: pathlib.Path = REPO) -> tuple[list[str], int]:
     out: list[str] = []
     checked = 0
 
-    for main in sorted(repo.glob("openbank-*/src/main")):
+    for main in gatelib.glob(repo, "openbank-*/src/main"):
         service = main.parts[len(repo.parts)]
         if service.startswith(SKIP_PREFIXES):
             continue
 
         used: dict[str, str] = {}
-        for source in main.rglob("*.kt"):
+        for source in gatelib.rglob(main, "*.kt"):
             try:
-                text = source.read_text(encoding="utf-8", errors="ignore")
+                text = gatelib.read_text(source, errors="ignore")
             except OSError:
                 continue
             for bean, prop in BEAN_CONFIG.items():
@@ -148,7 +150,7 @@ def findings(repo: pathlib.Path = REPO) -> tuple[list[str], int]:
             continue
 
         app = main / "resources/application.yaml"
-        app_text = app.read_text(encoding="utf-8", errors="ignore") if app.is_file() else ""
+        app_text = gatelib.read_text(app, errors="ignore") if app.is_file() else ""
 
         short = service.removeprefix("openbank-")
         declared: set[str] = set()

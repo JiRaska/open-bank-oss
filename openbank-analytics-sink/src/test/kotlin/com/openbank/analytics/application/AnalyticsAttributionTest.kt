@@ -118,6 +118,59 @@ class AnalyticsAttributionTest {
         assertThat(env.sourceService).isEqualTo("openbank-party-service")
     }
 
+    // ---------------------------------------------------------------------------------------------
+    // Issue #4553 — the producer's spelling used to survive verbatim while both fallbacks emit
+    // uppercase, so aggregate_type recorded which path attributed the event. Measured on the sandbox
+    // warehouse: ACCOUNT 294 rows / Account 17, five account ids under BOTH, and therefore two
+    // current-state rows per account in silver_current_state (it groups by (type, id), so
+    // last-writer-wins cannot fire across the split). Transaction and Consent existed only in mixed
+    // case, so every consumer comparing against 'TRANSACTION' matched nothing.
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun `a producer's mixed-case aggregateType is normalised, so one aggregate cannot split in two`() {
+        val mixed = consumer.toEnvelope(
+            mapper.readTree(
+                """{ "aggregateType": "Account", "aggregateId": "acc-1", "eventType": "AccountCreated" }""",
+            ),
+        )
+        val upper = consumer.toEnvelope(
+            mapper.readTree(
+                """{ "aggregateType": "ACCOUNT", "aggregateId": "acc-1", "eventType": "BALANCE_UPDATED" }""",
+            ),
+        )
+
+        assertThat(mixed.aggregateType).isEqualTo("ACCOUNT")
+        // The property that matters is not the string — it is that both events reduce to ONE silver
+        // group. Asserting the pair is what a single isEqualTo("ACCOUNT") cannot express.
+        assertThat(mixed.aggregateType to mixed.aggregateId)
+            .describedAs("both spellings of one account must land in the same silver group")
+            .isEqualTo(upper.aggregateType to upper.aggregateId)
+    }
+
+    @Test
+    fun `a mixed-case type still resolves its own id field, never the accountId fallback`() {
+        // idForType is a `when (type)` over uppercase literals, so before normalisation a
+        // "Transaction" envelope fell through to `?: node["accountId"]` — pairing a TRANSACTION type
+        // with an ACCOUNT id, which is precisely what resolveAggregateId's KDoc exists to prevent and
+        // what would collapse every transaction on an account into one aggregate in silver.
+        val env = consumer.toEnvelope(
+            mapper.readTree("""{ "aggregateType": "Transaction", "transactionId": "tx-1", "accountId": "acc-1" }"""),
+        )
+
+        assertThat(env.aggregateType).isEqualTo("TRANSACTION")
+        assertThat(env.aggregateId).isEqualTo("tx-1")
+    }
+
+    @Test
+    fun `normalisation does not manufacture attribution for an unidentifiable event`() {
+        // The UNKNOWN sentinel must survive uppercasing unchanged: #2598's whole point is that an
+        // unattributed event stays visibly unattributed rather than being quietly bucketed.
+        val env = consumer.toEnvelope(mapper.readTree("""{ "somethingElse": "x" }"""), EventAddress.NONE)
+
+        assertThat(env.aggregateType).isEqualTo("UNKNOWN")
+    }
+
     @Test
     fun `every subscribed topic resolves to a domain and a service`() {
         // Scope derived from the config, never hand-kept: a list maintained separately from the

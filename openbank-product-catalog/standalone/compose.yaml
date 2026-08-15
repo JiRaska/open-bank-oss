@@ -1,0 +1,56 @@
+name: product-catalog
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: product_catalog
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - catalog-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [catalog]
+
+  catalog:
+    image: ${CATALOG_IMAGE:?Set CATALOG_IMAGE to a released product-catalog image}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    environment:
+      QUARKUS_PROFILE: standalone
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      REACTIVE_URL: postgresql://postgres:5432/product_catalog
+      JDBC_URL: jdbc:postgresql://postgres:5432/product_catalog
+      OIDC_ISSUER: ${OIDC_ISSUER:?Set OIDC_ISSUER to the issuer URL}
+      CATALOG_SCOPE_CLAIM: ${CATALOG_SCOPE_CLAIM:-scope}
+      CATALOG_READ_SCOPE: ${CATALOG_READ_SCOPE:-catalog:read}
+      CATALOG_AUTHOR_SCOPE: ${CATALOG_AUTHOR_SCOPE:-catalog:author}
+      CATALOG_PUBLISH_SCOPE: ${CATALOG_PUBLISH_SCOPE:-catalog:publish}
+      OPENBANK_CATALOG_PACKS: ${OPENBANK_CATALOG_PACKS:-}
+      OPENBANK_BANK_V1_COMPATIBILITY_ENABLED: ${OPENBANK_BANK_V1_COMPATIBILITY_ENABLED:-false}
+      QUARKUS_MANAGEMENT_HOST: 0.0.0.0
+    ports:
+      - "${CATALOG_PORT:-8104}:8104"
+      - "127.0.0.1:${MANAGEMENT_PORT:-8085}:8085"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    networks: [catalog]
+
+volumes:
+  catalog-data:
+
+networks:
+  catalog:
+    internal: false

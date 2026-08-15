@@ -22,8 +22,8 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 
 ## Dependencies
 
-- **Upstream (this service consumes):** `sca-service`, `product-catalog`, `account-service`
-- **Downstream (depends on this service):** _none declared_
+- **Upstream (this service consumes):** `account-service`
+- **Downstream (depends on this service):** `sca-service`, `product-catalog`
 
 A failure here propagates to the downstream services above — check them when
 triaging an incident that starts on `document`.

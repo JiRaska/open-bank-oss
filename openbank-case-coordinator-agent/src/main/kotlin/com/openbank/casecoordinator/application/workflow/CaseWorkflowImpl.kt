@@ -67,13 +67,23 @@ class CaseWorkflowImpl : CaseWorkflow {
             val remainingMs = start.deadlineEpochMs - Workflow.currentTimeMillis()
             if (remainingMs <= 0) {
                 status = CaseStatus.CLOSED
-                return emitTerminalProposal(start, "case-timeout", terminalSummary(start), contested = false)
+                return emitTerminalProposal(
+                    start,
+                    eventType = "case-timeout",
+                    summary = terminalSummary(start),
+                    contested = false,
+                )
             }
             Workflow.await(Duration.ofMillis(remainingMs)) { synthesisRequested || breakerTripped(start) }
             when {
                 breakerTripped(start) -> {
                     status = CaseStatus.CONTESTED
-                    return emitTerminalProposal(start, "case-contested", terminalSummary(start), contested = true)
+                    return emitTerminalProposal(
+                        start,
+                        eventType = "case-contested",
+                        summary = terminalSummary(start),
+                        contested = true,
+                    )
                 }
                 synthesisRequested -> return synthesize(start)
             }
@@ -123,17 +133,17 @@ class CaseWorkflowImpl : CaseWorkflow {
         val text = synthesis.synthesize(start.caseId, start.caseClass.name, draft)
             ?: "PENDING: synthesis backend unavailable; ${draft.size} contributions on draft v$draftVersion"
         status = CaseStatus.SYNTHESIZED
-        return emitTerminalProposal(start, "case-synthesis", text, contested = false)
+        return emitTerminalProposal(start, eventType = "case-synthesis", summary = text, contested = false)
     }
 
     private fun emitTerminalProposal(
         start: CaseStart,
-        type: String,
+        eventType: String,
         summary: String,
         contested: Boolean,
     ): CaseOutcome {
         persistence.recordContributions(start.caseId, contributions)
-        val proposalId = proposals.emitProposal(start.caseId, type, summary, contested)
+        val proposalId = proposals.emitProposal(start.caseId, eventType, summary, contested)
         persistence.recordCaseClosed(start.caseId, status.name, Workflow.currentTimeMillis())
         return CaseOutcome(
             caseId = start.caseId,

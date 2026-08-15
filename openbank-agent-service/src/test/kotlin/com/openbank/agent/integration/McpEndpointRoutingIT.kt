@@ -13,6 +13,7 @@ import io.restassured.RestAssured.given
 import io.restassured.http.ContentType
 import jakarta.ws.rs.Path
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.hasItem
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -62,5 +63,21 @@ class McpEndpointRoutingIT {
             // legitimately shape the body, but an unregistered resource can only ever be 404.
             .statusCode(not(equalTo(404)))
             .body("jsonrpc", equalTo("2.0"))
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `MCP exposes the exact catalog revision review tool as a read-only catalog capability`() {
+        given()
+            .contentType(ContentType.JSON)
+            .header("X-Agent-Id", "ui-assistant")
+            .header("X-Agent-Plane", "control")
+            .body("""{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}""")
+            .`when`().post("/mcp")
+            .then()
+            .statusCode(200)
+            .body("result.tools.name", hasItem("get_catalog_revision"))
+            .body("result.tools.find { it.name == 'get_catalog_revision' }.service", equalTo("product-catalog"))
+            .body("result.tools.find { it.name == 'get_catalog_revision' }.domain", equalTo("Core Banking"))
     }
 }

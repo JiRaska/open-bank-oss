@@ -12,6 +12,7 @@ import com.openbank.party.application.port.out.PartyOutboxRepository
 import com.openbank.party.infrastructure.persistence.entity.PartyOutboxEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
@@ -24,7 +25,7 @@ class PartyOutboxRepositoryImpl(private val clock: Clock) :
     PartyOutboxRepository,
     PanacheRepository<PartyOutboxEntity> {
 
-    fun persistInTransaction(message: OutboxMessage) = persist(message.toEntity())
+    override fun persistInTransaction(message: OutboxMessage): Uni<Void> = persist(message.toEntity()).replaceWithVoid()
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
         find(

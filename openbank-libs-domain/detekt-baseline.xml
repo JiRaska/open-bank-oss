@@ -17,22 +17,6 @@
     <ID>MagicNumber:Amortization.kt$Amortization$4</ID>
     <ID>MagicNumber:Amortization.kt$Amortization$6</ID>
     <ID>MagicNumber:AnalyticsEnvelope.kt$AnalyticsRetention$10</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_ALREADY_EXISTS$409</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_CLOSED$422</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_FROZEN$422</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.ACCOUNT_NOT_FOUND$404</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.CONFLICT$409</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.DUPLICATE_REQUEST$409</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.FORBIDDEN$403</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.INSUFFICIENT_FUNDS$422</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.INTERNAL_ERROR$500</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_AMOUNT$400</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_CURRENCY$400</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.INVALID_IBAN$400</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.NOT_FOUND$404</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE$503</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.UNAUTHORIZED$401</ID>
-    <ID>MagicNumber:ApiError.kt$ErrorCode.VALIDATION_ERROR$400</ID>
     <ID>MagicNumber:AuthorizeInterceptor.kt$AuthorizeInterceptor$100</ID>
     <ID>MagicNumber:BlindIndex.kt$BlindIndex$0xFF</ID>
     <ID>MagicNumber:BuildInfo.kt$BuildInfo$1024</ID>
@@ -77,9 +61,6 @@
     <ID>MagicNumber:Easter.kt$Easter$7</ID>
     <ID>MagicNumber:Easter.kt$Easter$8</ID>
     <ID>MagicNumber:FeatureFlagInterceptor.kt$FeatureFlagInterceptor$110</ID>
-    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$200</ID>
-    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$299</ID>
-    <ID>MagicNumber:FlagdProvider.kt$FlagdProvider$404</ID>
     <ID>MagicNumber:Iban.kt$Iban$4</ID>
     <ID>MagicNumber:Iban.kt$Iban.Companion$10</ID>
     <ID>MagicNumber:Iban.kt$Iban.Companion$15</ID>
@@ -87,8 +68,6 @@
     <ID>MagicNumber:Iban.kt$Iban.Companion$4</ID>
     <ID>MagicNumber:AnalyticsIntegrity.kt$AnalyticsIntegrity$0xFF</ID>
     <ID>MagicNumber:AnalyticsIntegrity.kt$AnalyticsIntegrity$4</ID>
-    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$200</ID>
-    <ID>MagicNumber:OpaSidecarPolicyDecisionPoint.kt$OpaSidecarPolicyDecisionPoint$299</ID>
     <ID>MagicNumber:PiiMasking.kt$PiiMask$4</ID>
     <ID>MagicNumber:PiiMasking.kt$PiiMask$6</ID>
     <ID>MagicNumber:PiiMasking.kt$PiiMask$8</ID>
@@ -115,7 +94,6 @@
     <ID>MagicNumber:RodneCislo.kt$RodneCislo$82</ID>
     <ID>MagicNumber:RodneCislo.kt$RodneCislo$9</ID>
     <ID>NewLineAtEndOfFile:CurrencyCodeTest.kt$com.openbank.libs.domain.money.CurrencyCodeTest.kt</ID>
-    <ID>NewLineAtEndOfFile:CursorEncoderTest.kt$com.openbank.libs.api.pagination.CursorEncoderTest.kt</ID>
     <ID>NewLineAtEndOfFile:IbanTest.kt$com.openbank.libs.domain.account.IbanTest.kt</ID>
     <ID>NewLineAtEndOfFile:MoneyTest.kt$com.openbank.libs.domain.money.MoneyTest.kt</ID>
     <ID>ThrowsCount:AuthorizeInterceptor.kt$AuthorizeInterceptor$@AroundInvoke fun authorize(ctx: InvocationContext): Any?</ID>

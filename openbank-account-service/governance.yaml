@@ -11,22 +11,27 @@ retentionPolicy: 7 years
 evidenceExported: true
 lineage:
   upstream:
-    - serviceName: transaction-service
-      relationType: api
-      description: validates
     - serviceName: interest-service
       relationType: api
       description: accrues
-    - serviceName: card-issuance-service
-      relationType: api
-      description: issues
-    - serviceName: consent-service
-      relationType: api
-      description: accesses
     - serviceName: agent-service
       relationType: api
       description: MCP tool
+    # Removed (issue #3982): `card-issuance-service (api, "issues")` and
+    # `consent-service (api, "accesses")` — neither service has a client for account-service
+    # (card-issuance's only configKeys are none at all, consent's only one is sca-service) and
+    # neither declares an account-service URL in its Deployment env. Phantom edges.
   downstream:
+    # Direction corrected (issue #3982): declared as `upstream: transaction-service
+    # ("validates")`, i.e. transaction-service -> account-service. The code says the opposite —
+    # account-service owns TransactionServiceClient(configKey = "transaction-service") and its
+    # Deployment env carries TRANSACTION_SERVICE_URL, while transaction-service has no
+    # account-service client at all (its own downstream edge to account-service is allowlisted
+    # as indirect, via BalanceCoverClient). Deleting it would have dropped a true edge; it was
+    # pointing the wrong way, not absent.
+    - serviceName: transaction-service
+      relationType: api
+      description: books the cash leg via TransactionServiceClient
     - serviceName: balance-service
       relationType: api
       description: init

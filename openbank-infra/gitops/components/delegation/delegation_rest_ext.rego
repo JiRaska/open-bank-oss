@@ -64,6 +64,15 @@ allowed_reasons contains "edge-service-delegation" if {
 		"delegation.decline",
 		"delegation.renounce",
 		"delegation.revoke",
+		# ADR-0249 D3. The reservation trio is the customer's own spending path — the edge
+		# authenticates the human and injects X-Customer-Party-Id, and delegation-service refuses
+		# any handler whose claimed party differs from it, so these carry no more authority than
+		# the sharing actions above. They are enumerated rather than folded into a
+		# `startswith(input.action, "delegation.")` prefix for the reason this set exists at all:
+		# a prefix would also hand the edge suspend/reinstate, which are bank acts.
+		"delegation.reserve",
+		"delegation.reserve.confirm",
+		"delegation.reserve.release",
 	}
 }
 

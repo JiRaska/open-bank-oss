@@ -1,0 +1,295 @@
+.dashboard {
+  max-width: 1560px;
+  min-height: 100%;
+  padding: 24px 36px 48px;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.dashboard :global(.page-header) {
+  position: relative;
+  align-items: center;
+  min-height: 136px;
+  margin-bottom: 18px;
+  padding: 28px;
+  overflow: hidden;
+  background: linear-gradient(118deg, #111a35 0%, #172657 54%, #30338f 100%);
+  border: 1px solid rgba(129, 140, 248, 0.42);
+  border-radius: 18px;
+  box-shadow: 0 18px 42px rgba(31, 41, 105, 0.17);
+}
+.dashboard :global(.page-header)::after { position: absolute; top: -96px; right: 15%; width: 260px; height: 260px; content: ''; pointer-events: none; background: radial-gradient(circle, rgba(165, 180, 252, 0.28), transparent 67%); }
+.dashboard :global(.page-title) { color: #fff; font-size: 29px; letter-spacing: -0.045em; }
+.dashboard :global(.page-subtitle) { max-width: 680px; color: #cbd5e1; font-size: 14px; }
+
+.headerIcon {
+  color: #a5b4fc;
+}
+
+.headerActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lastRefresh {
+  color: #cbd5e1;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.metric {
+  min-height: 122px;
+  padding: 20px;
+  border-radius: 14px;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.045);
+}
+.metrics > :nth-child(1) { border-top: 3px solid var(--accent); }
+.metrics > :nth-child(2) { border-top: 3px solid var(--info); }
+.metrics > :nth-child(3) { border-top: 3px solid var(--success); }
+.metrics > :nth-child(4) { border-top: 3px solid var(--warning); }
+
+.healthOverview,
+.serviceGroup,
+.quickAccess {
+  padding: 18px;
+}
+
+.healthOverview {
+  margin-bottom: 16px;
+  color: #dbeafe;
+  background: linear-gradient(120deg, #121c36, #1c2b55);
+  border-color: #273966;
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.13);
+}
+.healthOverview:hover { border-color: #3f568d; }
+.healthOverview .sectionLabel { color: #c7d2fe; }
+
+.sectionLabel {
+  margin: 0 0 14px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.healthGroups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px 24px;
+}
+
+.healthGroupHeader,
+.serviceGroupHeader,
+.serviceGroupTitle {
+  display: flex;
+  align-items: center;
+}
+
+.healthGroupHeader,
+.serviceGroupHeader {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.healthGroupHeader {
+  margin-bottom: 7px;
+}
+
+.groupName {
+  color: #f8fafc;
+  font-size: 12px;
+  font-weight: 650;
+  text-transform: capitalize;
+}
+
+.groupSummary {
+  color: #cbd5e1;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.healthBar {
+  height: 7px;
+  overflow: hidden;
+  background: rgba(148, 163, 184, 0.2);
+  border-radius: 999px;
+}
+
+.healthBarFill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+.serviceGroups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.serviceGroupHeader {
+  margin-bottom: 14px;
+}
+.serviceGroup { min-height: 142px; border-radius: 14px; }
+
+.serviceGroupTitle {
+  gap: 8px;
+  min-width: 0;
+}
+
+.serviceGroupTitle .sectionLabel {
+  margin-bottom: 0;
+}
+
+.groupDot,
+.serviceDot {
+  display: inline-block;
+  flex: 0 0 auto;
+  border-radius: 50%;
+}
+
+.groupDot {
+  width: 8px;
+  height: 8px;
+}
+
+.groupStatus {
+  flex: 0 0 auto;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.serviceChips,
+.quickLinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.serviceChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.serviceChipHealthy {
+  background: var(--success-bg);
+  border-color: var(--success-border);
+  color: var(--success-text);
+}
+
+.serviceChipHealthy .serviceDot {
+  background: var(--success);
+}
+
+.serviceChipUnhealthy {
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+  color: var(--danger-text);
+}
+
+.serviceChipUnhealthy .serviceDot {
+  background: var(--danger);
+}
+
+.serviceChipPlanned {
+  background: var(--surface-2);
+  color: var(--text-tertiary);
+  opacity: 0.78;
+}
+
+.serviceChipPlanned .serviceDot {
+  background: var(--text-tertiary);
+}
+
+.serviceDot {
+  width: 5px;
+  height: 5px;
+}
+
+.serviceLatency {
+  opacity: 0.7;
+}
+
+.quickLink {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.quickLinkContent {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.15s ease;
+}
+
+.quickLink:hover .quickLinkContent,
+.quickLink:focus-visible .quickLinkContent {
+  border-color: var(--quick-link-accent);
+  background: var(--surface-2);
+  transform: translateY(-1px);
+}
+
+.quickLink:focus-visible {
+  outline: none;
+}
+
+@media (max-width: 1180px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .healthGroups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .dashboard {
+    padding: 16px 14px 32px;
+  }
+  .dashboard :global(.page-header) { min-height: auto; padding: 22px 18px; border-radius: 14px; }
+
+  .headerActions {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+
+  .metrics,
+  .healthGroups,
+  .serviceGroups {
+    grid-template-columns: 1fr;
+  }
+
+  .serviceGroupHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .groupStatus {
+    white-space: normal;
+  }
+}

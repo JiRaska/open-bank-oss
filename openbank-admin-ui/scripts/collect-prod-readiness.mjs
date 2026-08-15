@@ -38,15 +38,56 @@ const OUT    = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'prod-
 const TODAY  = process.env.READINESS_TODAY ?? new Date().toISOString().slice(0, 10)
 
 // ---------------------------------------------------------------------------
-// Money-path services (mirrors rules.yaml: money_path_services).
-// Short names (strip openbank-…-service).
+// Money-path services — DERIVED from rules.yaml: money_path_services.
+//
+// This used to be a hand-copied literal of 14 short names "mirroring" rules.yaml. It drifted,
+// exactly as CLAUDE.md says a second copy of a governance list always does: rules.yaml declared
+// 23 and this file listed 14, so NINE declared money-path services (billing, delegation,
+// interest, psd2, sanctions, sdd, settlement, standing-order, vop) were scored with the LENIENT
+// non-money-path gate — and billing and sdd therefore read GO in the shipped matrix, billing
+// being a service rules.yaml itself records as still gated on "real-env e2e verification +
+// four-eyes enforcement flip" (#2365).
+//
+// The Python collector fixed precisely this under #2364 (gitops_facts.money_path_services) —
+// but the deploy build runs THIS file (package.json `prebuild`, admin-ui-deploy.yml), so the
+// fix landed in the copy CI never executes and the shipped artifact kept the stale literal.
+// Deriving is the only form that cannot drift again.
+//
+// Throws when the list cannot be read: an empty set would make every service non-money-path and
+// silently relax the gate for all of them — the reassuring-answer-from-a-broken-probe failure
+// this repo keeps finding. Failing the build is the correct outcome.
 // ---------------------------------------------------------------------------
-const MONEY_PATH = new Set([
-  'ledger', 'transaction', 'account', 'balance',
-  'sepa-payment', 'sepa-instant', 'domestic-payment',
-  'clearing', 'swift', 'fx',
-  'lending', 'sca', 'consent', 'fraud',
-])
+function moneyPathServices() {
+  const rules = path.join(REPO, 'openbank-libs', 'governance', 'rules.yaml')
+  const text = readText(rules)
+  if (!text.includes('money_path_services:')) {
+    throw new Error(
+      `money_path_services not found in ${rules} — refusing to score with an empty money-path ` +
+      `set, which would relax the gate for every service`,
+    )
+  }
+  const out = new Set()
+  for (const line of text.split('money_path_services:')[1].split('\n')) {
+    const m = line.match(/^\s+-\s+openbank-([a-z0-9-]+?)(?:-service)?\s*(?:#.*)?$/)
+    if (m) { out.add(m[1]); continue }
+    // dedented out of the list
+    if (line.trim() && !line.trim().startsWith('#') && !line.startsWith('    ')) break
+  }
+  if (out.size === 0) {
+    throw new Error(
+      `money_path_services in ${rules} parsed to an empty set — refusing to score, since that ` +
+      `would silently relax the gate for every service`,
+    )
+  }
+  return out
+}
+
+let _moneyPath = null
+/** Memoised money-path set. Lazy so the throw lands at collect time, not import time. */
+function moneyPath() {
+  if (_moneyPath === null) _moneyPath = moneyPathServices()
+  return _moneyPath
+}
 
 const DIMENSIONS = [
   { code: 'C1', name: 'Kód' },
@@ -63,7 +104,19 @@ const DIMENSIONS = [
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+/**
+ * The module's directory, whichever naming shape it uses.
+ *
+ * openbank-sepa-payment, openbank-sepa-instant and openbank-domestic-payment carry no `-service`
+ * suffix, so the `-service`-only form resolved to a path that does not exist and every scorer
+ * read 0 for them. Falls back to the `-service` shape so a caller reporting on a missing module
+ * still gets a sensible path. Mirrors gitops_facts.module_dir.
+ */
 function svcDir(short) {
+  for (const shape of [`openbank-${short}-service`, `openbank-${short}`]) {
+    const candidate = path.join(REPO, shape)
+    try { if (statSync(candidate).isDirectory()) return candidate } catch { /* next shape */ }
+  }
   return path.join(REPO, `openbank-${short}-service`)
 }
 
@@ -173,10 +226,13 @@ function attestFresh(svc, key) {
   const rec = ATT[svc]?.[key]
   if (!rec || typeof rec !== 'object' || !rec.date) return false
   const ttl = parseInt(rec.ttl_days ?? '365', 10) || 365
-  const d = rec.date.split('-').map(Number)
-  const t = TODAY.split('-').map(Number)
-  const days = (t[0] - d[0]) * 365 + (t[1] - d[1]) * 30 + (t[2] - d[2])
-  return days >= 0 && days <= ttl
+  // Exact calendar arithmetic. The previous form approximated a year as 365 days and a
+  // month as 30, which let a TTL run past its own expiry (#2365): ledger's 21-day pentest,
+  // dated 2026-07-26, still counted on 2026-08-17. A TTL that outlives itself is the one
+  // thing this mechanism exists to prevent.
+  const DAY = 86400000
+  const days = Math.round((Date.parse(`${TODAY}T00:00:00Z`) - Date.parse(`${rec.date}T00:00:00Z`)) / DAY)
+  return Number.isFinite(days) && days >= 0 && days <= ttl
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +392,7 @@ const SCORERS = [
 // Gate logic
 // ---------------------------------------------------------------------------
 function computeGate(short, scores) {
-  const mp = MONEY_PATH.has(short)
+  const mp = moneyPath().has(short)
   const critical = new Set(['C1', 'C5', 'C7'])
   for (const { code } of DIMENSIONS) {
     const need = mp && critical.has(code) ? 3 : 2
@@ -348,16 +404,30 @@ function computeGate(short, scores) {
 // ---------------------------------------------------------------------------
 // Service discovery
 // ---------------------------------------------------------------------------
+/**
+ * Every module the matrix scores: the `-service` modules PLUS every declared money-path one.
+ *
+ * The `openbank-*-service` glob alone missed openbank-sepa-payment, openbank-sepa-instant and
+ * openbank-domestic-payment — three released components which rules.yaml declares money-path and
+ * which move SEPA and domestic payments. They had no row at all, so every headline this collector
+ * produced silently excluded them (#2364, fixed in the Python collector only; #2365).
+ *
+ * Deliberately NOT widened to every module carrying a governance.yaml: that is a scoping decision
+ * about what the matrix covers, not a correctness fix. Mirrors prod-readiness-collector.all_services.
+ */
 function allServices() {
-  const out = []
+  const out = new Set()
   for (const entry of readdirSync(REPO).sort()) {
     const m = entry.match(/^openbank-(.+)-service$/)
     if (!m) continue
     const d = path.join(REPO, entry)
     try { if (!statSync(d).isDirectory()) continue } catch { continue }
-    out.push(m[1])
+    out.add(m[1])
   }
-  return out
+  for (const short of moneyPath()) {
+    try { if (statSync(svcDir(short)).isDirectory()) out.add(short) } catch { /* absent module */ }
+  }
+  return [...out].sort()
 }
 
 // ---------------------------------------------------------------------------
@@ -372,7 +442,7 @@ function collectService(short) {
     evidence[code] = ev
   }
   const gate = computeGate(short, scores)
-  return { service: short, money_path: MONEY_PATH.has(short), scores, evidence, gate }
+  return { service: short, money_path: moneyPath().has(short), scores, evidence, gate }
 }
 
 // ---------------------------------------------------------------------------

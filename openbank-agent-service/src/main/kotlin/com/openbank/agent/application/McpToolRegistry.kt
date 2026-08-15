@@ -45,6 +45,15 @@ class McpToolRegistry {
 
     @Inject lateinit var auditPublisher: AuditEventPublisher
 
+    /**
+     * Charter lookup for AI attribution (ADR-0031 D5, issue #3667). The acting model id is derived
+     * from the actor's charter rather than threaded through every dispatch signature: the charter is
+     * the declaration of record for which model an agent runs, and it is keyed by exactly the
+     * `actorId` this class already carries. An unregistered actor yields
+     * [CharterRegistry.UNKNOWN_MODEL] — the attribution is then explicitly unknown, never absent.
+     */
+    @Inject lateinit var charters: CharterRegistry
+
     private val log = Logger.getLogger(McpToolRegistry::class.java)
 
     val tools: List<ToolDefinition> = listOf(
@@ -111,6 +120,15 @@ class McpToolRegistry {
             description = "Get a product's fee schedule.",
             inputSchema = schema(
                 "productId" to (stringProp("Product id or code") to true),
+            ),
+        ),
+        ToolDefinition(
+            name = "get_catalog_revision",
+            description = "Get one exact v2 catalog revision for grounded draft review. Read-only; " +
+                "it cannot create, replace, publish or retire a revision.",
+            inputSchema = schema(
+                "offeringId" to (stringProp("UUID of the offering that owns the revision") to true),
+                "revisionId" to (stringProp("UUID of the exact catalog revision") to true),
             ),
         ),
         ToolDefinition(
@@ -338,6 +356,7 @@ class McpToolRegistry {
         "list_products" to "query.catalog.readonly",
         "get_product" to "query.catalog.readonly",
         "get_product_fees" to "query.catalog.readonly",
+        "get_catalog_revision" to "query.catalog.readonly",
         // Journal posting/listing touches the GL write model — query.ledger.readonly is correct.
         "list_ledger_journals" to "query.ledger.readonly",
         // Trial balance is a GL aggregate read (Refs #299 / ADR-0031): dedicated query.gl.readonly
@@ -467,7 +486,9 @@ class McpToolRegistry {
                 "'$flagKey' defaultVariant to '$targetVariant'. Verify behaviour in staging " +
                 "before approving for production.",
             proposedBy = actorId,
-            modelId = null,
+            // ADR-0031 D5 (#3667): an MCP-drafted proposal is AI-attributed, so it records the
+            // acting agent's charter-declared model rather than a null the audit cannot interpret.
+            modelId = charters.modelId(actorId),
             correlationId = null,
         )
         auditFlip(
@@ -503,7 +524,9 @@ class McpToolRegistry {
             rationale = args.requiredString("rationale"),
             suggestedAction = args.requiredString("suggested_action"),
             proposedBy = actorId,
-            modelId = null,
+            // ADR-0031 D5 (#3667): an MCP-drafted proposal is AI-attributed, so it records the
+            // acting agent's charter-declared model rather than a null the audit cannot interpret.
+            modelId = charters.modelId(actorId),
             correlationId = null,
         )
         return objectMapper.createObjectNode()
@@ -528,7 +551,9 @@ class McpToolRegistry {
                     resourceType = "feature-flag",
                     resourceId = flagKey,
                     result = result,
-                    payload = payload,
+                    // AI attribution (ADR-0031 D5, #3667). A caller-supplied model_id is never
+                    // overwritten; today no caller supplies one, so the charter value applies.
+                    payload = payload + ("model_id" to (payload["model_id"] ?: charters.modelId(actorId))),
                 ),
             )
         }
@@ -551,6 +576,7 @@ class McpToolRegistry {
             payload = buildMap {
                 put("tool", toolName)
                 put("outcome", result.name)
+                put("model_id", charters.modelId(actorId))
                 errorKey?.let { put("error", it) }
             },
         )

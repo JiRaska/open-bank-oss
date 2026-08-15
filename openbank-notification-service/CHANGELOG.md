@@ -1,5 +1,61 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.2...notification-service-v0.23.0) (2026-08-14)
+
+
+### Features
+
+* **scheduler:** register workflow liveness on four retention and cleanup jobs (ADR-0237) ([#4739](https://github.com/JiRaska/open-bank-oss/issues/4739)) ([c2a2fa4](https://github.com/JiRaska/open-bank-oss/commit/c2a2fa4b788a172ef85c8babb439cecd10fbfe23)), closes [#3345](https://github.com/JiRaska/open-bank-oss/issues/3345)
+
+## [0.22.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.1...notification-service-v0.22.2) (2026-08-13)
+
+
+### Bug Fixes
+
+* **notification:** count the outcome events published for a notification row that does not exist ([#4711](https://github.com/JiRaska/open-bank-oss/issues/4711)) ([e6b05dc](https://github.com/JiRaska/open-bank-oss/commit/e6b05dc5b8d9403f3f95c658898e9c0690f95d65)), closes [#4512](https://github.com/JiRaska/open-bank-oss/issues/4512)
+
+## [0.22.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.0...notification-service-v0.22.1) (2026-08-13)
+
+
+### Bug Fixes
+
+* **notification:** record device sweep liveness ([#4650](https://github.com/JiRaska/open-bank-oss/issues/4650)) ([67cfb60](https://github.com/JiRaska/open-bank-oss/commit/67cfb60b5588c2ebf1ede760ae70d927900fc48d))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.21.0...notification-service-v0.22.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add push interaction reference ([#4516](https://github.com/JiRaska/open-bank-oss/issues/4516)) ([1bb708b](https://github.com/JiRaska/open-bank-oss/commit/1bb708b5f3d5bd8af2c578f4f530bd665bbe7e3e))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.20.0...notification-service-v0.21.0) (2026-08-13)
+
+
+### Features
+
+* **campaign:** add measured holdout experiments ([#4471](https://github.com/JiRaska/open-bank-oss/issues/4471)) ([8756228](https://github.com/JiRaska/open-bank-oss/commit/8756228553b5daa828762cace3a84457d3a4b816))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.1...notification-service-v0.20.0) (2026-08-09)
+
+
+### Features
+
+* **notification:** tag push fan-outs by template so an undelivered SCA approval can be alerted on ([#4362](https://github.com/JiRaska/open-bank-oss/issues/4362)) ([347f1c6](https://github.com/JiRaska/open-bank-oss/commit/347f1c6f035da6cba461c5111f567e2e7325e196))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.19.0...notification-service-v0.19.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **notification:** persist WHY a delivery failed (complements ADR-0252's counters) ([#4349](https://github.com/JiRaska/open-bank-oss/issues/4349)) ([28295b3](https://github.com/JiRaska/open-bank-oss/commit/28295b35453627d72e171284126286a7ad44ae43))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.1...notification-service-v0.19.0) (2026-08-09)
+
+
+### Features
+
+* **notification:** ADR-0252 synthetic assurance — phase 0, make the push channel observable ([#4351](https://github.com/JiRaska/open-bank-oss/issues/4351)) ([98c3623](https://github.com/JiRaska/open-bank-oss/commit/98c36233a0f8a55bb2be191a8b7142b77e9db492))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.18.0...notification-service-v0.18.1) (2026-08-08)
 
 

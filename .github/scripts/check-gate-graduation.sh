@@ -27,6 +27,54 @@
 # ENFORCED.
 # Usage: check-gate-graduation.sh [rules.yaml path]   (default: openbank-libs/governance/rules.yaml)
 set -euo pipefail
+
+# --- self-test ------------------------------------------------------------------------
+# ADR-0144: an advisory/planned rule must carry a target_enforce_date, and that date must not
+# be in the past. Without it "advisory" is permanent by default — the rule reads as a control
+# forever while enforcing nothing, which is the failure this whole gate estate keeps hitting.
+#
+# The check is an awk state machine over a 3-line lookahead, so the interesting cases are the
+# ones about DISTANCE and ORDER, not about the happy path.
+if [ "${1:-}" = "--self-test" ]; then
+  set +e
+  td=$(mktemp -d); trap 'rm -rf "$td"' EXIT
+  fails=0
+  past=$(date -u -v-1d +%Y-%m-%d 2>/dev/null || date -u -d 'yesterday' +%Y-%m-%d)
+  future=$(date -u -v+1y +%Y-%m-%d 2>/dev/null || date -u -d '+1 year' +%Y-%m-%d)
+
+  expect() { local label="$1" body="$2" want="$3" sub="${4:-}" out rc
+    printf '%b' "$body" > "$td/rules.yaml"
+    out=$(bash "$0" "$td/rules.yaml" 2>&1); rc=$?
+    if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
+    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
+
+  # The only clean shape: advisory WITH a live date.
+  expect "advisory with a future date is clean" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$future\"\n" 0 "all carry a live"
+  # THE DEFECT: no date at all, so advisory never expires.
+  expect "advisory with NO date is FLAGGED" \
+    "rule_a:\n  enforced: advisory\n  gate: x\n  detect: y\n  require: z\n" 1 "no target_enforce_date"
+  # ...and an expired one, which is the same permanence with a paper trail.
+  expect "an EXPIRED date is FLAGGED" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$past\"\n" 1 "has passed"
+  # `planned` is the same state under a different word.
+  expect "planned is treated like advisory" \
+    "rule_a:\n  enforced: planned\n  gate: x\n  detect: y\n  require: z\n" 1 "no target_enforce_date"
+  # SCOPE: an enforced rule needs no date, and demanding one would be nonsense.
+  expect "an enforced rule is out of scope" \
+    "rule_a:\n  enforced: enforce\n  gate: x\n" 0 "0 advisory/planned rule(s) checked"
+  # DISTANCE: the date must be found within the 3-line window. Beyond it the rule is treated
+  # as dateless — that is the intended behaviour and it must stay deliberate, not incidental.
+  expect "a date more than 3 lines away is not credited" \
+    "rule_a:\n  enforced: advisory\n  a: 1\n  b: 2\n  c: 3\n  d: 4\n  target_enforce_date: \"$future\"\n" 1 "no target_enforce_date"
+  # A file with no advisory rules at all must say ZERO rather than read like a clean estate.
+  expect "a file with no advisory rules reports 0 checked" "rule_a:\n  enforced: enforce\n" 0 "0 advisory/planned"
+
+  if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
+  echo "self-test ok: gate-graduation guard is falsifiable (7 cases)"
+  exit 0
+fi
 rules="${1:-openbank-libs/governance/rules.yaml}"
 [ -f "$rules" ] || { echo "::error::check-gate-graduation: $rules not found" >&2; exit 1; }
 

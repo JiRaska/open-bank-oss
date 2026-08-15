@@ -186,6 +186,12 @@ openbank:
       # the cover hold as the booked delta lands (referenceId == transactionId). Deploy together: with
       # the saga debit still live this double-counts the booked movement.
       enabled: true
+    value-date-roll:
+      # ADR-0178 Phase 2 (#1745). Announces credits that became effective as the accounting day
+      # rolled over, so downstream consumers learn the money is spendable. It publishes only — the
+      # effective figures are derived per read, so a missed run delays a notification and can never
+      # leave a balance wrong. 00:05 Europe/Prague, just after the accounting day turns.
+      cron: "0 5 0 * * ?"
   outbox:
     dispatch-enabled: true
   rate-limit:

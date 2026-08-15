@@ -55,6 +55,7 @@ import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import org.jboss.resteasy.reactive.MultipartForm
 import org.jboss.resteasy.reactive.PartType
 import java.net.URI
+import java.time.Instant
 import java.util.UUID
 
 @Path("/api/v1/parties")
@@ -125,7 +126,12 @@ class PartyResource {
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
     @Operation(summary = "Create a new party (customer or company)")
-    suspend fun createParty(req: CreatePartyRequest, @HeaderParam("Idempotency-Key") idempotencyKey: String): Response {
+    suspend fun createParty(
+        req: CreatePartyRequest,
+        // Nullable by necessity — JAX-RS injects null for an absent header (#526, #3624).
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+    ): Response {
+        requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
         val party = partyUseCase.createParty(req.toCommand(idempotencyKey))
         return Response.created(URI.create("/api/v1/parties/${party.id}")).entity(party.toResponse()).build()
     }
@@ -168,10 +174,19 @@ class PartyResource {
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "party.update", resource = "#id")
-    @Operation(summary = "Update party contact details")
+    @Operation(summary = "Update party contact details or material master data")
     suspend fun updateParty(@PathParam("id") id: UUID, req: UpdatePartyRequest): Response {
         val party = partyUseCase.updateParty(
-            UpdatePartyCommand(id, req.email, req.phone, req.address?.toDomain(), req.tradingName),
+            UpdatePartyCommand(
+                id = id,
+                email = req.email,
+                phone = req.phone,
+                address = req.address?.toDomain(),
+                tradingName = req.tradingName,
+                legalName = req.legalName,
+                dateOfBirth = req.dateOfBirth,
+                nationality = req.nationality,
+            ),
         )
         return Response.ok(party.toResponse()).build()
     }
@@ -320,7 +335,8 @@ class PartyResource {
         summary = "Merge a duplicate party into a surviving party (ADR-0179)",
         description = "Retires {id} as a duplicate, preserving all PII and history. NOT erasure: " +
             "no anonymization, no PARTY_ERASED event. Refuses while the duplicate still owns an " +
-            "open account — sweep the balances via a ledger ADJUSTMENT journal entry and close " +
+            "open account — sweep the balances via POST /api/v1/transactions/merge-sweep " +
+            "(transaction-service, ADR-0179) and close " +
             "the account first. Four-eyes gated (ADR-0155): when four-eyes enforcement is on, the " +
             "first call returns 202 with an approvalId; a DIFFERENT operator decides it via " +
             "PATCH /api/v1/parties/approvals/{approvalId} and the maker retries this call with an " +
@@ -493,6 +509,7 @@ class PartyResource {
                             Response.Status.SERVICE_UNAVAILABLE.statusCode,
                             "DEDUP_UNAVAILABLE",
                             "RČ dedup pepper not configured; uniqueness not enforced",
+                            timestamp = Instant.now(),
                         ),
                     ).build()
             } else {
@@ -503,6 +520,7 @@ class PartyResource {
                             Response.Status.NOT_FOUND.statusCode,
                             "PARTY_NOT_FOUND",
                             "No party matches the supplied RČ",
+                            timestamp = Instant.now(),
                         ),
                     ).build()
             }
@@ -577,14 +595,22 @@ data class CreatePartyRequest(
     }
 }
 
+/**
+ * All fields optional; null leaves the stored value alone. `legalName`, `dateOfBirth` and
+ * `nationality` are the MATERIAL master-data fields — editing one classifies the emitted
+ * `PARTY_UPDATED` as MATERIAL (ADR-0256 D1, #4458).
+ */
 data class UpdatePartyRequest(
     val email: String?,
     val phone: String?,
     val tradingName: String?,
     val address: AddressRequest?,
+    val legalName: String? = null,
+    val dateOfBirth: String? = null,
+    val nationality: String? = null,
 )
 
-/** ADR-0179. [approvalReference] links the ledger ADJUSTMENT journal that swept the balances. */
+/** ADR-0179. [approvalReference] links the merge-sweep transaction that swept the balances. */
 data class MergePartyRequest(val mergedIntoPartyId: UUID, val reason: String, val approvalReference: String? = null)
 data class UpdateConsentRequest(val marketingConsent: Boolean)
 data class AddDocumentRequest(

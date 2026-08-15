@@ -6,9 +6,11 @@ package com.openbank.copilot.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.copilot.application.port.out.ConversationStore
+import com.openbank.copilot.infrastructure.observability.CopilotMetricsAdapter
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -22,6 +24,7 @@ import java.util.UUID
 class PartyErasureConsumerTest {
 
     private val conversationStore = mockk<ConversationStore>()
+    private val metrics = mockk<CopilotMetricsAdapter>(relaxed = true)
     private lateinit var consumer: PartyErasureConsumer
 
     @BeforeEach
@@ -29,7 +32,48 @@ class PartyErasureConsumerTest {
         consumer = PartyErasureConsumer().also {
             it.conversationStore = conversationStore
             it.objectMapper = ObjectMapper()
+            it.metrics = metrics
         }
+    }
+
+    @Test
+    fun `a delete that removed rows is counted as erased`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { conversationStore.deleteForParty(partyId.toString()) } returns 2L
+
+        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+
+        verify(exactly = 1) { metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_ERASED) }
+        verify(exactly = 0) { metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_NO_MATCH) }
+    }
+
+    /**
+     * The #4175 half that a log line could not express: an erasure that matched nothing is a
+     * DIFFERENT outcome from one that removed rows, and must be readable by an alert or a query
+     * rather than by grepping INFO for the digit zero.
+     *
+     * RED against `origin/main`: the consumer had no metrics port at all, so both cases produced
+     * the same `log.infof` and nothing downstream could tell them apart.
+     */
+    @Test
+    fun `a delete that matched nothing is counted as no_match, not as a successful erasure`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { conversationStore.deleteForParty(partyId.toString()) } returns 0L
+
+        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+
+        verify(exactly = 1) { metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_NO_MATCH) }
+        verify(exactly = 0) { metrics.recordPartyErasure(CopilotMetricsAdapter.OUTCOME_ERASED) }
+    }
+
+    @Test
+    fun `a store failure counts neither outcome`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { conversationStore.deleteForParty(partyId.toString()) } throws IllegalStateException("db down")
+
+        consumer.consume("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+
+        verify(exactly = 0) { metrics.recordPartyErasure(any()) }
     }
 
     @Test

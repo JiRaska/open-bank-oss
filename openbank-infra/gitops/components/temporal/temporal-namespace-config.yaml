@@ -66,7 +66,9 @@ data:
   # namespace Temporal has never held — ~2,000 ERROR lines/hour into Loki, and no
   # origination workflow could start. Nothing went red: the pod is 2/2 and its readiness
   # probe does not touch Temporal, so the only evidence was the log volume.
-  NAMESPACES: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending"
+  # case-coordinator-agent → openbank-casecoord (ADR-0244 case workflows; task queue
+  # `case-coordinator` is a task queue, not a namespace, and stays out of this list).
+  NAMESPACES: "openbank-default openbank-payments openbank-fx openbank-statements openbank-settlement openbank-finops openbank-devops openbank-liveness openbank-governance openbank-release openbank-docstruth openbank-authzaudit openbank-flakytest openbank-campaign openbank-lending openbank-casecoord"
   RETENTION: "168h"
   # Idempotent: each namespace is `describe`d first and only created if absent; a lost
   # race on create is tolerated when the error says "already exists".

@@ -58,6 +58,8 @@ import re
 import subprocess
 import sys
 
+import gatelib
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 SCRIPTS_DIR = REPO / ".github/scripts"
 MANIFEST = REPO / ".github/gates/gates.yaml"
@@ -77,8 +79,8 @@ HELPERS: dict[str, str] = {}
 # defect it exists to find.
 def invocation_re(name: str) -> re.Pattern[str]:
     # A COMMAND POSITION, not merely a path: after a runner, after `./`, after a workflow `run:`,
-    # or after a shell operator. `agent-review.yml:464` runs an executable script by bare relative
-    # path (`run: .github/scripts/check-claude-fallback-result.sh "$F"`), so `run:` has to count —
+    # or after a shell operator. `agent-review.yml:464` (retired #2161) ran an executable script by bare relative
+    # path (`run: .github/scripts/a workflow-invoked helper (the retired agent-review pair, #2161) "$F"`), so `run:` has to count —
     # but a bare path anywhere is exactly the rules.yaml `ci_producer:` shape that #3240 was about.
     #
     # Line-start alone is deliberately NOT a command position, even though a shell script could
@@ -131,7 +133,7 @@ def coverage(names: list[str] | None = None) -> tuple[dict[str, str], list[str]]
     script resolved left the self-test green.
     """
     names = names if names is not None else [p.name for p in check_scripts()]
-    manifest_text = MANIFEST.read_text(encoding="utf-8") if MANIFEST.is_file() else ""
+    manifest_text = gatelib.read_text(MANIFEST) if MANIFEST.is_file() else ""
 
     covered: dict[str, str] = {}
     pending = []
@@ -149,7 +151,7 @@ def coverage(names: list[str] | None = None) -> tuple[dict[str, str], list[str]]
             if path.parent == SCRIPTS_DIR or path == MANIFEST:
                 continue
             try:
-                text = strip_comments(path.read_text(encoding="utf-8", errors="ignore"))
+                text = strip_comments(gatelib.read_text(path, errors="ignore"))
             except OSError:
                 continue
             for name in list(pending):
@@ -169,7 +171,7 @@ def stale_helpers(covered: dict[str, str]) -> list[str]:
     """A HELPERS entry that is wrong in either direction is itself a finding."""
     names = {p.name for p in check_scripts()}
     stale = []
-    for name, reason in HELPERS.items():
+    for name in HELPERS:
         if name not in names:
             stale.append(f"{name} is declared a helper but does not exist")
         elif not covered.get(name, "").startswith("declared helper"):
@@ -191,7 +193,7 @@ def selftest() -> int:
         "  ./check-demo.py",
         "python3 scripts/check-demo.py",
         # An executable run by bare relative path from a workflow step — the real shape in
-        # agent-review.yml, and the one the stricter first draft of this regex missed.
+        # agent-review.yml (retired #2161), and the one the stricter first draft of this regex missed.
         "        run: .github/scripts/check-demo.py \"$EXECUTION_FILE\"",
         "make thing && python3 check-demo.py",
     ]
@@ -234,7 +236,7 @@ def selftest() -> int:
     # an earlier version asserted only "something was covered", and stayed green when the manifest
     # lookup was broken to cover everything unconditionally.
     orphan_probe = "check-this-name-is-referenced-nowhere-selftest.py"
-    real = next((p.name for p in names if p.name in MANIFEST.read_text(encoding="utf-8")), None)
+    real = next((p.name for p in names if p.name in gatelib.read_text(MANIFEST)), None)
     if real is None:
         print("selftest FAIL: no check-* script is in gates.yaml — the manifest read is broken.")
         return 1

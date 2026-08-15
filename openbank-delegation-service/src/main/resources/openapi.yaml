@@ -5,7 +5,7 @@ info:
     Customer-to-party delegated access (ADR-0232): granular, SCA-bound grants over
     products (accounts, savings goals, cards) and single objects (payment, statement,
     document). Lifecycle: OFFERED → ACTIVE → SUSPENDED/REVOKED/EXPIRED/RENOUNCED/DECLINED.
-  version: 1.3.0
+  version: 1.4.0
 servers:
   - url: http://localhost:8126
 tags:
@@ -32,10 +32,17 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationResponse' }
         '400':
-          description: >-
-            Validation or SCA failure. `code: CUMULATIVE_LIMIT_UNSUPPORTED` when the body carries
-            dailyLimit or monthlyLimit — ceilings this platform accepts nowhere because it enforces
-            nowhere. Refused before the SCA challenge is spent, so the customer keeps their ceremony.
+          description: |
+            Validation or SCA failure. Machine-readable `code`:
+
+            * `CUMULATIVE_LIMIT_UNSUPPORTED` — dailyLimit/monthlyLimit on a grant with no
+              money-moving capability, where nothing would ever reserve against them.
+            * `SPEND_WITHOUT_CEILING` — ACCOUNT_INITIATE_PAYMENT with neither dailyLimit nor
+              monthlyLimit (ADR-0249 D5). Unlimited access to someone else's account is not
+              something this platform grants by omission.
+            * `APPROVAL_POLICY_UNSUPPORTED` — approvalPolicy other than SOLO; nothing counts approvals.
+
+            All are refused before the SCA challenge is spent, so the customer keeps their ceremony.
         '403': { description: The authenticated party is not the grantor }
         '422': { description: Eligibility gate, or the grantor does not own the resource (ADR-0232 D5, threat model T1) }
   /api/v1/delegations/{id}:
@@ -219,6 +226,79 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DelegationCheckResponse' }
+  /api/v1/delegations/{id}/reservations:
+    post:
+      tags: [Delegations]
+      summary: Reserve headroom under the grant's per-transaction, daily and monthly ceilings
+      description: |
+        ADR-0249 D3 — the authoritative cumulative-spend counter. The caller reserves BEFORE
+        initiating the payment, confirms on a settled outcome and releases on failure. A RESERVED
+        reservation already consumes headroom; that is the point, and it is why two concurrent
+        payments cannot both pass a check that neither passes alone.
+
+        `idempotencyKey` is the caller's key for the spend: a retry under the same key returns the
+        SAME reservation and takes the headroom once. The response carries
+        `X-Idempotency-Replayed: true` when it did.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReserveSpendRequest' }
+      responses:
+        '201':
+          description: Headroom reserved (or an existing reservation replayed under the same key)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpendReservationResponse' }
+        '404': { description: No such delegation, or the caller is not its grantee }
+        '409':
+          description: >-
+            Refused. The body names WHICH ceiling was hit and how much remains under it, because a
+            client that only learns "no" can only guess.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpendRefusalResponse' }
+  /api/v1/delegations/{id}/reservations/{rid}/confirm:
+    post:
+      tags: [Delegations]
+      summary: Confirm a reservation — the money moved, the headroom stays consumed
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Confirmed (idempotent on an already-confirmed reservation)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpendReservationResponse' }
+        '404': { description: No such reservation on this delegation }
+        '409': { description: The reservation was released and cannot be confirmed }
+  /api/v1/delegations/{id}/reservations/{rid}/release:
+    post:
+      tags: [Delegations]
+      summary: Release a reservation — the payment did not happen, the headroom comes back
+      description: >-
+        Must be called on every failure branch. A leaked reservation silently shrinks the
+        delegate's ceiling, which is why release is tested alongside confirm rather than after it.
+      parameters:
+        - $ref: '#/components/parameters/DelegationId'
+        - $ref: '#/components/parameters/ReservationId'
+        - $ref: '#/components/parameters/CustomerPartyId'
+      responses:
+        '200':
+          description: Released (idempotent on an already-released reservation)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SpendReservationResponse' }
+        '404': { description: No such reservation on this delegation }
+        '409':
+          description: >-
+            The reservation was confirmed. Releasing settled money would re-open a ceiling the
+            delegate has already spent through.
 components:
   parameters:
     CustomerPartyId:
@@ -240,6 +320,11 @@ components:
       schema: { type: string, format: uuid }
     PartyId:
       name: partyId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    ReservationId:
+      name: rid
       in: path
       required: true
       schema: { type: string, format: uuid }
@@ -290,20 +375,26 @@ components:
         perTransactionLimit:
           $ref: '#/components/schemas/MoneyDto'
           description: >-
-            The only limit this platform enforces. Checked per payment amount; it never accumulates.
+            Per-amount ceiling. It never accumulates — it caps each payment and says nothing about
+            how many there may be, which is why it does NOT satisfy the ADR-0249 D5 requirement
+            that ACCOUNT_INITIATE_PAYMENT carry a cumulative ceiling.
         dailyLimit:
           $ref: '#/components/schemas/MoneyDto'
-          deprecated: true
-          description: >-
-            NOT SUPPORTED — sending this field is rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
-            No service in this platform counts cumulative spend against a grant, so a value here
-            would be stored and echoed back while never capping any payment. Omit it. ADR-0232 D1/D6
-            describes cumulative ceilings as intended; they are not built.
+          description: |
+            Cumulative ceiling per calendar day, counted authoritatively by the reservation API
+            (ADR-0249 D3). Enforced from version 1.4.0; before that the field was rejected because
+            nothing counted it.
+
+            The day is a **Europe/Prague** calendar day, not a UTC one — a customer's "5 000 Kč per
+            day" is their own day, and a UTC counter would roll over at 01:00/02:00 local and hand
+            the delegate a second full ceiling.
+
+            Rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED on a grant with no money-moving
+            capability: nothing would ever reserve against it.
         monthlyLimit:
           $ref: '#/components/schemas/MoneyDto'
-          deprecated: true
           description: >-
-            NOT SUPPORTED — see dailyLimit. Rejected with 400 CUMULATIVE_LIMIT_UNSUPPORTED.
+            As dailyLimit, over the Europe/Prague calendar month.
         exposure: { $ref: '#/components/schemas/ExposureDto' }
         validTo: { type: string, format: date-time }
         grantScaSessionId: { type: string, format: uuid }
@@ -385,3 +476,47 @@ components:
         granted: { type: boolean }
         reason: { type: string }
         code: { type: string }
+    ReserveSpendRequest:
+      type: object
+      required: [amount, currency, idempotencyKey]
+      properties:
+        amount:
+          type: string
+          description: Decimal amount in major units, scaled to the currency's minor unit. Never a float.
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        idempotencyKey:
+          type: string
+          maxLength: 200
+          description: >-
+            The caller's key for this spend, unique per delegation. Enforced by a database
+            constraint, so a replay cannot double-count even across replicas.
+    SpendReservationResponse:
+      type: object
+      required: [reservationId, delegationId, amount, state, createdAt]
+      properties:
+        reservationId: { type: string, format: uuid }
+        delegationId: { type: string, format: uuid }
+        amount: { $ref: '#/components/schemas/MoneyDto' }
+        state:
+          type: string
+          enum: [RESERVED, CONFIRMED, RELEASED]
+          description: RESERVED and CONFIRMED consume headroom; RELEASED gives it back.
+        createdAt:
+          type: string
+          format: date-time
+          description: The window anchor — a reservation belongs to the day it took the headroom.
+        settledAt: { type: string, format: date-time, nullable: true }
+    SpendRefusalResponse:
+      type: object
+      required: [status, reason, error]
+      properties:
+        status: { type: integer }
+        reason:
+          type: string
+          enum: [PER_TX, DAILY, MONTHLY, GRANT_NOT_ACTIVE, NO_SPEND_CAPABILITY, CURRENCY_MISMATCH]
+        ceiling: { $ref: '#/components/schemas/MoneyDto' }
+        alreadyCounted: { $ref: '#/components/schemas/MoneyDto' }
+        remaining:
+          $ref: '#/components/schemas/MoneyDto'
+          description: What is still spendable under the breached ceiling, clamped at zero.
+        error: { type: string }

@@ -36,3 +36,14 @@
 #   gh workflow run auto-deploy.yml -f services=openbank-delegation-service
 # DELETE THIS ENTRY once that build lands and the auto-deploy gitops PR rewrites the pin.
 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-delegation-service:sandbox-900c64bbf
+
+# case-coordinator-agent: first ArgoCD registration (ADR-0244 Phase 4, #4187). Same shape as
+# delegation-service above — the module, its Dockerfile and its auto-deploy ALL_SERVICES entry
+# all land in this PR, so the tag has never been built and the image is absent from ECR.
+# The ECR REPOSITORY does not exist either (verified: DescribeRepositories -> RepositoryNotFound),
+# so the first build both creates the repo and pushes the image; that works only while the CI
+# role still holds ecr:CreateRepository. Dropping that grant (#3661) before this service's first
+# build would break it — sequence the two.
+#   gh workflow run auto-deploy.yml -f services=openbank-case-coordinator-agent
+# DELETE THIS ENTRY once that build lands and the auto-deploy gitops PR rewrites the pin.
+265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-4405a74fa

@@ -30,6 +30,27 @@ interface PaymentActivities {
     /** Best-effort reversal of a previously posted ledger journal (compensation). */
     fun reverseJournal(journalId: UUID)
 
+    /**
+     * Close the transaction lifecycle as COMPLETED and enqueue the `...transaction.completed`
+     * outbox message, in one database transaction (#4238).
+     *
+     * This is the terminal write. It is an ACTIVITY — not caller code after `execute()` returns —
+     * so that the record of a settlement is owned by the same durable unit that moved the money:
+     * losing the HTTP request (pod eviction, rollout, client disconnect) can no longer strand a
+     * settled transaction on PENDING with no completed event, because Temporal re-runs the
+     * activity until it commits.
+     *
+     * At-least-once by contract: a retry that finds the row already COMPLETED is a no-op, so no
+     * second outbox row and no version conflict.
+     */
+    fun markCompleted(transactionId: UUID)
+
+    /**
+     * Terminal write for the unhappy path: FAILED + the `...transaction.failed` outbox message.
+     * Same durability and same at-least-once no-op rule as [markCompleted].
+     */
+    fun markFailed(transactionId: UUID, reason: String)
+
     companion object {
         /** Returned by [placeHold] when there is no source account, so no hold was placed. */
         val SENTINEL_HOLD: UUID = UUID(0L, 0L)

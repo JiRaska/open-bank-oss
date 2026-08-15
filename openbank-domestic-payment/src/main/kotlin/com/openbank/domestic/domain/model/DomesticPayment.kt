@@ -63,6 +63,18 @@ data class DomesticPayment(
     val settledAt: Instant?,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /**
+     * When a `pacs.008` for this payment was handed to the scheme gateway (#4218), or `null` if one
+     * never has been. Written BEFORE the outbound call, so it survives a failure of anything that
+     * follows it.
+     *
+     * This is NOT [submittedAt], which [transitionTo] sets on the move to `VALIDATED` and which is
+     * therefore already non-null for every payment that can reach the scheme hop. `status` alone
+     * cannot distinguish "never submitted" from "submitted, bookkeeping failed" — both read
+     * `VALIDATED` — and that distinction is the whole of #4218. Defaulted so no existing
+     * construction site has to change.
+     */
+    val schemeDispatchedAt: Instant? = null,
 ) {
     fun transitionTo(
         targetStatus: DomesticPaymentStatus,

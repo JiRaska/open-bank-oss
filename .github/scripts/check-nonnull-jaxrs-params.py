@@ -75,32 +75,19 @@ PARAM_ANNOTATIONS = ("QueryParam", "HeaderParam", "MatrixParam")
 # JVM primitives: JAX-RS supplies the zero value, never null, so no NPE is possible here.
 KOTLIN_PRIMITIVES = {"Int", "Long", "Double", "Float", "Boolean", "Short", "Byte", "Char"}
 
-# The tail left after the money-path fix in #3625, being worked through in #3624. psd2 and
-# card-issuance are done. Each entry is "<service>|<Class>|<param>".
-# The count per key is not recorded on purpose: several of these repeat the identical parameter
-# across sibling handlers (card-issuance's X-Operator-Id sevenfold), and pinning the count would
-# make an unrelated refactor fail the gate for no defect.
-BASELINE = {
-    # openbank-aml-service — POST /api/v1/aml/cases
-    "openbank-aml-service|AmlCaseResource|Idempotency-Key",
-    # openbank-customer-edge — the mobile/web BFF
-    "openbank-customer-edge|CustomerEdgeResource|currency",
-    "openbank-customer-edge|CustomerEdgeResource|accountId",
-    # openbank-dispute-service
-    "openbank-dispute-service|DisputeResource|actor",
-    # openbank-party-service
-    "openbank-party-service|PartyResource|Idempotency-Key",
-    # openbank-pid-service
-    "openbank-pid-service|PartyResource|index",
-    "openbank-pid-service|PartyResource|type",
-    "openbank-pid-service|PartyResource|value",
-    # openbank-statement-service
-    "openbank-statement-service|StatementResource|from",
-    "openbank-statement-service|StatementResource|to",
-    # openbank-tpp-registry-service
-    "openbank-tpp-registry-service|TppRegistryResource|tppId",
-    "openbank-tpp-registry-service|TppRegistryResource|role",
-}
+# EMPTY, and it stays that way — #3624 closed the tail (aml, party, pid ×3, tpp-registry ×2), the
+# last of which were `suspend` handlers where no `Intrinsics.checkNotNullParameter` is emitted, so
+# the null flowed into the body instead of failing at offset 0. Each was fixed by declaring the
+# parameter nullable and either widening its existing guard to `isNullOrBlank()` (preserving the
+# service's own error envelope) or adding `requireNotNull` — libs-runtime maps
+# IllegalArgumentException to 400; never a service-local mapper (#526).
+#
+# An entry added here needs a reason and an issue. The check reports a baseline key that no longer
+# occurs as well as a new occurrence, so the list cannot rot in either direction — do not add one
+# to silence a finding you have not read.
+#
+# Each entry would be "<service>|<Class>|<param>".
+BASELINE: set[str] = set()
 
 
 def strip_comments(src: str) -> str:
@@ -154,7 +141,22 @@ def strip_comments(src: str) -> str:
 ANNOTATION_RE = re.compile(
     r"@(" + "|".join(PARAM_ANNOTATIONS) + r")\s*\(\s*\"([^\"]+)\"\s*\)",
 )
-DECL_RE = re.compile(r"^(?:[\w@\s]*?)\b(interface|class|object)\s+(\w+)", re.M)
+# TOP-LEVEL declarations only — the leading `(?![ \t])` is load-bearing, not tidiness.
+#
+# The enclosing declaration supplies the middle field of the BASELINE key, so getting the NAME
+# wrong silently rekeys a handler. The old pattern let `[\w@\s]*?` swallow indentation, so a
+# nested type declared inside a resource became the enclosing declaration for every handler
+# BELOW it. Measured on openbank-customer-edge: a `private sealed interface DelegatedCardParse`
+# with a `data class Bad` member re-keyed `listDisputes` from
+# `openbank-customer-edge|CustomerEdgeResource|accountId` (baselined) to
+# `openbank-customer-edge|Bad|accountId`, which the gate then reported as a NEW occurrence on a
+# PR that had not touched a single JAX-RS parameter.
+#
+# Both directions are possible and the quiet one is worse: a false NEW is at least loud, while a
+# handler re-keyed onto some OTHER baselined key would be waved through. Restricting to column 0
+# keeps the resource-plus-client case working (both are top-level, so "last wins" still resolves
+# correctly) and makes nested types invisible, which is what the key wants.
+DECL_RE = re.compile(r"^(?![ \t])(?:[\w@]+[ \t]+)*?\b(interface|class|object)[ \t]+(\w+)", re.M)
 
 
 def enclosing_type(src: str, offset: int):
@@ -276,6 +278,18 @@ class DemoResource {
 
     fun flaggedAfterNestedObject(@QueryParam("flag_after_object") i: String): Response = TODO()
 
+    // A nested TYPE must not become the enclosing declaration for handlers below it. Being flagged
+    // is not enough here: the enclosing NAME is the middle field of the BASELINE key, so a handler
+    // re-keyed onto a nested type reads as a NEW occurrence forever (or, worse, silently collides
+    // with some other baselined key). SELF_TEST_EXPECTED_KEYS below asserts the key, which is why
+    // the pre-existing `object Headers` fixture could not catch this: it only ever checked which
+    // params were flagged.
+    private sealed interface Parse {
+        data class Bad(val response: Response) : Parse
+    }
+
+    fun flaggedAfterNestedType(@QueryParam("flag_after_nested_type") j: String): Response = TODO()
+
     // A commented-out declaration must not count:
     // fun commentedOut(@QueryParam("comment_only") z: String): Response = TODO()
     fun stringLiteralIsNotADecl(): String = "@QueryParam(\\"literal_only\\") y: String"
@@ -288,7 +302,14 @@ interface DemoClient {
 }
 '''
 
-SELF_TEST_EXPECTED_FLAGGED = {"flag_plain", "flag_header", "flag_enum", "flag_after_object"}
+SELF_TEST_EXPECTED_FLAGGED = {
+    "flag_plain", "flag_header", "flag_enum", "flag_after_object", "flag_after_nested_type",
+}
+
+# Every flagged handler in the fixture belongs to the top-level resource, whatever nested types
+# sit above it. Asserting the KEY and not just the param is the whole point — the key is what
+# BASELINE matches on.
+SELF_TEST_EXPECTED_KEYS = {f"demo|DemoResource|{p}" for p in SELF_TEST_EXPECTED_FLAGGED}
 SELF_TEST_EXPECTED_ALLOWED = {
     "prose_only", "nested_prose", "ok_nullable", "ok_default_ann", "ok_kotlin_default",
     "ok_primitive", "comment_only", "literal_only", "ok_outbound",
@@ -296,7 +317,8 @@ SELF_TEST_EXPECTED_ALLOWED = {
 
 
 def self_test() -> int:
-    flagged = {f["param"] for f in scan_source(strip_comments(SELF_TEST_SOURCE), "demo", "Demo.kt")}
+    found = list(scan_source(strip_comments(SELF_TEST_SOURCE), "demo", "Demo.kt"))
+    flagged = {f["param"] for f in found}
     failures = 0
     for want in sorted(SELF_TEST_EXPECTED_FLAGGED):
         ok = want in flagged
@@ -314,7 +336,15 @@ def self_test() -> int:
     else:
         print("pass  no findings outside the declared fixture set")
 
-    total = len(SELF_TEST_EXPECTED_FLAGGED) + len(SELF_TEST_EXPECTED_ALLOWED) + 1
+    keys = {f["key"] for f in found}
+    if keys == SELF_TEST_EXPECTED_KEYS:
+        print("pass  every finding is keyed to the top-level resource, not a nested type")
+    else:
+        print(f"FAIL  wrong BASELINE keys: {sorted(keys - SELF_TEST_EXPECTED_KEYS)} "
+              f"(missing {sorted(SELF_TEST_EXPECTED_KEYS - keys)})")
+        failures += 1
+
+    total = len(SELF_TEST_EXPECTED_FLAGGED) + len(SELF_TEST_EXPECTED_ALLOWED) + 2
     print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 2
 

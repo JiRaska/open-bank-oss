@@ -298,6 +298,30 @@ class DomainMetrics {
         counter("openbank.authz.four_eyes", "action", action, "outcome", outcome)
     }
 
+    /**
+     * Increment when two authorization stores that are meant to hold the same grant give
+     * DIFFERENT answers to one access question (ADR-0232 D1 dual-run, issue #2993).
+     *
+     * A dual-run's risk is not "is each store written" but "can they disagree, and does anyone
+     * find out". Nothing in this fleet answers the second half: a grant revoked in one store and
+     * still live in the other is invisible, because the guards OR the two together and an OR
+     * cannot report which arm carried it. This counter is that report, sampled at the decision
+     * itself rather than by a nightly diff — so it observes the state the guard actually acted on.
+     *
+     * Emitting it is never a decision: the caller records the disagreement and then returns the
+     * same verdict it would have returned anyway. A metric that changed the answer would make the
+     * observation the thing being observed.
+     *
+     * @param question  the access question being answered, low-cardinality, e.g.
+     *                  `account_delegated_payment`
+     * @param direction which store was the permissive one — `legacy_only` (the store being
+     *                  migrated FROM permits, the new one does not) or `delegation_only` (the
+     *                  reverse). Never a store pair, an id, or a party: two values per question.
+     */
+    fun authorizationStoreDisagreement(question: String, direction: String) {
+        counter("openbank.authz.store_disagreement", "question", question, "direction", direction)
+    }
+
     // ── Outbox ────────────────────────────────────────────────────────────────
 
     /**
@@ -345,19 +369,31 @@ class DomainMetrics {
      * Register the liveness gauges for a scheduled workflow (ADR-0160): age-of-last-success and
      * its expected interval, both in seconds.
      *
-     * **What consumes them, accurately (#2239).** `openbank-control-liveness-sentinel`'s D1
-     * detection (ADR-0163) reads both gauges and files a FINDING on any workflow past 2x its
-     * declared interval. There is **no PrometheusRule and no page**: this KDoc used to describe
-     * `openbank_workflow_last_success_age_seconds > 2 * on(workflow)
-     * openbank_workflow_expected_interval_seconds` as a rule that already exists, and ADR-0163 D1
-     * leaned on that sentence — two documents describing a paging line nothing had ever
-     * implemented. Before adding it verbatim, note why it would page falsely: the age gauge seeds
-     * from [java.time.Instant.EPOCH], so a freshly started pod reports decades of staleness until
-     * the job's first success — for a daily job that is up to 24h of continuous firing after every
-     * deploy or restart, and no `for:` duration helps because the condition genuinely persists.
-     * That EPOCH behaviour is right for a sentinel finding and wrong for a 3am page; making it a
-     * rule needs a decision (seed from persisted run state, gate on pod uptime, or stay
-     * sentinel-only), not a copy-paste. Tracked in #2239 Gap 2.
+     * **What consumes them (#2239, ADR-0237).** Two readers, and the seed below is what lets both
+     * be right at once. `openbank-control-liveness-sentinel`'s D1 detection (ADR-0163) files a
+     * FINDING on any workflow past 2x its declared interval; `prometheus-rules-workflow-liveness`
+     * ships `WorkflowLivenessStale` on the same comparison
+     * (`openbank_workflow_last_success_age_seconds > 2 *
+     * openbank_workflow_expected_interval_seconds`, `for: 15m`).
+     *
+     * **The age is seeded at REGISTRATION time, not at [java.time.Instant.EPOCH].** It used to be
+     * EPOCH, which made a freshly started pod report ~1.8e9 seconds — decades — for every workflow
+     * that had not yet recorded a success. That is survivable for a daily sentinel run and fatal
+     * for an alert rule: `WorkflowLivenessStale` would fire 15 minutes after every deploy or
+     * restart, for every daily workflow, and keep firing until that workflow's next success (up to
+     * 24h), across all ~28 registration sites. No `for:` duration helps, because the condition
+     * genuinely persists. This KDoc named the choice — "seed from persisted run state, gate on pod
+     * uptime, or stay sentinel-only" — while the rule shipped asserting the seeding had already
+     * happened; seeding here is what makes the rule's own comment and ADR-0237 true.
+     *
+     * The cost of the seed is one bit of information, and it is published rather than lost:
+     * [WorkflowLivenessMetrics.SUCCESS_RECORDED] is `0` until the first [recordSuccess] and `1`
+     * after, so triage can still separate "ran once, then stopped" from "has not succeeded since
+     * this pod started". Detection is unaffected either way — a job that has never run crosses its
+     * own 2x threshold once its grace elapses, exactly like one that stopped. What the seed does
+     * give up is a job whose pod restarts *more often* than 2x its interval: that job can never
+     * accumulate enough age to alert, and is covered statically instead, by the registration gate
+     * (`check-scheduler-liveness.py`, ADR-0237 point 4) and the HR000068 guards.
      *
      * This exists because a scheduled job can fail SILENTLY (an exception swallowed after logging,
      * or simply stopping) and leave no record and no alarm — exactly how balance-service's daily
@@ -366,9 +402,7 @@ class DomainMetrics {
      *
      * Call **once at startup** (e.g. from the caller's constructor) with the workflow's own name
      * and expected run interval; call [WorkflowLivenessRecorder.recordSuccess] at the end of the
-     * job's success path on every run. A workflow that has never succeeded reads as maximally
-     * stale (age computed from [java.time.Instant.EPOCH]) — no special-casing needed, it is
-     * trivially over any real threshold. Re-registration with the same `workflow` tag is a no-op
+     * job's success path on every run. Re-registration with the same `workflow` tag is a no-op
      * gauge re-register (safe, matches [registerOutboxBacklog]); a no-op [WorkflowLivenessRecorder]
      * is returned when no [MeterRegistry] is resolvable (same fallback as every method above).
      *
@@ -378,7 +412,11 @@ class DomainMetrics {
      *                          not a tighter SLA; grace period is baked into the 2x multiplier.
      */
     fun registerWorkflowLiveness(workflow: String, expectedInterval: Duration): WorkflowLivenessRecorder {
-        val lastSuccessEpochMillis = java.util.concurrent.atomic.AtomicLong(java.time.Instant.EPOCH.toEpochMilli())
+        // Seeded at registration, so the age a fresh pod reports is its own uptime rather than the
+        // ~1.8e9 seconds Instant.EPOCH produced. See the KDoc: the alert rule that reads this gauge
+        // is only boot-safe because of this line.
+        val lastSuccessEpochMillis = java.util.concurrent.atomic.AtomicLong(java.time.Instant.now().toEpochMilli())
+        val successRecorded = java.util.concurrent.atomic.AtomicLong(0)
         reg()?.let { r ->
             // Names come from WorkflowLivenessMetrics, never a literal: the consumer side
             // (openbank-control-liveness-sentinel) queried a name nothing emitted for as long as
@@ -391,8 +429,11 @@ class DomainMetrics {
             Gauge.builder(WorkflowLivenessMetrics.EXPECTED_INTERVAL_SECONDS) {
                 expectedInterval.toSeconds().toDouble()
             }.tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow).strongReference(true).register(r)
+            Gauge.builder(WorkflowLivenessMetrics.SUCCESS_RECORDED) {
+                successRecorded.get().toDouble()
+            }.tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow).strongReference(true).register(r)
         }
-        return WorkflowLivenessRecorder(lastSuccessEpochMillis)
+        return WorkflowLivenessRecorder(lastSuccessEpochMillis, successRecorded)
     }
 
     // ── Reconciliation drift (ADR-0160 mechanism 4) ─────────────────────────────
@@ -475,8 +516,10 @@ class DomainMetrics {
  */
 class WorkflowLivenessRecorder internal constructor(
     private val lastSuccessEpochMillis: java.util.concurrent.atomic.AtomicLong,
+    private val successRecorded: java.util.concurrent.atomic.AtomicLong,
 ) {
     fun recordSuccess() {
         lastSuccessEpochMillis.set(java.time.Instant.now().toEpochMilli())
+        successRecorded.set(1)
     }
 }

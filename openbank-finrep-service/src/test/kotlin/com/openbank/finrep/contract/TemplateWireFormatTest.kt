@@ -18,6 +18,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Instant
 import java.time.LocalDate
 
 /**
@@ -147,5 +148,31 @@ class TemplateWireFormatTest {
             assertThat(error.keys).contains("traceId", "status", "code", "message")
             assertThat(error["status"]).isEqualTo(400)
         }
+    }
+
+    /**
+     * #3874: the SERVED body, not the mapper's return value — `timestamp` is declared in this
+     * service's `openapi.yaml` (one of only two specs that declare it), and it was serialised as
+     * `1970-01-01T00:00:00Z` on every error the fleet ever returned, because
+     * `ApiError.timestamp` defaulted to `Instant.EPOCH` and no call site passed it.
+     *
+     * Asserts RECENCY. A `isNotNull`/`isNotBlank` assertion passes against the epoch, which is
+     * precisely why nothing caught this. The window is bounded by two real clock reads either side
+     * of the request, so it cannot pass against a constant.
+     */
+    @Test
+    fun `the served error body carries a timestamp from now, not the epoch`() {
+        val before = Instant.now().minusSeconds(1)
+        val body = given()
+            .accept("application/json")
+            .get("/api/v1/finrep/templates/F99.99")
+            .then()
+            .statusCode(400)
+            .extract().body().asString()
+        val after = Instant.now().plusSeconds(1)
+
+        val served = mapper.readValue(body, Map::class.java)["timestamp"]
+        assertThat(served).describedAs("timestamp is absent from the served error envelope").isNotNull()
+        assertThat(Instant.parse(served.toString())).isBetween(before, after)
     }
 }

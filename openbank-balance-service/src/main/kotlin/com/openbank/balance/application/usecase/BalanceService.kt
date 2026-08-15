@@ -7,6 +7,8 @@ package com.openbank.balance.application.usecase
 import com.openbank.balance.application.port.`in`.*
 import com.openbank.balance.application.port.out.*
 import com.openbank.balance.domain.model.*
+import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.event.EventActor
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.time.Clock
@@ -24,10 +26,12 @@ class BalanceService(
     private val eventPublisher: BalanceEventPublisher,
     private val movementPort: BalanceMovementPort,
     private val clock: Clock,
+    private val accountingClock: AccountingClock = AccountingClock.bank(clock),
 ) : BalanceUseCase {
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
-    // fixed Clock for deterministic timestamps (ADR-0100 Layer 1).
+    // fixed Clock for deterministic timestamps (ADR-0100 Layer 1) — and get the matching accounting
+    // clock for free from the default above, so a fixed Clock fixes the accounting day too.
     @Inject
     constructor(
         balanceRepo: BalanceRepository,
@@ -42,12 +46,28 @@ class BalanceService(
         Clock.systemUTC(),
     )
 
+    /**
+     * Attach the not-yet-effective credit tail (#1745). Read per call from the dated projection
+     * audit against the current accounting day, so the figure becomes correct on its own the moment
+     * the day passes the value date — no roll job has to have run.
+     */
+    private suspend fun withValueDateBasis(balance: Balance): Balance = balance.copy(
+        notYetEffectiveCredit = balanceRepo.sumNotYetEffectiveCredit(
+            balance.accountId,
+            balance.currency,
+            accountingClock.today(),
+        ),
+    )
+
     override suspend fun getBalance(query: GetBalanceQuery): Balance {
         val currency = query.currency ?: "CZK"
         val current = balanceRepo.findByAccountIdAndCurrency(query.accountId, currency)
             ?: throw BalanceNotFoundException("Balance not found for account=${query.accountId} currency=$currency")
 
-        val asOf = query.asOf ?: return current
+        // Live read: carry the value-date basis so `effectiveAvailable` excludes a posted-but-not-yet-
+        // effective credit. The point-in-time branch below needs no such treatment — it rewinds the
+        // whole future tail explicitly, so adding this on top would subtract the credit twice.
+        val asOf = query.asOf ?: return withValueDateBasis(current)
 
         // Point-in-time (ADR-0039): rewind the current booked balance by the deltas booked strictly
         // after `asOf`, read from the dated ledger-projection audit. Holds are current-state and have
@@ -64,11 +84,18 @@ class BalanceService(
         )
     }
 
-    override suspend fun getBalances(accountId: UUID): List<Balance> = balanceRepo.findAllByAccountId(accountId)
+    override suspend fun getBalances(accountId: UUID): List<Balance> =
+        balanceRepo.findAllByAccountId(accountId).map { withValueDateBasis(it) }
 
     override suspend fun placeHold(cmd: PlaceHoldCommand): BalanceHold {
-        val balance = balanceRepo.findByAccountIdAndCurrency(cmd.accountId, cmd.currency)
-            ?: throw BalanceNotFoundException("Balance not found for account=${cmd.accountId}")
+        // The cover decision (#1745). Hydrating the value-date basis here is what actually stops a
+        // posted-but-not-yet-effective credit being spent: `withReservation` guards on
+        // `effectiveAvailable()`, and without this the tail is ZERO and the guard sees the raw
+        // receipt-dated figure — which is the current, defective behaviour.
+        val balance = withValueDateBasis(
+            balanceRepo.findByAccountIdAndCurrency(cmd.accountId, cmd.currency)
+                ?: throw BalanceNotFoundException("Balance not found for account=${cmd.accountId}"),
+        )
 
         val updated = try {
             balance.withReservation(cmd.amount).copy(updatedAt = OffsetDateTime.now(clock))
@@ -102,6 +129,8 @@ class BalanceService(
                 availableAmount = updated.availableAmount,
                 reservedAmount = updated.reservedAmount,
                 occurredAt = OffsetDateTime.now(clock),
+                actorId = BalanceEventActors.API,
+                actorType = EventActor.TYPE_SYSTEM,
             ),
         )
 
@@ -132,6 +161,8 @@ class BalanceService(
                 availableAmount = updated.availableAmount,
                 reservedAmount = updated.reservedAmount,
                 occurredAt = OffsetDateTime.now(clock),
+                actorId = BalanceEventActors.API,
+                actorType = EventActor.TYPE_SYSTEM,
             ),
         )
 
@@ -156,6 +187,8 @@ class BalanceService(
                     availableAmount = outcome.balance.availableAmount,
                     reservedAmount = outcome.balance.reservedAmount,
                     occurredAt = OffsetDateTime.now(clock),
+                    actorId = BalanceEventActors.API,
+                    actorType = EventActor.TYPE_SYSTEM,
                 ),
             )
         }
@@ -184,6 +217,8 @@ class BalanceService(
                     availableAmount = outcome.balance.availableAmount,
                     reservedAmount = outcome.balance.reservedAmount,
                     occurredAt = OffsetDateTime.now(clock),
+                    actorId = BalanceEventActors.API,
+                    actorType = EventActor.TYPE_SYSTEM,
                 ),
             )
         }

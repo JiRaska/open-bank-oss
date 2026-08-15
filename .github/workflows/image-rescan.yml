@@ -14,6 +14,12 @@
 # an undispositioned CRITICAL or HIGH in a shipped image FAILS that service's
 # job — the weekly red run is the signal to either bump + redeploy (Dependabot
 # usually already has the PR open) or record a VEX verdict.
+#
+# That signal used to stop at the red run, and a red run is addressed to nobody:
+# all four runs of this workflow failed CORRECTLY on real fixable HIGHs and were
+# unactioned for four weeks (#4026). The `escalate` job below closes the loop —
+# vex-triage.yml, named above as sharing this pattern, always had one; this did
+# not. Do not remove it and leave the red as the only output.
 name: Image rescan
 
 on:
@@ -42,18 +48,50 @@ jobs:
           REQUESTED: ${{ inputs.services }}
         run: |
           set -euo pipefail
+          # Same discovery rule as ghcr-publish.yml: a module is a released
+          # component iff it has a version.txt; only services bake an image.
+          # Always computed, even for a narrowed dispatch, so the run can state
+          # its own DENOMINATOR — see the coverage note below.
+          all="$(for d in openbank-*-service; do
+            [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
+          done)"
+          total="$(echo "$all" | grep -c . || true)"
+
           if [ -n "${REQUESTED:-}" ]; then
             list="$(printf '%s\n' $REQUESTED)"
+            # A typo in the dispatch input is otherwise invisible: the matrix
+            # entry exists, its image is not on GHCR, the scan step is skipped
+            # by `found == 'false'` and the job goes GREEN having scanned
+            # nothing. Reject a requested name that is not a released service.
+            unknown=""
+            for svc in $REQUESTED; do
+              echo "$all" | grep -qx "$svc" || unknown="$unknown $svc"
+            done
+            if [ -n "$unknown" ]; then
+              echo "::error::not released openbank-*-service module(s):${unknown}"
+              exit 1
+            fi
           else
-            # Same discovery rule as ghcr-publish.yml: a module is a released
-            # component iff it has a version.txt; only services bake an image.
-            list="$(for d in openbank-*-service; do
-              [ -f "$d/version.txt" ] && [ -f "$d/build.gradle.kts" ] && echo "$d"
-            done)"
+            list="$all"
           fi
+
           services="$(echo "$list" | jq -Rnc '[inputs | select(length > 0)]')"
+          selected="$(echo "$services" | jq 'length')"
+
+          # An empty scope must FAIL, never pass quietly. With `services=[]` the
+          # rescan job's `if:` is false, so it is SKIPPED; `escalate` then guards
+          # on `needs.rescan.result == 'failure'`, which 'skipped' is not — so the
+          # whole run concludes SUCCESS having rescanned zero images and told
+          # nobody. A control that reports green about nothing is worse than an
+          # absent one, because its green argues the images are covered (#4026).
+          if [ "$selected" -eq 0 ]; then
+            echo "::error::no services to rescan — refusing to report a green run that scanned nothing"
+            exit 1
+          fi
+
           echo "services=$services" >> "$GITHUB_OUTPUT"
-          echo "Rescanning: $services"
+          echo "Rescanning ${selected} of ${total} released services: $services"
+          echo "Rescanning **${selected} of ${total}** released services." >> "$GITHUB_STEP_SUMMARY"
 
   rescan:
     name: rescan / ${{ matrix.service }}
@@ -120,3 +158,23 @@ jobs:
             --exit-code 1 \
             || { echo "::error::${IMAGE}: undispositioned fixable CRITICAL/HIGH in a shipped image — bump + redeploy (check the open Dependabot PR) or record a VEX verdict in openbank-libs/governance/vex/"; exit 1; }
           echo "::notice::${IMAGE}: no undispositioned fixable CRITICAL/HIGH."
+
+  escalate:
+    name: Escalate undispositioned findings
+    needs: [discover, rescan]
+    # `always()` so a failed matrix still reaches this job; the guard is the rescan
+    # result, so a clean week opens nothing.
+    if: always() && needs.rescan.result == 'failure'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Open or refresh the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: bash .github/scripts/escalate-image-rescan.sh

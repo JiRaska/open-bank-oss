@@ -138,6 +138,24 @@ account-service/party-service (M2M, ROLE_SERVICE); vop-service → its own Postg
   matches. Contrast `openbank-sepa-instant`, whose `sctInstPayment` prefix silently never fires the
   four-eyes rule (documented in `gen-sepa-instant-opa-bundle.sh`). Naming this `vop.create` or
   `payeeVerification.*` would reintroduce that class of bug.
+- **The shared M2M identity reached `vop.verify` through the OPERATOR branch** (GHSA-58jq-9hq3-66jr,
+  #4228). `operator-vop-verify` was role-only, and `service-account-openbank-services` — the identity
+  nearly every backend service authenticates as — carries `ROLE_OPERATOR` and is classified `HUMAN`
+  by `AuthorizeInterceptor` (there is no `SERVICE` principal type), so it matched. Measured with
+  `opa eval` against `vop-opa-bundle.yaml`, the shared account resolved **both** reasons
+  (`["m2m-vop-verify", "operator-vop-verify"]`). Mitigated: `operator-vop-verify` now carries
+  `not startswith(input.principal.id, "service-account-")`.
+  Two things this does and does not change. It **strands no caller** — the payment rails were always
+  meant to arrive through the identity-pinned `m2m-vop-verify`, which is untouched — so unlike the
+  sibling debt entries in `check-operator-write-naming.py` this one needed no caller audit; the
+  legitimate M2M caller had already named itself. And it does **not** narrow the name oracle: the
+  rails still resolve any domestic IBAN, so per §4 item 1 the rate limit remains the control that
+  bounds enumeration, not authorization. What it removes is every *other* service-account's
+  incidental reach — a bare `ROLE_OPERATOR` holder that is not a payment rail no longer matches
+  anything here. Covered by `vop_rest_ext_test.rego`; the extension moved out of the generator
+  heredoc into a standalone `.rego` in the same change, since `opa-policy.yml` discovers suites by
+  the `*_rest_ext.rego` / `*_rest_ext_test.rego` file pair and a heredoc has nothing to pair with —
+  which is why this rule had never been covered by a test.
 
 ## 4. Open items / accepted risk
 

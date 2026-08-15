@@ -32,6 +32,22 @@ object WorkflowLivenessMetrics {
     /** Meter name (Micrometer, dotted) of the companion expected-run-interval gauge. */
     const val EXPECTED_INTERVAL_SECONDS: String = "openbank.workflow.expected_interval_seconds"
 
+    /**
+     * Meter name (Micrometer, dotted) of the has-ever-succeeded flag: `0` from registration until
+     * the first `recordSuccess()`, `1` from then on.
+     *
+     * **Why this is a separate series rather than a magic value in [LAST_SUCCESS_AGE_SECONDS].**
+     * The age gauge is seeded at registration time, so on a fresh pod "the job has never succeeded"
+     * and "the job succeeded a second ago" both read as a small age — the age alone cannot tell
+     * them apart, and the alert must not care (a never-run job crosses its own threshold once its
+     * grace elapses, exactly like one that stopped running). What *does* care is triage: the
+     * control-liveness-sentinel's finding says something different about a job that has produced
+     * one success and then stopped than about a job that has produced none since boot. This flag
+     * carries that one bit, and nothing else — the age gauge stays a plain age with no sentinel
+     * values in it.
+     */
+    const val SUCCESS_RECORDED: String = "openbank.workflow.success.recorded"
+
     /** Tag carrying the workflow's stable low-cardinality name, e.g. `standing-order-execution`. */
     const val WORKFLOW_TAG: String = "workflow"
 
@@ -40,6 +56,9 @@ object WorkflowLivenessMetrics {
 
     /** PromQL series name of [EXPECTED_INTERVAL_SECONDS]. */
     val EXPECTED_INTERVAL_SERIES: String = promSeriesName(EXPECTED_INTERVAL_SECONDS)
+
+    /** PromQL series name of [SUCCESS_RECORDED]. */
+    val SUCCESS_RECORDED_SERIES: String = promSeriesName(SUCCESS_RECORDED)
 
     /**
      * Renders a Micrometer meter name as the Prometheus series name it is scraped under.

@@ -27,8 +27,13 @@ load.
 `k6` is already installed in-cluster via the k6-operator
 (`openbank-infra/gitops/apps/k6-operator.yaml`) and a synthetic test runs
 periodically against the public sandbox
-(`openbank-infra/gitops/components/observability/k6-synthetic.yaml`). That test
-proves the public edge works but does not gate individual service changes and
+(`openbank-infra/gitops/components/observability/k6-synthetic.yaml`).
+<!-- Correction (2026-08-09, ADR-0252 phase 2): "periodically" was not true when this was
+     written. That TestRun ran `iterations: 1` once on ArgoCD sync, as its own header said.
+     It is now a CronJob — components/observability/cronjob-journey-public-edge.yaml — and
+     k6-synthetic.yaml is deleted. Nothing about this ADR's decision changes; the sentence
+     is corrected in place rather than removed so the next reader learns it was wrong. -->
+That test proves the public edge works but does not gate individual service changes and
 cannot reproduce regressions introduced in a PR. The operational-maturity
 assessment (#3343) scored the platform at level 1 for performance validation:
 tests exist, but they are not in the build path.
@@ -146,6 +151,7 @@ so the pilot can be tuned before it blocks merges.
 - ADR-0011 (testing pyramid), ADR-0144 (gate graduation — advisory rules with
   enforcement deadline)
 - `openbank-infra/gitops/apps/k6-operator.yaml` and
-  `openbank-infra/gitops/components/observability/k6-synthetic.yaml`
+  `openbank-infra/gitops/components/observability/cronjob-journey-public-edge.yaml`
+  (was `k6-synthetic.yaml` — see the correction note above)
 - `openbank-infra/gitops/components/argo-rollouts/analysis-template.yaml`
 - `.github/workflows/api-fuzz.yml` — the analogous non-PR heavy test workflow

@@ -24,3 +24,42 @@
   runner. Note `audit_entries` carries `no_update_audit`/`no_delete_audit` rules (V2), so a test
   cannot clean up after itself — write with fresh `aggregate_id`s and anchor `verifyChain` with
   `fromEntryId` instead of assuming an empty table.
+- **A consumer that takes `payload: String` cannot see the envelope, and its `?:` defaults make the
+  gap look like data.** `AuditConsumer` read the body only, so the outbox `ce-type` header (the
+  event type) and the topic (the producing service) were dropped at ingest and fell through to
+  `?: "UNKNOWN"` / `?: "unknown"`. Measured on the live database: **1353 of 1774 rows** named no
+  source and 131 no event type, with only TWO distinct `source_service` values in the whole table —
+  `unknown` and `customer-edge`, the one producer that populates the field. Nothing could see it:
+  the fallbacks are *successful parses* (no exception, no metric, no log line), and every existing
+  assertion was `isNotNull()`-shaped, which a default satisfies. **Assert the VALUE of an
+  attribution field, never its non-nullity** — same lesson as `Instant.EPOCH` in the root guide.
+  Fixed in #3994 by taking `Message<String>`, exactly as the analytics sink did in #2598.
+- **Do not derive a service name from the topic by convention here — nine of the twenty-one
+  subscribed topics disagree with it.** `openbank.cards.events` is card-issuance-service,
+  `openbank.payments.swift.event` is swift-service, `openbank.customer.audit` is customer-edge,
+  `openbank.security.*` is security-scanner, and accounts/transactions/documents are plural where
+  the module is singular. A convention-based derivation does not under-attribute, it writes a
+  confident FALSE service name into a chain-hashed evidentiary row — worse than the `unknown` it
+  replaces. `TopicAttribution` is a verified table whose COVERAGE (not values) is derived from
+  `application.yaml`, so a newly subscribed topic fails `TopicAttributionCoverageTest` instead of
+  silently defaulting again.
+- **Asking the audit DATABASE which fields producers send measures traffic, not the wire contract —
+  and it answers "nothing to recover" with total confidence.** Chasing the actor half of #3994, the
+  obvious probe was to enumerate the payload keys of every actor-less row
+  (`jsonb_object_keys(payload::jsonb)` filtered for `%by%`/`%actor%`/`%initiat%`). It returned two
+  keys, one of them already read and the other (`reviewedBy`) JSON-null on all 53 rows — i.e. every
+  gap is a producer omission and the consumer is fine. **Wrong.** Enumerating the producers'
+  serialised TYPES instead found three actor spellings genuinely on the wire and unread —
+  `reviewedBy` (sanctions' four-eyes review identity), `changedBy` (3 of 4 card event types) and
+  `actorKind` (lending, beside an `actorId` that WAS read, so the row named the actor but not
+  whether it was a human or the policy engine). The probe missed them because cards, lending and
+  account-service's savings path have **zero rows in the sandbox**, and no manual sanctions review
+  has ever run there. Same shape as the zero-denials-from-an-idle-service trap: a topic with no
+  traffic is not evidence about that topic. Note both halves of the trap fire here — a `grep` for
+  the quoted key finds nothing either, because all three live in serialised data classes where the
+  JSON key exists only as a Kotlin property name at runtime. **Enumerate the producing types; use
+  the database only to size what you found.**
+- **Switching an `@Incoming` from `String` to `Message<String>` switches SmallRye from auto-ack to
+  MANUAL ack.** A missed ack stalls the partition and the audit trail stops dead — worse than the
+  under-attribution being fixed. Ack explicitly, in a `finally`, and test it on the path most
+  likely to skip it (an unparseable payload).

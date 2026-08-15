@@ -60,7 +60,11 @@ class FraudScoringShadowZeroDriftTest {
             mlModel,
             clock,
             shadowEnabled,
-        )
+        ).also {
+            // Field-injected (LongParameterList) — see FraudScoringServiceTest for why this must
+            // be set manually outside CDI.
+            it.fraudHoldService = mockk(relaxed = true)
+        }
     }
 
     private fun requests(): List<ScoreRequest> = buildList {

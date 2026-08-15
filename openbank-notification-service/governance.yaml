@@ -10,16 +10,20 @@ dataClassification: confidential
 retentionPolicy: 2 years
 evidenceExported: false
 lineage:
-  upstream:
-    - serviceName: transaction-service
-      relationType: topic
-      description: events
-    - serviceName: kyc-service
-      relationType: topic
-      description: events
+  upstream: []
+    # Removed (issue #3982): `transaction-service (topic, "events")` and
+    # `kyc-service (topic, "events")`. notification-service consumes exactly two topics —
+    # openbank.notification.requests and openbank.party.events — and neither of those is
+    # produced by transaction-service (openbank.transactions.transaction.initiated) or
+    # kyc-service (openbank.kyc.events). No overlap in either direction.
+  downstream:
+    # Direction corrected (issue #3982): declared as `upstream: consent-service`, i.e.
+    # consent-service calling notification-service. ConsentServiceClient(configKey =
+    # "consent-service") lives in notification-service, and notification-service's Deployment
+    # env carries CONSENT_SERVICE_URL. Real edge, declared backwards.
     - serviceName: consent-service
       relationType: api
-      description: marketing consent check (ADR-0198 D4)
+      description: per-send marketing consent check (ADR-0198 D4)
 databaseLineage:
   ownedDatabases:
     - openbank_notifications

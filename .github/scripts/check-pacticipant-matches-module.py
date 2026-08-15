@@ -2,17 +2,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Guard: every Pact participant name is exactly a module directory in this repo.
+# Guard: every Pact PROVIDER name is exactly a module directory in this repo.
 #
 # WHY THIS EXISTS
 #   The verification reconciler
 #   .github/scripts/pact-reconcile-verifications.py dispatches verify-provider.yml
-#   with the broker's pacticipant name as its `service` input — a workflow input that
-#   must name a module directory. That works today (55 of 55 match, checked against
-#   the live broker), and it works ONLY because the two vocabularies happen to
-#   coincide.
+#   with the broker's PROVIDER pacticipant name as its `service` input — a workflow
+#   input that must name a module directory. That works today (55 of 55 match,
+#   checked against the live broker), and it works ONLY because the two vocabularies
+#   happen to coincide.
 #
-#   Nothing was holding them together. Register a pacticipant as `ledger` instead of
+#   Nothing was holding them together. Register a provider as `ledger` instead of
 #   `openbank-ledger-service`, or rename a module directory, and the reconciler keeps
 #   dispatching — it just dispatches a build of a service that does not exist. GitHub
 #   accepts the dispatch (the input is a free-form string), the run fails somewhere
@@ -25,9 +25,15 @@
 #   runs on every PR.
 #
 # WHAT IT CHECKS
-#   For every pacts/*.json, both `consumer.name` and `provider.name` must be a
-#   directory in the repository root that carries a build.gradle.kts — i.e. a real
-#   Gradle module verify-provider.yml could build.
+#   For every pacts/*.json, `provider.name` must be a directory in the repository
+#   root that carries a build.gradle.kts — i.e. a real Gradle module
+#   verify-provider.yml could build.
+#
+#   `consumer.name` is NOT checked: the reconciler never dispatches by consumer,
+#   and a consumer need not be a Gradle module at all — the first one that is not
+#   is openbank-admin-ui (a Next.js web client consuming
+#   openbank-case-coordinator-agent, ADR-0246), whose contract is still enforced by
+#   the provider-side @PactFolder replay gate (check-pact-provider-replay.py).
 #
 # Run:  python3 .github/scripts/check-pacticipant-matches-module.py [--root .]
 
@@ -80,21 +86,20 @@ def main() -> int:
         except json.JSONDecodeError as e:
             errors.append(f"{f.name}: not valid JSON: {e}")
             continue
-        for role in ("consumer", "provider"):
-            name = ((doc.get(role) or {}).get("name") or "").strip()
-            if not name:
-                errors.append(f"{f.name}: {role}.name is missing or empty")
-                continue
-            names.add(name)
-            if name not in modules:
-                errors.append(
-                    f"{f.name}: {role} '{name}' is not a Gradle module directory. The Pact "
-                    f"verification reconciler dispatches verify-provider.yml with the pacticipant "
-                    f"name as its `service` input, so a name that is not a module directory "
-                    f"dispatches a build of nothing and the pact stays unverified. Rename the "
-                    f"pacticipant to match the module, or stop relying on the identity in "
-                    f".github/scripts/pact-reconcile-verifications.py."
-                )
+        name = ((doc.get("provider") or {}).get("name") or "").strip()
+        if not name:
+            errors.append(f"{f.name}: provider.name is missing or empty")
+            continue
+        names.add(name)
+        if name not in modules:
+            errors.append(
+                f"{f.name}: provider '{name}' is not a Gradle module directory. The Pact "
+                f"verification reconciler dispatches verify-provider.yml with the provider "
+                f"pacticipant name as its `service` input, so a name that is not a module "
+                f"directory dispatches a build of nothing and the pact stays unverified. "
+                f"Rename the provider pacticipant to match the module, or stop relying on "
+                f"the identity in .github/scripts/pact-reconcile-verifications.py."
+            )
 
     if errors:
         for e in errors:
@@ -102,7 +107,7 @@ def main() -> int:
         return 1
 
     print(
-        f"pacticipant/module identity: {len(names)} distinct pacticipant name(s) across "
+        f"pacticipant/module identity: {len(names)} distinct provider name(s) across "
         f"{len(pacts)} pact(s), every one a Gradle module directory."
     )
     return 0

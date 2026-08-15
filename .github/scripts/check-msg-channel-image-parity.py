@@ -51,6 +51,8 @@ import re
 import subprocess
 import sys
 
+import gatelib
+
 try:
     import yaml
 except ImportError:
@@ -177,7 +179,7 @@ def main() -> int:
 
     # service -> deployed image sha, and service -> {channels declared in a ConfigMap}
     images, declared = {}, {}
-    for f in sorted(gitops.rglob("*.yaml")):
+    for f in gatelib.rglob(gitops, "*.yaml"):
         text = f.read_text(errors="replace")
         for svc, sha in IMAGE_RE.findall(text):
             images[svc] = sha

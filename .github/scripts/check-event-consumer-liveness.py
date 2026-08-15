@@ -50,8 +50,13 @@ def resolve_topic_value(raw: str) -> str | None:
     cannot be resolved statically) is skipped — same fail-closed-on-ambiguity stance as
     check-outbox-dispatch-enabled.sh."""
     raw = raw.strip().strip('"').strip("'")
-    if raw.startswith("${") and raw.endswith("}") and ":" not in raw:
-        return None
+    # There used to be an explicit `startswith("${") and endswith("}") and ":" not in raw`
+    # branch here. It was UNREACHABLE-equivalent: `${T}` is already refused by the
+    # `startswith("${")` fallback below, and `${T:x}` never entered it because of the colon.
+    # No input distinguishes the two versions (checked across the `${}`/`${:x}`/`${T:}`/
+    # nested-colon/unterminated shapes), so it was dead weight that made the resolver look
+    # like it handled more cases than it does — the same reason this repo bans a rego rule
+    # gated on a principal type nothing emits. Found by a self-test break going UNCAUGHT.
     m = ENV_DEFAULT.match(raw)
     if m:
         return m.group(1)
@@ -134,7 +139,101 @@ def build_topic_maps(root: pathlib.Path) -> tuple[dict[str, set[str]], dict[str,
     return all_producers, all_consumers, yaml_files
 
 
+def self_test() -> int:
+    """Falsify the topic resolver and the producer/consumer scanner.
+
+    ADR-0160 mechanism 1, and the incident behind it: standing-order-service published
+    `standing-order.due.v1` every day for weeks with ZERO consumers anywhere in the fleet —
+    full CRUD, passing tests, docs, and a scheduler comment claiming a downstream consumed it.
+    Nothing checked the claim against the fleet (#889).
+
+    The scanner is indentation- and section-aware, which is precisely the code that looks
+    right and is off by one level: read a topic under the wrong section and a producer counts
+    as its own consumer, which closes the gap on paper while the topic still goes nowhere.
+    """
+    import tempfile
+
+    fails: list[str] = []
+
+    def case(label, got, want):
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # --- topic resolution ---------------------------------------------------------------
+    case("a literal topic resolves to itself", resolve_topic_value("a.events"), "a.events")
+    case("quotes are stripped", resolve_topic_value('"a.events"'), "a.events")
+    case("an env default resolves to the default", resolve_topic_value("${T:a.events}"), "a.events")
+    # An env var with NO default cannot be known from this repo. Guessing it would invent a
+    # topic name and then report a missing consumer for a topic that does not exist.
+    case("an env var with no default is refused", resolve_topic_value("${T}"), None)
+
+    with tempfile.TemporaryDirectory() as td:
+        d = pathlib.Path(td)
+
+        # A producer and a consumer in one file, plus the `topics:` plural form some
+        # connectors use — missing that form loses consumers and manufactures dead topics.
+        f = d / "application.yaml"
+        f.write_text(
+            "mp:\n"
+            "  messaging:\n"
+            "    outgoing:\n"
+            "      out:\n"
+            "        topic: a.produced\n"
+            "    incoming:\n"
+            "      in:\n"
+            "        topic: b.consumed\n"
+            "      multi:\n"
+            "        topics: c.one, c.two\n"
+        )
+        prod, cons = scan_application_yaml(f, "openbank-x")
+        case("the produced topic is a producer", sorted(prod), ["a.produced"])
+        case("consumed topics include both forms", sorted(cons), ["b.consumed", "c.one", "c.two"])
+
+        # SECTION BOUNDARY: a `topic:` that dedents back out of the incoming/outgoing block
+        # belongs to neither. Read as a consumer it would silently close a real gap — the
+        # producer would appear to have a consumer and #889 repeats.
+        f2 = d / "boundary.yaml"
+        f2.write_text(
+            "mp:\n"
+            "  messaging:\n"
+            "    outgoing:\n"
+            "      out:\n"
+            "        topic: a.produced\n"
+            "unrelated:\n"
+            "  topic: not.a.channel\n"
+        )
+        prod2, cons2 = scan_application_yaml(f2, "openbank-x")
+        if "not.a.channel" in prod2 or "not.a.channel" in cons2:
+            fails.append("a topic outside any incoming/outgoing section was counted as a channel")
+        case("the real producer survives the boundary", sorted(prod2), ["a.produced"])
+
+        # An unresolvable topic must be skipped rather than recorded under its raw text.
+        f3 = d / "envonly.yaml"
+        f3.write_text("mp:\n  messaging:\n    outgoing:\n      out:\n        topic: ${T}\n")
+        prod3, _c = scan_application_yaml(f3, "openbank-x")
+        case("an unresolvable topic is not recorded", sorted(prod3), [])
+
+    # A live read: fixtures cannot tell that the fleet glob still resolves.
+    live_prod, live_cons, live_files = build_topic_maps(pathlib.Path("."))
+    if not live_files or not live_prod:
+        fails.append(f"reading the real repo found {len(live_files)} config(s) and "
+                     f"{len(live_prod)} produced topic(s) — the glob moved and this gate "
+                     f"would report every topic as consumed")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print(f"self-test ok: event-consumer liveness is falsifiable "
+          f"(9 cases + a live read of {len(live_files)} config(s))")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", default=".")
     parser.add_argument("--rules", default="openbank-libs/governance/rules.yaml")

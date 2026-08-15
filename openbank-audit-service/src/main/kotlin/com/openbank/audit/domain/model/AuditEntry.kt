@@ -28,7 +28,21 @@ data class AuditEntry(
      * one that quietly claims the queue's clock was the event's (#3883).
      */
     val occurredAtSource: OccurredAtSource,
-    /** Ingress channel the event arrived through — ui|mcp|api (ADR-0226); null = unknown/legacy. */
+    /**
+     * Whether [sourceService] is the producer's own claim or the broker topic standing in for it.
+     *
+     * The same distinction [occurredAtSource] draws for time, drawn for attribution, and for the
+     * same reason: a value the consumer supplied must never be indistinguishable from one the
+     * producer asserted (#3994).
+     */
+    val sourceServiceSource: AttributionSource = AttributionSource.ABSENT,
+    /**
+     * `<namespace>:<value>` (issue #4660). The bare JSON key "channel" is independently populated
+     * by three producers with no shared vocabulary: `ingress:ui|mcp|api` (ADR-0226),
+     * `onboarding:BANKID|BRANCH|API|MOBILE_APP` (party-service), `complaint:APP|BRANCH|EMAIL|ARBITER`
+     * (dispute-service). The namespace is the source topic, resolved in `AuditConsumer.resolveChannel`
+     * — never trust the bare value's vocabulary without it. Null = no producer sent one.
+     */
     val channel: String? = null,
     /** Ordered on-behalf-of delegation chain from the RFC 8693 `act` claim (ADR-0224); empty = direct. */
     val actChain: List<String> = emptyList(),
@@ -63,6 +77,76 @@ data class AuditEntry(
  * silence this exists to end. A producer that emits the wrong key now shows up as [INGEST] rows
  * and on `openbank.audit.event.time.missing`, and gets fixed at the producer.
  */
+/**
+ * Provenance of an attribution field — who says so (#3994).
+ *
+ * `source_service` was `node["sourceService"] ?: "unknown"`, and 76% of the live audit trail is
+ * that `"unknown"`: `customer-edge` is the only producer in the fleet that populates the field.
+ * The consumer can now recover the producer from the Kafka topic for every subscribed topic
+ * (`TopicAttribution`), which retires almost all of that — but a recovered value is a different
+ * kind of claim from a declared one, and an evidentiary store must not blur the two.
+ *
+ * That is the whole point of this enum. Substituting a plausible value silently is exactly the
+ * defect being fixed: it converts a visibly missing attribution into an invisible wrong one, and
+ * the second is far harder to ever notice again. The row now carries who supplied the answer.
+ */
+enum class AttributionSource {
+    /** The producer put the field in its own payload; the strongest claim available. */
+    EVENT,
+
+    /**
+     * Derived from the Kafka topic the record arrived on. Sound — the topic is transport-level
+     * addressing the producer cannot forge by omission — but it identifies the producing SERVICE,
+     * not a producer's own assertion about itself.
+     */
+    TOPIC,
+
+    /** Neither available: the field holds the `"unknown"` sentinel and attributes nothing. */
+    ABSENT,
+}
+
+/**
+ * Whether an audit row names the actor that caused the operation, and — where it does not —
+ * whether the producer SAID SO or simply stayed silent (#3994).
+ *
+ * **Not persisted, deliberately.** The sibling provenance markers ([AttributionSource],
+ * [OccurredAtSource]) each needed a column of their own because the field they describe carries a
+ * SENTINEL: `source_service = "unknown"` and an ingest-substituted `occurred_at` are both
+ * indistinguishable, in the stored row, from a real value. `actor_id` has no sentinel — it is
+ * plain SQL `NULL` — so this classification is already fully derivable from the two columns the
+ * table has:
+ *
+ * ```
+ * DECLARED  <=>  actor_id IS NOT NULL
+ * SYSTEM    <=>  actor_id IS NULL AND actor_type IS NOT NULL
+ * ABSENT    <=>  actor_id IS NULL AND actor_type IS NULL
+ * ```
+ *
+ * Adding a fourth `*_source` column for it would restate what the row already says, and grow the
+ * chain-hashed evidentiary record to hold a value that asserts nothing new. The gap this enum
+ * closes is not in the TABLE — a `GROUP BY` has always been able to answer it — it is that no
+ * TIME SERIES existed, so nothing could alert or degrade on the actor gap, and 75% of the trail
+ * reached that state unremarked. See `openbank.audit.actor.missing`.
+ */
+enum class ActorProvenance {
+    /** The producer named an actor: `requestedBy`, `actorId` or `initiatedByPartyId`. */
+    DECLARED,
+
+    /**
+     * No actor id, but the producer classified the actor anyway (`actorType`, e.g. `SYSTEM` for a
+     * scheduled balance update). An ASSERTED absence — the producer is on record that no human
+     * identity applies, which is a materially different claim from having forgotten one.
+     */
+    SYSTEM,
+
+    /**
+     * Neither an id nor a type: the producer said nothing about who acted. A SILENT absence, and
+     * the state 75% of the live trail is in — including `PARTY_CREATED`, `KYC_CASE_APPROVED`,
+     * `AccountStatusChanged` and `ConsentRevoked`, which are decisions with a decider.
+     */
+    ABSENT,
+}
+
 enum class OccurredAtSource {
     /** The producer sent a parseable `occurredAt`; [AuditEntry.occurredAt] is the real event time. */
     EVENT,

@@ -156,10 +156,20 @@ class StubContactGateProducer {
         },
         suppression = ContactSuppressionPort { emptyList() },
         policy = ContactPolicy(),
+        // A FIXED clock, at 12:00 UTC. ContactPolicy's defaults are quietHoursStart = 21 and
+        // quietHoursEnd = 8, and ContactPolicyGate reads them against `clock()`, which defaults to
+        // Instant.now(). Without this the outcome of every test here depends on the wall clock of
+        // whatever runs it: the SENT case is SUPPRESSED with reason QUIET_HOURS between 21:00 and
+        // 08:00 in the platform zone, and green the rest of the day. Measured on main at 21:37
+        // local — `expected: "SENT" but was: "SUPPRESSED"`.
+        clock = { FIXED_NOW },
     )
 
     companion object {
         var consented: Boolean = true
         var sendsInWindow: Int = 0
+
+        /** 2026-01-15T12:00:00Z — midday, so outside the 21→8 quiet window in any platform zone. */
+        val FIXED_NOW: Instant = Instant.parse("2026-01-15T12:00:00Z")
     }
 }

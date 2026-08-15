@@ -42,6 +42,10 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // @TestSecurity for KycOutboxWriteIT (#4007): the outbox write can only be proved through a
+    // real HTTP request (a reactive Panache repo called from a bare @QuarkusTest thread has no
+    // Vert.x context), and every KYC endpoint is @RolesAllowed.
+    testImplementation(libs.quarkus.test.security)
     // Consumer-driven contract for the party-events Kafka messages (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
     // Provider-side verification of kyc-case events onboarding-service consumes (ADR-0063,

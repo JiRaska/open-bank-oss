@@ -54,7 +54,8 @@ reconciliation did for 41 days (issue #855).
   Seeding those two secret values is the one remaining manual step before this agent can produce a
   real end-to-end proposal.
 - The Prometheus gauge names this agent queries
-  (`openbank_workflow_last_success_age_seconds` + `openbank_workflow_expected_interval_seconds`,
+  (`openbank_workflow_last_success_age_seconds` + `openbank_workflow_expected_interval_seconds`
+  + `openbank_workflow_success_recorded`,
   `openbank_event_consumer_liveness_producer_only`, `openbank_lineage_audit_unverified_edge`,
   `openbank_reconciliation_consecutive_drift_runs`) are the contract this agent expects from
   ADR-0160's mechanisms 1–4; wiring each mechanism's CI script / watchdog primitive to actually
@@ -70,3 +71,11 @@ reconciliation did for 41 days (issue #855).
   have no producer yet **by design** (see the bullet above) — an empty vector there means "not
   wired", which is different from mechanism 3's case, where a producer existed and was simply not
   being asked for.
+- **`openbank_workflow_success_recorded` changes no verdict — only the wording of a finding.** The
+  age gauge is seeded at registration (ADR-0237, so the `WorkflowLivenessStale` rule cannot fire on
+  every fresh pod), which means "has never succeeded" and "succeeded a second ago" are the same
+  small age. This flag is the one bit that separates them: with it, a stale-heartbeat finding says
+  "no success in the Ns since this pod registered it" instead of asserting a last success that
+  never happened. Thresholds and severities are untouched — a job that never ran crosses the same
+  2× line once its grace elapses. An absent or unparseable flag is read as "has succeeded", so a
+  rolling upgrade past pods that predate the gauge cannot manufacture never-succeeded findings.

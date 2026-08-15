@@ -115,7 +115,99 @@ def _walk_routes(route: dict, receivers_hit: list[str]) -> None:
         _walk_routes(child, receivers_hit)
 
 
+def self_test() -> int:
+    """Falsify the egress classifier and the critical-route matcher.
+
+    What this gate protects: a `severity=critical` alert whose receiver cannot LEAVE the
+    cluster is an alert nobody is paged by. The failure is perfectly quiet — Alertmanager
+    fires, the webhook resolves to a `.svc` name, the delivery succeeds, and the only person
+    who would notice is the one who was supposed to be woken up.
+
+    Both halves are string-shaped and both can be wrong while looking right: a receiver is
+    "egress capable" by integration key or by a literal external URL, and a route is
+    "critical" in two matcher dialects.
+    """
+    fails: list[str] = []
+
+    def case(label, fn, arg, want):
+        got = fn(arg)
+        if got != want:
+            fails.append(f"{label}: expected {want}, got {got}")
+
+    # --- receiver egress ---------------------------------------------------------------
+    # A named integration is egress by definition — that is the whole point of the key list.
+    case("a slack receiver is egress capable", receiver_is_egress_capable,
+         {"slack_configs": [{"channel": "#ops"}]}, True)
+    case("a pagerduty receiver is egress capable", receiver_is_egress_capable,
+         {"pagerduty_configs": [{"routing_key": "x"}]}, True)
+
+    # THE DEFECT this gate exists for: a receiver that only posts INSIDE the cluster. The
+    # delivery succeeds and nobody is paged.
+    case("a .svc webhook is NOT egress", receiver_is_egress_capable,
+         {"webhook_configs": [{"url": "http://alerta.monitoring.svc:8080/api"}]}, False)
+    case("a cluster.local webhook is NOT egress", receiver_is_egress_capable,
+         {"webhook_configs": [{"url": "http://x.monitoring.svc.cluster.local/api"}]}, False)
+    case("a localhost webhook is NOT egress", receiver_is_egress_capable,
+         {"webhook_configs": [{"url": "http://localhost:9090/hook"}]}, False)
+    # ...and the shape that DOES leave.
+    case("an external webhook is egress", receiver_is_egress_capable,
+         {"webhook_configs": [{"url": "https://hooks.example.com/services/T/B/X"}]}, True)
+
+    # An EMPTY receiver must not read as egress-capable. This is the direction that fails
+    # silently: a receiver stub with nothing in it looks configured.
+    case("an empty receiver is not egress", receiver_is_egress_capable, {}, False)
+    case("a receiver with an empty key list is not egress", receiver_is_egress_capable,
+         {"slack_configs": []}, False)
+    # A webhook with no URL, or a blank one, proves nothing.
+    case("a webhook with no url is not egress", receiver_is_egress_capable,
+         {"webhook_configs": [{}]}, False)
+    case("a webhook with a blank url is not egress", receiver_is_egress_capable,
+         {"webhook_configs": [{"url": "   "}]}, False)
+    # A templated URL is not a literal one: it may resolve anywhere, so it cannot be counted
+    # as proof of egress. Pinned so the behaviour stays deliberate.
+    case("a host containing .svc anywhere is internal", _webhook_url_is_external,
+         {"url": "http://prom.svc.internal/x"}, False)
+
+    # --- critical route matching --------------------------------------------------------
+    # Both dialects in use here. Missing one silently halves the gate's coverage.
+    case("the matchers list form selects critical", _matchers_select_critical,
+         {"matchers": ['severity = "critical"']}, True)
+    case("the legacy match map form selects critical", _matchers_select_critical,
+         {"match": {"severity": "critical"}}, True)
+    case("the regex-equals form selects critical", _matchers_select_critical,
+         {"matchers": ['severity =~ "critical"']}, True)
+    # Not critical, and must not be treated as such — a gate that thinks every route is
+    # critical reports on routes nobody asked about.
+    case("a warning route is not critical", _matchers_select_critical,
+         {"matchers": ['severity = "warning"']}, False)
+    case("a route with no matchers is not critical", _matchers_select_critical, {}, False)
+
+    # --- route walking ------------------------------------------------------------------
+    # Critical routes nest. A walker that only reads the top level misses the common shape,
+    # where severity routing sits two levels down under a team split.
+    hits: list[str] = []
+    _walk_routes({"routes": [
+        {"matchers": ['team = "payments"'], "routes": [
+            {"matchers": ['severity = "critical"'], "receiver": "deep-pager"},
+        ]},
+        {"matchers": ['severity = "critical"'], "receiver": "top-pager"},
+    ]}, hits)
+    if sorted(hits) != ["deep-pager", "top-pager"]:
+        fails.append(f"nested critical routes not both found: {hits}")
+
+    if fails:
+        for f in fails:
+            sys.stderr.write(f"::error::self-test: {f}\n")
+        sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
+        return 1
+    print("self-test ok: critical-alert-egress is falsifiable (17 cases)")
+    return 0
+
+
 def main() -> int:
+    if "--self-test" in sys.argv:
+        return self_test()
+
     manifest = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MANIFEST
     if not manifest.is_file():
         print(f"::error::check-critical-alert-egress: {manifest} not found")

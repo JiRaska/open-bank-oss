@@ -27,11 +27,29 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 - document-service → seal adapter (phase-1 no-op; phase-2 EU DSS PAdES with a QSeal/HSM key,
   ADR-0007/0162) — introduces an HSM/key-custody trust boundary in phase-2.
 - Outbox → Kafka (`openbank.documents.document.event`) → downstream consumers (lending, account).
+- **Kafka → document-service (new, ADR-0248):** `billing-service`'s billing-outbox
+  (`openbank.billing.billing.event`, `AnnualFeeSummaryReadyConsumer`) — the annual statement of
+  fees is a PAD Art. 5 push duty, so this is the one template family document-service renders on an
+  async trigger rather than a synchronous caller request. Same poison-pill posture as the existing
+  `AccountCreatedConsumer` ingress (malformed/incomplete events are logged and skipped, never
+  crash the consumer or wedge the partition); the rendered bytes never reach the object store (no
+  `Document` row, no outbox event) and are handed to a delivery port that is a **logging-only
+  phase-1 stub** — no real email/postal channel exists yet, so nothing is actually sent today.
+- **Any internal service → `POST /api/v1/documents/templates/preview` (new synchronous callers,
+  ADR-0248):** `statement-service`, `sepa-payment-service` and `domestic-payment-service` now call
+  this existing endpoint synchronously to render a statement/confirmation document on customer
+  request, alongside document-service's own editor-preview use. This endpoint never persists (no
+  `Document` row, no object-store write, no outbox event), so it carries no new data-at-rest risk —
+  only a rendering-abuse/DoS surface, mitigated by the existing `MAX_PREVIEW_BODY_LENGTH` cap
+  (200,000 chars) and the platform rate-limit noted under **Denial of service** below. Each caller
+  still authenticates as any other endpoint on this resource (OIDC bearer,
+  `ROLE_API`/`ROLE_OPERATOR`/`ROLE_ADMIN`) — this is a new set of *callers*, not a new
+  authentication or authorization boundary.
 
 ## Threats & mitigations (STRIDE)
 | Threat | Mitigation |
 | --- | --- |
-| **Spoofing the caller** | Every endpoint requires a valid OIDC bearer with `ROLE_SERVICE`/`ROLE_OPERATOR`/`ROLE_ADMIN`; unauthenticated calls are 401. Reflection guard test asserts no endpoint is `@PermitAll`/unannotated. |
+| **Spoofing the caller** | Every REST endpoint requires a valid OIDC bearer with `ROLE_SERVICE`/`ROLE_OPERATOR`/`ROLE_ADMIN`; unauthenticated calls are 401. Reflection guard test asserts no endpoint is `@PermitAll`/unannotated. The `AnnualFeeSummaryReadyConsumer` Kafka ingress has no per-message caller identity (mTLS at the broker is the only authentication layer, ADR-0056) — mitigated by `eventType` + required-field validation and by the consumer being a pure read of `billing-service`'s own outbox topic, never a write path back into billing. |
 | **Tampering — document forgery** | Documents render only from a `PUBLISHED` template (`findPublished`); the rendered bytes are content-addressed by SHA-256 and stored under a derived key; phase-2 adds S3 Object Lock (WORM) so stored bytes are immutable. |
 | **Tampering — SSTI / XSS via template + data** | The phase-1 renderer is logic-less `{{token}}` substitution (regex only, no engine), and substituted values are HTML-escaped. Production Handlebars/Qute adapter (ADR-0162) must stay logic-less and sandboxed behind the same port. |
 | **Repudiation** | Lifecycle transitions emit domain events to the outbox → audit pipeline; phase-2 PAdES sealing makes the signed artifact independently verifiable (non-repudiation). Ceremony records each signer's decision + timestamp. |

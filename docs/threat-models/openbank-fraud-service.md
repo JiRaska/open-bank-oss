@@ -69,7 +69,10 @@ Assets protected, in priority order:
                      └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-Trust boundaries crossed: (1) external caller → REST; (3) service → Postgres;
+Trust boundaries crossed: (1) external caller → REST — in a deployed environment this means
+namespaces `payments` (domestic-payment, sepa-payment, sepa-instant) and `fx` (fx-service), which
+is what this service's NetworkPolicy admits; until issue #4221 it was crossed by nothing at all,
+since no workload set `FRAUD_SERVICE_URL`; (3) service → Postgres;
 (4) Kafka (`openbank.transactions.transaction.initiated`) → `TransactionSignalConsumer` → (5)
 `velocity_aggregates` Postgres and (6) `payee_history` Postgres (ADR-0084 §3 v4 — same Kafka signal,
 same trust boundary, no new topic). Domain layer (`FraudRuleEngine`, model) has **zero** framework
@@ -91,6 +94,9 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — fraud reuses the shared `openbank-services` Keycloak confidential client / shared Vault key (like the rest of the fleet). Compromise of that one key mints tokens accepted across services. | Secret Vault-projected (never in git/state); confidential (not public) client; endpoint additionally requires a service/operator/admin role | **Shared-credential blast radius accepted for sandbox only.** Dedicated Vault path + per-service Keycloak client = hardening before prod. **Prod go-live requires the second money-path approver to sign off this residual** (ADR-0030). — *open* |
 | T4 | Bundled ONNX model | **Tampering** — a modified `baseline-fraud-v1.onnx` on the classpath changes shadow-score behaviour without a rule-set code review (T2's mitigation is code-as-config; a binary model artifact isn't source-reviewable the same way) | Model file is repo-committed (in `src/main/resources`, same PR review + signed-commit gate as code, ADR-0030); loaded from the service's own classpath only, never a runtime-fetched path; `OnnxFraudModel.loadSession` catches any parse/load failure and disables shadow scoring rather than propagating a bad model | No cryptographic signature/provenance on the model artifact itself yet — deferred to ADR-0141's model registry (model card + artifact signing reusing ADR-0121's chain), *tracked, not blocking since output stays shadow-only (never affects a verdict) until ADR-0139 phase 3* |
 | D2 | ONNX Runtime session | **DoS** — a malformed/oversized `.onnx` payload consumed pathologically by ONNX Runtime's native inference engine stalls or crashes the JVM | Model is a fixed, repo-bundled, size-known (269 B) artifact — never accepts an externally-supplied model at runtime; `scoreShadow` wraps inference in a try/catch and degrades to `null` (rules-only) rather than propagating | Native-library CVEs in `onnxruntime` itself — covered by the fleet's existing Trivy/SBOM scan (ADR-0121), not a fraud-service-specific gap |
+| S3 | account-service REST call | **Spoofing** — `AccountServiceClient`'s M2M call (fraud-hold partyId lookup) is impersonated or its response is trusted uncritically | Same shared `openbank-services` OIDC client every outbound caller in this fleet uses (S2's residual applies identically); response is used ONLY to resolve `partyId` for a marketing-suppression signal, never to gate a scoring verdict or a payment | Shared-credential blast radius — same *open* item as S2 |
+| T5 | `fraud_hold` row / `fraud.hold_changed` event | **Tampering/DoS** — a forged or flooded hold event could suppress marketing indefinitely for arbitrary parties, or a compromised producer could fabricate holds | Trigger is server-computed only (repeated REVIEW verdicts already in `fraud_scores`, never caller-supplied); event published only via the transactional outbox (ADR-0050), never a direct emit; consuming side (engagement-service) treats the signal as advisory (targeting exclusion only) — **never an account/payment restriction**, bounding the blast radius of a forged event to "this party sees fewer marketing surfaces," not a financial action | Kafka topic has no application-layer message signing yet — same posture as every other domain-event topic in this fleet |
+| I3 | `fraud.hold_changed` payload | **Information disclosure** — `partyId`/`accountId` on the wire | Same class of identifier already in `fraud_scores.account_id`/`counterparty_id` (I2); topic is mTLS, in-cluster only, consumed by one authorized service | Low — no new PII category |
 
 ## 4. Key invariants (must never regress)
 
@@ -132,6 +138,55 @@ imports (ADR-0002), so verdict logic is unit-testable in isolation.
 
 ## 6. Change log
 
+- **2026-08-09** — Boundary (1) gains its first real callers (issue #4221). No new *kind* of
+  boundary: the inbound REST surface, its `@RolesAllowed`/`@Authorize` gates, the rule engine and
+  every stored artefact are untouched. What changes is that boundary (1) — described above as the
+  "(Phase 2 caller)" — had **never once been crossed in a deployed environment**. All four scoring
+  clients (domestic-payment, sepa-payment, sepa-instant, fx-service) resolved
+  `${FRAUD_SERVICE_URL:http://localhost:8133}` with the variable unset in every workload, so each
+  dialled its own pod, was refused, and the fail-open `FraudScoringAdapter` returned a synthetic
+  ALLOW. `fraud_scores` held 0 rows fleet-wide. Wiring the four workloads to
+  `fraud-service.fraud.svc:8133` makes `gen-network-policies.py` derive the corresponding ingress
+  edge, so this service's NetworkPolicy now admits namespaces `payments` and `fx` (previously
+  `admin-ui` only). Security-relevant in both directions, and worth stating plainly:
+  - **Reduces** a real risk. Every payment on all four rails was scored by a fail-open stub, and
+    the WARN it emitted per payment ("shadow ALLOW") is indistinguishable in aggregate from a
+    genuinely quiet risk engine. The RTS Art. 18 baseline ADR-0084 §4.1 assumes is now actually
+    being collected rather than assumed.
+  - **Adds** exposure worth naming. Two namespaces reach this service's REST surface that could
+    not before, and `fraud_scores` starts receiving live money-path amounts, currencies and
+    account identifiers at payment volume for the first time. Ingress remains least-privilege
+    (derived per-namespace, not opened wildly), callers still present a Keycloak JWT and are still
+    gated by `@RolesAllowed`, and the storage contract is unchanged.
+  - **No verdict is acted on.** Every call site is shadow-only — `shadowFraudScore`
+    (domestic/sepa), `scoreFraudShadow` (sepa-instant) — and logs a non-ALLOW outcome without
+    influencing payment flow. The `*_FRAUD_ENFORCEMENT_ENABLED` flags that would change that have
+    no reader in Kotlin today. Flipping enforcement is a separate, runbook-gated change and needs
+    its own threat-model entry, including the load test §5 already requires before any surface
+    moves to challenge/enforce.
+  - **Rollback**: remove `FRAUD_SERVICE_URL` from the four workloads and regenerate network
+    policies. That restores the fail-open stub, i.e. the state described above — which is a
+    return to unmeasured risk, not to safety.
+- **2026-08-08** — ADR-0220 D3.5 fraud-hold signal (issue #2749): two NEW trust boundaries,
+  documented in S3/T5/I3 above. This is fraud-service's **first-ever Kafka producer** (every
+  prior grant was Read-only, `openbank.fraud.hold.changed`, `kafka-fraud-mtls.yaml`) and its
+  **first-ever outbound REST call** (`AccountServiceClient` → account-service, resolving
+  `partyId` from `accountId`). Deliberately conservative on both the trigger and the target: the
+  trigger is repeated REVIEW verdicts within a rolling window (no new DECLINE rule — `FraudRuleEngine`
+  is unchanged, `ruleVersion` unbumped, and this cannot influence a scoring verdict, only observe
+  ones already computed and persisted), and the signal is consumed by engagement-service ONLY as
+  a marketing-targeting exclusion (`AdverseState.FRAUD_HOLD`) — it never touches account status,
+  never freezes anything, and has no path back into the payment hot path. New `fraud_hold` table
+  (one row per party, auto-expiring — no manual clear mechanism exists in this service, by
+  design: there is no fraud-case/investigation lifecycle to resolve one from) and a standard
+  ADR-0050 transactional outbox (`fraud_outbox`) publishing `fraud.hold_changed`
+  (`{partyId, accountId, active, reason, ruleVersion, occurredAt}`) atomically with the hold
+  write. Both the raise path (`FraudHoldService.maybeRaise`, called from `FraudScoringService.score`
+  in the same fire-and-forget, exceptions-swallowed slot as the existing ML shadow pass) and the
+  expiry sweep (`FraudHoldService.sweepExpired`, hourly `@Scheduled`) never affect the returned
+  `FraudScore` or the money-path scoring latency. Rollback: revert the commit; drop `fraud_hold`/
+  `fraud_outbox` (safe while inert — no other consumer reads either table); the account-service
+  client and Kafka producer grant can be removed independently since nothing else depends on them.
 - **2026-08-07** — Malformed `POST /api/v1/fraud/score` bodies answered 500, not 400 (#3923). Nothing validated `currency` at the HTTP boundary, and Jackson **coerces** a wrongly-typed JSON scalar into `String` rather than rejecting it — `{"currency": false}` deserialises to the five-character `"false"`. That reached `fraud_scores.currency`, a `varchar(3)`, and Postgres raised `22001 value too long`, surfacing as a Hibernate `DataException` and, with no mapper for it, a **500** from `GenericExceptionMapper`. Found by the 2026-08-03 `api-fuzz-authenticated` run as this service's only `Server error`. **No trust boundary moves:** the endpoint, its `@RolesAllowed`/`@Authorize` gates and every caller are unchanged, and the new guard runs AFTER authorization — the change is purely which status a rejected request carries. It is still security-relevant twice over: a 5xx on a money-path service charges its error budget for someone else's bad request, and it hid a real input reaching storage untyped. Validation is `require` (-> `IllegalArgumentException` -> 400 via libs-runtime's `CommonExceptionMappers`), never a service-local `ExceptionMapper` — a second mapper for one JDK type is picked non-deterministically per request (#526). The bound is the storage contract (exactly three upper-case ISO 4217 letters), so it cannot drift back from the column. Rollback: revert the commit, which restores the 500.
 - **2026-08-05** — Prohibit the customer-edge M2M principal from `fraud.score` (#3734).
   `operator-fraud-write` was role-only over the whole `fraud.*` namespace, and `rules.yaml`'s

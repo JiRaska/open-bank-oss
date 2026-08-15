@@ -1,0 +1,53 @@
+# Declared debt for the canary-realisability half of check-single-replica-rollout-strategy.py
+# (issue #3806, the sharper half of #3545).
+#
+# Every line here is a canary Argo Rollout that declares `setWeight` steps its replica count
+# cannot produce. Without a `trafficRouting` provider Argo realises a canary weight by POD COUNT,
+# so N replicas express only the multiples of 100/N — at N=1 that is 0 or 100 and nothing else.
+# `setWeight: 10` on a one-replica Rollout therefore routes all traffic or none, and the `pause`
+# after it observes a state the weights do not describe.
+#
+# Measured on origin/main and live (`kubectl get rollout -A`) 2026-08-08: 21 Rollouts in the
+# fleet, 21 at `replicas: 1`, 21 canary, 0 with trafficRouting, all reporting `Healthy` and
+# `1/1 READY`. 17 of the 21 are money-path per rules.yaml: money_path_services. There is no
+# unaffected control group — the canary strategy has never run in a shape where it can do
+# anything, which is why nothing ever looked wrong.
+#
+# This file is the ENFORCED ratchet, not an amnesty: a NEW unrealisable canary fails the gate,
+# and a line here that stops matching fails it too (delete the line when the debt is paid, or the
+# file outlives it and starts lying about what is covered).
+#
+# Three ways off this list, and picking between them is an owner decision, not a drive-by:
+#   1. Make the weights match the replica count (at 1 replica: 0/100 only) — free, honest, and
+#      says out loud that progressive delivery is not in force.
+#   2. Wire a trafficRouting provider (ingress-nginx / SMI) — weights become real at any replica
+#      count. This is the only option that makes `setWeight: 10` mean 10%.
+#   3. Raise `replicas` — note this alone does NOT fix it (at 2 replicas `setWeight: 10` means
+#      50%), it costs capacity (+4.62 vCPU / +9.69 GiB to double all 21, ~+9.6% of the `default`
+#      nodepool's declared CPU cap), and for at least lending-service it is a CORRECTNESS change
+#      first: #3467 records per-pod in-memory compliance-pack state, so a second replica arms a
+#      four-eyes divergence. #3644 is the convergence fix and says itself it does not make
+#      lending safe to scale.
+#
+# Refs #3806, #3545, #3805, #3467, #3644.
+openbank-infra/gitops/components/accounts/account-service.yaml: Rollout/account-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/balances/balance-service.yaml: Rollout/balance-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/consent/consent-service.yaml: Rollout/consent-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/customer-edge/customer-edge.yaml: Rollout/customer-edge canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/fraud-service/fraud-service.yaml: Rollout/fraud-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/fx-service/fx-service.yaml: Rollout/fx-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/kyc/kyc-service.yaml: Rollout/kyc-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/ledger/ledger-service.yaml: Rollout/ledger-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/lending/lending-service.yaml: Rollout/lending-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/onboarding/onboarding-service.yaml: Rollout/onboarding-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/party/party-service.yaml: Rollout/party-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/transaction-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-payment canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/domestic-payment canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/sepa-instant canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/clearing-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/settlement-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/swift-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/payments/payments-services.yaml: Rollout/vop-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/sanctions-service/sanctions-service.yaml: Rollout/sanctions-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting
+openbank-infra/gitops/components/sca/sca-service.yaml: Rollout/sca-service canary declares setWeight 10,30 that 1 replica(s) cannot express and has no trafficRouting

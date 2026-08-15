@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.8.1...aml-service-v0.8.2) (2026-08-09)
+
+
+### Bug Fixes
+
+* **jaxrs-params:** answer 400, not 500, for a missing required query/header parameter ([#4375](https://github.com/JiRaska/open-bank-oss/issues/4375)) ([32ab2a2](https://github.com/JiRaska/open-bank-oss/commit/32ab2a2dfe0d208ae5ba865758c774ec47a92d09)), closes [#4175](https://github.com/JiRaska/open-bank-oss/issues/4175)
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.8.0...aml-service-v0.8.1) (2026-08-09)
+
+
+### Bug Fixes
+
+* **libs:** stamp ApiError.timestamp at construction instead of serving 1970 ([#3880](https://github.com/JiRaska/open-bank-oss/issues/3880)) ([b3e6672](https://github.com/JiRaska/open-bank-oss/commit/b3e6672c9e13470fc6353ad8a5483e4075875b1f))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.7.10...aml-service-v0.8.0) (2026-08-07)
 
 

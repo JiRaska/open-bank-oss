@@ -40,8 +40,6 @@ class PartyService : PartyUseCase {
 
     @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
 
-    @Inject lateinit var eventPublisher: PartyEventPublisher
-
     @Inject lateinit var gdprAggregation: GdprAggregationPort
 
     @Inject lateinit var portabilityAggregation: PortabilityAggregationPort
@@ -53,6 +51,8 @@ class PartyService : PartyUseCase {
     @Inject lateinit var marketingConsentTracking: MarketingConsentTrackingRepository
 
     @Inject lateinit var metrics: DomainMetrics
+
+    @Inject lateinit var changeMetrics: PartyChangeMetricsPort
 
     @Inject lateinit var clock: Clock
 
@@ -101,8 +101,10 @@ class PartyService : PartyUseCase {
             consentMarketing = cmd.consentMarketing,
             consentCapturedAt = consentCapturedAt,
         )
-        val saved = partyRepo.save(party)
-        eventPublisher.publishPartyCreated(saved)
+        val saved = partyRepo.save(
+            party,
+            PartyEvents.created(party, Instant.now(clock), PartyActor.system("party-api")),
+        )
         metrics.partyCreated(saved.partyType.name)
         return saved
     }
@@ -185,10 +187,19 @@ class PartyService : PartyUseCase {
             phone = cmd.phone ?: party.phone,
             address = cmd.address ?: party.address,
             tradingName = cmd.tradingName ?: party.tradingName,
+            legalName = cmd.legalName ?: party.legalName,
+            dateOfBirth = cmd.dateOfBirth ?: party.dateOfBirth,
+            nationality = cmd.nationality ?: party.nationality,
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated)
-        eventPublisher.publishPartyUpdated(saved)
+        // ADR-0256 D1 / #4458: the publisher declares materiality, computed from this diff. The
+        // event is published either way — account-service reconciles on PARTY_UPDATED regardless
+        // — but only MATERIAL is a KYC re-screening trigger, and NO_CHANGE is its own outcome.
+        changeMetrics.changeClassified(PartyChange.classify(party, updated).materiality)
+        val saved = partyRepo.update(
+            updated,
+            PartyEvents.updated(party, updated, Instant.now(clock), PartyActor.system("party-api")),
+        )
         return saved
     }
 
@@ -291,8 +302,10 @@ class PartyService : PartyUseCase {
             status = deriveStatus(status, party.amlStatus, party.status),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated)
-        eventPublisher.publishKycStatusChanged(saved)
+        val saved = partyRepo.update(
+            updated,
+            PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("kyc-status-projection")),
+        )
         countIfVerifyingTransition(party.status, saved)
         return saved
     }
@@ -304,10 +317,12 @@ class PartyService : PartyUseCase {
             status = deriveStatus(party.kycStatus, amlStatus, party.status),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(updated)
         // Emits the party's current status (incl. ACTIVE) to downstream consumers
         // (account-service activation, onboarding cockpit) on the party events topic.
-        eventPublisher.publishKycStatusChanged(saved)
+        val saved = partyRepo.update(
+            updated,
+            PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("aml-status-projection")),
+        )
         countIfVerifyingTransition(party.status, saved)
         return saved
     }
@@ -352,8 +367,7 @@ class PartyService : PartyUseCase {
         // GDPR Art. 17: delete binary document files before anonymizing the party row.
         // Order matters: files first (they carry biometric PII), then anonymize identity.
         documentFileRepo.deleteByPartyId(cmd.id)
-        partyRepo.anonymize(cmd.id)
-        eventPublisher.publishPartyErased(cmd.id)
+        partyRepo.anonymize(cmd.id, PartyEvents.erased(cmd.id, Instant.now(clock)))
     }
 
     /**
@@ -405,8 +419,10 @@ class PartyService : PartyUseCase {
             mergedIntoPartyId = target.id,
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.update(merged)
-        eventPublisher.publishPartyMerged(saved, target.id)
+        val saved = partyRepo.update(
+            merged,
+            PartyEvents.merged(merged, target.id, Instant.now(clock), PartyActor.system("party-merge")),
+        )
         return saved
     }
 
@@ -431,8 +447,10 @@ class PartyService : PartyUseCase {
             createdAt = Instant.now(clock),
             updatedAt = Instant.now(clock),
         )
-        val saved = partyRepo.save(party)
-        eventPublisher.publishPartyCreated(saved)
+        val saved = partyRepo.save(
+            party,
+            PartyEvents.created(party, Instant.now(clock), PartyActor.customer(cmd.keycloakSub)),
+        )
         return Pair(saved, true)
     }
 

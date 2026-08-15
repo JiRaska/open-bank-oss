@@ -103,20 +103,32 @@ data:
 
           # A job that completed successfully having done nothing. The hardest class to alert on,
           # because every metric it touches reports a healthy run.
+          # The selector is `ledger`, not `fx`, and that one word was the whole rule (#3921).
+          # "skipping its revaluation leg" is emitted from exactly one place in service code —
+          # openbank-ledger-service .../usecase/FxRevaluationService.kt — and the ledger workload
+          # deploys to namespace `ledger` (gitops/apps/ledger.yaml). Selecting `fx` matched the
+          # namespace holding fx-service, fx-db and redis, where that string is never logged, so
+          # the only rule claiming to cover the skipped-leg path could not fire at all. The label
+          # vocabulary was never in doubt: this same file selects namespace=~"ledger|accounts|…"
+          # elsewhere. Companion signal, and the one that catches the quieter failure: the
+          # openbank_fx_fixing_age_seconds gauge in prometheus-rules-fx-fixing.yaml, which sees a
+          # rate that is stale-but-valid — a case that logs nothing at all.
           - alert: FxRevaluationSkippedAllLegs
             expr: |
               sum by (namespace) (
-                count_over_time({namespace="fx"} |= "skipping its revaluation leg" [1h])
+                count_over_time({namespace="ledger"} |= "skipping its revaluation leg" [1h])
               ) > 0
             for: 15m
             labels:
               severity: warning
               team: platform
             annotations:
-              summary: "fx-service revalued nothing — no valid rate available"
+              summary: "ledger-service revalued nothing — no valid ČNB rate available"
               description: >-
-                FxRevaluationService found no usable rate and returned posted=false. The run looks
-                successful from every angle: no exception, no failed counter, a green job. The only
-                other evidence is a table that stops growing, and nothing alerts on that. Check the
-                ČNB feed first (check-external-feeds.py probes the URL's payload SHAPE, not its
-                status code — a 404 HTML page is a perfectly valid HTTP response).
+                FxRevaluationService (openbank-ledger-service) found no usable rate and returned
+                posted=false. The run looks successful from every angle: no exception, no failed
+                counter, a green job, and a workflow-liveness heartbeat that records the run as a
+                success. The only other evidence is a table that stops growing, and nothing alerts
+                on that. Check the ČNB feed first — it is ingested by fx-service, one namespace
+                over (check-external-feeds.py probes the URL's payload SHAPE, not its status code
+                — a 404 HTML page is a perfectly valid HTTP response).

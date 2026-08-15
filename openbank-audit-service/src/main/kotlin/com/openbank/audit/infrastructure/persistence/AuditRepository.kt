@@ -4,6 +4,7 @@
 
 package com.openbank.audit.infrastructure.persistence
 
+import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -74,6 +75,19 @@ class AuditEntryEntity : PanacheEntity() {
     @Column(name = "occurred_at_source", length = 8)
     var occurredAtSource: String? = null
 
+    /**
+     * Provenance of [sourceService] — `EVENT`, `TOPIC` or `ABSENT` ([AttributionSource]), NULL on
+     * any row written before V13 (#3994).
+     *
+     * Same contract as [occurredAtSource] above and for the same reasons: NULL stays NULL (the
+     * `DO INSTEAD NOTHING` rule from V2 makes a backfill a silent no-op, and there is nothing to
+     * backfill from — the topic a pre-V13 row arrived on was never stored), and it is NOT part of
+     * [chainHash], because it describes where the consumer got a value rather than asserting a new
+     * evidential fact. `source_service` itself remains chain-hashed exactly as before.
+     */
+    @Column(name = "source_service_source", length = 8)
+    var sourceServiceSource: String? = null
+
     // ── Tamper-evidence (hash chain, ADR-0023 spirit applied to the operational log) ──
     @Column(name = "prev_hash")
     var prevHash: String? = null
@@ -100,7 +114,13 @@ class AuditEntryEntity : PanacheEntity() {
     // ── Cross-channel correlation (ADR-0226): query indexes, NOT part of the chain hash — the
     // producer's raw event JSON (already hashed via `payload`) carries these fields verbatim, so
     // tamper-evidence covers them without recomputing every pre-V9 row.
-    @Column(name = "channel", length = 16)
+    //
+    // length=32 (V14, issue #4660): widened from 16. The bare JSON key "channel" turned out to be
+    // independently populated by THREE producers — AuditChannel (ADR-0226, this column's original
+    // intent), OnboardingChannel (party-service) and ComplaintChannel (dispute-service) — with no
+    // shared vocabulary, so AuditConsumer now namespaces the value by source topic before storing
+    // it (see resolveChannel there). "onboarding:MOBILE_APP" alone is 22 characters.
+    @Column(name = "channel", length = 32)
     var channel: String? = null
 
     /** JSON array string (e.g. `["agent-session:7f3…","mcp-cli"]`); null when the action was direct. */
@@ -156,6 +176,7 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 it.occurredAt = stored.occurredAt
                 it.recordedAt = stored.recordedAt
                 it.occurredAtSource = entry.occurredAtSource.name
+                it.sourceServiceSource = entry.sourceServiceSource.name
                 it.channel = entry.channel
                 it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
                     ?.let { chain -> actChainJson.writeValueAsString(chain) }
@@ -380,6 +401,9 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
         // NULL (pre-V11) reads back as INGEST: those rows may hold ingest time and cannot prove
         // otherwise, so the weaker claim is the honest one.
         occurredAtSource = occurredAtSource?.let { OccurredAtSource.valueOf(it) } ?: OccurredAtSource.INGEST,
+        // NULL (pre-V13) reads back as ABSENT for the same reason: those rows cannot say who
+        // supplied `source_service`, and for 76% of them the answer is that nobody did.
+        sourceServiceSource = sourceServiceSource?.let { AttributionSource.valueOf(it) } ?: AttributionSource.ABSENT,
         channel = channel,
         actChain = actChain?.let { actChainJson.readValue(it, stringListType) } ?: emptyList(),
         sessionId = sessionId,

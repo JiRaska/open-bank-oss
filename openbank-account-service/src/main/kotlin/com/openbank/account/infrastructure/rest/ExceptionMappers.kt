@@ -11,6 +11,7 @@ import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import java.time.Instant
 import java.util.UUID
 
 // Generic IllegalArgument/IllegalState/Exception mappers are provided by openbank-libs
@@ -25,6 +26,7 @@ class AccountNotFoundExceptionMapper : ExceptionMapper<AccountNotFoundException>
                 status = 404,
                 code = "ACCOUNT_NOT_FOUND",
                 message = exception.message ?: "Account not found",
+                timestamp = Instant.now(),
             ),
         )
         .build()
@@ -44,6 +46,7 @@ class AccountUpdateConflictExceptionMapper : ExceptionMapper<AccountUpdateConfli
                     status = 409,
                     code = "CONCURRENT_MODIFICATION",
                     message = exception.message ?: "Account was modified concurrently",
+                    timestamp = Instant.now(),
                 ),
             )
             .build()

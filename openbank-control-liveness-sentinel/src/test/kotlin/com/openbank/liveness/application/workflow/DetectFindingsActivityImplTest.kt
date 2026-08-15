@@ -30,7 +30,7 @@ class DetectFindingsActivityImplTest {
         val findings = activity.detect(
             ControlMechanism.M3_WORKFLOW_WATCHDOG,
             mapOf(
-                "balance-reconciliation|100" to 120.0,
+                "balance-reconciliation|100|1" to 120.0,
             ),
         )
         assertThat(findings).isEmpty()
@@ -42,7 +42,7 @@ class DetectFindingsActivityImplTest {
         val findings = activity.detect(
             ControlMechanism.M3_WORKFLOW_WATCHDOG,
             mapOf(
-                "balance-reconciliation|100" to 170.0,
+                "balance-reconciliation|100|1" to 170.0,
             ),
         )
         assertThat(findings).hasSize(1)
@@ -56,7 +56,7 @@ class DetectFindingsActivityImplTest {
         val findings = activity.detect(
             ControlMechanism.M3_WORKFLOW_WATCHDOG,
             mapOf(
-                "balance-reconciliation|100" to 200.0,
+                "balance-reconciliation|100|1" to 200.0,
             ),
         )
         assertThat(findings).hasSize(1)
@@ -67,6 +67,35 @@ class DetectFindingsActivityImplTest {
     fun `heartbeat signal missing the composite interval suffix is skipped, not crashed on`() {
         val findings = activity.detect(ControlMechanism.M3_WORKFLOW_WATCHDOG, mapOf("no-interval-here" to 999.0))
         assertThat(findings).isEmpty()
+    }
+
+    @Test
+    fun `a job that has never succeeded says so, instead of claiming a last success it never had`() {
+        // The age gauge is seeded at registration (ADR-0237), so this age is the pod's own uptime
+        // and there was no last success to be 200s ago. The verdict is unchanged — same threshold,
+        // same severity — only the sentence a human reads at 3am.
+        val findings = activity.detect(
+            ControlMechanism.M3_WORKFLOW_WATCHDOG,
+            mapOf("balance-reconciliation|100|0" to 200.0),
+        )
+        assertThat(findings).hasSize(1)
+        assertThat(findings.single().severity).isEqualTo(FindingSeverity.CRITICAL)
+        assertThat(findings.single().title)
+            .contains("no success in the 200s since this pod registered it")
+            .doesNotContain("last success")
+    }
+
+    @Test
+    fun `a heartbeat whose success flag is unreadable is read as having succeeded`() {
+        // Rolling upgrade: an older pod emits two gauges, not three, and the collector defaults the
+        // missing flag to 1. This pins the same default one layer down, for any value that will not
+        // parse — the other default would manufacture a never-succeeded claim about every job in
+        // the fleet for the length of a rollout.
+        val findings = activity.detect(
+            ControlMechanism.M3_WORKFLOW_WATCHDOG,
+            mapOf("balance-reconciliation|100|unknown" to 200.0),
+        )
+        assertThat(findings.single().title).contains("last success 200s ago")
     }
 
     @Test

@@ -13,6 +13,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.MDC
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import java.time.DateTimeException
+import java.time.Instant
 
 class CommonExceptionMappersTest {
 
@@ -144,5 +146,38 @@ class CommonExceptionMappersTest {
         assertThat(body.status).isEqualTo(409)
         assertThat(body.code).isEqualTo(ErrorCode.CONFLICT.code)
         assertThat(body.message).contains("appr-1")
+    }
+
+    /**
+     * #3874: `ApiError.timestamp` defaulted to [Instant.EPOCH] and no call site in the fleet passed
+     * it, so every error body carried `1970-01-01T00:00:00Z` — syntactically valid, never wrong out
+     * loud, and useless to the support path the envelope's own message points at
+     * ("contact support with traceId=…").
+     *
+     * Asserts RECENCY, not non-nullness: a non-null assertion passes against `Instant.EPOCH`, which
+     * is exactly how this survived. Every mapper is covered, because the defect was in the shared
+     * default and one green mapper says nothing about the other nine.
+     */
+    @Test
+    fun `every mapper stamps a timestamp from now, not the epoch`() {
+        val before = Instant.now()
+        val bodies = listOf(
+            IllegalArgumentExceptionMapper().toResponse(IllegalArgumentException("x")).entity,
+            IllegalStateExceptionMapper().toResponse(IllegalStateException("x")).entity,
+            NoSuchElementExceptionMapper().toResponse(NoSuchElementException("x")).entity,
+            DateTimeExceptionMapper().toResponse(DateTimeException("x")).entity,
+            GenericExceptionMapper().toResponse(RuntimeException("x")).entity,
+            SelfApprovalNotAllowedMapper().toResponse(SelfApprovalNotAllowedException("m-1")).entity,
+            PolicyDecisionExceptionMapper().toResponse(PolicyDecisionException("pdp down")).entity,
+            InvalidApprovalStateMapper()
+                .toResponse(InvalidApprovalStateException("a-1", ApprovalStatus.PENDING, ApprovalStatus.EXECUTED))
+                .entity,
+            WebApplicationExceptionMapper().toResponse(WebApplicationException(409)).entity,
+        ).map { it as ApiError }
+        val after = Instant.now()
+
+        assertThat(bodies).allSatisfy { body ->
+            assertThat(body.timestamp).isBetween(before, after)
+        }
     }
 }

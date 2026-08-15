@@ -156,6 +156,18 @@ class LendingServiceEdgeCasesTest {
 
     // --- Intake validation ---------------------------------------------------------------------
 
+    /**
+     * The conditional UPDATE that claims an origination transition (issue #3850). [claimed] is the
+     * row count the database returns: `1` won the row, `0` lost the race to another caller.
+     */
+    private fun stubClaim(claimed: Int = 1) {
+        every { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) } returns
+            Uni.createFrom().item(claimed)
+    }
+
+    private fun verifyClaims(times: Int) =
+        verify(exactly = times) { applications.compareAndSetStatus(any(), any(), any(), any(), any(), any()) }
+
     @Test
     fun `apply rejects a non-positive requested amount`() {
         assertThatThrownBy { service.apply(request(amount = "0.00"), "alice") }
@@ -215,7 +227,7 @@ class LendingServiceEdgeCasesTest {
         }.isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("not awaiting a four-eyes decision")
 
-        verify(exactly = 0) { applications.update(any()) }
+        verifyClaims(0)
     }
 
     @Test
@@ -228,15 +240,14 @@ class LendingServiceEdgeCasesTest {
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Decider identity")
 
-        verify(exactly = 0) { applications.update(any()) }
+        verifyClaims(0)
     }
 
     @Test
     fun `decide records a rejection with the stated reason and decision time`() {
         val app = proposedApplication(proposer = "alice")
-        val updated: CapturingSlot<LoanApplication> = slot()
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
-        every { applications.update(capture(updated)) } answers { Uni.createFrom().item(updated.captured) }
+        stubClaim()
 
         val result = service.decide(
             app.id,

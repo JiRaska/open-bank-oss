@@ -7,13 +7,19 @@ package com.openbank.consent.infrastructure.rest
 import com.openbank.consent.application.usecase.*
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
-import java.util.UUID
+import java.time.Instant
 
-private fun errorResponse(code: ErrorCode, message: String) =
-    ApiError(traceId = UUID.randomUUID().toString(), status = code.httpStatus, code = code.code, message = message)
+private fun errorResponse(code: ErrorCode, message: String) = ApiError(
+    traceId = Ids.randomId().toString(),
+    status = code.httpStatus,
+    code = code.code,
+    message = message,
+    timestamp = Instant.now(),
+)
 
 @Provider
 class ConsentNotFoundMapper : ExceptionMapper<ConsentNotFoundException> {
@@ -52,10 +58,11 @@ class ConsentScaVerificationUnavailableMapper : ExceptionMapper<ConsentScaVerifi
     override fun toResponse(e: ConsentScaVerificationUnavailableException): Response = Response.status(503)
         .entity(
             ApiError(
-                traceId = UUID.randomUUID().toString(),
+                traceId = Ids.randomId().toString(),
                 status = 503,
                 code = "SERVICE_UNAVAILABLE",
                 message = "SCA verification is temporarily unavailable",
+                timestamp = Instant.now(),
             ),
         )
         .build()

@@ -1,0 +1,130 @@
+{{- $issuer := required "oidc.issuer is required" .Values.oidc.issuer -}}
+{{- $dbHost := required "database.host is required" .Values.database.host -}}
+{{- $dbSecret := required "database.existingSecret is required" .Values.database.existingSecret -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "product-catalog.name" . }}
+  labels:
+    {{- include "product-catalog.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "product-catalog.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "product-catalog.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s|%s|%s|%v|%v|%s|%s|%s|%s" $issuer $dbHost .Values.database.name .Values.catalogPacks .Values.bankV1CompatibilityEnabled .Values.oidc.scopeClaim .Values.oidc.readScope .Values.oidc.authorScope .Values.oidc.publishScope | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: catalog
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          ports:
+            - {name: http, containerPort: 8104}
+            - {name: management, containerPort: 8085}
+          env:
+            - {name: QUARKUS_PROFILE, value: standalone}
+            - {name: QUARKUS_MANAGEMENT_HOST, value: "0.0.0.0"}
+            - {name: OIDC_ISSUER, value: {{ $issuer | quote }}}
+            - {name: CATALOG_SCOPE_CLAIM, value: {{ .Values.oidc.scopeClaim | quote }}}
+            - {name: CATALOG_READ_SCOPE, value: {{ .Values.oidc.readScope | quote }}}
+            - {name: CATALOG_AUTHOR_SCOPE, value: {{ .Values.oidc.authorScope | quote }}}
+            - {name: CATALOG_PUBLISH_SCOPE, value: {{ .Values.oidc.publishScope | quote }}}
+            - {name: REACTIVE_URL, value: {{ printf "postgresql://%s:%v/%s" $dbHost .Values.database.port .Values.database.name | quote }}}
+            - {name: JDBC_URL, value: {{ printf "jdbc:postgresql://%s:%v/%s" $dbHost .Values.database.port .Values.database.name | quote }}}
+            - {name: OPENBANK_CATALOG_PACKS, value: {{ join "," .Values.catalogPacks | quote }}}
+            - {name: OPENBANK_BANK_V1_COMPATIBILITY_ENABLED, value: {{ .Values.bankV1CompatibilityEnabled | quote }}}
+            - name: POSTGRES_USER
+              valueFrom: {secretKeyRef: {name: {{ $dbSecret }}, key: {{ .Values.database.usernameKey }}}}
+            - name: POSTGRES_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ $dbSecret }}, key: {{ .Values.database.passwordKey }}}}
+          startupProbe:
+            httpGet: {path: /q/health/ready, port: management}
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /q/health/ready, port: management}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /q/health/live, port: management}
+            periodSeconds: 15
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+{{- if .Values.studio.enabled }}
+{{- if not (hasPrefix "https://" .Values.studio.publicUrl) }}
+{{- fail "studio.publicUrl must use https://" }}
+{{- end }}
+{{- if not (hasPrefix "https://" .Values.studio.keycloak.publicUrl) }}
+{{- fail "studio.keycloak.publicUrl must use https://" }}
+{{- end }}
+        - name: product-studio
+          image: "{{ required "studio.image.repository is required" .Values.studio.image.repository }}:{{ required "studio.image.tag is required" .Values.studio.image.tag }}"
+          imagePullPolicy: {{ .Values.studio.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          ports:
+            - {name: studio, containerPort: 3000}
+          env:
+            - {name: NODE_ENV, value: production}
+            - {name: NEXTAUTH_URL, value: {{ required "studio.publicUrl is required" .Values.studio.publicUrl | quote }}}
+            - {name: KEYCLOAK_PUBLIC_URL, value: {{ required "studio.keycloak.publicUrl is required" .Values.studio.keycloak.publicUrl | quote }}}
+            - {name: KEYCLOAK_URL, value: {{ required "studio.keycloak.publicUrl is required" .Values.studio.keycloak.publicUrl | quote }}}
+            - {name: KEYCLOAK_REALM, value: {{ .Values.studio.keycloak.realm | quote }}}
+            - {name: KEYCLOAK_CLIENT_ID, value: {{ .Values.studio.keycloak.clientId | quote }}}
+            - {name: CATALOG_SCOPE_CLAIM, value: {{ .Values.oidc.scopeClaim | quote }}}
+            - {name: CATALOG_READ_SCOPE, value: {{ .Values.oidc.readScope | quote }}}
+            - {name: CATALOG_AUTHOR_SCOPE, value: {{ .Values.oidc.authorScope | quote }}}
+            - {name: CATALOG_PUBLISH_SCOPE, value: {{ .Values.oidc.publishScope | quote }}}
+            - {name: CATALOG_STANDALONE_SIDECAR, value: "true"}
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "studio.keycloak.existingSecret is required" .Values.studio.keycloak.existingSecret }}
+                  key: {{ .Values.studio.keycloak.clientSecretKey }}
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "studio.keycloak.existingSecret is required" .Values.studio.keycloak.existingSecret }}
+                  key: {{ .Values.studio.keycloak.authSecretKey }}
+          volumeMounts:
+            - {name: studio-tmp, mountPath: /tmp}
+        {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
+        {{- if .Values.studio.enabled }}
+        - name: studio-tmp
+          emptyDir: {sizeLimit: 64Mi}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}

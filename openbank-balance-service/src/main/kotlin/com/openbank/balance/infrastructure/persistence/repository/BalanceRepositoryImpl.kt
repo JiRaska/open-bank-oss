@@ -75,6 +75,38 @@ class BalanceRepositoryImpl(private val repo: BalancePanacheRepo) : BalanceRepos
             }
         }.awaitSuspending() ?: BigDecimal.ZERO
 
+    // Strictly positive deltas only (`e.delta > 0`), strictly after asOf. Netting the tail would add
+    // future-dated debits back into the spendable figure — see Balance.effectiveAvailable (#1745).
+    override suspend fun sumNotYetEffectiveCredit(
+        accountId: UUID,
+        currency: String,
+        asOf: java.time.LocalDate,
+    ): BigDecimal = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select coalesce(sum(e.delta), 0) from LedgerProjectionEventEntity e " +
+                    "where e.accountId = :acct and e.currency = :ccy and e.entryDate > :asOf and e.delta > 0",
+                BigDecimal::class.java,
+            )
+                .setParameter("acct", accountId)
+                .setParameter("ccy", currency)
+                .setParameter("asOf", asOf)
+                .singleResult
+        }
+    }.awaitSuspending() ?: BigDecimal.ZERO
+
+    override suspend fun findCreditsMaturingOn(date: java.time.LocalDate): List<AccountCurrency> = Panache.withSession {
+        Panache.getSession().flatMap { session ->
+            session.createQuery(
+                "select distinct e.accountId as acct, e.currency as ccy " +
+                    "from LedgerProjectionEventEntity e where e.entryDate = :date and e.delta > 0",
+                Tuple::class.java,
+            ).setParameter("date", date).resultList
+        }
+    }.awaitSuspending().map { row ->
+        AccountCurrency(row.get("acct", UUID::class.java), row.get("ccy", String::class.java))
+    }
+
     override suspend fun sumBookedByCurrency(): Map<String, BigDecimal> = Panache.withSession {
         Panache.getSession().flatMap { session ->
             session.createQuery(

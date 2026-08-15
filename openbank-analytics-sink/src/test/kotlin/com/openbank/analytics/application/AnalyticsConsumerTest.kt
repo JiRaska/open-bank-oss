@@ -70,6 +70,44 @@ class AnalyticsConsumerTest {
     }
 
     @Test
+    fun `server attributed engagement stays a distinct analytics fact`() {
+        val eventId = UUID.randomUUID()
+        val campaignId = UUID.randomUUID()
+        val node = mapper.readTree(
+            """
+            {
+              "eventId": "$eventId",
+              "aggregateType": "ENGAGEMENT",
+              "aggregateId": "$eventId",
+              "partyId": "${UUID.randomUUID()}",
+              "campaignId": "$campaignId",
+              "stepOrder": 2,
+              "channel": "PUSH",
+              "type": "CLICK",
+              "occurredAt": "2026-08-13T10:00:00Z"
+            }
+            """.trimIndent(),
+        )
+
+        val env = consumer.toEnvelope(
+            node,
+            EventAddress(
+                topic = "openbank.engagement.events",
+                key = UUID.randomUUID().toString(),
+                ceType = "EngagementEvent.CLICK",
+            ),
+        )
+
+        assertThat(env.aggregateType).isEqualTo("ENGAGEMENT")
+        assertThat(env.aggregateId).isEqualTo(eventId.toString())
+        assertThat(env.eventType).isEqualTo("EngagementEvent.CLICK")
+        assertThat(env.sourceService).isEqualTo("openbank-engagement-service")
+        assertThat(env.payload).containsEntry("campaignId", campaignId.toString())
+        assertThat(env.payload).containsEntry("stepOrder", 2L)
+        assertThat(env.payload).containsEntry("channel", "PUSH")
+    }
+
+    @Test
     fun `generates a random eventId when source omits it so dedupe never NPEs`() {
         val node = mapper.readTree("""{ "aggregateId": "x", "eventType": "e" }""")
 

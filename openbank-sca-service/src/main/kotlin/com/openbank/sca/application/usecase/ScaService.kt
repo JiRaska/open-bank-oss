@@ -263,9 +263,20 @@ class ScaService(
         outboxRepository.save(
             OutboxMessage(
                 aggregateId = device.partyId,
-                eventType = "DEVICE_ENROLLED",
+                eventType = DEVICE_ENROLLED_EVENT_TYPE,
                 payload = objectMapper.writeValueAsString(
                     mapOf(
+                        // The discriminator MUST be in the payload body, not only in the outbox
+                        // column: every consumer of these topics receives the serialized payload
+                        // alone and switches on `eventType`. party-service and kyc-service both
+                        // embed it (PartyEvent.kt, KycEvent.kt); this publisher did not, so
+                        // onboarding-service's `parseScaEvent` read "" and fell to `else -> null`,
+                        // discarding the message on the quiet path (`?: return`, no log, no error).
+                        // Result: DEVICE_ENROLLED had never once been projected — 15 events
+                        // published and SENT, and every onboarding_records row still read
+                        // sca_enrolled=false / device_count=0, with 11 parties genuinely enrolled
+                        // (measured on the sandbox 2026-08-13, issue #4353).
+                        "eventType" to DEVICE_ENROLLED_EVENT_TYPE,
                         "deviceId" to device.id.toString(),
                         "partyId" to device.partyId.toString(),
                         "credentialId" to device.credentialId,
@@ -428,6 +439,13 @@ class ScaService(
  */
 private fun ScaChallenge.isReplayable(now: OffsetDateTime): Boolean =
     status == ScaStatus.PENDING && consumedAt == null && !isExpired(now)
+
+/**
+ * The `openbank.sca.events` discriminator. Declared once so the outbox column and the payload
+ * body cannot drift apart again — they are read by different consumers and only the body
+ * reaches onboarding-service.
+ */
+private const val DEVICE_ENROLLED_EVENT_TYPE = "DEVICE_ENROLLED"
 
 private fun Throwable.causedByUniqueViolation(): Boolean {
     var t: Throwable? = this

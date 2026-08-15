@@ -45,6 +45,11 @@ quarkus:
       generation: none
   flyway:
     migrate-at-start: true
+  jackson:
+    # The ADR-0246 thread entries carry optional fields (actor, draftVersion, proposalId, ...);
+    # omitting nulls keeps the wire shape stable for the admin-ui consumer pact — a null-emitting
+    # serializer would fail the pact's exact-key matching on every sparse entry.
+    serialization-inclusion: non_null
   shutdown:
     timeout: 30S
   log:

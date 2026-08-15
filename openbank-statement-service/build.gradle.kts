@@ -45,12 +45,40 @@ dependencies {
     // rather than a per-service restatement of it (#3914).
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // StatementMissingParamStatusIT (#3624): the missing-parameter defect lives in JAX-RS parameter
+    // injection, so it is only observable over real HTTP — a unit test calling the handler supplies
+    // the very argument the framework does not.
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.quarkus.test.security)
 
     // CI infra sweep (#578): isolated PostgreSQL per test JVM via Testcontainers.
     // Kafka is already in-memory in the IT, so no broker container is needed.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // ADR-0063 P2: consumer-driven contract tests (Pact). StatementDocumentServicePactConsumerTest
+    // publishes the document-service template/preview contract that
+    // DocumentPactProviderVerificationTest replays on every PR.
+    testImplementation(libs.pact.consumer)
+}
+
+// Pact: write generated consumer contracts to pacts/ and forward broker config for provider
+// verification (ADR-0063 P2). pactbroker.* props are injected by CI with -D. Without
+// `pact.rootDir` the generated pact lands in this module's build/pacts and the committed
+// pacts/*.json is never rewritten — the drift gate would then be green about work it never did.
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 
 kover {

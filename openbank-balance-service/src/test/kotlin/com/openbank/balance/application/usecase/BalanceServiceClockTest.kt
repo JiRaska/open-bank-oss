@@ -70,6 +70,9 @@ class BalanceServiceClockTest {
             expiresAt = null, createdAt = OffsetDateTime.now(fixedClock), releasedAt = null,
         )
         coEvery { balanceRepo.findByAccountIdAndCurrency(accountId, "CZK") } returns balance
+        // The cover decision reads the not-yet-effective credit tail (#1745); nothing is booked
+        // forward here, so the value-date basis is a no-op and this test's subject is unaffected.
+        coEvery { balanceRepo.sumNotYetEffectiveCredit(any(), any(), any()) } returns BigDecimal.ZERO
         coEvery { balanceRepo.update(any()) } answers { firstArg() }
         coEvery { holdRepo.save(any()) } returns expectedHold
 

@@ -155,6 +155,10 @@ NOT_PROBED = [
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
+    (
+        "https://campaign-service.campaign.svc:8443",
+        "private in-cluster ownership validator; protected by mTLS and the campaign network policy",
+    ),
 ]
 
 URL_IN_TEXT = re.compile(r"https?://[^\s\"'}\)>,]+")

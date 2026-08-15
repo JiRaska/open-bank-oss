@@ -104,43 +104,14 @@ jobs:
       - name: Type-check
         run: npm run type-check
 
-      # ADR-0071 Phase 4: manifest.ts must stay types-only — no hand-edited versions
-      # or inline data. Enforced (hard failure). Runs from repo root so the script
-      # can resolve the relative path to manifest.ts.
-      - name: manifest.ts types-only gate (ADR-0071 Phase 4, enforced)
-        working-directory: ${{ github.workspace }}
-        run: bash .github/scripts/check-manifest-types-only.sh
-
-      # ADR-0071: the governance manifest is code-derived from per-service
-      # governance.yaml. Regenerate and fail on any module missing/with an invalid
-      # governance.yaml. Phase 4: flipped from advisory (::warning::) to enforce
-      # (exit 1) — the fleet completed the governance.yaml sweep in phases 1-3.
-      - name: Governance manifest gate (ADR-0071, enforced)
-        working-directory: openbank-admin-ui
-        run: |
-          # The generator validates every governance.yaml against the Zod schema in
-          # scripts/governance-schema.mjs (governance.schema.json is DERIVED from it, ADR-0196),
-          # so a shape violation (wrong type, unknown key, malformed lineage node) is just
-          # another entry in `gaps` and needs no separate step here. It also cross-checks every
-          # declaration the tree can settle — Flyway migrations, datasource URLs, Redis config —
-          # so a wrong claim (not just a malformed one) fails too.
-          node scripts/generate-governance.mjs
-          GAPS=$(node -e "console.log(require('./governance.json').totals.withGaps)")
-          if [ "$GAPS" -gt 0 ]; then
-            echo "::error::Governance drift — $GAPS module(s) missing or with an invalid governance.yaml (ADR-0071 Phase 4). Add a governance.yaml to each flagged service."
-            # Reads governance.json's real shape: a top-level `gaps` string array
-            # (issue #2165 — this used to read a `.modules` field that never existed,
-            # so it threw a TypeError on every failure and never named a module).
-            # No `?? []` fallback on purpose: a missing array is a generator bug and
-            # must be loud, not silently reported as "no gaps".
-            node -e "const g=require('./governance.json'); if(!Array.isArray(g.gaps)){console.error('::error::governance.json has no gaps array — generate-governance.mjs is broken');process.exit(2)} for(const x of g.gaps) console.log('  gap: '+x)"
-            exit 1
-          else
-            # Also print the unverifiable count (ADR-0196): a declared databaseName that no
-            # datasource URL in the tree could confirm is not a gap, but it is not a fact
-            # either — printed every run so it stays visible instead of quietly growing.
-            node -e "const t=require('./governance.json').totals; console.log(\`Governance manifest clean: \${t.modules} modules, 0 gaps, \${t.unverifiedDatabaseNames} unverified databaseName.\`)"
-          fi
+      # Both ADR-0071 Phase 4 gates used to sit here — the manifest.ts types-only check
+      # (#4339) and the fleet governance-manifest check (#4083). Both are now declared in
+      # .github/gates/gates.yaml (`manifest-types-only`, `governance-manifest`), because this
+      # job is conditional and a gate must not inherit a scope nobody declared (#3629). The
+      # second one is why that matters: its subject is every module with a version.txt, and
+      # a PR adding a service without a governance.yaml matched none of `changes-ui`'s paths,
+      # so the job was ABSENT rather than skipped and the aggregate check read green.
+      # `pretest` still regenerates governance.json for the suite below.
 
       - name: Test (unit + integration)
         run: npm run test
@@ -400,14 +371,36 @@ jobs:
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
 
       - name: Run gates
-        run: python3 .github/scripts/run-gates.py --group "${{ matrix.group }}"
+        run: |
+          python3 .github/scripts/run-gates.py --group "${{ matrix.group }}" \
+            --json "${RUNNER_TEMP}/gate-results-${{ matrix.group }}.json"
+
+      # ADR-0255. A structured record per gate, not another log for something to re-parse —
+      # CLAUDE.md documents at length why scraping a job's own printed log is fragile (the log
+      # contains the step's own `run:` script text; real false positives/negatives came from
+      # exactly that). `if: always()` because a red shard is the run most worth capturing, not
+      # the one to skip: this step must still upload after "Run gates" has already failed the
+      # job. `--json` itself writes the file before run-gates.py returns its exit code (see
+      # run-gates.py's own comment at the call site), so a failed shard still has one to upload.
+      - name: Upload gate results (ADR-0255)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-results-${{ matrix.group }}
+          path: ${{ runner.temp }}/gate-results-${{ matrix.group }}.json
+          if-no-files-found: warn
+          retention-days: 90
 
   # Aggregates the shards into the single REQUIRED context named in the main-protection
   # ruleset. `cancelled` is treated as a failure on a PR for the same reason the Admin UI
   # gate does it (#2185): a cancelled shard built nothing and must not read as a pass.
+  # needs also binds the `ui` aggregator (issue #3675): the Admin UI build carries the
+  # enforced Playwright golden-path suite (#653), and depending on it here makes that
+  # suite merge-blocking for admin-ui-touching PRs without a ruleset edit — the
+  # in-repo fix the ruleset can't ship itself.
   validate:
     name: Validate manifests
-    needs: [gates]
+    needs: [gates, ui]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -437,6 +430,22 @@ jobs:
               echo "::error::Gate shards did not run (result=$RESULT). Refusing to report success."
               exit 1 ;;
           esac
+
+      # The ui aggregator already encodes the skip/cancel semantics (#2185): it passes
+      # when the PR touches no admin-ui paths (ui-build skipped) and fails on a real
+      # build/test failure — including the Playwright E2E step. So a plain success
+      # check here is the whole binding; anything else fails closed.
+      - name: Verify Admin UI gate (build + golden-path E2E)
+        env:
+          RESULT: ${{ needs.ui.result }}
+        run: |
+          set -euo pipefail
+          if [ "$RESULT" = "success" ]; then
+            echo "Admin UI gate green (or correctly skipped: no admin-ui changes)."
+            exit 0
+          fi
+          echo "::error::Admin UI gate did not succeed (result=$RESULT) — the Playwright E2E / build must pass on admin-ui-touching PRs (issue #3675)."
+          exit 1
 
   app-status:
     name: Customer-app dossier

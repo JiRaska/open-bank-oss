@@ -5,11 +5,12 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import Image from 'next/image'
 import {
   Bot, RefreshCw, ScrollText, GitBranch, Scale,
   Info, CheckCircle2, CircleDashed, CircleDot, Lock, Users, Search, Loader2,
-  AlertOctagon, ChevronRight,
+  AlertOctagon, ChevronRight, Sparkles, Hand, Fingerprint,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
@@ -17,6 +18,9 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
+import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
+import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
+import styles from './IAOps.module.css'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
 type DStatus = 'built' | 'partial' | 'planned'
@@ -140,7 +144,6 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
-  const router = useRouter()
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
@@ -151,6 +154,7 @@ function IAOpsContent() {
   const [rcaResult, setRcaResult] = useState<string | null>(null)
   const [rcaError, setRcaError] = useState<string | null>(null)
   const [rcaLoading, setRcaLoading] = useState(false)
+  const [crewFilter, setCrewFilter] = useState<'all' | 'control' | 'development' | 'customer'>('all')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -181,6 +185,17 @@ function IAOpsContent() {
 
   useEffect(() => { load() }, [load])
 
+  useEffect(() => {
+    if (!data || typeof window === 'undefined') return
+    const fragment = window.location.hash.slice(1)
+    if (fragment !== 'ai-swarm' && fragment !== 'ai-mesh') return
+
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById(fragment)?.scrollIntoView?.({ block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [data])
+
   const submitRca = useCallback(async () => {
     if (!rcaAsk.trim()) return
     setRcaLoading(true)
@@ -208,6 +223,14 @@ function IAOpsContent() {
   }
 
   const planeColor = (p: string) => p === 'control' ? '#6366f1' : '#0891b2'
+  const planeLabel = (p: string) => p === 'control'
+    ? t('Dohled a provoz', 'Oversight & operations')
+    : p === 'development'
+      ? t('Vývoj', 'Engineering')
+      : p === 'customer'
+        ? t('Klientské služby', 'Customer services')
+        : p
+  const visibleAgents = data?.agents.filter(a => crewFilter === 'all' || a.plane === crewFilter) ?? []
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
@@ -248,6 +271,52 @@ function IAOpsContent() {
         </div>
       ) : data ? (
         <>
+          {/* A human-first introduction. The generated illustration is an original OpenBank asset;
+              the governed capabilities below still come from agents.yaml. */}
+          <div className={styles.crewHero} style={{ borderRadius: '22px', marginBottom: '20px',
+            background: 'linear-gradient(135deg, #111827 0%, #172554 55%, #0f766e 150%)', color: 'white',
+            border: '1px solid rgba(148,163,184,0.25)', boxShadow: '0 18px 42px rgba(15,23,42,0.16)' }}>
+            <div className={styles.crewCopy}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', alignSelf: 'flex-start',
+                padding: '4px 9px', borderRadius: '20px', background: 'rgba(255,255,255,0.1)', border: '1px solid rgba(255,255,255,0.14)',
+                fontSize: '10px', fontWeight: 800, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#a5f3fc' }}>
+                <Sparkles size={12} /> {t('AI posádka OpenBank', 'The OpenBank AI crew')}
+              </span>
+              <h2 style={{ fontSize: '27px', lineHeight: 1.12, letterSpacing: '-0.035em', margin: '14px 0 10px', maxWidth: '470px' }}>
+                {t('Seznamte se s kolegy, kteří nikdy nerozhodují za vás.', 'Meet the colleagues who never decide for you.')}
+              </h2>
+              <p style={{ fontSize: '13px', lineHeight: 1.65, color: '#cbd5e1', margin: 0, maxWidth: '470px' }}>
+                {t(
+                  'Každý robot představuje jednoho skutečného agenta. Má jasnou práci, omezený přístup a okamžik, kdy musí předat rozhodnutí člověku.',
+                  'Each robot represents a real agent. It has a clear job, limited access and a defined moment when a human must take over.',
+                )}
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '18px' }}>
+                {[
+                  { icon: <Hand size={13} />, label: t('Agent připraví', 'Agent prepares') },
+                  { icon: <Fingerprint size={13} />, label: t('Člověk rozhodne', 'Human decides') },
+                  { icon: <ScrollText size={13} />, label: t('Audit vše zaznamená', 'Audit records everything') },
+                ].map(item => (
+                  <span key={item.label} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '6px 9px',
+                    borderRadius: '9px', background: 'rgba(255,255,255,0.08)', color: '#e2e8f0', fontSize: '10px', fontWeight: 700 }}>
+                    {item.icon}{item.label}
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div className={styles.crewArt}>
+              <Image src="/aiops-agent-crew.webp" alt={t('Originální tým pěti robotických AI agentů OpenBank', 'Original team of five OpenBank AI agent robots')}
+                fill priority unoptimized sizes="(max-width: 900px) 100vw, 55vw"
+                style={{ objectFit: 'cover', objectPosition: '52% 48%', opacity: 0.96 }} />
+              <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg, #172554 0%, transparent 32%)' }} />
+              <span style={{ position: 'absolute', right: '12px', bottom: '9px', zIndex: 2, fontSize: '8px', color: 'rgba(226,232,240,.7)', letterSpacing: '0.04em' }}>
+                {t('Vlastní vizuální koncept · bez postav třetích stran', 'Original visual concept · no third-party characters')}
+              </span>
+            </div>
+          </div>
+
+          <AgentMeshExplainer language={language} />
+
           {/* ── A. Governance posture (hero) ── */}
           <div style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.06), rgba(8,145,178,0.04))',
             border: '1px solid var(--border)', borderRadius: 'var(--r-lg)', padding: '22px 24px', marginBottom: '20px' }}>
@@ -331,6 +400,29 @@ function IAOpsContent() {
               {t('Agenti a jejich chartery', 'Agents & their charters')}
             </SectionTitle>
 
+            {data.chartersAvailable && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap', margin: '-2px 0 16px' }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }} role="group" aria-label={t('Filtrovat AI posádku', 'Filter AI crew')}>
+                  {([
+                    ['all', t('Všichni', 'Everyone')],
+                    ['control', t('Dohled a provoz', 'Oversight & operations')],
+                    ['development', t('Vývoj', 'Engineering')],
+                    ['customer', t('Klientské služby', 'Customer services')],
+                  ] as const).map(([filter, label]) => (
+                    <button key={filter} onClick={() => setCrewFilter(filter)} aria-pressed={crewFilter === filter}
+                      style={{ padding: '6px 10px', borderRadius: '9px', border: crewFilter === filter ? '1px solid #818cf8' : '1px solid var(--border)',
+                        background: crewFilter === filter ? '#eef2ff' : 'var(--surface)', color: crewFilter === filter ? '#4338ca' : 'var(--text-secondary)',
+                        fontSize: '11px', fontWeight: 700, cursor: 'pointer' }}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                  {t(`${visibleAgents.length} z ${data.agents.length} kolegů`, `${visibleAgents.length} of ${data.agents.length} colleagues`)}
+                </span>
+              </div>
+            )}
+
             {!data.chartersAvailable ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '14px', borderRadius: '8px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
                 <Info size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
@@ -339,8 +431,9 @@ function IAOpsContent() {
                 </span>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '14px' }}>
-                {data.agents.map(a => {
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '16px' }}>
+                {visibleAgents.map(a => {
+                  const persona = getAgentPersona(a.id, language)
                   const costEntry = agentCosts.find(c => c.agentId === a.id)
                   const budgetPct = costEntry?.budgetUsedPct ?? null
                   const budgetColor = budgetPct == null ? 'var(--text-tertiary)'
@@ -350,39 +443,80 @@ function IAOpsContent() {
                   const isExceeded = costEntry?.burnRate === 'exceeded'
                   const isFinopsAgent = a.id === 'finops-agent'
                   return (
-                    <div key={a.id} role="link" tabIndex={0}
-                      onClick={() => router.push(`/iaops/agents/${encodeURIComponent(a.id)}`)}
-                      onKeyDown={e => { if (e.key === 'Enter') router.push(`/iaops/agents/${encodeURIComponent(a.id)}`) }}
-                      style={{ padding: '16px', borderRadius: '12px', border: `1px solid ${isExceeded ? '#fca5a5' : 'var(--border)'}`, background: 'var(--surface-2)', cursor: 'pointer' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-primary)', fontFamily: 'monospace' }}>{a.id}</span>
-                          {isExceeded && (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px',
-                              fontSize: '9px', fontWeight: 700, padding: '2px 6px', borderRadius: '8px',
-                              background: '#fee2e2', color: '#dc2626' }}>
-                              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
-                              {t('Budget!', 'Budget!')}
-                            </span>
-                          )}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
-                            color: planeColor(a.plane), background: `${planeColor(a.plane)}18`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            {a.plane}
-                          </span>
-                          {isFinopsAgent && (
-                            <button
-                              onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
-                              style={{ fontSize: '10px', fontWeight: 700, padding: '2px 8px', borderRadius: '8px',
-                                border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
-                              {t('Spustit analýzu', 'Trigger Analysis')}
-                            </button>
-                          )}
-                          <ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} />
+                    <article key={a.id}
+                      style={{ position: 'relative', overflow: 'hidden', padding: '18px', borderRadius: '16px',
+                        border: `1px solid ${isExceeded ? '#fca5a5' : `${persona.accent}30`}`,
+                        background: `linear-gradient(145deg, var(--surface) 0%, ${persona.shell} 145%)`,
+                        boxShadow: '0 6px 18px rgba(15,23,42,0.05)', transition: 'transform .15s ease, box-shadow .15s ease' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '14px', marginBottom: '14px' }}>
+                        <AgentPortrait agentId={a.id} />
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
+                            <div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap' }}>
+                                <Link href={`/iaops/agents/${encodeURIComponent(a.id)}`}
+                                  aria-label={t(`Otevřít profil agenta ${persona.name}, ${persona.role}`, `Open ${persona.name}'s agent profile, ${persona.role}`)}
+                                  style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', color: 'var(--text-primary)', textDecoration: 'none' }}>
+                                  <span style={{ fontSize: '18px', fontWeight: 850, letterSpacing: '-0.025em' }}>{persona.name}</span>
+                                  <ChevronRight size={16} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                                </Link>
+                                {isExceeded && (
+                                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', fontSize: '9px', fontWeight: 700,
+                                    padding: '2px 6px', borderRadius: '8px', background: '#fee2e2', color: '#dc2626' }}>
+                                    <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: '#dc2626', display: 'inline-block' }} />
+                                    {t('Budget!', 'Budget!')}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)', marginTop: '1px' }}>{persona.role}</div>
+                              <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontFamily: 'monospace', marginTop: '4px' }}>{a.id}</div>
+                            </div>
+                          </div>
+                          <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '9px 0 0', lineHeight: 1.55 }}>{persona.purpose}</p>
                         </div>
                       </div>
-                      <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 12px', lineHeight: 1.5 }}>{a.charter}</p>
+
+                      <div style={{ padding: '10px 12px', borderRadius: '10px', background: `${persona.accent}0d`, borderLeft: `3px solid ${persona.accent}`, marginBottom: '12px' }}>
+                        <div style={{ fontSize: '9px', color: 'var(--text-secondary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '3px' }}>
+                          {t('Proč je tu', 'Why this colleague matters')}
+                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-primary)', lineHeight: 1.5 }}>{persona.value}</div>
+                      </div>
+
+                      <div style={{ marginBottom: '12px' }}>
+                        <div style={{ fontSize: '9px', color: 'var(--text-tertiary)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: '6px' }}>
+                          {t('Co umí', 'Skills in plain language')}
+                        </div>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                          {persona.talents.map((talent, index) => (
+                            <span key={talent} style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '5px 8px', borderRadius: '8px',
+                              background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text-secondary)', fontSize: '10px', fontWeight: 650 }}>
+                              <span style={{ display: 'grid', placeItems: 'center', width: '15px', height: '15px', borderRadius: '5px',
+                                background: `${persona.accent}${index === 0 ? '24' : '14'}`, color: persona.accent }}>
+                                <Sparkles size={9} />
+                              </span>
+                              {talent}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px', flexWrap: 'wrap', marginBottom: costEntry ? '10px' : '12px' }}>
+                        <span style={{ fontSize: '9px', fontWeight: 800, padding: '3px 8px', borderRadius: '10px',
+                          color: planeColor(a.plane), background: `${planeColor(a.plane)}16`, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                          {planeLabel(a.plane)}
+                        </span>
+                        <span style={{ fontSize: '9px', fontWeight: 750, padding: '3px 8px', borderRadius: '10px', background: '#fef9c3', color: '#92400e' }}>
+                          <Hand size={9} style={{ verticalAlign: '-1px', marginRight: '3px' }} />
+                          {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
+                        </span>
+                        {isFinopsAgent && (
+                          <button onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
+                            style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '8px', border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
+                            {t('Spustit analýzu', 'Trigger Analysis')}
+                          </button>
+                        )}
+                      </div>
 
                       {/* Cost / Budget column */}
                       {costEntry && (
@@ -411,7 +545,12 @@ function IAOpsContent() {
                         </div>
                       )}
 
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px' }}>
+                      <details onClick={e => e.stopPropagation()} style={{ borderTop: '1px solid var(--border)', paddingTop: '10px' }}>
+                        <summary style={{ cursor: 'pointer', color: 'var(--text-secondary)', fontSize: '10px', fontWeight: 750, userSelect: 'none' }}>
+                          {t('Technický profil a mantinely', 'Technical profile & guardrails')}
+                        </summary>
+                        <div style={{ padding: '10px 2px 0', display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '11px' }}>
+                        <p style={{ fontSize: '11px', color: 'var(--text-secondary)', margin: '0 0 2px', lineHeight: 1.5 }}>{a.charter}</p>
                         <div>
                           <div style={{ color: 'var(--text-tertiary)', marginBottom: '3px' }}>{t('Čte (PII', 'Reads (PII')} {a.pii})</div>
                           <Chips items={a.dataRead} tone="neutral" />
@@ -442,8 +581,9 @@ function IAOpsContent() {
                           <span>{t('Limit', 'Budget')}: <strong style={{ color: 'var(--text-secondary)' }}>{a.tokensPerRun ? `${(a.tokensPerRun / 1000).toFixed(0)}k tok/run` : '—'}</strong></span>
                           <span><strong style={{ color: 'var(--text-secondary)' }}>{a.runsPerDay ?? '—'}</strong> {t('běhů/den', 'runs/day')}</span>
                         </div>
-                      </div>
-                    </div>
+                        </div>
+                      </details>
+                    </article>
                   )
                 })}
               </div>

@@ -14,7 +14,7 @@ import com.openbank.sepa.application.usecase.SepaPaymentNotFoundException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
-import java.util.UUID
+import java.time.Instant
 
 private const val HTTP_CONFLICT = 409
 private const val HTTP_BAD_GATEWAY = 502
@@ -22,14 +22,30 @@ private const val HTTP_BAD_GATEWAY = 502
 @Provider
 class SepaPaymentNotFoundMapper : ExceptionMapper<SepaPaymentNotFoundException> {
     override fun toResponse(exception: SepaPaymentNotFoundException): Response = Response.status(404)
-        .entity(ApiError(UUID.randomUUID().toString(), 404, ErrorCode.NOT_FOUND.code, exception.message ?: "Not found"))
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                404,
+                ErrorCode.NOT_FOUND.code,
+                exception.message ?: "Not found",
+                timestamp = Instant.now(),
+            ),
+        )
         .build()
 }
 
 @Provider
 class InvalidSepaPaymentStateTransitionMapper : ExceptionMapper<InvalidSepaPaymentStateTransitionException> {
     override fun toResponse(exception: InvalidSepaPaymentStateTransitionException): Response = Response.status(409)
-        .entity(ApiError(UUID.randomUUID().toString(), 409, ErrorCode.CONFLICT.code, exception.message ?: "Conflict"))
+        .entity(
+            ApiError(
+                Ids.randomId().toString(),
+                409,
+                ErrorCode.CONFLICT.code,
+                exception.message ?: "Conflict",
+                timestamp = Instant.now(),
+            ),
+        )
         .build()
 }
 
@@ -46,6 +62,7 @@ class PaymentNotCompletedMapper : ExceptionMapper<PaymentNotCompletedException> 
                 HTTP_CONFLICT,
                 ErrorCode.CONFLICT.code,
                 exception.message ?: "Conflict",
+                timestamp = Instant.now(),
             ),
         )
         .build()
@@ -61,6 +78,7 @@ class DocumentTemplateUnavailableMapper : ExceptionMapper<DocumentTemplateUnavai
                     HTTP_BAD_GATEWAY,
                     ErrorCode.INTERNAL_ERROR.code,
                     exception.message ?: "Confirmation document unavailable",
+                    timestamp = Instant.now(),
                 ),
             )
             .build()

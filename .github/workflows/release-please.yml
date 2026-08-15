@@ -105,8 +105,9 @@ jobs:
       # scratch branch is what keeps this non-destructive: resetting the release ref back to
       # its parent and re-committing in place would leave the PR momentarily empty if the
       # mutation failed in between. No push-triggered workflow watches a scratch branch —
-      # every `on: push` in this repo is filtered to `main` (runner-smoke.yml to
-      # `ci/self-hosted-runner`) — so it fires nothing on create or delete.
+      # every `on: push` in this repo is filtered to `main` — so it fires nothing on create
+      # or delete. (The one exception, runner-smoke.yml on `ci/self-hosted-runner`, was
+      # deleted in #4026 along with that branch, so the claim is now unconditional.)
       #
       # Idempotent by design, because it has to be: release-please force-pushes each release
       # branch on every push to main, which re-unsigns it. Already-verified PRs are skipped, so
@@ -390,7 +391,7 @@ jobs:
           distribution: temurin
           java-version: "25"
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
@@ -531,7 +532,7 @@ jobs:
       # is skipped (the cosign-signed *.slsa.json above is the provenance that works today).
       - name: Attest SBOMs (native, public repos only)
         if: ${{ !github.event.repository.private && hashFiles('*.cdx.json') != '' }}
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: "*.cdx.json"
 

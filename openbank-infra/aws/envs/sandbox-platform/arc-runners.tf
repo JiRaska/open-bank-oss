@@ -389,14 +389,32 @@ locals {
 # ---------------------------------------------------------------------------
 # runner NodePool — TWO TIERS (FinOps 2026-06-13, ADR-0053):
 #
-# runners-warm  — 2 on-demand Graviton nodes, expireAfter: Never.
-#   Why: every cold Karpenter node pulls docker:dind (~700 MB) from
-#   public.ecr.aws over the NAT gateway ($0.045/GB). With arc_min_runners=2
-#   warm runners, the two always-alive nodes carry the dind containerd cache
-#   so a normal PR build never touches the NAT for the runner image.
-#   On-demand eliminates spot interruption mid-job for the critical build lane.
-#   Cost: 2× c6g.large on-demand = ~$3.72/day (fixed). Pays back vs. the
-#   $13 fleet-rebuild spike (NAT + cold-start Compute) in <4 events/month.
+# runners-warm  — RETIRED 2026-08-09 (limits.cpu = 0), issue #4317. Kept as a
+#   declaration rather than deleted so the history below stays readable and the
+#   pool can be revived by raising the limit if spot interruption ever proves
+#   to cost more than the rate difference.
+#   Original why: every cold Karpenter node pulls docker:dind (~700 MB) from
+#   public.ecr.aws over the NAT gateway ($0.045/GB), so two always-alive nodes
+#   carried the dind containerd cache and a normal PR build never touched the
+#   NAT for the runner image. On-demand also eliminated spot interruption
+#   mid-job for the critical build lane.
+#   Why that lapsed: PR #926 (2026-06-13) put docker:dind behind the ECR
+#   pull-through cache, reached over the ecr.dkr VPC endpoint — zero NAT
+#   regardless of node warmth. variables.tf recorded this and set
+#   arc_min_runners = 0 the same day; this NodePool was left at limits.cpu = 8
+#   with expireAfter: Never, so it kept provisioning on-demand nodes for a
+#   rationale that no longer existed.
+#   Cost, measured 2026-08-09 (the note this replaces was wrong twice: it
+#   quoted c6g.large, which has 2 vCPU and the requirements below make
+#   unselectable, at a price ~2.5x under the real bill):
+#     today  2x m6gd.xlarge on-demand  $0.1920/h  ~$280/month
+#     after  same work on `runners`    $0.0566/h  ~$83/month   (m7gd.xlarge spot)
+#   ~$197/month for identical throughput.
+#   NOT a reclamation of idle capacity: these nodes are busy. Runner pods carry
+#   karpenter.sh/do-not-disrupt: true and the build backlog keeps the pool
+#   occupied, which is why WhenEmpty/5m never fires on them. The trade accepted
+#   here is that a spot interruption can now kill a main-push build mid-job —
+#   the exposure every PR build already carries.
 #
 # runners       — spot burst pool. Karpenter provisions extra nodes when the
 #   queue exceeds 2 concurrent jobs. consolidateAfter extended to 30m so a
@@ -532,7 +550,11 @@ resource "kubectl_manifest" "nodepool_runners_warm" {
         consolidateAfter    = "5m"
       }
       limits = {
-        cpu = "8" # max 2 warm nodes (2× c6g.xlarge = 8 vCPU); hard cap
+        # 0 = retired (#4317). Karpenter provisions nothing here; the two nodes
+        # standing today drain as their runner pods finish and are replaced by
+        # `runners` spot capacity. Was "8" (2 nodes) — see the tier note above
+        # for why that stopped being justified on 2026-06-13.
+        cpu = "0"
       }
     }
   })
