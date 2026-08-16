@@ -108,6 +108,30 @@ quarkus:
   redis:
     hosts: redis://localhost:6379
 
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security.protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl.keystore.location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+        ssl.keystore.type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+        ssl.keystore.password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+        ssl.truststore.location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+        ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+        ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      # ADR-0248: billing-service's first Kafka topic — there was no existing one to reuse (every
+      # prior outbox row here posts to ledger-service over REST, never Kafka). Named for the
+      # service, not the one event type it carries today, mirroring openbank-interest-service's
+      # "one topic, eventType discriminates" convention (openbank.interest.accrual.event) in case
+      # billing gains a second Kafka-published event later.
+      billing-events-out:
+        connector: smallrye-kafka
+        client.id: billing-service-${quarkus.uuid}
+        topic: openbank.billing.fee.event
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+
 opa:
   url: "${OPA_URL:http://localhost:8181}"
   path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
@@ -164,6 +188,17 @@ openbank:
       # `enabled`, so flipping the scheduler on for a scoped manual run can never fan out.
       discovery-enabled: "${BILLING_SCHEDULER_DISCOVERY_ENABLED:false}"
       discovery-page-size: "${BILLING_SCHEDULER_DISCOVERY_PAGE_SIZE:100}"
+    annual-fee-summary:
+      scheduler:
+        # ADR-0248. Disabled by default — see AnnualFeeSummaryScheduler's class KDoc for why this
+        # is a firmer requirement than the usual "safe default", not boilerplate: an accidental
+        # fire in dev/test/staging publishes a real PAD Art. 5 push-duty event per active account.
+        enabled: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_ENABLED:false}"
+        # Default: 05:00 Europe/Prague on Jan 15th — well after the December cycle's fees have
+        # posted, so the prior year's data is settled before the sweep reads it.
+        cron: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_CRON:0 0 5 15 1 ?}"
+        currency: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_CURRENCY:CZK}"
+        discovery-page-size: "${BILLING_ANNUAL_FEE_SUMMARY_SCHEDULER_DISCOVERY_PAGE_SIZE:100}"
 
 "%dev":
   quarkus:
