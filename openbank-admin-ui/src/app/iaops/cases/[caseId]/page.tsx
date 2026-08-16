@@ -173,10 +173,10 @@ export default function IaopsCaseThreadPage() {
 
           {(() => {
             const brief = deriveCaseDecisionBrief(thread)
-            const stage = brief.stage === 'ready_for_human'
+            const stage = brief.stage === 'proposal_recorded'
               ? {
-                  title: t('Připraveno pro člověka', 'Ready for a human'),
-                  detail: t('Koordinátor předal jeden návrh do schvalovací fronty. Rozhodnutí stále náleží člověku.', 'The coordinator sent one proposal to the approval queue. The decision still belongs to a human.'),
+                  title: t('Návrh zaznamenán ve vlákně', 'Proposal recorded in the thread'),
+                  detail: t('Koordinátor vytvořil proposal event. Stav doručení a lidského rozhodnutí tato stránka nesleduje.', 'The coordinator created a proposal event. This page does not track delivery or the human decision.'),
                   tone: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)',
                 }
               : brief.stage === 'needs_convergence'
@@ -200,9 +200,9 @@ export default function IaopsCaseThreadPage() {
                     </div>
                     <h2 id="case-decision-brief-title" style={{ margin: '5px 0 0', color: 'var(--text-primary)', fontSize: '15px', letterSpacing: '-.015em' }}>{stage.title}</h2>
                   </div>
-                  {brief.stage === 'ready_for_human' && (
+                  {brief.stage === 'proposal_recorded' && (
                     <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '7px 10px', borderRadius: '8px', color: 'var(--accent-text)', background: 'var(--accent-bg)', fontSize: '11px', fontWeight: 750, textDecoration: 'none' }}>
-                      {t('Otevřít HITL frontu', 'Open HITL queue')}
+                      {t('Přejít do HITL fronty', 'Go to HITL queue')}
                     </Link>
                   )}
                 </div>

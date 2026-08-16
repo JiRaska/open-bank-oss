@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
 
 describe('case decision brief', () => {
-  it('shows a human hand-off only after the coordinator emitted a proposal', () => {
+  it('reports only a proposal event after the coordinator emitted one', () => {
     const brief = deriveCaseDecisionBrief({
       status: 'SYNTHESIZED',
       entries: [
@@ -16,7 +16,7 @@ describe('case decision brief', () => {
     })
 
     expect(brief).toEqual({
-      stage: 'ready_for_human',
+      stage: 'proposal_recorded',
       contributorCount: 1,
       evidenceRefCount: 2,
       contestedContributionCount: 0,

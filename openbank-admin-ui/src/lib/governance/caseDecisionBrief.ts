@@ -17,7 +17,7 @@ export interface CaseThreadForBrief {
   entries: CaseThreadEntry[]
 }
 
-export type DecisionBriefStage = 'ready_for_human' | 'needs_convergence' | 'gathering_evidence'
+export type DecisionBriefStage = 'proposal_recorded' | 'needs_convergence' | 'gathering_evidence'
 
 export interface CaseDecisionBrief {
   stage: DecisionBriefStage
@@ -36,7 +36,7 @@ export function deriveCaseDecisionBrief(thread: CaseThreadForBrief): CaseDecisio
   const proposalEmitted = thread.entries.some(entry => entry.type === 'PROPOSAL_EMITTED')
 
   return {
-    stage: proposalEmitted ? 'ready_for_human' : thread.status === 'CONTESTED' ? 'needs_convergence' : 'gathering_evidence',
+    stage: proposalEmitted ? 'proposal_recorded' : thread.status === 'CONTESTED' ? 'needs_convergence' : 'gathering_evidence',
     contributorCount,
     evidenceRefCount,
     contestedContributionCount,
