@@ -6,14 +6,19 @@ package com.openbank.delegation.infrastructure
 
 import com.openbank.delegation.application.port.out.DelegationRepository
 import com.openbank.delegation.domain.event.DelegationExpired
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.logging.Log
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import java.time.Clock
+import java.time.Duration
 import java.time.OffsetDateTime
 
 /**
@@ -31,6 +36,16 @@ class DelegationExpirationJob {
 
     @Inject
     lateinit var clock: Clock
+
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /** Registers the boot-seeded ADR-0237 heartbeat before the first hourly sweep. */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     /**
      * `suspend fun` — the fleet convention (rules.yaml: scheduled_methods), and here it is load
@@ -54,9 +69,15 @@ class DelegationExpirationJob {
             Log.errorf(e, "delegation.expiration.sweep FAILED threshold=%s", threshold)
             return
         }
+        liveness?.recordSuccess()
         if (count > 0) {
             Log.infof("delegation.expiration.sweep expired=%d threshold=%s", count, threshold)
         }
+    }
+
+    companion object {
+        private const val WORKFLOW_NAME = "delegation-expiration-sweep"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
     }
 
     internal fun buildSweepPipeline(threshold: OffsetDateTime): Uni<Int> = delegationRepo.findExpiredActive(threshold)
