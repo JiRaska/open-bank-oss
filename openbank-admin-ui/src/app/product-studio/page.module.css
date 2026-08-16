@@ -75,6 +75,7 @@
 .bundleProposal strong, .bundleProposal small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bundleProposal strong { color: var(--text-primary); font-size: 11px; }
 .bundleProposal small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; }
+.bundleProposal em { display: block; margin-top: 4px; color: #475569; font-size: 9px; font-style: normal; line-height: 1.35; }
 .bundleProposal button { flex: 0 0 auto; padding: 6px 8px; font-size: 10px; }
 .compositionEmpty { margin-top: 9px; color: var(--text-tertiary); font-size: 10px; }
 .relationships { display: grid; gap: 5px; margin-top: 9px; }
@@ -142,6 +143,15 @@
 .selectionCopy strong, .selectionCopy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .selectionCopy strong { font-size: 11px; }
 .selectionCopy small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; }
+.explanation, .explanationHidden { margin-bottom: 12px; padding: 11px; border-radius: 11px; font-size: 10px; line-height: 1.5; }
+.explanation { border: 1px solid #b9dfce; background: linear-gradient(135deg, #f4fffa, #effcf7); color: #3f6655; }
+.explanationTitle { display: flex; align-items: center; gap: 6px; color: #166534; font-size: 11px; font-weight: 800; }
+.explanation p { margin: 5px 0 8px; }
+.explanationTrace { display: flex; flex-wrap: wrap; gap: 4px; }
+.explanationTrace code { padding: 2px 5px; border-radius: 5px; background: rgba(255, 255, 255, .75); color: #166534; font-size: 9px; }
+.explanation small { display: block; margin-top: 8px; color: #47715d; }
+.explanationHidden { display: flex; gap: 6px; border: 1px solid #d7d8e8; background: var(--surface-2); color: var(--text-tertiary); }
+.explanationHidden svg { flex: 0 0 auto; margin-top: 1px; }
 .previewEyebrow { color: var(--ob-accent-text); font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .previewName { margin-top: 8px; font-size: 22px; letter-spacing: -.035em; }
 .previewCopy { margin-top: 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }

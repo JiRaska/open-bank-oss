@@ -18,6 +18,7 @@ import {
   type MarketContextInput,
 } from '@/lib/catalog-offer-composition'
 import { proposeBundleComponents } from '@/lib/catalog-bundle-proposals'
+import { explainOfferSelection, simulateBundleImpact } from '@/lib/catalog-offer-intelligence'
 import { selectOffersForMarket } from '@/lib/catalog-offer-selection'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
@@ -153,6 +154,24 @@ export default function ProductStudioPage() {
       marketContextFromInput(previewContextInput),
     ),
     [offerings, specificationId, previewContextInput],
+  )
+  const selectedOfferSelection = offerSelections.find(selection => selection.offering.id === offeringId)
+  const selectedOfferExplanation = selectedOfferSelection
+    ? explainOfferSelection(selectedOfferSelection, language)
+    : null
+  const bundleImpacts = useMemo(
+    () => selectedOffering
+      ? bundleProposals.slice(0, 3).map(proposal => ({
+          id: proposal.offering.id,
+          impact: simulateBundleImpact(
+            selectedOffering,
+            proposal.offering,
+            marketContextFromInput(previewContextInput),
+            language,
+          ),
+        }))
+      : [],
+    [bundleProposals, language, previewContextInput, selectedOffering],
   )
   const draftCount = revisions.filter(item => item.state === 'DRAFT').length
   const publishedCount = revisions.filter(item => item.state === 'PUBLISHED').length
@@ -458,7 +477,7 @@ export default function ProductStudioPage() {
                 {bundleProposals.length === 0
                   ? <div className={styles.bundleProposalEmpty}>{t('Žádná další bezpečně kompatibilní komponenta.', 'No further safely compatible component.')}</div>
                   : <div className={styles.bundleProposalList}>{bundleProposals.slice(0, 3).map(proposal => <div className={styles.bundleProposal} key={proposal.offering.id}>
-                    <div><strong>{proposal.offering.code}</strong><small>{proposal.reasons.slice(0, 2).join(' · ')}</small></div>
+                    <div><strong>{proposal.offering.code}</strong><small>{proposal.reasons.slice(0, 2).join(' · ')}</small><em>{bundleImpacts.find(item => item.id === proposal.offering.id)?.impact.summary}</em></div>
                     <button className="btn btn-secondary" onClick={() => applyBundleProposal(proposal.offering.id)}><Plus size={13} />{t('Navrhnout', 'Propose')}</button>
                   </div>)}</div>}
               </div>}
@@ -528,6 +547,14 @@ export default function ProductStudioPage() {
               <span className={styles.selectionRank}>#{index + 1}</span><span className={styles.selectionCopy}><strong>{selection.offering.code}</strong><small>{selection.reasons.join(' · ')}</small></span><span className="badge badge-info">{selection.specificity === 0 ? t('globální', 'global') : t('shoda', 'match')}</span>
             </button>)}
           </div>
+          {selectedOfferExplanation
+            ? <aside className={styles.explanation} aria-live="polite">
+                <div className={styles.explanationTitle}><ShieldCheck size={14} />{selectedOfferExplanation.title}</div>
+                <p>{selectedOfferExplanation.summary}</p>
+                <div className={styles.explanationTrace}>{selectedOfferExplanation.trace.map(item => <code key={item}>{item}</code>)}</div>
+                <small>{selectedOfferExplanation.privacyNotice}</small>
+              </aside>
+            : <div className={styles.explanationHidden}><LockKeyhole size={13} />{t('Pro tuto nabídku nevzniká vysvětlení: není součástí autorizovaného výsledku zadaného tržního kontextu.', 'No explanation is created for this offering: it is not part of the authorized result for the supplied market context.')}</div>}
           <div className={styles.preview}><div className={styles.previewEyebrow}>{selectedOffering?.market.channels?.join(' · ') || t('Všechny kanály', 'All channels')}</div><h3 className={styles.previewName}>{String((parsedDraft?.name as Record<string, string> | undefined)?.[language] ?? (parsedDraft?.name as Record<string, string> | undefined)?.en ?? selectedOffering?.code ?? '—')}</h3><p className={styles.previewCopy}>{String((parsedDraft?.description as Record<string, string> | undefined)?.[language] ?? (parsedDraft?.description as Record<string, string> | undefined)?.en ?? t('Doplňte popis, aby byl dopad nabídky srozumitelný pro zákazníka i kontrolora.', 'Add a description so the offer is understandable to both customer and reviewer.'))}</p><div className={styles.previewFoot}>{t('Trh:', 'Market:')} {selectedOffering?.market.countries?.join(', ') || t('všechny země', 'all countries')} · {t('Ceny:', 'Prices:')} {Array.isArray(parsedDraft?.prices) ? parsedDraft.prices.length : 0}</div></div>
         </div>
       </section>
