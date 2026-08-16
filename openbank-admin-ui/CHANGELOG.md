@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.154.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.153.0...admin-ui-v0.154.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify payment detail workspace ([#5163](https://github.com/JiRaska/open-bank-oss/issues/5163)) ([e7a8bcb](https://github.com/JiRaska/open-bank-oss/commit/e7a8bcb740f16d1c4f78eb40c9665b74da063d42))
+
 ## [0.153.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.152.0...admin-ui-v0.153.0) (2026-08-16)
 
 
