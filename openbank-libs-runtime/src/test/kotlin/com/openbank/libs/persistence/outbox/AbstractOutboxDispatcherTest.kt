@@ -4,6 +4,9 @@
 
 package com.openbank.libs.persistence.outbox
 
+import com.openbank.libs.observability.DomainMetrics
+import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -42,17 +45,26 @@ class AbstractOutboxDispatcherTest {
     private class TestOutboxDispatcher(
         override val outboxRepository: OutboxRepository,
         override val outboxEventPublisher: OutboxEventPublisher,
+        service: String? = null,
     ) : AbstractOutboxDispatcher() {
+        override val service: String = service ?: super.service
         suspend fun runBatch() = dispatchScheduledBatch()
+
+        /** No CDI container in a plain unit test — set the field [AbstractOutboxDispatcher]
+         * normally receives via `@Inject` (#5049). Only reachable from this subclass because
+         * `metrics` is `protected`. */
+        fun useMetrics(m: DomainMetrics) {
+            metrics = m
+        }
     }
 
-    private fun entry(type: String) = OutboxEntry(
+    private fun entry(type: String, attemptCount: Int = 0) = OutboxEntry(
         eventId = UUID.randomUUID(),
         aggregateId = UUID.randomUUID(),
         eventType = type,
         payload = """{"t":"$type"}""",
         status = OutboxStatus.PENDING,
-        attemptCount = 0,
+        attemptCount = attemptCount,
         createdAt = Instant.EPOCH,
         updatedAt = Instant.EPOCH,
         sentAt = null,
@@ -128,5 +140,73 @@ class AbstractOutboxDispatcherTest {
         // and it delegated to publisher
         assertThat(publisher.published).containsExactly(row)
         assertThat(repo.sent).containsExactly(row.eventId)
+    }
+
+    // ── #5049: outboxDispatched/outboxDead must actually fire, the right number of times ──
+
+    @Test
+    fun `with no metrics wired (plain unit-test construction), dispatch does not crash`() {
+        // Every per-service *OutboxDispatcherTest in the fleet constructs its dispatcher exactly
+        // this way — directly, with no CDI container, so `metrics` is never field-injected. This
+        // is the regression this test exists to catch: a naive `metrics!!.outboxDispatched(...)`
+        // would NPE every one of those ~34 tests the moment this class is touched.
+        val row = entry("a.created")
+        val repo = FakeRepo(listOf(row))
+        val publisher = FakePublisher()
+        val dispatcher = TestOutboxDispatcher(repo, publisher)
+
+        runBlocking { dispatcher.runBatch() }
+
+        assertThat(repo.sent).containsExactly(row.eventId)
+    }
+
+    @Test
+    fun `dispatchScheduledBatch fires outboxDispatched once per successfully published row`() {
+        val rows = listOf(entry("account.created"), entry("payment.sent"))
+        val repo = FakeRepo(rows)
+        val publisher = FakePublisher()
+        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget")
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        dispatcher.useMetrics(metrics)
+
+        runBlocking { dispatcher.runBatch() }
+
+        // Falsifying assertion: a no-op wiring (metrics never called) or a wiring that fires once
+        // per BATCH instead of once per ROW both fail this — it must be exactly 2, tagged with
+        // each row's own eventType as the topic label, not a shared/hardcoded one.
+        verify(exactly = 1) { metrics.outboxDispatched("widget", "account.created") }
+        verify(exactly = 1) { metrics.outboxDispatched("widget", "payment.sent") }
+        verify(exactly = 0) { metrics.outboxDead(any()) }
+    }
+
+    @Test
+    fun `dispatchScheduledBatch fires outboxDead only for rows that actually reach DEAD`() {
+        val retrying = entry("retrying", attemptCount = 1)
+        val dying = entry("dying", attemptCount = OutboxFailurePolicy.DEFAULT_MAX_ATTEMPTS - 1)
+        val repo = FakeRepo(listOf(retrying, dying))
+        val publisher = FakePublisher()
+        publisher.publishErrors[retrying.eventId] = IllegalStateException("still failing")
+        publisher.publishErrors[dying.eventId] = IllegalStateException("still failing")
+        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget")
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        dispatcher.useMetrics(metrics)
+
+        runBlocking { dispatcher.runBatch() }
+
+        // Falsifying assertion: a wiring that fires outboxDead for every FAILURE (not just the
+        // terminal one) would call this twice; a wiring that never distinguishes DEAD at all
+        // would call it zero times either way. Exactly 1 is the only wiring that agrees with
+        // OutboxFailurePolicy's own threshold.
+        verify(exactly = 1) { metrics.outboxDead("widget") }
+        verify(exactly = 0) { metrics.outboxDispatched(any(), any()) }
+    }
+
+    @Test
+    fun `service defaults to a kebab-case derivation of the concrete class name`() {
+        assertThat(AbstractOutboxDispatcher.deriveServiceName("PartyOutboxDispatcher")).isEqualTo("party")
+        assertThat(AbstractOutboxDispatcher.deriveServiceName("SepaPaymentOutboxDispatcher"))
+            .isEqualTo("sepa-payment")
+        assertThat(AbstractOutboxDispatcher.deriveServiceName("StandingOrderOutboxDispatcher"))
+            .isEqualTo("standing-order")
     }
 }
