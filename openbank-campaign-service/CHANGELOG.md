@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/v0.32.0...v0.33.0) (2026-08-15)
+
+
+### Features
+
+* **campaign:** add governed audience composer ([#4888](https://github.com/JiRaska/open-bank-oss/issues/4888)) ([7b3b056](https://github.com/JiRaska/open-bank-oss/commit/7b3b05692b2f1c21d9184f03d53255197a5f4939))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/v0.31.0...v0.32.0) (2026-08-15)
 
 
