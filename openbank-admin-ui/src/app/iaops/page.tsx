@@ -188,7 +188,7 @@ function IAOpsContent() {
   useEffect(() => {
     if (!data || typeof window === 'undefined') return
     const fragment = window.location.hash.slice(1)
-    if (fragment !== 'ai-swarm' && fragment !== 'ai-mesh') return
+    if (fragment !== 'ai-swarm' && fragment !== 'ai-mesh' && fragment !== 'agent-roster') return
 
     const frame = window.requestAnimationFrame(() => {
       document.getElementById(fragment)?.scrollIntoView?.({ block: 'start' })
