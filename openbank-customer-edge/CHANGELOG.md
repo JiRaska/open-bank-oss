@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.62.0...customer-edge-v0.63.0) (2026-08-16)
+
+
+### Features
+
+* **accounts:** let a customer rename an account (TOP-10 [#10](https://github.com/JiRaska/open-bank-oss/issues/10), part 1) ([#5002](https://github.com/JiRaska/open-bank-oss/issues/5002)) ([b9b3fc6](https://github.com/JiRaska/open-bank-oss/commit/b9b3fc675da7c5920d1d8fd4562fb001eb04635d))
+
 ## [0.62.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.61.0...customer-edge-v0.62.0) (2026-08-13)
 
 
