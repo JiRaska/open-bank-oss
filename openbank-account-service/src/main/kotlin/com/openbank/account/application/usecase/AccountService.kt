@@ -170,7 +170,19 @@ class AccountService(
 
     override suspend fun closeAccount(command: CloseAccountCommand): Account {
         val account = requireAccount(command.accountId)
+        // Status validity first (throws IllegalStateException for an already-CLOSED/PENDING
+        // account) so a doomed request fails on "wrong state" rather than a balance lookup it
+        // was never going to need.
         val closed = account.close(clock)
+        val balances = balancePort.getByAccount(command.accountId)
+        val notEmpty = balances.filter { it.booked.signum() != 0 || it.reserved.signum() != 0 }
+        if (notEmpty.isNotEmpty()) {
+            throw AccountNotEmptyException(
+                "Account ${command.accountId} still holds money in " +
+                    notEmpty.joinToString(", ") { "${it.currency} ${it.booked}" } +
+                    " — move it out before closing",
+            )
+        }
         val updated = accountRepository.update(closed)
 
         eventPublisher.publish(
@@ -481,6 +493,14 @@ class AccountNotFoundException(message: String) : RuntimeException(message)
  * non-deterministically per request; see issue #526) mapped to 409.
  */
 class AccountUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+
+/**
+ * Closing an account with money still in any of its currency pockets would strand that money —
+ * the account moves to CLOSED and stops appearing anywhere a customer or ops person would think
+ * to look for it. [closeAccount] refuses rather than closing anyway; the caller must move the
+ * balance out (or open a dispute) first.
+ */
+class AccountNotEmptyException(message: String) : RuntimeException(message)
 
 class AccountOpeningBlockedByScreeningException(partyId: UUID, matchedName: String?) :
     RuntimeException("Account opening blocked by sanctions screening for party $partyId (matched: $matchedName)")

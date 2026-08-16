@@ -974,6 +974,13 @@ class CustomerEdgeResource(
         )
     }
 
+    // NOTE: deliberately no customer-facing "close account" endpoint here. account-service's
+    // OPA policy (account_rest_ext.rego) explicitly PROHIBITS account.close for the edge's M2M
+    // principal — closed off after a fleet audit (#3734) that found a blanket role-only grant
+    // had accidentally exposed the whole sensitive lifecycle (close/freeze/unfreeze/authorize)
+    // to this exact proxy path. That is a deliberate security boundary, not a missing feature —
+    // don't add a caller here without an explicit human decision to reopen it.
+
     @GET
     @Path("/accounts/{accountId}/pockets/resolve")
     @Authorize(action = "customer.pockets.read", resource = "#accountId")
