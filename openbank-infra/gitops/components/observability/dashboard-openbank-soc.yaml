@@ -255,10 +255,10 @@ data:
         {
           "type": "stat",
           "title": "Falco priority≥Warning (5m)",
-          "description": "needs Falco metrics.enabled + SM (follow-up)",
+          "description": "Falco (ADR-0081) is deliberately Loki-only \u2014 json_output to stdout, tailed by Alloy, no Prometheus exporter (falco.yaml: \"zero-new-plumbing\"). falco_events_total has never existed and never will under this architecture; the fix (#5046) is this LogQL query, not a scrape config.",
           "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
+            "type": "loki",
+            "uid": "loki"
           },
           "gridPos": {
             "x": 18,
@@ -269,10 +269,10 @@ data:
           "targets": [
             {
               "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
+                "type": "loki",
+                "uid": "loki"
               },
-              "expr": "sum(increase(falco_events_total{priority=~\"Emergency|Alert|Critical|Error|Warning\"}[5m]))",
+              "expr": "sum(count_over_time({namespace=\"falco\"} | json | priority=~\"Emergency|Alert|Critical|Error|Warning\" [5m]))",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
@@ -641,10 +641,10 @@ data:
         {
           "type": "table",
           "title": "Falco events by rule (1h)",
-          "description": "needs Falco metrics (follow-up)",
+          "description": "Falco (ADR-0081) is deliberately Loki-only \u2014 see the stat panel above for why. LogQL over the JSON body Alloy already ships (#5046).",
           "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
+            "type": "loki",
+            "uid": "loki"
           },
           "gridPos": {
             "x": 12,
@@ -655,10 +655,10 @@ data:
           "targets": [
             {
               "datasource": {
-                "type": "prometheus",
-                "uid": "${datasource}"
+                "type": "loki",
+                "uid": "loki"
               },
-              "expr": "topk(15, sum by (rule, priority) (increase(falco_events_total[1h])))",
+              "expr": "topk(15, sum by (rule, priority) (count_over_time({namespace=\"falco\"} | json [1h])))",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
