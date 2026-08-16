@@ -1,8 +1,7 @@
 ---
 date: 2026-08-13
 decision-status: accepted
-delivery-status: partial
-followup: "#4505 — P6b bundle intelligence and P6c offer explanations remain proposal-only"
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -123,9 +122,9 @@ context.
 1. **P6a — Author/Reviewer:** read-only grounded context, structured proposal, audit, kill switch,
    reviewer Studio surface and adversarial/e2e tests. No automatic patch application.
 2. **P6b — Bundle intelligence:** constrained relationship and copy suggestions plus deterministic
-   impact simulation against catalog fixtures. No generated discounts or executable rules.
+   impact simulation against catalog fixtures. No generated discounts or executable rules. **Shipped.**
 3. **P6c — Offer explanations:** natural-language explanation over a deterministic selector trace,
-   with a proof that an unentitled/private offer cannot enter the prompt or response.
+   with a proof that an unentitled/private offer cannot enter the prompt or response. **Shipped.**
 4. **P6d — Personalization integration:** only after the owning decisioning service demonstrates
    consent, fairness, reason-code and monitoring controls. The catalog contract remains
    customer-free.
