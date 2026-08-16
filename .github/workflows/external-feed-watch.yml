@@ -29,6 +29,22 @@
 #   copy of the DRIFT half therefore belongs in `Validate manifests` in ci.yml,
 #   the same shape adr-registry and eu-ai-act use; this workflow is the fast
 #   echo plus the scheduled liveness lane.
+#
+# RELATIONSHIP TO THE IN-CLUSTER FETCH-OUTCOME CONTRACT (issue #4743, ADR-0237 point 2)
+#   This job is the ONLY thing that can catch a bad URL/shape before anything is ever
+#   deployed — a unit test stubs the client, an IT serves a local fixture, and a
+#   consumer pact answers whatever path it is asked for (#2283), so an unauthenticated
+#   external probe is not a redundant second opinion, it is the only opinion outside a
+#   running pod. It deliberately does NOT decide "is the feed healthy right now" any
+#   more, though: the DEPLOYED service now classifies every real fetch attempt as
+#   FETCHED/EMPTY/HTTP_ERROR/PARSE_ERROR (`com.openbank.fx.domain.feed.FeedFetchOutcome`),
+#   publishes it as `openbank.feed.fetch{feed,outcome}`, and records a success against a
+#   `feed-<name>` liveness gauge ONLY on FETCHED — which the existing WorkflowLivenessStale
+#   rule already alerts on (prometheus-rules-workflow-liveness.yaml), gauge-based so a
+#   daily feed is never truncated by this cluster's 12h Prometheus retention the way a
+#   `[24h]` range query would be. That in-cluster signal is the live/authoritative answer;
+#   this workflow's escalation below points at it rather than re-deciding health from a
+#   single outside-in fetch, so triage has one place to look, not two disagreeing ones.
 # -----------------------------------------------------------------------------
 name: External feed watch
 
@@ -126,6 +142,14 @@ jobs:
               'circuit breaker stays closed, and the scheduler logs one ERROR line. Fix',
               'the URL in the service\'s `application.yaml` (the probe reads it from',
               'there, so the fix and the check can never disagree).',
+              '',
+              'This is the OUTSIDE-IN canary (issue #2204) — it can fire before anything is',
+              'deployed. For the live/authoritative verdict once the fix ships, check the',
+              'in-cluster fetch-outcome contract instead of re-deriving health from this run',
+              '(issue #4743, ADR-0237 point 2): `openbank_feed_fetch_total{outcome!="FETCHED"}`',
+              'for which outcome the deployed service is actually hitting, and the',
+              '`WorkflowLivenessStale` alert for `workflow=~"feed-.*"` for how long it has been',
+              'since the feed last delivered anything usable.',
               '',
               `_Automated: \`${context.workflow}\` run ${context.runId}._`,
             ].join('\n')
