@@ -12,6 +12,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
@@ -142,6 +143,13 @@ class AuditEntryEntity : PanacheEntity() {
 
 @ApplicationScoped
 class AuditRepository : PanacheRepository<AuditEntryEntity> {
+
+    // ADR-0179 / issue #1984: follows `merged_into` at read time so a party-history query does
+    // not stop at the retired id (see PartyMergeIndexRepository and findByAggregateId below).
+    // Optional in tests the same way meterRegistry is elsewhere in this service — a unit test
+    // that constructs this repo by hand and never sets it gets today's un-merge-aware behaviour,
+    // not a crash.
+    @Inject lateinit var mergeIndex: PartyMergeIndexRepository
 
     // Chain writes are serialised in-process: the consumer group has a single member
     // (group.id=audit-service, 1 replica), so a mutex is sufficient — and much simpler than
@@ -326,9 +334,29 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             }
         }.awaitSuspending()
 
-    suspend fun findByAggregateId(aggregateId: String, limit: Int = 100): List<AuditEntry> = Panache.withSession {
-        find("aggregateId = ?1 ORDER BY occurredAt DESC", aggregateId).page(0, limit).list()
-    }.awaitSuspending().map { it.toDomain() }
+    /**
+     * The audit trail for [aggregateId] — and, for a party, its full history: ADR-0179 /
+     * issue #1984. A party merge retires the duplicate (`PartyStatus.MERGED` + `merged_into`) and
+     * moves nothing else, so the rows recorded under the retired id before the merge would
+     * otherwise be invisible to a query for the survivor — exactly the gap #3901 closed for
+     * customer-edge's JWT resolution, on the read side here instead of the write side, because
+     * `audit_entries` cannot be rewritten (see V15's migration comment).
+     *
+     * [PartyMergeIndexRepository.ancestorsOf] is a safe no-op for every [aggregateId] this is not
+     * true of: an id that never had anything merged into it (the common case, and every non-party
+     * aggregate) resolves to just itself, so this is unconditionally correct to call for both
+     * callers of this method — the auditor investigator route AND the customer's own access log.
+     */
+    suspend fun findByAggregateId(aggregateId: String, limit: Int = 100): List<AuditEntry> {
+        val ids = if (::mergeIndex.isInitialized) mergeIndex.ancestorsOf(aggregateId) else listOf(aggregateId)
+        return Panache.withSession {
+            if (ids.size == 1) {
+                find("aggregateId = ?1 ORDER BY occurredAt DESC", aggregateId).page(0, limit).list()
+            } else {
+                find("aggregateId in ?1 ORDER BY occurredAt DESC", ids).page(0, limit).list()
+            }
+        }.awaitSuspending().map { it.toDomain() }
+    }
 
     /**
      * Person-across-channels query (ADR-0226 D3): every entry an actor produced, optionally

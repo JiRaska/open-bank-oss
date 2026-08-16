@@ -28,7 +28,11 @@ export type Role = typeof ROLES[keyof typeof ROLES]
 // Permission matrix — what each role can access
 export const PERMISSIONS = {
   // Dashboard
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
+  // Every interactive staff persona needs the workspace landing page. Without
+  // the KYC and supervisor entries their role-specific workspace can be
+  // derived, but the role matrix says they may not view the dashboard — a
+  // contradiction ADR-0229 D4 explicitly rules out.
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -57,7 +61,17 @@ export const PERMISSIONS = {
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
-  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // ROLES.DEMO here (and nowhere else in this file) because onboarding-service's own
+  // @RolesAllowed(Roles.VIEWER, ...) is the one backend in this matrix that already accepts
+  // a plain viewer — verified by reading OnboardingResource.kt, not assumed. Every other
+  // *:view permission demo might plausibly want (kyc, audit, delegations, notifications:
+  // checked; compliance/regulatory/technical-accounts/templates/system: not yet checked)
+  // gates a backend or OPA rule with no viewer-equivalent tier, so adding DEMO there would
+  // render a nav link that 403s on click — worse than today's hidden link, and the opposite
+  // of what a demo account is for. Tracked as issue #5020 before widening
+  // further; do not add ROLES.DEMO to another line here without first confirming its
+  // backend accepts VIEWER-tier reads.
+  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.DEMO],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -98,6 +112,9 @@ export const PERMISSIONS = {
   // call the endpoint directly. This decides what we *render*, not what they can *fetch*.
   // Real metadata/body separation needs a policy change — issue #1326.
   "notifications:view":       [ROLES.ADMIN, ROLES.OPERATOR],
+  // Screen feedback carries free-text comments and screenshot keys (ADR-0192), so it is
+  // intentionally narrower than general docs/viewer access.
+  "feedback:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Operator-initiated customer messaging (ADR-0176 D4/D5). Matches the backend's actual rego
   // grants exactly (opsmessage-compose / opsmessage-approve in rest.rego) — any
   // ROLE_OPERATOR/ROLE_ADMIN may compose or decide, with self-approval refused server-side by
@@ -107,7 +124,17 @@ export const PERMISSIONS = {
   "opsmessage:compose":       [ROLES.ADMIN, ROLES.OPERATOR],
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
-  "system:view":              [ROLES.ADMIN, ROLES.OPERATOR],
+  // ROLES.DEMO added 2026-08-16 (issue #5020), verified safe two independent ways before
+  // adding: middleware.ts's routeGuards array has a pattern for /system/config (ADMIN only,
+  // the mutation path — untouched) but NONE for the general /system/* view pages, so no
+  // route-level role check exists to conflict with; and every BFF route these pages call
+  // (finops/*, devops/*, security, observability/*, temporal/status) either has no
+  // permission check of its own at all, or (api/iaops/rca) checks this exact
+  // hasPermission(roles, 'system:view') — same source of truth, so widening it here widens
+  // consistently everywhere it is read. Unlike onboarding:view above, there is no backend
+  // @RolesAllowed/rego to have verified against, because these pages proxy telemetry
+  // (Prometheus, Holmes, k8s) rather than calling a service with its own RBAC.
+  "system:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.DEMO],
   "system:config":            [ROLES.ADMIN],
   // Docs
   "docs:view":                [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
@@ -120,6 +147,56 @@ export type Permission = keyof typeof PERMISSIONS
 export function hasPermission(roles: string[], permission: Permission): boolean {
   const allowed = PERMISSIONS[permission] as readonly string[]
   return roles.some(r => allowed.includes(r))
+}
+
+/**
+ * One UI route-to-permission projection used by the edge gate and route-coverage tests.
+ *
+ * This is deliberately a route manifest, not a list of roles: adding a role to a permission
+ * immediately changes every matching page consistently, while the backend/OPA remains the
+ * enforcement authority for data and mutations. Longest prefixes win, so `/system/config` can
+ * be stricter than `/system` without an exception in a page component.
+ */
+const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = [
+  ['dashboard:view', ['/dashboard']],
+  ['system:config', ['/system/config']],
+  ['catalog:read', ['/product-studio']],
+  ['templates:view', ['/document-templates']],
+  ['delegations:view', ['/delegations']],
+  ['feedback:view', ['/feedback']],
+  ['regulatory:view', ['/regulatory']],
+  ['audit:view', ['/audit']],
+  ['kyc:view', ['/kyc']],
+  ['onboarding:view', ['/onboarding', '/identity-cases']],
+  ['parties:view', ['/parties']],
+  ['transactions:view', ['/transactions']],
+  ['accounts:view', ['/accounts', '/ledger', '/day-end']],
+  ['payments:view', [
+    '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
+    '/fx', '/swift', '/cards', '/interest', '/pid', '/fees', '/lending',
+  ]],
+  ['compliance:view', [
+    '/aml', '/fraud', '/sanctions', '/disputes', '/consents', '/customer-360', '/campaigns',
+    '/segments', '/lending/compliance-packs', '/docs/compliance', '/docs/bcp',
+  ]],
+  ['system:view', [
+    '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
+    '/security', '/notifications', '/system',
+  ]],
+  ['docs:view', ['/docs', '/services']],
+  ['settings:view', ['/settings']],
+]
+
+export function permissionForPath(pathname: string): Permission | undefined {
+  let match: { permission: Permission; length: number } | undefined
+  for (const [permission, prefixes] of ROUTE_PREFIXES) {
+    for (const prefix of prefixes) {
+      if ((pathname === prefix || pathname.startsWith(`${prefix}/`)) && (!match || prefix.length > match.length)) {
+        match = { permission, length: prefix.length }
+      }
+    }
+  }
+  return match?.permission
 }
 
 export function hasRole(roles: string[], role: Role): boolean {

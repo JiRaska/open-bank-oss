@@ -45,7 +45,7 @@ afterEach(() => {
 })
 
 describe('AIOps agent card interactions', () => {
-  it.each(['ai-swarm', 'ai-mesh'])('scrolls to the %s swarm fragment after governance data loads', async fragment => {
+  it.each(['ai-swarm', 'ai-mesh', 'agent-roster'])('scrolls to the %s fragment after governance data loads', async fragment => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation(callback => {

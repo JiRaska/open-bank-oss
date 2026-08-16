@@ -1,0 +1,112 @@
+# EMAIL-channel alert rules (issue #4737). Fed by EmailMetricsAdapter in
+# openbank-notification-service, which emits openbank_notification_email_sends_total.
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false), same as the other
+# rule files here.
+#
+# WHAT THESE CAN AND CANNOT SAY. `outcome="ACCEPTED"` counts MAILER acceptances — a
+# handoff to a relay, not a receipt from a mailbox. A later bounce can still refine it
+# (ADR-0239 D4 `BOUNCED`, which has no producer today). These rules detect "we stopped
+# handing mail to a real mailer" and "the mailer is rejecting us", never "customers read
+# their mail".
+#
+# THE DEFECT THESE EXIST FOR PRODUCED NO ERRORS. The deployed notification-service runs
+# with QUARKUS_MAILER_MOCK=true — deliberately: its gitops manifest says "No SMTP in the
+# sandbox". A mocked ReactiveMailer.send completes SUCCESSFULLY without opening a
+# connection, so before #4737 the row committed status=SENT with sent_at populated for a
+# message that never left the process. Nothing threw, nothing retried, nothing logged an
+# error. That is why EmailChannelMockedOnly below alerts on a *success* state: an error
+# rate is structurally unable to express "everything succeeded and nothing happened".
+# It is the same defect PushChannelSkippedOnly covers for push, where it was found by a
+# customer rather than by any signal.
+#
+# WHY THIS IS NOT PERMANENT NOISE IN THE SANDBOX, even though the mock is deliberate and
+# permanent: Micrometer registers a counter lazily, on its first increment, so the series
+# does not exist until something actually sends an EMAIL. Today nothing does — the
+# notifications table holds zero EMAIL rows, ever — so these rules are silent. The moment
+# anything starts sending (e.g. if #4363 re-routes device-less push to e-mail) the MOCKED
+# series is born and the alert fires. That is precisely the moment this stops being latent,
+# which makes "email is being sent into a mock" the right thing to be woken by, and not a
+# standing complaint about a known configuration.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-email-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.email
+      rules:
+        # The mocked-mailer case, stated positively — the success state, because there is no
+        # failure state to read.
+        #
+        # NOT `sum(rate(...{outcome="ACCEPTED"}[15m])) == 0` on its own. Lazy registration means
+        # an ACCEPTED series that has never incremented DOES NOT EXIST, so `sum(rate(...))` over
+        # it returns an EMPTY vector, `== 0` matches nothing, and the `and` yields nothing — the
+        # rule would be silent in exactly the case it is written for (a deployment that has never
+        # once accepted a real mail). `or vector(0)` forces the absent side to a real zero. This
+        # is the same lazy-registration trap the ScaApprovalPushUndeliverable comments document,
+        # in its other form: there it defeated increase(), here it defeats an == 0 comparison.
+        - alert: EmailChannelMockedOnly
+          expr: |
+            (sum(rate(openbank_notification_email_sends_total{outcome="MOCKED"}[15m])) or vector(0)) > 0
+            and
+            (sum(rate(openbank_notification_email_sends_total{outcome="ACCEPTED"}[15m])) or vector(0)) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "The mailer is mocked — every e-mail send is a no-op"
+            description: >-
+              notification-service is sending e-mail into the Quarkus mock mailer and has handed
+              nothing to a real one for 15m, so no message is leaving the process. Rows are
+              recorded SUPPRESSED/mailer_mocked (never SENT — that was #4737), so the database is
+              honest, but nobody is receiving anything. If this environment is meant to send mail,
+              QUARKUS_MAILER_MOCK must go and real SMTP credentials must be configured; if it is
+              not meant to send, whatever started producing EMAIL notifications is the thing to
+              look at.
+        # The mailer is real and refusing. Distinct from the alert above: there the mailer is a
+        # mock, here it is genuine and failing.
+        - alert: EmailDeliveryRejected
+          expr: |
+            sum(rate(openbank_notification_email_sends_total{outcome="FAILED"}[15m]))
+              / clamp_min(sum(rate(openbank_notification_email_sends_total[15m])), 0.001) > 0.5
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Over half of e-mail sends are rejected by the mailer"
+            description: >-
+              More than 50% of EMAIL sends have failed for 15m — rows commit FAILED with reason
+              mailer_refused. Check SMTP host/port reachability, credentials, and whether the
+              relay is rate-limiting or greylisting the sender.
+
+        # Not every e-mail is worth the same alert. An SCA_APPROVAL or OTP_CODE mail is a PSD2
+        # Art. 97 / authentication control; a marketing offer is not. One undelivered instance of
+        # the former is worth waking someone for, which the channel-wide ratios above cannot
+        # express because a single message is noise against any denominator.
+        #
+        # Self-delta with `or vector(0)` on BOTH sides for the lazy-registration reason above: the
+        # series is born at 1 on its first occurrence, where increase() reads 0. A pod restart
+        # makes the delta negative for one window, which correctly does not alert.
+        - alert: SecurityEmailNotDelivered
+          expr: |
+            (sum(openbank_notification_email_sends_total{
+              template=~"OTP_CODE|SCA_APPROVAL|PASSWORD_RESET", outcome!="ACCEPTED"
+            }) or vector(0))
+            -
+            (sum(openbank_notification_email_sends_total{
+              template=~"OTP_CODE|SCA_APPROVAL|PASSWORD_RESET", outcome!="ACCEPTED"
+            } offset 15m) or vector(0)) > 0
+          for: 0m
+          labels:
+            severity: critical
+          annotations:
+            summary: "A security e-mail (OTP / SCA / password reset) was never delivered"
+            description: >-
+              An authentication-related e-mail ended MOCKED or FAILED in the last 15m, so the
+              customer never received a code or prompt they are being asked to act on. outcome
+              MOCKED means this environment has no real mailer at all (see EmailChannelMockedOnly);
+              FAILED means a live mailer refused it. Both leave the customer unable to complete the
+              flow, and neither raises an application error.

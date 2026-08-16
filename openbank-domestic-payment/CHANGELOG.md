@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.5...domestic-payment-v0.13.6) (2026-08-16)
+
+
+### Bug Fixes
+
+* **sepa-payment,domestic-payment:** emit sanctions screening/hit metrics ([#5079](https://github.com/JiRaska/open-bank-oss/issues/5079)) ([ef730ff](https://github.com/JiRaska/open-bank-oss/commit/ef730ffffebad6165a29e8715b993b1a273060fc)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
+## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.4...domestic-payment-v0.13.5) (2026-08-16)
+
+
+### Bug Fixes
+
+* **domestic-payment:** emit paymentCompleted/paymentProcessingDuration on terminal transitions ([#5068](https://github.com/JiRaska/open-bank-oss/issues/5068)) ([ae4af48](https://github.com/JiRaska/open-bank-oss/commit/ae4af48107c953623ccef39563394a86c40989c7)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.3...domestic-payment-v0.13.4) (2026-08-10)
 
 

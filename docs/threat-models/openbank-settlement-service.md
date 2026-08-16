@@ -65,7 +65,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 | ID | Threat | Mitigation |
 |----|--------|------------|
 | S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | mTLS between Temporal server and workers (both directions); OPA activity interceptor (`OpaActivityInterceptor`) rejects tasks not matching policy |
-| S2 | Attacker impersonates settlement-service to call balance/ledger | Service mesh mTLS (SPIFFE identity); OPA authz on REST receivers |
+| S2 | Attacker impersonates settlement-service to call balance/ledger | Corrected 2026-08-16 (#3921) — see note below. `debit-port`/`credit-port`/`ledger-port` are `OidcClientRequestReactiveFilter`-backed REST clients (`BalanceRestClient`, `LedgerRestClient`) that attach a client-credentials bearer token from `quarkus.oidc-client`, the confidential `openbank-services` Keycloak client (`OIDC_CLIENT_SECRET` Vault-projected, never in git); OPA authz on the balance/ledger REST receivers checks that identity |
 
 ### T — Tampering
 
@@ -185,3 +185,21 @@ replacing the former in-memory stub), so settlement state is durable across rest
 - ADR-0034 (OPA unified authz — `OpaActivityInterceptor`)
 - ADR-0101 (Temporal durable execution — this migration)
 - Settlement money-bug (2026-06-19, root cause: missing intermediate-state timeout in hand-rolled saga)
+
+## Change log
+
+- **2026-08-16** (#3921) — S2's mitigation was corrected and the outbound OIDC client was
+  configured for the first time; both belong together. The prior text credited "Service mesh mTLS
+  (SPIFFE identity)" for the debit/credit/ledger port calls — no service mesh is deployed anywhere
+  in this platform, so that line described a control that does not exist. The real mechanism is
+  `quarkus.oidc-client` client-credentials on each `OidcClientRequest*Filter`-backed REST client,
+  and `application.yaml` had **no `quarkus.oidc-client` block at all** — only `quarkus.oidc`
+  (inbound; validates tokens arriving at settlement-service). So the actual state before this fix
+  was neither mesh mTLS nor OIDC: every settlement→balance and settlement→ledger call left with no
+  `Authorization` header, and the callee's 401 (not 403 — no token to be missing a role) was the
+  only signal. Fixed by adding the block with `auth-server-url:
+  ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}`, the same variable the
+  inbound block already reads and the deployed workload already sets — no gitops change needed.
+  **No new trust boundary**: this restores the M2M identity the ports were always meant to
+  present, on the existing edges, against the existing confidential client. Enforced fleet-wide by
+  `check-oidc-client-configured.py` (six services fixed; ledger and settlement money-path).

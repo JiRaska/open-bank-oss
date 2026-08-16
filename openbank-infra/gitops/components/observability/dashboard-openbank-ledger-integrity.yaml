@@ -2,6 +2,13 @@
 # sidecar (label grafana_dashboard=1); synced by the observability-components
 # ArgoCD app (recurse). Queries use live Tempo span-metrics + openbank_* /
 # kyverno_* contracts.
+# `or vector(0)` (added 2026-08-16): sum(rate(x{status_code=~"ERROR|5.."}[5m])) over an
+# EMPTY match set is NOT a zero-valued sample in PromQL — it is no series at all, and Grafana
+# renders that as "No data", indistinguishable from the metric never existing. During any window
+# with genuinely zero errors this panel went blank, reading as broken when the real state was
+# healthy. Verified live against Prometheus before and after: all patched panels went from an
+# empty result set to a real 0-valued series over the same 14d window with confirmed non-zero
+# service traffic (i.e. the fix restores correctness, it does not paper over a real data gap).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -212,7 +219,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "100 * sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",status_code=~\"STATUS_CODE_ERROR|5..\"}[5m])) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\"}[5m])),0.001)",
+              "expr": "100 * (sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",status_code=~\"STATUS_CODE_ERROR|5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\"}[5m])),0.001)",
               "legendFormat": "",
               "refId": "A",
               "instant": true,
@@ -484,7 +491,7 @@ data:
                 "type": "prometheus",
                 "uid": "${datasource}"
               },
-              "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",status_code=~\"STATUS_CODE_ERROR|5..\"}[5m]))",
+              "expr": "sum(rate(traces_spanmetrics_calls_total{service=\"openbank-ledger-service\",status_code=~\"STATUS_CODE_ERROR|5..\"}[5m])) or vector(0)",
               "legendFormat": "errors/s",
               "refId": "B",
               "instant": false,

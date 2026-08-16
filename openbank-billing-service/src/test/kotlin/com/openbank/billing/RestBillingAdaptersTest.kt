@@ -5,6 +5,7 @@
 package com.openbank.billing
 
 import com.openbank.billing.infrastructure.adapter.RestAccountContextPort
+import com.openbank.billing.infrastructure.adapter.RestAccountPartyLookupPort
 import com.openbank.billing.infrastructure.adapter.RestBillableAccountDiscoveryPort
 import com.openbank.billing.infrastructure.adapter.RestProductCatalogPort
 import com.openbank.billing.infrastructure.client.AccountDto
@@ -134,5 +135,37 @@ class RestBillingAdaptersTest {
         val thrown = runCatching { RestProductCatalogPort(catalog).billableFees("prod-1", "CZK") }.exceptionOrNull()
 
         assertThat(thrown).isInstanceOf(RuntimeException::class.java)
+    }
+
+    @Test
+    fun `partyIdFor reads partyId off the account read`(): Unit = runBlocking {
+        val accounts = mockk<AccountRestClient>()
+        every { accounts.getAccount("acc1") } returns
+            Uni.createFrom().item(AccountDto("acc1", "prod-1", "CZK", "ACTIVE", "party-1"))
+
+        val partyId = RestAccountPartyLookupPort(accounts).partyIdFor("acc1")
+
+        assertThat(partyId).isEqualTo("party-1")
+    }
+
+    @Test
+    fun `partyIdFor fails closed (null) when the account read errors`(): Unit = runBlocking {
+        val accounts = mockk<AccountRestClient>()
+        every { accounts.getAccount(any()) } returns Uni.createFrom().failure(RuntimeException("account-service down"))
+
+        val partyId = RestAccountPartyLookupPort(accounts).partyIdFor("acc1")
+
+        assertThat(partyId).isNull()
+    }
+
+    @Test
+    fun `partyIdFor returns null when the account response carries no partyId`(): Unit = runBlocking {
+        val accounts = mockk<AccountRestClient>()
+        every { accounts.getAccount("acc1") } returns
+            Uni.createFrom().item(AccountDto("acc1", "prod-1", "CZK", "ACTIVE", null))
+
+        val partyId = RestAccountPartyLookupPort(accounts).partyIdFor("acc1")
+
+        assertThat(partyId).isNull()
     }
 }

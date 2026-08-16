@@ -24,6 +24,9 @@ import { ConfirmTransitionDialog } from '@/components/cards/ConfirmTransitionDia
 import { CardOperationFeedback } from '@/components/cards/CardOperationFeedback'
 import { IssueCardDialog } from '@/components/cards/IssueCardDialog'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatCard } from '@/components/ui/StatCard'
+import type { Tone } from '@/components/ui/tone'
 
 // Admin-UI rule #2: page the render. `GET /api/v1/cards` is an unpaginated
 // list-all on the service side, so the cap has to be applied here — a portfolio
@@ -96,16 +99,11 @@ export default function CardsPage() {
   return (
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Vydávání karet', 'Card Issuance')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Vydávání a správa platebních karet — PCI DSS Level 1', 'Card issuance and management — PCI DSS Level 1')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader
+          icon={<CreditCard size={20} aria-hidden="true" />}
+          title={t('Vydávání karet', 'Card Issuance')}
+          subtitle={t('Vydávání a správa platebních karet — PCI DSS Level 1', 'Card issuance and management — PCI DSS Level 1')}
+          actions={<div className="flex flex-wrap items-center gap-2">
             <ServiceStatusBadge
               label="card-issuance :8118"
               loading={loading}
@@ -124,26 +122,17 @@ export default function CardsPage() {
             <button className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
               <RefreshCw size={13} /> {t('Obnovit', 'Refresh')}
             </button>
-          </div>
-        </div>
+          </div>}
+        />
 
         {/* KPIs */}
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Celkem karet', 'Total cards'), value: cards.length, icon: <CreditCard size={16} />, color: 'var(--accent)' },
-            { label: t('Aktivní', 'Active'), value: countBy('ACTIVE'), icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Blokované', 'Blocked'), value: countBy('BLOCKED'), icon: <XCircle size={16} />, color: 'var(--danger)' },
-            { label: t('Čekající', 'Pending'), value: countBy('PENDING'), icon: <Clock size={16} />, color: 'var(--warning)' },
-          ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
-                <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color }}>{k.icon}</div>
-              </div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
-          ))}
+            { label: t('Celkem karet', 'Total cards'), value: cards.length, icon: <CreditCard size={16} /> },
+            { label: t('Aktivní', 'Active'), value: countBy('ACTIVE'), icon: <CheckCircle2 size={16} />, tone: 'success' as Tone },
+            { label: t('Blokované', 'Blocked'), value: countBy('BLOCKED'), icon: <XCircle size={16} />, tone: 'danger' as Tone },
+            { label: t('Čekající', 'Pending'), value: countBy('PENDING'), icon: <Clock size={16} />, tone: 'warning' as Tone },
+          ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
         </div>
 
         <CardLifecycleMap current={highlightedCard?.status} />

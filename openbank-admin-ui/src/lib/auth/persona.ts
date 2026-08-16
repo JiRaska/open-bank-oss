@@ -4,45 +4,49 @@
 
 // ADR-0229 D4 (first cut): persona derivation from realm roles. One operator = one primary
 // persona (strongest match wins); it drives the pinned "My workspace" quick links at the top
-// of the sidebar. The full menu below is untouched — the workspace is an additive landing,
-// not a wall. Persona home dashboards and generated-matrix workspaces are later ADR-0229 steps.
+// of the sidebar and the dashboard. The full menu below is untouched — the workspace is an
+// additive landing, not a wall.
 
-import { ROLES, type Role } from './roles'
+import { ROLES, type Permission, type Role } from './roles'
 
 export type Persona = 'backoffice' | 'payments' | 'compliance' | 'supervisor' | 'platform'
 
-export type WorkspaceLink = { href: string; nameCs: string; nameEn: string }
+/** A persona shortcut carries its UI permission so every consumer can suppress
+ * a destination before it becomes a 403 trap (ADR-0229 D3/D4). */
+export type WorkspaceLink = { href: string; nameCs: string; nameEn: string; permission: Permission }
 
 const WORKSPACES: Record<Persona, WorkspaceLink[]> = {
   backoffice: [
-    { href: '/parties', nameCs: 'Klienti', nameEn: 'Parties' },
-    { href: '/accounts', nameCs: 'Účty', nameEn: 'Accounts' },
-    { href: '/transactions', nameCs: 'Transakce', nameEn: 'Transactions' },
-    { href: '/onboarding', nameCs: 'Onboarding', nameEn: 'Onboarding' },
+    { href: '/parties', nameCs: 'Klienti', nameEn: 'Parties', permission: 'parties:view' },
+    { href: '/accounts', nameCs: 'Účty', nameEn: 'Accounts', permission: 'accounts:view' },
+    { href: '/transactions', nameCs: 'Transakce', nameEn: 'Transactions', permission: 'transactions:view' },
+    { href: '/onboarding', nameCs: 'Onboarding', nameEn: 'Onboarding', permission: 'onboarding:view' },
   ],
   payments: [
-    { href: '/payments', nameCs: 'Platby', nameEn: 'Payments' },
-    { href: '/standing-orders', nameCs: 'Trvalé příkazy', nameEn: 'Standing Orders' },
-    { href: '/clearing', nameCs: 'Clearing', nameEn: 'Clearing' },
-    { href: '/fx', nameCs: 'FX', nameEn: 'FX' },
+    { href: '/payments', nameCs: 'Platby', nameEn: 'Payments', permission: 'payments:view' },
+    { href: '/standing-orders', nameCs: 'Trvalé příkazy', nameEn: 'Standing Orders', permission: 'payments:view' },
+    { href: '/clearing', nameCs: 'Clearing', nameEn: 'Clearing', permission: 'payments:view' },
+    { href: '/fx', nameCs: 'FX', nameEn: 'FX', permission: 'payments:view' },
   ],
   compliance: [
-    { href: '/kyc', nameCs: 'KYC', nameEn: 'KYC' },
-    { href: '/aml', nameCs: 'AML', nameEn: 'AML' },
-    { href: '/sanctions', nameCs: 'Sankce', nameEn: 'Sanctions' },
-    { href: '/audit', nameCs: 'Audit', nameEn: 'Audit' },
+    { href: '/kyc', nameCs: 'KYC', nameEn: 'KYC', permission: 'kyc:view' },
+    { href: '/aml', nameCs: 'AML', nameEn: 'AML', permission: 'compliance:view' },
+    { href: '/sanctions', nameCs: 'Sankce', nameEn: 'Sanctions', permission: 'compliance:view' },
+    { href: '/audit', nameCs: 'Audit', nameEn: 'Audit', permission: 'audit:view' },
   ],
   supervisor: [
-    { href: '/approvals', nameCs: 'Schvalování', nameEn: 'Approvals' },
-    { href: '/audit', nameCs: 'Audit', nameEn: 'Audit' },
-    { href: '/day-end', nameCs: 'Závěrky', nameEn: 'Closings' },
-    { href: '/ledger', nameCs: 'Hlavní kniha', nameEn: 'Ledger' },
+    // A supervisor can review, but cannot use the platform-admin approvals queue or the
+    // operator-only closing trigger. Keep this workspace aligned to the actual RBAC matrix.
+    { href: '/payments', nameCs: 'Platební dohled', nameEn: 'Payment oversight', permission: 'payments:view' },
+    { href: '/aml', nameCs: 'AML dohled', nameEn: 'AML oversight', permission: 'compliance:view' },
+    { href: '/sanctions', nameCs: 'Sankční dohled', nameEn: 'Sanctions oversight', permission: 'compliance:view' },
+    { href: '/audit', nameCs: 'Audit', nameEn: 'Audit', permission: 'audit:view' },
   ],
   platform: [
-    { href: '/system/health', nameCs: 'Zdraví systému', nameEn: 'System Health' },
-    { href: '/devops', nameCs: 'DevOps', nameEn: 'DevOps' },
-    { href: '/observability', nameCs: 'Observability', nameEn: 'Observability' },
-    { href: '/services', nameCs: 'Služby', nameEn: 'Services' },
+    { href: '/system/health', nameCs: 'Zdraví systému', nameEn: 'System Health', permission: 'system:view' },
+    { href: '/devops', nameCs: 'DevOps', nameEn: 'DevOps', permission: 'system:view' },
+    { href: '/observability', nameCs: 'Observability', nameEn: 'Observability', permission: 'system:view' },
+    { href: '/services', nameCs: 'Služby', nameEn: 'Services', permission: 'docs:view' },
   ],
 }
 

@@ -112,7 +112,17 @@ EVENT_TYPE_CONST_RE = re.compile(
 )
 
 # A top-level `data class Name(` opening a primary constructor.
-DATA_CLASS_RE = re.compile(r"^data class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
+#
+# The visibility/modality modifiers are NOT optional decoration to allow: anchoring on a bare
+# `^data class` made every `internal data class` invisible to this gate — 19 of the fleet's 1317
+# top-level data classes, and a contract for one of them therefore reported "no class declares
+# that event type" about a class that plainly does (billing's AnnualFeeSummaryReadyPayload, #4129).
+# A detector keyed on one spelling reports its blind spot as a finding about the code, which is
+# worse than not looking: it sends the author to fix something that is not wrong.
+DATA_CLASS_RE = re.compile(
+    r"^(?:(?:internal|private|public|sealed|abstract|open|final)\s+)*data class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    re.MULTILINE,
+)
 
 # The hand-built-outbox idiom (fraud-service, case-coordinator-agent): the payload is a raw
 # string template or a `mapOf(...)` literal, not a `data class`, so DATA_CLASS_RE never fires —
@@ -643,11 +653,38 @@ def check_contract(path: pathlib.Path) -> list[str]:
             f'`const val EVENT_TYPE = "{name}"`). Either the producer was renamed and the contract '
             f"was not, or this message describes an event that is never emitted."
         )
-    for name in sorted(set(declared) - ordinary_doc_names):
+    # An outbox is not necessarily a Kafka producer. billing-service dispatches ON eventType:
+    # `billing.fee.post-intent.v1` and `...reversal-intent.v1` are posted to ledger-service over
+    # REST via LedgerPostingPort, and only `billing.annual-fee-summary.ready` reaches the Kafka
+    # emitter (LedgerOutboxEventPublisher.dispatch). Demanding a channel message for the REST ones
+    # would document as published events two things that never touch a topic — which is the
+    # opposite of this gate's purpose, and which billing's contract header already forbids in prose.
+    #
+    # So a contract may declare `x-openbank-not-published` with a REASON per event type. The reason
+    # is required: a bare list would become a silent mute, and the next reader needs to know why an
+    # emitted-looking type is exempt rather than merely that someone exempted it.
+    not_published = doc.get("x-openbank-not-published") or {}
+    if not isinstance(not_published, dict):
+        errors.append(
+            f"{rel}: x-openbank-not-published must be a mapping of event type -> reason, so each "
+            f"exemption carries why it is not a published event. A bare list is a silent mute."
+        )
+        not_published = {}
+    for name, reason in not_published.items():
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(f"{rel}: x-openbank-not-published[{name}] has no reason.")
+        if name not in declared:
+            errors.append(
+                f"{rel}: x-openbank-not-published lists `{name}`, but no producer in "
+                f"{service}/src/main declares that event type — a stale exemption."
+            )
+    for name in sorted(set(declared) - ordinary_doc_names - set(not_published)):
         info = declared[name]
         errors.append(
             f"{rel}: {info['path']} declares event type `{name}` ({info['class'] or 'hand-built outbox'}) "
-            f"and the contract has no message for it — an emitted event no consumer has been told about."
+            f"and the contract has no message for it — an emitted event no consumer has been told about. "
+            f"If it is not published to a topic at all (an outbox row dispatched by another transport), "
+            f"declare it under x-openbank-not-published with a reason."
         )
 
     # ---- C. payload properties vs constructor properties --------------------------------
@@ -751,6 +788,26 @@ def self_test() -> int:
         if old not in text:
             raise AssertionError(f"self-test fixture stale: {old!r} not in {path}")
         path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    # The `internal` modifier must not hide a producer. Without the modifier-tolerant
+    # DATA_CLASS_RE this case does not merely go undetected — the gate reports the WRONG thing
+    # ("no class declares that event type") about a class that plainly does, which is how a
+    # correct PR gets sent to fix something that is not broken (#4129).
+    case(
+        "an internal data class is still a producer",
+        "openbank-notification-service",
+        lambda t: edit(
+            t / "openbank-notification-service" / "src/main/kotlin/com/openbank/notification/domain/model/NotificationOutcome.kt",
+            "data class NotificationOutcomeEvent(",
+            "internal data class NotificationOutcomeEvent(",
+        )
+        or edit(
+            t / CONTRACTS_DIRNAME / "openbank-notification-service" / "asyncapi.yaml",
+            "        notificationId:\n          type: string",
+            "        notificationIdRenamed:\n          type: string",
+        ),
+        "does not carry",
+    )
 
     # A: a channel address the service does not produce.
     case(

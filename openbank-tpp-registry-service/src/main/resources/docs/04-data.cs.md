@@ -67,12 +67,17 @@ Indexy: `idx_tpp_outbox_status_created_at(status, created_at ASC)` (pořadí dra
 | V1 | `V1__init.sql` | `tpp_entries`, `eba_sync_state`, indexy, 3 seed sandbox TPP | `DROP TABLE tpp_entries, eba_sync_state;` |
 | V3 | `V3__create_tpp_outbox.sql` | `tpp_outbox` + 2 indexy | `DROP TABLE tpp_outbox;` |
 | V4 | `V4__hibernate_sequences.sql` | sekvence `*_seq` (INCREMENT 50) vyžadované Panache při `generation:none` | `DROP SEQUENCE eba_sync_state_seq, tpp_entries_seq, tpp_outbox_seq;` |
+| V5 | `V5__tpp_outbox_claimed_at.sql` | `tpp_outbox.claimed_at` pro atomický claim `FOR UPDATE SKIP LOCKED` | `ALTER TABLE tpp_outbox DROP COLUMN claimed_at;` |
+| V6 | `V6__tpp_entries_entry_uuid.sql` | `tpp_entries.entry_uuid` — doménové id, odlišné od interního BIGSERIAL PK (#2340) | `ALTER TABLE tpp_entries DROP COLUMN entry_uuid;` |
+| V7 | `V7__tpp_entries_seq_past_seeded_rows.sql` | `setval` na `tpp_entries_seq` za seed řádky z V1 — bez toho první registrace koliduje na `tpp_entries_pkey` a vrací 500 (#4007) | `SELECT setval('tpp_entries_seq', 1, false);` |
 
 > **Poznámka:** ve stromě není `V2` (historie migrací jej přeskakuje). Komentář u V4 dokumentuje napříč-službový vzor (stejná vada opravena u party V6 a notification V4/V5): samotný `BIGSERIAL` vytvoří jen `<table>_id_seq`, ale Panache očekává `<table>_seq`.
 
 ### Seed data (V1)
 
 Tři sandbox/test TPP jsou vloženy pro local/dev: `CZ-CNB-SANDBOX-001` (AISP,PISP), `CZ-CNB-TEST-AISP` (AISP), `CZ-CNB-TEST-PISP` (PISP) — všechny `ACTIVE`, země `CZ`, NCA `CNB`.
+
+> Tyto tři dostanou id 1..3 z implicitní `tpp_entries_id_seq`, zatímco Panache alokuje z `tpp_entries_seq`, kterou V4 vytvořila od 1. Do V7 tak byla PRVNÍ registrace přes API zaručeně `duplicate key value violates unique constraint "tpp_entries_pkey"` → 500. Nikdo na to nenarazil: měřeno na sandboxu 2026-08-16, `tpp_entries_seq` měla `last_value = 1, is_called = f` — nikdy nebyla zavolána, takže registrace nebyla v nasazeném prostředí nikdy vyzkoušena (#4007).
 
 ## PII a klasifikace dat
 

@@ -16,6 +16,7 @@ import com.openbank.account.application.port.`in`.ListAccountsQuery
 import com.openbank.account.application.port.`in`.ListActiveAccountsQuery
 import com.openbank.account.application.port.`in`.ListPocketsQuery
 import com.openbank.account.application.port.`in`.OpenAccountCommand
+import com.openbank.account.application.port.`in`.RenameAccountCommand
 import com.openbank.account.application.port.`in`.ResolvePocketQuery
 import com.openbank.account.application.port.`in`.SearchAccountsQuery
 import com.openbank.account.application.port.`in`.UnfreezeAccountCommand
@@ -392,6 +393,17 @@ class AccountService(
         )
     }
 
+    // Same "plain field update on the existing aggregate" shape as the savings goal above —
+    // the nickname is cosmetic customer-preference metadata, not a money-path transition, so
+    // no new event/topic either.
+    override suspend fun renameAccount(command: RenameAccountCommand): Account {
+        require(command.nickname == null || command.nickname.length <= NICKNAME_MAX_LENGTH) {
+            "Nickname must be at most $NICKNAME_MAX_LENGTH characters"
+        }
+        val account = requireAccount(command.accountId)
+        return accountRepository.update(account.rename(command.nickname))
+    }
+
     private suspend fun requireAccount(id: UUID): Account = accountRepository.findById(id)
         ?: throw AccountNotFoundException("Account not found: $id")
 
@@ -423,6 +435,9 @@ class AccountService(
     companion object {
         /** Matches the goal_name VARCHAR(120) column (ADR-0153, V13) — validated app-side too. */
         const val GOAL_NAME_MAX_LENGTH = 120
+
+        /** Matches the nickname VARCHAR(60) column (V20) — validated app-side too. */
+        const val NICKNAME_MAX_LENGTH = 60
 
         /**
          * Map the free-text close reason to a **closed, low-cardinality** set for the

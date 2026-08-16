@@ -86,6 +86,34 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-16** — Account rename (TOP-10 #10, part 1): `PATCH /api/v1/accounts/{accountId}/nickname`
+  (`nickname` — nullable, VARCHAR(60)). No new trust boundary, no new service, no money movement —
+  same shape as the 2026-07-03 savings-goal entry below, which this mirrors field for field.
+  - **S (Spoofing):** identical path — the edge authenticates the customer JWT and forwards
+    `X-Customer-Party-Id`; account-service's `denyIfNotOwner` re-checks ownership as
+    defense-in-depth before accepting operator/service-role requests.
+  - **T (Tampering):** nickname is customer-authored free text — bounded to 60 chars (VARCHAR(60)
+    + app-side `require`), forwarded through the edge via Jackson re-serialization (not string
+    interpolation) so it cannot break out of the JSON body.
+  - **R (Repudiation):** no new event/audit trail — cosmetic customer preference, not a money-path
+    state transition; the `accounts.updated_at` / optimistic `version` bump is the only trace, same
+    as the goal fields.
+  - **I (Information disclosure):** returned only on the owning customer's own `GET /accounts/{id}`
+    (or operator/admin reads) — no new read endpoint. PII-adjacent (customer-authored text) —
+    nulled on GDPR Art. 17 erasure alongside `legalName`/goal fields (`anonymizeByPartyId`
+    extended, not a new erasure path).
+  - **D (Denial of service):** plain synchronous DB write through the existing `update()` path — no
+    new external call, no new failure mode beyond "account not found" (404).
+  - **E (Elevation of privilege):** none — reuses `account.update` (service-side) and
+    `customer.accounts.nickname.write` (edge-side, under the existing `customer.*` self-service OPA
+    rule — no new policy rule needed).
+  **Risk class = low** (customer-preference metadata, no money movement, no new trust boundary).
+  Flyway `V20__account_nickname.sql`: `nickname VARCHAR(60)`, nullable. Rollback: `ALTER TABLE
+  accounts DROP COLUMN nickname` + revert commit.
+  Money-path service (account-service is in `rules.yaml: money_path_services`) — this entry
+  satisfies the threat-model requirement for the 2-approval gate (rule #8); the change itself moves
+  no money and needs no additional compensating control beyond what's documented above.
+
 - **2026-08-09** — **`BalanceServiceClient` now reads and forwards a spendable figure the raw projection did not carry (#1745).** `effectiveAvailableAmount` on the wire is nullable and defaults to `availableAmount` when absent, so this service tolerates talking to an older balance-service during a rollout. **Risk class = none new**: this is a client-side interpretation change on an existing inbound field from an already-trusted M2M dependency (balance-service is inside this service's own trust boundary, not a new edge), no new endpoint, no new listener, no authorization change. The only new datum this service now trusts is a number it already trusted the shape of. Rollback: revert the mapping; the field is additive on balance-service's side and nothing here persists it.
 
 

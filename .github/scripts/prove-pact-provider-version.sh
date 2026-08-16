@@ -2,82 +2,78 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Prove the one deliberately narrow exception to provider-version equality.
+# Prepare the sole approved provider-fixture overlay for an already deployed Ledger version.
 #
-# A Pact verification normally publishes against the exact commit whose provider code and tests
-# ran.  A provider-state-only repair may need the current test fixture to verify an already
-# deployed provider version.  That is safe only if the deployed version is an ancestor of the
-# checked-out ref and every intervening change is confined to that provider's test tree.  This
-# script makes that claim executable.  Any missing object, non-main history, reversed ancestry or
-# path outside <service>/src/test/** is a refusal; callers must not publish or dispatch on failure.
+# Normal verification checks out and publishes one SHA.  The exceptional repair checks out the
+# deployed provider SHA (P), then replaces exactly ONE broker-state fixture from a later main
+# SHA (F).  Runtime, pacts, libraries, workflows, config and every other test file remain P.
+# This is deliberately an allowlist of one path, not a diff allowlist: F can carry arbitrary
+# unrelated work without changing the provider runtime the broker result attests to.
 #
 # Usage:
 #   prove-pact-provider-version.sh --resolve <revision>
-#   prove-pact-provider-version.sh <service> <provider_version> <ref> <main_ref>
+#   prove-pact-provider-version.sh --prepare-overlay <service> <provider_sha> <fixture_sha> <main_ref>
 #   prove-pact-provider-version.sh --self-test
 set -euo pipefail
 
-refuse() {
-  printf 'REFUSE\t%s\n' "$1" >&2
-  exit 1
-}
+LEDGER_SERVICE='openbank-ledger-service'
+LEDGER_FIXTURE='openbank-ledger-service/src/test/kotlin/com/openbank/ledger/contract/LedgerPactBrokerProviderVerificationTest.kt'
 
+refuse() { printf 'REFUSE\t%s\n' "$1" >&2; exit 1; }
 commit_exists() { git rev-parse -q --verify "$1^{commit}" >/dev/null 2>&1; }
 
 canonical_commit() {
   local raw="$1" resolved
   resolved="$(git rev-parse -q --verify "$raw^{commit}")" \
-    || refuse "provider version '$raw' is not a resolvable commit"
-  [[ "$resolved" =~ ^[0-9a-f]{40}$ ]] \
-    || refuse "provider version '$raw' did not resolve to a full object id"
+    || refuse "revision '$raw' is not a resolvable commit"
+  [[ "$resolved" =~ ^[0-9a-f]{40}$ ]] || refuse "revision '$raw' did not resolve to a full object id"
   printf '%s\n' "$resolved"
 }
 
-prove() {
-  local service="$1" provider_version="$2" ref="$3" main_ref="$4" path
+regular_blob_at() {
+  local sha="$1" path="$2" entry mode type
+  entry="$(git ls-tree "$sha" -- "$path")"
+  [ -n "$entry" ] || refuse "approved fixture is missing at ${sha:0:8}"
+  mode="${entry%% *}"; entry="${entry#* }"; type="${entry%% *}"
+  [ "$mode" = 100644 ] && [ "$type" = blob ] \
+    || refuse "approved fixture must be a regular 100644 blob at ${sha:0:8}"
+}
 
-  [[ "$service" =~ ^[a-z0-9][a-z0-9-]*$ ]] \
-    || refuse "service '$service' is not a safe module directory name"
-  [ "$provider_version" = "$(canonical_commit "$provider_version")" ] \
+prepare_overlay() {
+  local service="$1" provider="$2" fixture="$3" main_ref="$4" current
+  [ "$service" = "$LEDGER_SERVICE" ] \
+    || refuse "a distinct provider version has no approved fixture overlay for $service"
+  [ "$provider" = "$(canonical_commit "$provider")" ] \
     || refuse "provider version must be a canonical 40-character SHA"
-  commit_exists "$ref" || refuse "verification ref is not a commit"
+  [ "$fixture" = "$(canonical_commit "$fixture")" ] \
+    || refuse "fixture version must be a canonical 40-character SHA"
   commit_exists "$main_ref" || refuse "main ref is not a commit"
-
-  git merge-base --is-ancestor "$provider_version" "$main_ref" \
+  git merge-base --is-ancestor "$provider" "$main_ref" \
     || refuse "provider version is not an ancestor of main"
-  git merge-base --is-ancestor "$ref" "$main_ref" \
-    || refuse "verification ref is not an ancestor of main"
-  git merge-base --is-ancestor "$provider_version" "$ref" \
-    || refuse "provider version is not an ancestor of verification ref"
-  git cat-file -e "$ref:$service/build.gradle.kts" 2>/dev/null \
-    || refuse "service '$service' is not a Gradle module at verification ref"
+  git merge-base --is-ancestor "$fixture" "$main_ref" \
+    || refuse "fixture version is not an ancestor of main"
+  git merge-base --is-ancestor "$provider" "$fixture" \
+    || refuse "provider version is not an ancestor of fixture version"
+  current="$(git rev-parse HEAD)"
+  [ "$current" = "$provider" ] \
+    || refuse "checkout ${current:0:8} is not provider version ${provider:0:8}; refusing to attest different runtime"
+  regular_blob_at "$provider" "$LEDGER_FIXTURE"
+  regular_blob_at "$fixture" "$LEDGER_FIXTURE"
 
-  # Disable rename detection: a rename from src/main to src/test must expose both paths, not
-  # become a misleading test-tree-only destination name. NUL delimiters keep unusual filenames
-  # from changing the proof's path boundaries.
-  while IFS= read -r -d '' path; do
-    case "$path" in
-      "$service"/src/test/*) ;;
-      *) refuse "changed path '$path' is outside $service/src/test; refusing a verification for different provider code" ;;
-    esac
-  done < <(git diff --no-renames --name-only -z "$provider_version" "$ref")
-
-  printf 'PROVEN\t%s may publish test-only verification against %s from %s\n' \
-    "$service" "$provider_version" "$ref"
+  # git show reads one named blob from F; no checkout, merge or diff can import another F path.
+  git show "$fixture:$LEDGER_FIXTURE" > "$LEDGER_FIXTURE"
+  printf 'OVERLAY_READY\tprovider=%s fixture=%s path=%s\n' \
+    "$provider" "$fixture" "$LEDGER_FIXTURE"
 }
 
 selftest() {
-  local script repo_root workflow tmp base test_only runtime resources build dockerfile libs root other_service behind_main fail=0
-  # A gate runner may export Git plumbing variables while inspecting the repository under test.
-  # This fixture owns a different repository; inheriting its index/object directory can make
-  # `git add` validate unrelated entries (for example a tracked Dockerfile) as fixture objects.
+  local script repo_root workflow tmp provider fixture side symlink missing fail=0 runtime_before pacts_before libs_before workflow_before
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
   script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
   workflow="$repo_root/.github/workflows/_service-ci.yml"
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
-
   (
     set -e
     cd "$tmp"
@@ -85,148 +81,96 @@ selftest() {
     git config user.email selftest@example.invalid
     git config user.name selftest
     git config commit.gpgsign false
-    mkdir -p provider/src/main/resources provider/src/test other/src/main openbank-libs-domain/src/main
-    printf 'main\n' > provider/src/main/Provider.kt
-    printf 'fixture\n' > provider/src/test/ProviderPactTest.kt
-    printf 'config\n' > provider/src/main/resources/application.yaml
-    printf 'plugins {}\n' > provider/build.gradle.kts
-    printf 'FROM scratch\n' > provider/Dockerfile
-    printf 'other\n' > other/src/main/Other.kt
-    printf 'libs\n' > openbank-libs-domain/src/main/Library.kt
-    printf 'root\n' > settings.gradle.kts
-    git add provider other openbank-libs-domain settings.gradle.kts
-    git commit -qm base
+    mkdir -p "$(dirname "$LEDGER_FIXTURE")" openbank-ledger-service/src/main/resources \
+      openbank-libs-domain/src/main pacts .github/workflows config
+    printf 'old fixture\n' > "$LEDGER_FIXTURE"
+    printf 'provider runtime P\n' > openbank-ledger-service/src/main/Ledger.kt
+    printf 'provider config P\n' > openbank-ledger-service/src/main/resources/application.yaml
+    printf 'libs P\n' > openbank-libs-domain/src/main/Domain.kt
+    printf 'pact P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
+    printf 'workflow P\n' > .github/workflows/provider.yml
+    printf 'config P\n' > config/detekt.yml
+    printf 'plugins {}\n' > openbank-ledger-service/build.gradle.kts
+    git add openbank-ledger-service openbank-libs-domain pacts .github config
+    git commit -qm provider
   ) || { echo 'selftest FAIL: fixture setup failed' >&2; return 1; }
-  base="$(git -C "$tmp" rev-parse HEAD)"
+  provider="$(git -C "$tmp" rev-parse HEAD)"
+  runtime_before="$(git -C "$tmp" show "$provider:openbank-ledger-service/src/main/Ledger.kt")"
+  pacts_before="$(git -C "$tmp" show "$provider:pacts/openbank-finrep-service-openbank-ledger-service.json")"
+  libs_before="$(git -C "$tmp" show "$provider:openbank-libs-domain/src/main/Domain.kt")"
+  workflow_before="$(git -C "$tmp" show "$provider:.github/workflows/provider.yml")"
   (
     cd "$tmp"
-    printf 'fixture changed\n' > provider/src/test/ProviderPactTest.kt
-    git add provider/src/test/ProviderPactTest.kt
-    git commit -qm test-only
+    printf 'approved fixture F\n' > "$LEDGER_FIXTURE"
+    printf 'runtime F must not enter P\n' > openbank-ledger-service/src/main/Ledger.kt
+    printf 'pact F must not enter P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
+    printf 'libs F must not enter P\n' > openbank-libs-domain/src/main/Domain.kt
+    printf 'workflow F must not enter P\n' > .github/workflows/provider.yml
+    printf 'config F must not enter P\n' > config/detekt.yml
+    git add openbank-ledger-service openbank-libs-domain pacts .github config
+    git commit -qm fixture
   )
-  test_only="$(git -C "$tmp" rev-parse HEAD)"
+  fixture="$(git -C "$tmp" rev-parse HEAD)"
+  git -C "$tmp" branch side "$provider"
   (
-    cd "$tmp"
-    printf 'runtime changed\n' > provider/src/main/Provider.kt
-    git add provider/src/main/Provider.kt
-    git commit -qm runtime
+    cd "$tmp" && git checkout -q side
+    printf 'side fixture\n' > "$LEDGER_FIXTURE"
+    git add "$LEDGER_FIXTURE" && git commit -qm side
   )
-  runtime="$(git -C "$tmp" rev-parse HEAD)"
-  (
-    cd "$tmp"
-    printf 'resource changed\n' > provider/src/main/resources/application.yaml
-    git add provider/src/main/resources/application.yaml
-    git commit -qm resources
-  )
-  resources="$(git -C "$tmp" rev-parse HEAD)"
-  (
-    cd "$tmp"
-    printf 'plugins { changed }\n' > provider/build.gradle.kts
-    git add provider/build.gradle.kts
-    git commit -qm build
-  )
-  build="$(git -C "$tmp" rev-parse HEAD)"
-  (
-    cd "$tmp"
-    printf 'FROM busybox\n' > provider/Dockerfile
-    git add provider/Dockerfile
-    git commit -qm dockerfile
-  )
-  dockerfile="$(git -C "$tmp" rev-parse HEAD)"
-  (
-    cd "$tmp"
-    printf 'libs changed\n' > openbank-libs-domain/src/main/Library.kt
-    git add openbank-libs-domain/src/main/Library.kt
-    git commit -qm libs
-  )
-  libs="$(git -C "$tmp" rev-parse HEAD)"
-  (
-    cd "$tmp"
-    printf 'root changed\n' > settings.gradle.kts
-    git add settings.gradle.kts
-    git commit -qm root
-  )
-  root="$(git -C "$tmp" rev-parse HEAD)"
-  (
-    cd "$tmp"
-    printf 'other changed\n' > other/src/main/Other.kt
-    git add other/src/main/Other.kt
-    git commit -qm other-service
-  )
-  other_service="$(git -C "$tmp" rev-parse HEAD)"
-  git -C "$tmp" branch side "$base"
-  (
-    cd "$tmp"
-    git checkout -q side
-    printf 'side fixture\n' > provider/src/test/ProviderPactTest.kt
-    git add provider/src/test/ProviderPactTest.kt
-    git commit -qm side
-  )
-  behind_main="$(git -C "$tmp" rev-parse HEAD)"
+  side="$(git -C "$tmp" rev-parse HEAD)"
+  git -C "$tmp" checkout -q main
+  rm "$tmp/$LEDGER_FIXTURE"
+  ln -s /tmp/not-a-fixture "$tmp/$LEDGER_FIXTURE"
+  git -C "$tmp" add -A "$LEDGER_FIXTURE"
+  git -C "$tmp" commit -qm symlink
+  symlink="$(git -C "$tmp" rev-parse HEAD)"
+  rm "$tmp/$LEDGER_FIXTURE"
+  git -C "$tmp" add -u "$LEDGER_FIXTURE"
+  git -C "$tmp" commit -qm missing
+  missing="$(git -C "$tmp" rev-parse HEAD)"
+  git -C "$tmp" checkout -q "$provider"
 
   expect() {
     local label="$1" want="$2"; shift 2
     local out rc
-    if out="$(git -C "$tmp" checkout -q main && git -C "$tmp" show-ref --verify --quiet refs/heads/main && (cd "$tmp" && bash "$script" "$@") 2>&1)"; then
-      rc=0
-    else
-      rc=$?
-    fi
-    if [ "$want" = pass ] && [ "$rc" -ne 0 ]; then
-      echo "selftest FAIL: $label refused: $out" >&2; fail=1
-    elif [ "$want" = fail ] && [ "$rc" -eq 0 ]; then
-      echo "selftest FAIL: $label unexpectedly passed: $out" >&2; fail=1
-    fi
+    if out="$(cd "$tmp" && bash "$script" "$@" 2>&1)"; then rc=0; else rc=$?; fi
+    if [ "$want" = pass ] && [ "$rc" -ne 0 ]; then echo "selftest FAIL: $label: $out" >&2; fail=1; fi
+    if [ "$want" = fail ] && [ "$rc" -eq 0 ]; then echo "selftest FAIL: $label unexpectedly passed" >&2; fail=1; fi
   }
-
-  expect 'same revision is default-safe' pass provider "$base" "$base" main
-  expect 'test-only ancestor exception' pass provider "$base" "$test_only" main
-  expect 'runtime change is rejected' fail provider "$test_only" "$runtime" main
-  expect 'main resources change is rejected' fail provider "$runtime" "$resources" main
-  expect 'build file change is rejected' fail provider "$resources" "$build" main
-  expect 'Dockerfile change is rejected' fail provider "$build" "$dockerfile" main
-  expect 'libs change is rejected' fail provider "$dockerfile" "$libs" main
-  expect 'root build configuration is rejected' fail provider "$libs" "$root" main
-  expect 'another service change is rejected' fail provider "$root" "$other_service" main
-  expect 'provider must be an ancestor of ref' fail provider "$test_only" "$base" main
-  expect 'both revisions must be on main' fail provider "$base" "$behind_main" main
-  expect 'unsafe service input is rejected' fail '../provider' "$base" "$base" main
-
-  expect_resolve() {
-    local label="$1" raw="$2" want="$3" out rc
-    if out="$(cd "$tmp" && bash "$script" --resolve "$raw")"; then rc=0; else rc=$?; fi
-    if [ "$rc" -ne 0 ] || [ "$out" != "$want" ] || ! [[ "$out" =~ ^[0-9a-f]{40}$ ]]; then
-      echo "selftest FAIL: $label did not canonicalize '$raw' to $want (got '$out', rc=$rc)" >&2
-      fail=1
-    fi
-  }
-  expect_resolve 'short SHA is canonicalized' "${base:0:8}" "$base"
-  expect_resolve 'named ref is canonicalized' main "$other_service"
-
-  local provider_args
-  [ -f "$workflow" ] || { echo "selftest FAIL: workflow not found: $workflow" >&2; fail=1; }
-  provider_args="$(grep -F -- '-Dpact.provider.version=' "$workflow" || true)"
-  if [ "$(printf '%s\n' "$provider_args" | sed '/^$/d' | wc -l | tr -d ' ')" != 2 ] \
-     || [ "$(printf '%s\n' "$provider_args" | grep -Ec '^[[:space:]]*-Dpact\.provider\.version="\$\{PACT_PROVIDER_VERSION\}"[[:space:]]*\\?$')" != 2 ] \
-     || ! grep -Fq -- 'PROVIDER_VERSION="$(bash .github/scripts/prove-pact-provider-version.sh --resolve "$REQUESTED_PROVIDER_VERSION")"' "$workflow"; then
-    echo 'selftest FAIL: raw provider_version can reach Gradle or is not canonicalized first' >&2
+  expect 'approved Ledger overlay' pass --prepare-overlay "$LEDGER_SERVICE" "$provider" "$fixture" main
+  [ "$(<"$tmp/$LEDGER_FIXTURE")" = 'approved fixture F' ] \
+    || { echo 'selftest FAIL: approved fixture not overlaid' >&2; fail=1; }
+  [ "$(<"$tmp/openbank-ledger-service/src/main/Ledger.kt")" = "$runtime_before" ] \
+    || { echo 'selftest FAIL: runtime from F entered P' >&2; fail=1; }
+  [ "$(<"$tmp/pacts/openbank-finrep-service-openbank-ledger-service.json")" = "$pacts_before" ] \
+    || { echo 'selftest FAIL: pacts from F entered P' >&2; fail=1; }
+  [ "$(<"$tmp/openbank-libs-domain/src/main/Domain.kt")" = "$libs_before" ] \
+    || { echo 'selftest FAIL: libs from F entered P' >&2; fail=1; }
+  [ "$(<"$tmp/.github/workflows/provider.yml")" = "$workflow_before" ] \
+    || { echo 'selftest FAIL: workflow from F entered P' >&2; fail=1; }
+  git -C "$tmp" checkout -q "$provider"
+  expect 'other provider is denied' fail --prepare-overlay openbank-swift-service "$provider" "$fixture" main
+  expect 'fixture off main is denied' fail --prepare-overlay "$LEDGER_SERVICE" "$provider" "$side" main
+  expect 'reversed ancestry is denied' fail --prepare-overlay "$LEDGER_SERVICE" "$fixture" "$provider" main
+  expect 'symlink fixture is denied' fail --prepare-overlay "$LEDGER_SERVICE" "$provider" "$symlink" main
+  expect 'missing fixture is denied' fail --prepare-overlay "$LEDGER_SERVICE" "$provider" "$missing" main
+  expect_resolve() { local raw="$1" want="$2" out; out="$(cd "$tmp" && bash "$script" --resolve "$raw")" || { fail=1; return; }; [ "$out" = "$want" ] || fail=1; }
+  expect_resolve "${provider:0:8}" "$provider"
+  expect_resolve main "$missing"
+  if ! grep -Fq 'path: provider-proof-source' "$workflow" \
+     || ! grep -Fq 'cp provider-proof-source/.github/scripts/prove-pact-provider-version.sh' "$workflow" \
+     || ! grep -Fq '"$RUNNER_TEMP/prove-pact-provider-version.sh"' "$workflow" \
+     || grep -Fq 'bash .github/scripts/prove-pact-provider-version.sh --prepare-overlay' "$workflow"; then
+    echo 'selftest FAIL: workflow does not preserve a trusted proof runner outside the P checkout' >&2
     fail=1
   fi
-
-  [ "$fail" -eq 0 ] && echo 'selftest OK: equality, canonical short/ref resolution, exact test-only exception, runtime, resources, build, Dockerfile, libs, root, sibling, ancestry, main membership, unsafe service and raw-to-Gradle cases.'
+  [ "$fail" -eq 0 ] && echo 'selftest OK: exact Ledger fixture overlay preserves P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner stays outside P.'
   return "$fail"
 }
 
-if [ "${1:-}" = --self-test ]; then
-  selftest
-  exit $?
-fi
-
-if [ "${1:-}" = --resolve ]; then
-  [ "$#" -eq 2 ] || refuse "usage: $0 --resolve <revision>"
-  canonical_commit "$2"
-  exit 0
-fi
-
-[ "$#" -eq 4 ] || refuse "usage: $0 <service> <provider_version> <ref> <main_ref>"
-prove "$@"
+case "${1:-}" in
+  --self-test) selftest ;;
+  --resolve) [ "$#" -eq 2 ] || refuse "usage: $0 --resolve <revision>"; canonical_commit "$2" ;;
+  --prepare-overlay) [ "$#" -eq 5 ] || refuse "usage: $0 --prepare-overlay <service> <provider_sha> <fixture_sha> <main_ref>"; prepare_overlay "$2" "$3" "$4" "$5" ;;
+  *) refuse "usage: $0 --resolve|--prepare-overlay|--self-test" ;;
+esac

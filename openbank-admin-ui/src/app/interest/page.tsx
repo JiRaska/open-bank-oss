@@ -11,6 +11,7 @@ import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface AccrualRecord {
   id: string; accountId: string; accrualDate: string; accruedAmount: number
@@ -39,16 +40,7 @@ export default function InterestPage() {
   return (
     <AuthGuard permission="payments:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Úrokové výpočty', 'Interest Calculations')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Akruální účetnictví — ACT/365 · ACT/360 · kapitalizace', 'Accrual accounting — ACT/365 · ACT/360 · capitalisation')}
-            </p>
-          </div>
-          <ServiceStatusBadge
+        <PageHeader icon={<Percent size={20} aria-hidden="true" />} title={t('Úrokové výpočty', 'Interest Calculations')} subtitle={t('Akruální účetnictví — ACT/365 · ACT/360 · kapitalizace', 'Accrual accounting — ACT/365 · ACT/360 · capitalisation')} actions={<ServiceStatusBadge
             label="interest-service :8125"
             loading={loading}
             waking={waking}
@@ -59,8 +51,7 @@ export default function InterestPage() {
               down: t('interest-service neodpovídá', 'interest-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
             }}
-          />
-        </div>
+          />} />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[

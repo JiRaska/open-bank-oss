@@ -5,7 +5,7 @@ info:
   title: Account Service API
   # API-contract axis (ADR-0048) — bumps are classified from the OpenAPI diff,
   # independently of the release version in version.txt.
-  version: 1.9.0
+  version: 1.10.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -591,6 +591,31 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/accounts/{accountId}/nickname:
+    patch:
+      tags: [Accounts]
+      summary: Set or clear the account's customer-chosen display label
+      operationId: renameAccount
+      security:
+        - bearerAuth: [ROLE_OPERATOR, ROLE_ADMIN]
+      parameters:
+        - $ref: '#/components/parameters/accountId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RenameAccountRequest'
+      responses:
+        '200':
+          description: Nickname set or cleared
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/accounts/approvals/{id}:
     patch:
       tags: [Accounts]
@@ -753,6 +778,17 @@ components:
           type: string
           format: date
           nullable: true
+        nickname:
+          type: string
+          nullable: true
+
+    RenameAccountRequest:
+      type: object
+      properties:
+        nickname:
+          type: string
+          nullable: true
+          maxLength: 60
 
     ProposeWithdrawalRequest:
       type: object

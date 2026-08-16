@@ -946,6 +946,34 @@ class CustomerEdgeResource(
         )
     }
 
+    // --- Account rename ---
+    // Same class as the savings goal above: cosmetic customer preference, not a money
+    // movement — no SCA (ADR-0021 only scopes payments).
+
+    @PATCH
+    @Path("/accounts/{accountId}/nickname")
+    @Authorize(action = "customer.accounts.nickname.write", resource = "#accountId")
+    @Blocking
+    fun renameAccount(@PathParam("accountId") accountId: UUID, body: String): Response {
+        val customer = customer()
+        if (!ownsAccount(accountId, customer.partyId)) {
+            return forbidden("Account does not belong to caller")
+        }
+        // Re-serialize through Jackson (not raw string interpolation) — the nickname is
+        // customer-authored free text and must be JSON-escaped, not spliced into a template.
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed rename request body")
+        val nickname = node.get("nickname")?.takeIf { it.isTextual }?.asText()
+        val forwarded = objectMapper.createObjectNode().apply {
+            if (nickname != null) put("nickname", nickname) else putNull("nickname")
+        }
+        return upstream.patch(
+            "$accountServiceUrl/api/v1/accounts/$accountId/nickname",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(forwarded),
+        )
+    }
+
     @GET
     @Path("/accounts/{accountId}/pockets/resolve")
     @Authorize(action = "customer.pockets.read", resource = "#accountId")

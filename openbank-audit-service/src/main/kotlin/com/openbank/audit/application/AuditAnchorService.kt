@@ -8,11 +8,16 @@ import com.openbank.audit.application.port.out.AnchorSigner
 import com.openbank.audit.domain.model.AuditAnchor
 import com.openbank.audit.infrastructure.persistence.AuditAnchorRepository
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
+import java.time.Duration
 import java.util.UUID
 
 /**
@@ -31,8 +36,15 @@ class AuditAnchorService(
     private val clock: Clock,
     @ConfigProperty(name = "openbank.audit.anchor.enabled", defaultValue = "true")
     private val enabled: Boolean,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(AuditAnchorService::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /** Registers the boot-seeded ADR-0237 heartbeat before the first anchor capture. */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     @Scheduled(
         every = "\${openbank.audit.anchor.interval:1h}",
@@ -43,6 +55,7 @@ class AuditAnchorService(
     suspend fun captureScheduled() {
         if (!enabled) return
         runCatching { captureAnchor() }
+            .onSuccess { liveness?.recordSuccess() }
             .onFailure { log.error("audit anchor capture failed", it) }
     }
 
@@ -120,6 +133,8 @@ class AuditAnchorService(
     suspend fun recent(limit: Int): List<AuditAnchor> = anchorRepo.recent(limit.coerceIn(1, MAX_ANCHOR_PAGE))
 
     private companion object {
+        const val WORKFLOW_NAME = "audit-anchor-capture"
+        val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
         const val STATUS_INTACT = "INTACT"
         const val STATUS_BROKEN = "BROKEN"
         const val MAX_ANCHOR_PAGE = 200

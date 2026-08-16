@@ -12,6 +12,7 @@ import {
   Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle, ChevronRight
 } from 'lucide-react'
 import { stashRow } from '@/lib/services/rowHandoff'
+import { PageHeader, StatusBadge } from '@/components/ui'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
 // routes — never NEXT_PUBLIC_ localhost URLs, which leaked the internal port map into the
@@ -80,11 +81,6 @@ interface SepaFormData {
   purposeCode: string
   vopStatus: VopStatus
   vopResult: string | null
-}
-
-const STATUS_COLOR: Record<string, string> = {
-  COMPLETED: 'var(--green)', PENDING: 'var(--yellow)', FAILED: 'var(--red)',
-  PROCESSING: 'var(--accent)', CANCELLED: 'var(--text-muted)',
 }
 
 const TABS: { key: Tab; labelCs: string; labelEn: string; icon: React.ElementType }[] = [
@@ -451,25 +447,18 @@ function PaymentsContent() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Platby', 'Payments')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Banknote size={18} style={{ color: 'var(--accent)' }} />
-            {t('Platby', 'Payments')}
-          </h1>
-          <p className="page-subtitle">{t('Tuzemské a SEPA platební příkazy', 'Domestic and SEPA payment orders')}</p>
-        </div>
-        {activeTab !== 'sct-inst' && (
+      <PageHeader
+        title={t('Platby', 'Payments')}
+        subtitle={t('Tuzemské a SEPA platební příkazy', 'Domestic and SEPA payment orders')}
+        icon={<Banknote size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platby', 'Payments')}</span></div>}
+        actions={activeTab !== 'sct-inst' ? (
           <button className="btn btn-secondary" onClick={load} disabled={loading}>
             <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       <TabNav active={activeTab} onChange={handleTabChange} />
 
@@ -912,9 +901,7 @@ function PaymentsContent() {
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{p.id.slice(0, 8)}…</td>
                     <td><span className="tag" style={{ color: p.type === 'SEPA' ? 'var(--accent)' : 'var(--green)' }}>{p.type}</span></td>
                     <td>
-                      <span className="pill" style={{ background: `${STATUS_COLOR[p.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[p.status] ?? 'var(--text-muted)' }}>
-                        {p.status}
-                      </span>
+                      <StatusBadge status={p.status} />
                     </td>
                     <td style={{ fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{formatAmount(p.amount, p.currency, language)}</td>
                     <td style={{ fontSize: '13px' }}>{p.creditorName ?? '—'}</td>
