@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.5.0...settlement-service-v0.5.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.4.10...settlement-service-v0.5.0) (2026-08-08)
 
 

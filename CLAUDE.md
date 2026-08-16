@@ -105,6 +105,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `Panache.getSession().flatMap { it.merge(entity) }` (the upsert SDD's `SddMandateRepositoryImpl`
   already documents). Invisible to unit tests that mock the repository — consent-service shipped this
   way and every revoke/reject/activate 500'd, caught only by a real-DB IT (ADR-0126 D3, #1521).
+- **A missing row is TWO different defects, and the POOLED SEQUENCE tells them apart without any
+  logging.** "The log says it happened and there is no row" is either an INSERT that was never
+  attempted (an upstream branch returned early) or one that was attempted and lost (rolled back,
+  or never reached the WAL) — opposite fixes, and no error line distinguishes them because neither
+  path logs. Every table here carries a Hibernate `<table>_seq` with `increment_by 50`, and a JVM
+  draws a block **only** when allocating an id for a `persist`, so the gaps in the surviving ids are
+  a free record of how many inserts were attempted. On #4512 the ids either side of the missing
+  window were 1351 and 1601 with exactly four blocks burned between them (1401/1451/1501/1551) —
+  one per fan-out — which converts "no row" into "four inserts were attempted and lost" in a single
+  `select last_value from pg_sequences` plus a `min/max(id)`. Read it *before* enabling SQL logging;
+  it is retrospective (the sequence state survives long after logs and metrics age out) whereas
+  `log_statement` only ever answers about the future. The companion query for the same class of
+  defect is the orphan join — an outbox row whose aggregate id has no row in the entity table.
 - **A `Panache.withTransaction`/`withSession` reactive repo can't be called from a bare
   `@QuarkusTest` thread** — `runBlocking { repo.save(...) }` throws `No current Vertx context found`.
   Only a real HTTP request carries a Vert.x context: drive the flow through the REST endpoint
