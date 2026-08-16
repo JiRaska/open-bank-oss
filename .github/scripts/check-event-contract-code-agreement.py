@@ -112,7 +112,17 @@ EVENT_TYPE_CONST_RE = re.compile(
 )
 
 # A top-level `data class Name(` opening a primary constructor.
-DATA_CLASS_RE = re.compile(r"^data class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(", re.MULTILINE)
+#
+# The visibility/modality modifiers are NOT optional decoration to allow: anchoring on a bare
+# `^data class` made every `internal data class` invisible to this gate — 19 of the fleet's 1317
+# top-level data classes, and a contract for one of them therefore reported "no class declares
+# that event type" about a class that plainly does (billing's AnnualFeeSummaryReadyPayload, #4129).
+# A detector keyed on one spelling reports its blind spot as a finding about the code, which is
+# worse than not looking: it sends the author to fix something that is not wrong.
+DATA_CLASS_RE = re.compile(
+    r"^(?:(?:internal|private|public|sealed|abstract|open|final)\s+)*data class\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(",
+    re.MULTILINE,
+)
 
 # The hand-built-outbox idiom (fraud-service, case-coordinator-agent): the payload is a raw
 # string template or a `mapOf(...)` literal, not a `data class`, so DATA_CLASS_RE never fires —
@@ -751,6 +761,26 @@ def self_test() -> int:
         if old not in text:
             raise AssertionError(f"self-test fixture stale: {old!r} not in {path}")
         path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+    # The `internal` modifier must not hide a producer. Without the modifier-tolerant
+    # DATA_CLASS_RE this case does not merely go undetected — the gate reports the WRONG thing
+    # ("no class declares that event type") about a class that plainly does, which is how a
+    # correct PR gets sent to fix something that is not broken (#4129).
+    case(
+        "an internal data class is still a producer",
+        "openbank-notification-service",
+        lambda t: edit(
+            t / "openbank-notification-service" / "src/main/kotlin/com/openbank/notification/domain/model/NotificationOutcome.kt",
+            "data class NotificationOutcomeEvent(",
+            "internal data class NotificationOutcomeEvent(",
+        )
+        or edit(
+            t / CONTRACTS_DIRNAME / "openbank-notification-service" / "asyncapi.yaml",
+            "        notificationId:\n          type: string",
+            "        notificationIdRenamed:\n          type: string",
+        ),
+        "does not carry",
+    )
 
     # A: a channel address the service does not produce.
     case(
