@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.0...product-catalog-v0.13.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **product-catalog:** isolate reconciliation conflicts ([#4987](https://github.com/JiRaska/open-bank-oss/issues/4987)) ([613fc01](https://github.com/JiRaska/open-bank-oss/commit/613fc0147aeb630bcdfb734e83c94861e4e5c271))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.12.1...product-catalog-v0.13.0) (2026-08-16)
 
 
