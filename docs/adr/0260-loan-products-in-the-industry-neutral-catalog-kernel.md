@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [product-catalog, lending, governance, api-contract]
-summary: "Loan products join the ADR-0257/0258 catalog kernel via a banking.loan-v1 schema pack (no parallel versioning mechanism); lending-service pins a resolved revision at origination, fail-closed, a deliberate divergence from account-service's fail-open precedent."
+summary: "Loan products join the ADR-0257/0258 catalog kernel via a banking.loan-v1 schema pack, no parallel versioning; lending-service will pin a resolved revision fail-closed, diverging from account-service's fail-open precedent."
 followup: "#668 — phases C (money-path wiring), D (repayment allocation), E (interest resolution), F (restructuring re-pin) are unbuilt; phase C needs its own ADR before any lending-service code changes"
 ---
 
