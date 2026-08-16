@@ -10,10 +10,19 @@ info:
     budget) and a local repeated-dismissal exclusion, and records the app's impression/click/
     dismiss/conversion feedback (D2).
 
-    Deliberately absent: gamification (D3) and pre-approved offers (D4, blocked on ADR-0142 not
-    existing yet). No NBA ranking — content returns in catalogue order until ADR-0201's model
-    graduates from shadow (D5). The customer app reaches these endpoints only through
-    customer-edge, whose narrowly scoped M2M policy injects the authoritative party id.
+    Gamification (D3) award evaluation is wired internally as of this version, reusing the SAME
+    `POST /api/v1/surfaces/events` CONVERSION stream above — a party who has opted into
+    `rewards_hub` and posts a CONVERSION for a catalogued challenge card earns Points, recorded
+    with full audit attribution and dispatched over `engagement.events`. No new HTTP surface is
+    exposed for it yet: opting in/out of the rewards hub and being targeted for a new challenge
+    invitation are both real, unit-tested domain operations with no REST endpoint in this slice —
+    deliberately, matching this ADR's own D5 "honest dependency statement" discipline rather than
+    shipping an endpoint ahead of its consent/authz wiring review.
+
+    Deliberately still absent: pre-approved offers (D4, blocked on ADR-0142 not existing yet). No
+    NBA ranking — content returns in catalogue order until ADR-0201's model graduates from shadow
+    (D5). The customer app reaches these endpoints only through customer-edge, whose narrowly
+    scoped M2M policy injects the authoritative party id.
   version: 1.6.0
 tags:
   - name: Surfaces

@@ -64,6 +64,19 @@ object SurfaceCatalog {
             type = SurfaceContentType.BANNER,
             variables = setOf("rateHeadline"),
         ),
+        // ADR-0220 D3 (gamification): the rendered card for a ChallengeCatalog entry. Its id is
+        // deliberately the SAME string as the ChallengeCatalog key
+        // ("COMPLETE_BUDGETING_COURSE") — this is the one piece of content the app can both SEE
+        // (SurfaceResolver renders it into REWARDS_HUB) and POST a CONVERSION for
+        // (SurfaceResource.validateContent looks up posted event content here, same as every
+        // other slot); a challenge with no matching SurfaceContent entry could be completed by the
+        // app but never validly reported back, which AwardGamificationPointsUseCase depends on.
+        "COMPLETE_BUDGETING_COURSE" to SurfaceContent(
+            id = "COMPLETE_BUDGETING_COURSE",
+            slot = SurfaceSlot.REWARDS_HUB,
+            type = SurfaceContentType.CARD,
+            variables = emptySet(),
+        ),
     )
 
     fun exists(id: String): Boolean = id in ALL
