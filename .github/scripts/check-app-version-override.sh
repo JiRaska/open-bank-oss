@@ -33,7 +33,7 @@ if [ "${1:-}" = "--self-test" ]; then
   expect() { local label="$1" want="$2" sub="${3:-}" out rc
     out=$(bash "$0" "$td" 2>&1); rc=$?
     if [ "$rc" -ne "$want" ]; then echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    elif [ -n "$sub" ] && ! printf '%s' "$out" | grep -qF -- "$sub"; then
+    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<<"$out"; then
       echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2; fails=$((fails+1)); fi; }
   reset() { rm -rf "$td"/openbank-x; }
 
