@@ -2676,6 +2676,28 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
+  # NEEDS can exist, this one whether the caller can present a token at all. An outbound client
+  # annotated @RegisterProvider(OidcClientRequest*Filter) mints from `quarkus.oidc-client`, a
+  # different extension from `quarkus.oidc` (inbound) that shares its three field names and
+  # differs by one hyphen. Missing it, or leaving its auth-server-url on the localhost default
+  # in a pod (where localhost is the service itself), sends every outbound call out bare and the
+  # callee answers 401 — not 403, so the natural first hypothesis sends you to Keycloak instead.
+  # Found by observability sweep 2026-08-16: ledger's daily FX revaluation had failed on every
+  # run it ever made and only an absent() alert noticed; settlement (money-path) had no block.
+  # The gate resolves the interpolation rather than matching an env NAME — the fleet spells the
+  # deployed override three ways and a name-match draft failed 16 correct services.
+  - id: oidc-client-configured
+    name: "outbound OIDC filter ⇒ a client it can actually mint from (enforced)"
+    group: security
+    mode: enforced
+    rationale: "An unmintable outbound token fails as a 401 from the CALLEE, which reads as an authorization problem and sends the reader to Keycloak; no test can catch it because a mock port, a @QuarkusTest security context and a pact mock server all supply the very token the real client cannot obtain (#3921: ledger's daily FX revaluation had never once succeeded, and settlement, money-path, had no client block at all)."
+    review_after: "2027-02-16"
+    min_subjects: 25   # 30 modules register the filter today (2026-08-16)
+    selftest: python3 .github/scripts/check-oidc-client-configured.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-oidc-client-configured.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
