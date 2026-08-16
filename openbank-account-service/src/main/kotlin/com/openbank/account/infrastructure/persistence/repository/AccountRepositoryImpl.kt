@@ -166,13 +166,13 @@ class AccountRepositoryImpl(
     override suspend fun existsByIban(iban: Iban): Boolean =
         Panache.withSession { count("accountNumber", iban.value) }.awaitSuspending() > 0
 
-    // GDPR Art. 17: nulls legalName AND the goal fields (ADR-0153 — goal_name is
-    // customer-authored free text, PII-adjacent like legalName) for every account owned by
-    // the erased party.
+    // GDPR Art. 17: nulls legalName, the goal fields (ADR-0153 — goal_name is customer-authored
+    // free text, PII-adjacent like legalName) AND nickname (same reasoning: free text the
+    // customer chose, which can carry a name) for every account owned by the erased party.
     override suspend fun anonymizeByPartyId(partyId: UUID): Int = Panache.withTransaction {
         update(
             "legalName = null, goalName = null, goalTargetMinorUnits = null, goalTargetDate = null, " +
-                "updatedAt = ?2 WHERE partyId = ?1",
+                "nickname = null, updatedAt = ?2 WHERE partyId = ?1",
             partyId,
             clock.instant(),
         )
@@ -208,6 +208,9 @@ private fun AccountRepositoryImpl.versionMatchedUpdate(entity: AccountEntity) = 
         existing.goalName = entity.goalName
         existing.goalTargetMinorUnits = entity.goalTargetMinorUnits
         existing.goalTargetDate = entity.goalTargetDate
+        // Same round-trip-through-update() story as the goal fields above: only
+        // renameAccount in AccountService actually changes this.
+        existing.nickname = entity.nickname
         // Audit timestamp comes from the injected Clock, not the entity default (ADR-0100 /
         // #540): the @PreUpdate callback's EPOCH default is never overwritten by the DB
         // DEFAULT since Hibernate writes every insertable/updatable column explicitly.
@@ -236,6 +239,7 @@ private fun AccountEntity.toDomain() = Account(
     goalName = goalName,
     goalTargetMinorUnits = goalTargetMinorUnits,
     goalTargetDate = goalTargetDate,
+    nickname = nickname,
 )
 
 private fun Account.toEntity() = AccountEntity().also {
@@ -256,4 +260,5 @@ private fun Account.toEntity() = AccountEntity().also {
     it.goalName = goalName
     it.goalTargetMinorUnits = goalTargetMinorUnits
     it.goalTargetDate = goalTargetDate
+    it.nickname = nickname
 }
