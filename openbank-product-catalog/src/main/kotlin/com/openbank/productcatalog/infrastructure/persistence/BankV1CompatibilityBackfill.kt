@@ -37,7 +37,7 @@ class BankV1CompatibilityBackfill(
     @Suppress("UnusedParameter")
     fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION + STARTUP_PRIORITY_OFFSET) event: StartupEvent) {
         if (!bankCompatibilityEnabled) return
-        val mapped = run()
+        val mapped = runLenient()
         liveness.recordSuccess()
         if (mapped > 0) log.info("Mapped $mapped legacy banking product(s) into the v2 catalog.")
     }
@@ -45,6 +45,19 @@ class BankV1CompatibilityBackfill(
     fun run(): Int {
         if (!bankCompatibilityEnabled) return 0
         return VertxContextSupport.subscribeAndAwait { reconcile(failOnConflict = true) }?.changed ?: 0
+    }
+
+    /**
+     * A compatibility conflict is fail-closed for that product, never for the whole catalog.
+     * Operators can resolve it through the catalog evidence trail while unrelated products stay
+     * available during a rollout.
+     */
+    internal fun runLenient(): Int {
+        val result = VertxContextSupport.subscribeAndAwait {
+            reconcile(failOnConflict = false)
+        } ?: ReconciliationResult()
+        logConflicts(result)
+        return result.changed
     }
 
     /**
@@ -66,8 +79,12 @@ class BankV1CompatibilityBackfill(
         if (result.changed > 0) {
             log.info("Reconciled ${result.changed} banking product(s) after a mixed-version write.")
         }
-        result.conflicts.forEach { log.error("Banking compatibility reconciliation conflict: ${it.message}") }
+        logConflicts(result)
         liveness.recordSuccess()
+    }
+
+    private fun logConflicts(result: ReconciliationResult) {
+        result.conflicts.forEach { log.error("Banking compatibility reconciliation conflict: ${it.message}") }
     }
 
     private fun reconcile(failOnConflict: Boolean): Uni<ReconciliationResult> = sessions.withSession { session ->
