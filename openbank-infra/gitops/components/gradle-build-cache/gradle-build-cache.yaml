@@ -181,11 +181,46 @@ spec:
           command: ["/bin/sh", "-c"]
           args:
             - |
+              # HIGH-WATER MARK (added 2026-08-16). The 14d age pass alone does not bound
+              # the disk: it deletes whatever happens to be old, and says nothing about how
+              # much is left. Measured 2026-08-16 the PVC was 100% full with /data/cache at
+              # 48.9G of 50Gi, KubePersistentVolumeFillingUp had been critical for two days,
+              # and the sidecar's own log showed the failure in plain sight — ten consecutive
+              # passes reading "removed 33/11/5/25/20/38/54/43 entries older than 14d,
+              # 50073MB -> 50073MB". It was deleting real files every time and the total never
+              # moved, because inflow over six hours matched whatever aged out. An age policy
+              # is a retention policy, not a capacity policy, and only the second one can keep
+              # a fixed-size volume from filling.
+              #
+              # So: keep the 14d pass as the normal steady state, then walk the age threshold
+              # DOWN (10, 7, 5, 3, 2, 1 days) until usage is under the high-water mark. Oldest
+              # entries still go first, which is the same ordering the age pass already used —
+              # this only makes the cut-off adaptive instead of fixed. `df` on the mount, not
+              # `du` on the tree, is what the alert reads and what actually runs out.
+              #
+              # BusyBox `find` has no -printf and Alpine has no GNU sort -z, so a true
+              # oldest-first walk is not available here; the descending-threshold loop is the
+              # portable equivalent and needs no extra tooling in the image.
+              HIGH_WATER=80   # percent used; evict down to this
               while true; do
                 before=$(du -sm /data/cache 2>/dev/null | cut -f1)
                 deleted=$(find /data/cache -type f -mtime +14 -delete -print 2>/dev/null | wc -l)
+                used=$(df -P /data/cache | awk 'NR==2 {print $5+0}')
+                extra=0
+                for days in 10 7 5 3 2 1; do
+                  [ "${used}" -le "${HIGH_WATER}" ] && break
+                  n=$(find /data/cache -type f -mtime +${days} -delete -print 2>/dev/null | wc -l)
+                  extra=$(( extra + n ))
+                  used=$(df -P /data/cache | awk 'NR==2 {print $5+0}')
+                  echo "evictor: high-water pass at ${days}d removed ${n}, now ${used}% used"
+                done
                 after=$(du -sm /data/cache 2>/dev/null | cut -f1)
-                echo "evictor: removed ${deleted} entries older than 14d, ${before}MB -> ${after}MB"
+                echo "evictor: removed ${deleted} entries older than 14d (+${extra} by high-water), ${before}MB -> ${after}MB, ${used}% used"
+                # Above the mark with nothing left older than a day means inflow alone fills
+                # the volume — eviction cannot fix that and the PVC genuinely needs to grow.
+                if [ "${used}" -gt "${HIGH_WATER}" ]; then
+                  echo "evictor: WARNING still ${used}% used after evicting everything older than 1d — the 50Gi PVC is undersized for current inflow, not merely unswept"
+                fi
                 sleep 21600
               done
           volumeMounts:

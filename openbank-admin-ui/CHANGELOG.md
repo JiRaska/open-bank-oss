@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.141.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.140.0...admin-ui-v0.141.0) (2026-08-16)
+
+
+### Features
+
+* **product-catalog:** govern bundles and private offers ([#4969](https://github.com/JiRaska/open-bank-oss/issues/4969)) ([f2d2f45](https://github.com/JiRaska/open-bank-oss/commit/f2d2f45117b89c2c28861fa9b7ff6d7751c9e64e))
+
+## [0.140.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.139.0...admin-ui-v0.140.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify payment operations workspaces ([#4968](https://github.com/JiRaska/open-bank-oss/issues/4968)) ([ddb047d](https://github.com/JiRaska/open-bank-oss/commit/ddb047d7bc908877275b16d9538760ed4f9724c3))
+
+## [0.139.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.1...admin-ui-v0.139.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify compliance workspaces ([#4958](https://github.com/JiRaska/open-bank-oss/issues/4958)) ([db38812](https://github.com/JiRaska/open-bank-oss/commit/db38812c645359108f37e82f8ac49c376733c119))
+
+## [0.138.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.0...admin-ui-v0.138.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify private AI review ([#4956](https://github.com/JiRaska/open-bank-oss/issues/4956)) ([8aa5fd6](https://github.com/JiRaska/open-bank-oss/commit/8aa5fd6fb95629fe055871e41eb83eed9ac37f4b))
+* **admin-ui:** derive Kafka topic table from AsyncAPI doc instead of hand-kept array ([#4948](https://github.com/JiRaska/open-bank-oss/issues/4948)) ([4254d24](https://github.com/JiRaska/open-bank-oss/commit/4254d24cec9690bc1141fa68a14b7df346ab026c))
+
 ## [0.138.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.137.0...admin-ui-v0.138.0) (2026-08-15)
 
 

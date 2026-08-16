@@ -116,6 +116,9 @@ spec:
   failedJobsHistoryLimit: 1
   jobTemplate:
     spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
+      # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
+      ttlSecondsAfterFinished: 172800
       activeDeadlineSeconds: 240
       # No retry: a synthetic monitor that retries until it passes is measuring its own
       # persistence, not the platform's availability.

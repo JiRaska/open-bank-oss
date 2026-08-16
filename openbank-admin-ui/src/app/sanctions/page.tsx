@@ -14,6 +14,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader, StatCard, type Tone } from '@/components/ui'
 
 interface SanctionCheck {
   id: string; name: string; entityType: string; status: string
@@ -480,16 +481,11 @@ export default function SanctionsPage() {
   return (
     <AuthGuard permission="compliance:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '24px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Prověření sankcí', 'Sanctions Screening')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB', 'OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB')}
-            </p>
-          </div>
-          <ServiceStatusBadge
+        <PageHeader
+          title={t('Prověření sankcí', 'Sanctions Screening')}
+          subtitle={t('OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB', 'OFAC SDN · EU Consolidated · UN · HM Treasury · PEP · ČNB')}
+          icon={<ShieldAlert size={18} aria-hidden="true" />}
+          actions={<ServiceStatusBadge
             label="sanctions-service :8123"
             loading={loading}
             unavailable={checksUnavail}
@@ -499,8 +495,8 @@ export default function SanctionsPage() {
               down: t('sanctions-service neodpovídá', 'sanctions-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
             }}
-          />
-        </div>
+          />}
+        />
 
         {hits.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
@@ -515,17 +511,12 @@ export default function SanctionsPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Kontrol celkem', 'Total Checks'), value: checks.length, icon: <ShieldAlert size={16} />, color: 'var(--accent)' },
-            { label: t('Shody (HIT)', 'Matches (HIT)'), value: hits.length, icon: <AlertTriangle size={16} />, color: 'var(--danger)' },
-            { label: t('Čisté', 'Clear'), value: clear.length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Čeká na review', 'Pending Review'), value: pending.length, icon: <Clock size={16} />, color: 'var(--warning)' },
+            { label: t('Kontrol celkem', 'Total Checks'), value: checks.length, icon: <ShieldAlert size={16} />, tone: undefined },
+            { label: t('Shody (HIT)', 'Matches (HIT)'), value: hits.length, icon: <AlertTriangle size={16} />, tone: 'danger' },
+            { label: t('Čisté', 'Clear'), value: clear.length, icon: <CheckCircle2 size={16} />, tone: 'success' },
+            { label: t('Čeká na review', 'Pending Review'), value: pending.length, icon: <Clock size={16} />, tone: 'warning' },
           ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
+            <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone as Tone | undefined} />
           ))}
         </div>
 

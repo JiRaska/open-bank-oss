@@ -30,6 +30,17 @@ interface Service {
   derived?: boolean
 }
 
+// A Kafka topic row, as derived by scripts/generate-events.mjs from
+// docs/asyncapi/openbank-events.yaml + each service's application.yaml.
+interface EventTopic {
+  channel: string
+  topic: string
+  description: string | null
+  publishers: string[]
+  consumers: string[]
+  color: string
+}
+
 // Title-case a k8s short name for display, e.g. `lending-service` → `Lending Service`.
 function prettyName(short: string): string {
   return short
@@ -512,6 +523,24 @@ export default function ApiCatalogPage() {
     return () => { alive = false }
   }, [])
 
+  // Code-derived Kafka topic table (ADR-0029 D3 pattern) — derived from
+  // docs/asyncapi/openbank-events.yaml cross-referenced with each service's own
+  // application.yaml (scripts/generate-events.mjs), replacing a hand-maintained
+  // array that drifted the same way the AsyncAPI document itself drifted (#4761:
+  // 15 of ~23 topic names were fiction). Falls back to an empty, honest list.
+  const [events, setEvents] = useState<EventTopic[]>([])
+  useEffect(() => {
+    let alive = true
+    fetch('/api/events', { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!alive || !data?.available || !Array.isArray(data.topics)) return
+        setEvents(data.topics)
+      })
+      .catch(() => { /* events snapshot absent — async tab shows the empty state */ })
+    return () => { alive = false }
+  }, [])
+
   // Editorial cards first (rich metadata, port-ordered), catalog-derived extras last.
   const allServices = [...SERVICES, ...derived]
   const groups = ['all', ...Array.from(new Set(allServices.map(s => s.group)))]
@@ -848,31 +877,15 @@ export default function ApiCatalogPage() {
             <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
               {t('Všechny Kafka topics a event payloady. Broker:', 'All Kafka topics and event payloads. Broker:')} <code style={{ fontFamily: 'JetBrains Mono, monospace', background: 'var(--surface)', padding: '1px 4px', borderRadius: '3px' }}>kafka:9092</code>
             </p>
-            {[
-              { topic: 'openbank.accounts.account.created', publisher: 'account-service', consumers: ['audit-service', 'notification-service'], color: '#2563eb' },
-              { topic: 'openbank.accounts.account.status-changed', publisher: 'account-service', consumers: ['audit-service', 'notification-service'], color: '#2563eb' },
-              { topic: 'openbank.ledger.journal.posted', publisher: 'ledger-service', consumers: ['audit-service'], color: '#2563eb' },
-              { topic: 'openbank.ledger.journal.reversed', publisher: 'ledger-service', consumers: ['audit-service'], color: '#2563eb' },
-              { topic: 'openbank.payments.sepa.event', publisher: 'sepa-payment-service', consumers: ['audit-service', 'notification-service', 'clearing-service'], color: '#7c3aed' },
-              { topic: 'openbank.payments.sct-inst.event', publisher: 'sepa-instant-service', consumers: ['audit-service', 'clearing-service'], color: '#7c3aed' },
-              { topic: 'openbank.payments.domestic.event', publisher: 'domestic-payment-service', consumers: ['audit-service', 'clearing-service'], color: '#7c3aed' },
-              { topic: 'openbank.transactions.transaction.event', publisher: 'transaction-service', consumers: ['audit-service', 'ledger-service'], color: '#7c3aed' },
-              { topic: 'openbank.balances.balance.event', publisher: 'balance-service', consumers: ['audit-service'], color: '#2563eb' },
-              { topic: 'openbank.kyc.case.event', publisher: 'kyc-service', consumers: ['audit-service', 'notification-service', 'aml-service'], color: '#dc2626' },
-              { topic: 'openbank.aml.case.event', publisher: 'aml-service', consumers: ['audit-service', 'notification-service'], color: '#dc2626' },
-              { topic: 'openbank.parties.party.event', publisher: 'pid-service', consumers: ['audit-service', 'kyc-service'], color: '#059669' },
-              { topic: 'openbank.consents.consent.event', publisher: 'consent-service', consumers: ['audit-service', 'notification-service'], color: '#d97706' },
-              { topic: 'openbank.cards.card.event', publisher: 'card-issuance-service', consumers: ['audit-service', 'notification-service'], color: '#db2777' },
-              { topic: 'openbank.fx.conversion.completed', publisher: 'fx-service', consumers: ['audit-service', 'transaction-service'], color: '#2563eb' },
-              { topic: 'openbank.clearing.batch.event', publisher: 'clearing-service', consumers: ['audit-service'], color: '#7c3aed' },
-              { topic: 'openbank.audit.events-in', publisher: '(all services)', consumers: ['audit-service'], color: '#6b7280' },
-              { topic: 'openbank.notifications.events-in', publisher: '(all services)', consumers: ['notification-service'], color: '#6b7280' },
-              { topic: 'openbank.payments.swift.event', publisher: 'swift-service', consumers: ['audit-service', 'notification-service'], color: '#7c3aed' },
-              { topic: 'openbank.disputes.dispute.event', publisher: 'dispute-service', consumers: ['audit-service', 'notification-service'], color: '#db2777' },
-              { topic: 'openbank.interest.accrual.event', publisher: 'interest-service', consumers: ['audit-service'], color: '#059669' },
-              { topic: 'openbank.sanctions.screening.event', publisher: 'sanctions-service', consumers: ['audit-service', 'aml-service', 'notification-service'], color: '#dc2626' },
-              { topic: 'openbank.standing-orders.order.event', publisher: 'standing-order-service', consumers: ['audit-service', 'notification-service'], color: '#7c3aed' },
-            ].map(item => (
+            {events.length === 0 && (
+              <p style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>
+                {t(
+                  'Tabulka topics se generuje z docs/asyncapi/openbank-events.yaml při buildu — v tomto prostředí není k dispozici.',
+                  'The topic table is generated from docs/asyncapi/openbank-events.yaml at build time — not bundled in this environment.',
+                )}
+              </p>
+            )}
+            {events.map(item => (
               <div key={item.topic} style={{
                 display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '10px 12px',
                 background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: '6px',
@@ -883,11 +896,19 @@ export default function ApiCatalogPage() {
                   color: 'var(--text-primary)', flex: 1, wordBreak: 'break-all',
                 }}>{item.topic}</code>
                 <div style={{ display: 'flex', gap: '6px', flexShrink: 0, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <span style={{
-                    fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
-                    background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}30`,
-                    fontWeight: 600,
-                  }}>↑ {item.publisher === '(all services)' ? t('(všechny služby)', '(all services)') : item.publisher}</span>
+                  {item.publishers.length === 0 ? (
+                    <span style={{
+                      fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+                      background: '#6b728015', color: '#6b7280', border: '1px solid #6b728030',
+                      fontWeight: 600,
+                    }}>↑ {t('neznámý publisher', 'unknown publisher')}</span>
+                  ) : item.publishers.map(p => (
+                    <span key={p} style={{
+                      fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
+                      background: `${item.color}15`, color: item.color, border: `1px solid ${item.color}30`,
+                      fontWeight: 600,
+                    }}>↑ {p}</span>
+                  ))}
                   {item.consumers.map(c => (
                     <span key={c} style={{
                       fontSize: '10px', padding: '2px 6px', borderRadius: '4px',
