@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.150.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.149.0...admin-ui-v0.150.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** add weekly approval-rate trend to agent outcomes ([#4462](https://github.com/JiRaska/open-bank-oss/issues/4462)) ([#5102](https://github.com/JiRaska/open-bank-oss/issues/5102)) ([997d390](https://github.com/JiRaska/open-bank-oss/commit/997d390696cab456cfd124b0ee0e170d319c9418))
+
 ## [0.149.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.148.0...admin-ui-v0.149.0) (2026-08-16)
 
 
