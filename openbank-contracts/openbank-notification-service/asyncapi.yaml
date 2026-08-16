@@ -199,7 +199,10 @@ components:
             off, so nothing left the process; this case used to be reported as `SENT`, because a
             disabled adapter returns a *successful* skipped result and the fan-out counted
             successes, which is why a dead push channel produced telemetry identical to a healthy
-            one). Null on `SENT`.
+            one), `mailer_mocked` (issue #4737 — the EMAIL mirror of the above: the mailer is the
+            Quarkus mock, so nothing left the process. A mocked send completes *successfully*, so
+            this case used to be reported as `SENT` with `sentAt` populated, for a message that was
+            never transmitted). Null on `SENT`.
         occurredAt:
           type: string
           format: date-time

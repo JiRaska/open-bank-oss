@@ -6,26 +6,19 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Search, Plus, Filter } from 'lucide-react'
+import { Landmark, Search, Plus, Filter } from 'lucide-react'
 import type { Account, CursorPage } from '@/types'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
+import { PageHeader, StatusBadge } from '@/components/ui'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 // Cap every request and the rendered list. The operator never needs the full
 // table at once; a bounded page keeps both the backend query and the DOM cheap
 // (admin-ui pagination rule — see admin-ui CLAUDE.md).
 const PAGE_SIZE = 25
-
-const STATUS_PILL: Record<string, string> = {
-  ACTIVE:             'pill pill-success',
-  FROZEN:             'pill pill-info',
-  DORMANT:            'pill pill-warning',
-  CLOSED:             'pill pill-neutral',
-  PENDING_ACTIVATION: 'pill pill-warning',
-}
 
 // What the single smart query resolves to. account-service now serves three lookup
 // shapes: an exact IBAN (`/iban/{iban}`), a Party-ID list (`?partyId={uuid}`), and a
@@ -145,20 +138,15 @@ export default function AccountsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Účty', 'Accounts')}</span>
-          </div>
-          <h1 className="page-title">{t('Účty zákazníků', 'Customer Accounts')}</h1>
-          <p className="page-subtitle">{t('Vyhledávejte a spravujte bankovní účty', 'Search and manage bank accounts')}</p>
-        </div>
-        <Link href="/accounts/new" className="btn btn-primary">
+      <PageHeader
+        title={t('Účty zákazníků', 'Customer Accounts')}
+        subtitle={t('Vyhledávejte a spravujte bankovní účty', 'Search and manage bank accounts')}
+        icon={<Landmark size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Účty', 'Accounts')}</span></div>}
+        actions={<Link href="/accounts/new" className="btn btn-primary">
           <Plus size={14} /> {t('Založit účet', 'Open Account')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       <div className="card">
         {/* Search toolbar */}
@@ -303,7 +291,7 @@ export default function AccountsPage() {
                     <td><span className="mono" style={{ fontSize: '12px', color: 'var(--text-primary)', fontWeight: 500 }}>{a.accountNumber}</span></td>
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accountType}</span></td>
                     <td><span className="tag">{a.currencyCode}</span></td>
-                    <td><span className={STATUS_PILL[a.status] ?? 'pill pill-neutral'}>{a.status}</span></td>
+                    <td><StatusBadge status={a.status} /></td>
                     <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{a.partyId}</span></td>
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(a.openedAt).toLocaleDateString('en-GB')}</span></td>
                     <td style={{ textAlign: 'right' }}>
