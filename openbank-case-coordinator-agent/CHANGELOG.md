@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.4](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.3...case-coordinator-agent-v0.4.4) (2026-08-16)
+
+
+### Bug Fixes
+
+* **case-coordinator:** authorise the asserted agent identity against the caller ([#4834](https://github.com/JiRaska/open-bank-oss/issues/4834)) ([#4985](https://github.com/JiRaska/open-bank-oss/issues/4985)) ([02fff25](https://github.com/JiRaska/open-bank-oss/commit/02fff25127fb01bea2e0bbb12134d3054ab909fe))
+
 ## [0.4.3](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.2...case-coordinator-agent-v0.4.3) (2026-08-15)
 
 
