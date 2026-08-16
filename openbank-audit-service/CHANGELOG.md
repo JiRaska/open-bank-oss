@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.2...audit-service-v0.15.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **audit:** follow merged_into at read time for a party's history ([#5110](https://github.com/JiRaska/open-bank-oss/issues/5110)) ([48df1cc](https://github.com/JiRaska/open-bank-oss/commit/48df1cc917ca6e66ce23fa43c71ee2d8623ca892)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.1...audit-service-v0.15.2) (2026-08-16)
 
 

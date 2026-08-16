@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.63.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.0...customer-edge-v0.63.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **customer-edge:** announce the single-replica assumption behind PaymentSessionStore ([#5101](https://github.com/JiRaska/open-bank-oss/issues/5101)) ([0e48bd7](https://github.com/JiRaska/open-bank-oss/commit/0e48bd794b7db6aefe9047d60b83da183a776607)), closes [#4728](https://github.com/JiRaska/open-bank-oss/issues/4728)
+
 ## [0.63.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.62.0...customer-edge-v0.63.0) (2026-08-16)
 
 
