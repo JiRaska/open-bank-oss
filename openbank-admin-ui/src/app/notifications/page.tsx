@@ -12,6 +12,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { opsMessageApi } from '@/lib/api'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 
@@ -67,23 +68,16 @@ export default function NotificationsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Oznámení', 'Notifications')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Bell size={18} style={{ color: 'var(--accent)' }} />
-            {t('Oznámení', 'Notifications')}
-          </h1>
-          <p className="page-subtitle">{t('Odchozí oznámení — e-maily, upozornění, webhooky', 'Outbound notification log — emails, alerts, webhooks')}</p>
-        </div>
-        <button className="btn btn-secondary" onClick={load} disabled={loading}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Oznámení', 'Notifications')}</span></div>}
+        icon={<Bell size={18} aria-hidden="true" />}
+        title={t('Oznámení', 'Notifications')}
+        subtitle={t('Odchozí oznámení — e-maily, upozornění, webhooky', 'Outbound notification log — emails, alerts, webhooks')}
+        actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
           <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>

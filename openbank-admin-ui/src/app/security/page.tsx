@@ -9,6 +9,7 @@ import { Shield, RefreshCw, CheckCircle2, XCircle, AlertTriangle } from 'lucide-
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { summarizeReachable, serviceVerdict } from '@/lib/security/summary'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // Envelope returned by /api/security (never 500s — see that route): either the
 // scanner answered with a report, or it's unavailable with a typed reason that
@@ -132,21 +133,11 @@ export default function SecurityPage() {
   return (
     <AuthGuard permission="system:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Bezpečnostní skener', 'Security Scanner')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('OWASP Top 10 · EBA ICT · CVE skenování — všechny mikroservisy', 'OWASP Top 10 · EBA ICT · CVE scanning — all microservices')}
-            </p>
-            <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Shield size={11} style={{ flexShrink: 0 }} />
-              {t('Skeny běží automaticky v CI/CD pipeline (Trivy · CodeQL · Gitleaks). Tato stránka zobrazuje poslední výsledky — pouze ke čtení.',
-                 'Scans run automatically in the CI/CD pipeline (Trivy · CodeQL · Gitleaks). This page is a read-only view of the latest results.')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader
+          icon={<Shield size={20} aria-hidden="true" />}
+          title={t('Bezpečnostní skener', 'Security Scanner')}
+          subtitle={t('OWASP Top 10 · EBA ICT · CVE skenování — všechny mikroservisy', 'OWASP Top 10 · EBA ICT · CVE scanning — all microservices')}
+          actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {report?.generatedAt && (
               <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginRight: '8px' }}>
                 {t('Poslední sken:', 'Last scan:')} {formatDate(report.generatedAt)}
@@ -165,8 +156,12 @@ export default function SecurityPage() {
               <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
-          </div>
-        </div>
+          </div>}
+        />
+        <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '-20px', marginBottom: '28px', display: 'flex', alignItems: 'center', gap: '5px' }}>
+          <Shield size={11} aria-hidden="true" style={{ flexShrink: 0 }} />
+          {t('Skeny běží automaticky v CI/CD pipeline (Trivy · CodeQL · Gitleaks). Tato stránka zobrazuje poslední výsledky — pouze ke čtení.', 'Scans run automatically in the CI/CD pipeline (Trivy · CodeQL · Gitleaks). This page is a read-only view of the latest results.')}
+        </p>
 
         {criticalCount > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',

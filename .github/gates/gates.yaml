@@ -2724,6 +2724,32 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # Keycloak docker-dev / CI realm JSONs vs the deployed gitops template (issue #2540 gate-scope
+  # follow-up). The four checks above — this one included until now — all glob only
+  # `*realm-template*.json`. Two other tracked realm JSONs grant roles to the shared M2M service
+  # account and neither was read by anything: openbank-infra/docker/keycloak/realm/openbank-realm.json
+  # and .github/workflows/keycloak/openbank-realm.json. Measured 2026-08-16: both grant
+  # `service-account-openbank-services` ROLE_OPERATOR beyond the template's ROLE_API, and the CI
+  # realm additionally grants it ROLE_COMPLIANCE (15 `role_action_matrix` actions) — a third,
+  # unreviewed answer to "what does the shared client hold" that no existing check watched.
+  # ADVISORY, not enforced: whether the docker/CI realms should track the template, and the
+  # #3246 Vault reconcile that would make the template authoritative in practice, are both open
+  # policy calls this script does not make (see its header). This only makes the divergence
+  # visible at PR time — static, no cluster read, same shape as realm-template-importable above.
+  - id: realm-devci-artifact-parity
+    name: "Keycloak docker/CI realm JSONs vs gitops template (issue #2540, advisory)"
+    group: security
+    mode: advisory
+    rationale: "The docker-dev and CI realm JSONs grant the shared M2M service account roles the deployed gitops template does not (CI additionally grants ROLE_COMPLIANCE, 15 role_action_matrix actions); until this gate nothing read either file, so the divergence had no dedicated finding anywhere."
+    review_after: "2027-02-16"
+    verified: "2026-08-16 — self-test falsified against a constructed over-grant case and a matching clean case; real run confirms the docker/CI ROLE_OPERATOR + CI ROLE_COMPLIANCE grants measured on issue #2540"
+    min_subjects: 2
+    selftest: python3 .github/scripts/check-realm-devci-artifact-parity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-realm-devci-artifact-parity.py
+
   - id: opa-bundle-parses
     name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
     group: gitops

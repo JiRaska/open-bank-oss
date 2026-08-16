@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.36.0
+  version: 1.37.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -321,6 +321,31 @@ paths:
       responses:
         '200':
           description: Account with goal metadata cleared
+        '403':
+          description: Not the owner
+
+  /accounts/{accountId}/nickname:
+    patch:
+      tags: [Accounts]
+      summary: Set or clear the account's customer-chosen display label
+      operationId: renameAccount
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: {type: string, nullable: true}
+      responses:
+        '200':
+          description: Account with updated nickname
+        '400':
+          description: Malformed request body
         '403':
           description: Not the owner
 
@@ -1984,6 +2009,9 @@ components:
         goalTargetDate:
           type: string
           format: date
+          nullable: true
+        nickname:
+          type: string
           nullable: true
 
     # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,

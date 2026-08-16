@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.147.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.146.0...admin-ui-v0.147.0) (2026-08-16)
+
+
+### Features
+
+* **catalog:** explain safe offer matches ([#5057](https://github.com/JiRaska/open-bank-oss/issues/5057)) ([bff6e61](https://github.com/JiRaska/open-bank-oss/commit/bff6e614bd886a7b91fc62e1b3d7e715ce55208b))
+
+## [0.146.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.145.0...admin-ui-v0.146.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify customer operations workspaces ([#5056](https://github.com/JiRaska/open-bank-oss/issues/5056)) ([e6cb356](https://github.com/JiRaska/open-bank-oss/commit/e6cb35601966f841a32660e883ff0201441894a0))
+
+## [0.145.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.144.0...admin-ui-v0.145.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify operational workspaces ([#5045](https://github.com/JiRaska/open-bank-oss/issues/5045)) ([042e263](https://github.com/JiRaska/open-bank-oss/commit/042e263508ca967f3587a3c690ca31a7a9a59ff3))
+
+
+### Bug Fixes
+
+* **admin-ui:** make campaign preview CTA non-interactive ([#5027](https://github.com/JiRaska/open-bank-oss/issues/5027)) ([f89e568](https://github.com/JiRaska/open-bank-oss/commit/f89e568f4d762366a2e9d6bc41648b4b7460ffec))
+
+## [0.144.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.143.1...admin-ui-v0.144.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** connect swarm journey ([#5037](https://github.com/JiRaska/open-bank-oss/issues/5037)) ([02a8f35](https://github.com/JiRaska/open-bank-oss/commit/02a8f354fadf819adec1c470d17ad279ec6d7d3b))
+* **admin-ui:** propose compatible bundle components ([#5029](https://github.com/JiRaska/open-bank-oss/issues/5029)) ([14fbb43](https://github.com/JiRaska/open-bank-oss/commit/14fbb438e9a6d8b25eae8308121fa69240f90d4c))
+
+
+### Bug Fixes
+
+* **admin-ui:** widen demo account to system:view (issue [#5020](https://github.com/JiRaska/open-bank-oss/issues/5020)) ([#5032](https://github.com/JiRaska/open-bank-oss/issues/5032)) ([f4d34df](https://github.com/JiRaska/open-bank-oss/commit/f4d34df1095c7da24d6e44ce94da3c3462528667))
+
+## [0.143.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.143.0...admin-ui-v0.143.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **iam:** strip demo@openbank.local's real admin roles, widen its safe view ([#5022](https://github.com/JiRaska/open-bank-oss/issues/5022)) ([bbc53dc](https://github.com/JiRaska/open-bank-oss/commit/bbc53dcb2bd10e1dc082119938d9e205c7150765)), closes [#5020](https://github.com/JiRaska/open-bank-oss/issues/5020)
+
 ## [0.143.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.142.0...admin-ui-v0.143.0) (2026-08-16)
 
 

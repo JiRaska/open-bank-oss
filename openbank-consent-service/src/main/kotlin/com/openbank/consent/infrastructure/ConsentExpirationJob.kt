@@ -6,14 +6,19 @@ package com.openbank.consent.infrastructure
 
 import com.openbank.consent.application.port.out.ConsentRepository
 import com.openbank.consent.domain.event.ConsentExpired
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.logging.Log
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
 import java.time.Clock
+import java.time.Duration
 import java.time.OffsetDateTime
 
 /**
@@ -45,6 +50,16 @@ class ConsentExpirationJob {
     @Inject
     lateinit var clock: Clock
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    /** Registers the boot-seeded ADR-0237 heartbeat before the first hourly sweep. */
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
+
     // TooGenericExceptionCaught: one bad tick must not kill the cron — ANY fault is logged and the
     // next hour retries, since every consent still past validTo is picked up again by definition.
     @Suppress("TooGenericExceptionCaught")
@@ -57,12 +72,18 @@ class ConsentExpirationJob {
         val threshold = OffsetDateTime.now(clock)
         try {
             val count = buildSweepPipeline(threshold).awaitSuspending()
+            liveness?.recordSuccess()
             if (count > 0) {
                 Log.infof("consent.expiration.sweep expired=%d threshold=%s", count, threshold)
             }
         } catch (err: Exception) {
             Log.errorf(err, "consent.expiration.sweep FAILED threshold=%s", threshold)
         }
+    }
+
+    companion object {
+        private const val WORKFLOW_NAME = "consent-expiration-sweep"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
     }
 
     internal fun buildSweepPipeline(threshold: OffsetDateTime): Uni<Int> = consentRepo.findExpiredActive(threshold)

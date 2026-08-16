@@ -70,6 +70,9 @@ data class UpdateSavingsGoalCommand(
 )
 data class ClearSavingsGoalCommand(val accountId: UUID, val requestedBy: UUID)
 
+/** Set or clear the customer-chosen display label. Blank/null clears it. */
+data class RenameAccountCommand(val accountId: UUID, val nickname: String?, val requestedBy: UUID)
+
 interface AccountUseCase {
     suspend fun openAccount(command: OpenAccountCommand): Account
 
@@ -92,6 +95,7 @@ interface AccountUseCase {
     suspend fun resolvePocket(query: ResolvePocketQuery): PocketResolution
     suspend fun updateSavingsGoal(command: UpdateSavingsGoalCommand): Account
     suspend fun clearSavingsGoal(command: ClearSavingsGoalCommand): Account
+    suspend fun renameAccount(command: RenameAccountCommand): Account
 }
 
 data class GrantAuthorizationCommand(

@@ -338,6 +338,8 @@ change_requirements:
         reason: "ADR-0244 agent-swarm case workflow, first slice (#4181/#4215). Nothing is published today and three facts say so: the topic is declared nowhere under openbank-infra/, the service is absent from auto-deploy.yml's ALL_SERVICES, and no KafkaUser exists for it. The intended consumer is the oversight/review surface that ADR-0244 D7 describes, not yet built — the producer ships first so the wire shape is stable before consumers land, same shape as the delegation.events and engagement.events entries above. Re-triage: remove this entry with the first real consumer PR, and rename the topic to the fleet's openbank.<domain>.<event> convention before the first deploy, while it is still free."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
+      - topic: "openbank.billing.fee.event"
+        reason: "ADR-0248, temporary — the consumer exists but isn't on main yet: document-service's AnnualFeeSummaryReadyConsumer is in #4122 (open). This is a real cross-PR merge-order gap, not a #889-class abandoned producer. Re-triage: remove this entry once #4122 merges."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -2819,6 +2821,36 @@ shared_m2m_matrix_write_grants:
     - settlement.create
     - transaction.create
     - transaction.reverse
+
+# Docker-dev and CI Keycloak realm JSONs vs the deployed gitops template (issue #2540
+# gate-scope follow-up). check-roles-allowed-realm.py, check-realm-role-parity.py,
+# check-realm-user-role-parity.py and check-realm-template-importable.py all glob only
+# `openbank-infra/gitops/components/keycloak/*realm-template*.json`. Two other tracked realm
+# JSONs — openbank-infra/docker/keycloak/realm/openbank-realm.json (local dev) and
+# .github/workflows/keycloak/openbank-realm.json (CI/api-fuzz) — grant roles to the shared
+# M2M service account (`service-account-openbank-services`) and neither was read by any check.
+# Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
+# realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
+# third, unreviewed answer to "what does the shared client hold".
+realm_devci_artifact_parity:
+  detect: [
+    "openbank-infra/gitops/components/keycloak/*realm-template*.json",
+    "openbank-infra/docker/keycloak/realm/openbank-realm.json",
+    ".github/workflows/keycloak/openbank-realm.json",
+  ]
+  require:
+    - "every realm role the docker-dev or CI realm JSON declares also exists in the deployed gitops template"
+    - "every realm role the docker-dev or CI realm JSON grants a service-account-* principal is also granted to that principal in the deployed gitops template"
+  gate: realm-devci-artifact-parity
+  # ADVISORY, and deliberately not on a graduation path to enforce: whether the docker/CI
+  # realms should track the template, and the #3246 owner-gated Vault reconcile that would
+  # make the template authoritative in practice, are both open policy calls (issue #2540)
+  # this gate does not make. The date below is the review point for the DETECTOR (is the
+  # comparison still accurate, has either open question resolved), not a promise to flip
+  # --enforce — same shape as pr_file_overlap below.
+  enforced: advisory
+  target_enforce_date: "2027-02-16"   # ADR-0144 — review the detector, not a flip to enforce
+  ci_producer: ".github/scripts/check-realm-devci-artifact-parity.py"
 
 # ---------------------------------------------------------------------------------------
 pr_file_overlap:

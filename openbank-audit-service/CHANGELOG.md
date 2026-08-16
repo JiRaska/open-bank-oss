@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.0...audit-service-v0.15.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **audit:** record anchor capture liveness ([#5042](https://github.com/JiRaska/open-bank-oss/issues/5042)) ([27eece9](https://github.com/JiRaska/open-bank-oss/commit/27eece9998d7e4a1fc30556fa8776ac9d8d969bf))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.14.6...audit-service-v0.15.0) (2026-08-14)
 
 
