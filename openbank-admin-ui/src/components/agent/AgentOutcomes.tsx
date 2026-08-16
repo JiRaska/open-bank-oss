@@ -8,6 +8,7 @@ import { Sparkles } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   deriveAgentOutcomes,
+  deriveWeeklyOutcomes,
   formatLatency,
   MIN_DECIDED_FOR_RATE,
   PROPOSAL_PAGE_CAP,
@@ -36,6 +37,37 @@ function Figure({ label, value, sub }: { label: string; value: string; sub: stri
       <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-tertiary)' }}>{label}</div>
       <div style={{ fontSize: '22px', fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.3 }}>{value}</div>
       <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{sub}</div>
+    </div>
+  )
+}
+
+// ── Weekly trend (#4462: "per week") ────────────────────────────────────────
+// Most weeks will legitimately read "insufficient data" — the queue is thin. Each row
+// still states its own decided count, so a reader can see WHY a week is blank rather
+// than wondering if the week rendered a zero.
+function WeeklyTrend({ items }: { items: ProposalOutcomeInput[] }) {
+  const { t } = useLanguage()
+  const weeks = deriveWeeklyOutcomes(items)
+
+  if (weeks.length === 0) return null
+
+  return (
+    <div style={{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border)' }}>
+      <div style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
+        {t('Míra schválení podle týdne', 'Approval rate by week')}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {weeks.map(w => (
+          <div key={w.weekStart} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: 'var(--text-secondary)' }}>
+            <span>{w.weekStart}</span>
+            <span>
+              {w.insufficientData
+                ? t(`nedostatek dat (${w.decided} rozhodnuto)`, `insufficient data (${w.decided} decided)`)
+                : t(`${Math.round((w.approvalRate as number) * 100)}% (${w.approved} z ${w.decided})`, `${Math.round((w.approvalRate as number) * 100)}% (${w.approved} of ${w.decided})`)}
+            </span>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -116,6 +148,8 @@ export function OutcomeMetricsCard({ items }: { items: ProposalOutcomeInput[] })
               </div>
             )}
           </div>
+
+          <WeeklyTrend items={items} />
         </>
       )}
     </Card>
