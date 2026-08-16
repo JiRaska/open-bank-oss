@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.138.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.0...admin-ui-v0.138.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify private AI review ([#4956](https://github.com/JiRaska/open-bank-oss/issues/4956)) ([8aa5fd6](https://github.com/JiRaska/open-bank-oss/commit/8aa5fd6fb95629fe055871e41eb83eed9ac37f4b))
+* **admin-ui:** derive Kafka topic table from AsyncAPI doc instead of hand-kept array ([#4948](https://github.com/JiRaska/open-bank-oss/issues/4948)) ([4254d24](https://github.com/JiRaska/open-bank-oss/commit/4254d24cec9690bc1141fa68a14b7df346ab026c))
+
 ## [0.138.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.137.0...admin-ui-v0.138.0) (2026-08-15)
 
 
