@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.144.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.143.1...admin-ui-v0.144.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** connect swarm journey ([#5037](https://github.com/JiRaska/open-bank-oss/issues/5037)) ([02a8f35](https://github.com/JiRaska/open-bank-oss/commit/02a8f354fadf819adec1c470d17ad279ec6d7d3b))
+* **admin-ui:** propose compatible bundle components ([#5029](https://github.com/JiRaska/open-bank-oss/issues/5029)) ([14fbb43](https://github.com/JiRaska/open-bank-oss/commit/14fbb438e9a6d8b25eae8308121fa69240f90d4c))
+
+
+### Bug Fixes
+
+* **admin-ui:** widen demo account to system:view (issue [#5020](https://github.com/JiRaska/open-bank-oss/issues/5020)) ([#5032](https://github.com/JiRaska/open-bank-oss/issues/5032)) ([f4d34df](https://github.com/JiRaska/open-bank-oss/commit/f4d34df1095c7da24d6e44ce94da3c3462528667))
+
 ## [0.143.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.143.0...admin-ui-v0.143.1) (2026-08-16)
 
 
