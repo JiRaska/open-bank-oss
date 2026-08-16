@@ -18,7 +18,7 @@ import java.util.UUID
 
 class DomesticPaymentEventsTest {
 
-    private fun payment() = DomesticPayment(
+    private fun payment(initiatedByPartyId: UUID? = UUID.randomUUID()) = DomesticPayment(
         id = UUID.randomUUID(),
         idempotencyKey = "idem-event",
         status = DomesticPaymentStatus.VALIDATED,
@@ -46,6 +46,7 @@ class DomesticPaymentEventsTest {
         settledAt = null,
         createdAt = Instant.parse("2026-06-01T09:00:00Z"),
         updatedAt = Instant.parse("2026-06-01T09:00:00Z"),
+        initiatedByPartyId = initiatedByPartyId,
     )
 
     @Test
@@ -68,6 +69,16 @@ class DomesticPaymentEventsTest {
         assertThat(event.priority).isEqualTo(DomesticPaymentPriority.URGENT)
         assertThat(event.endToEndId).isEqualTo("DOMU42")
         assertThat(event.occurredAt).isEqualTo(now)
+        assertThat(event.initiatedByPartyId).isEqualTo(payment.initiatedByPartyId)
+    }
+
+    @Test
+    fun `toCreatedEvent carries no actor when the payment was created without one`() {
+        val payment = payment(initiatedByPartyId = null)
+
+        val event = payment.toCreatedEvent(Clock.fixed(Instant.parse("2026-06-01T10:00:00Z"), ZoneOffset.UTC))
+
+        assertThat(event.initiatedByPartyId).isNull()
     }
 
     @Test
