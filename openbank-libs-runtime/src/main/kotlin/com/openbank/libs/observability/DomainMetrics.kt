@@ -436,6 +436,35 @@ class DomainMetrics {
         return WorkflowLivenessRecorder(lastSuccessEpochMillis, successRecorded)
     }
 
+    // ── External feeds (ADR-0237 point 2, issue #4743) ──────────────────────────
+
+    /**
+     * Increment on every attempt to fetch and parse an external feed, labelled by the real
+     * OUTCOME of that attempt — never merely whether the scheduled job wrapping it threw. This is
+     * the companion signal to a `feed-<name>` [registerWorkflowLiveness] entry: the gauge answers
+     * "how long since the feed last delivered", this counter answers "what happened on THIS
+     * attempt", so a dashboard can show e.g. `outcome=EMPTY` climbing well before the gauge ever
+     * crosses its staleness threshold — the ADR-0237 gap that let the ČNB fixing go un-ingested
+     * for 46 days (#2204) while every layer reported green.
+     *
+     * A "successful no-op" and a real fetch are deliberately never the same label. This repo's own
+     * precedent for that split is `PushSendOutcome.SKIPPED` (openbank-notification-service): a
+     * disabled adapter returned a *successful* skipped result and the fan-out counted it as
+     * delivered, until `SKIPPED` got its own enum value. Every caller here should have an
+     * equivalent local enum (e.g. `com.openbank.fx.domain.feed.FeedFetchOutcome`) and pass its
+     * `.name` — this façade takes a plain `String`, like [authzDecision]'s `outcome` above, so a
+     * new feed never needs a libs-domain dependency on another service's enum.
+     *
+     * @param feed     stable low-cardinality feed name, e.g. `cnb-fx-fixing` — should match the
+     *                 `feed-<name>` liveness workflow tag with the `feed-` prefix stripped, so the
+     *                 two series join in a dashboard without a lookup table.
+     * @param outcome  `FETCHED` | `EMPTY` | `HTTP_ERROR` | `PARSE_ERROR` at minimum — additive,
+     *                 never exhaustively switched on by a consumer.
+     */
+    fun feedFetchOutcome(feed: String, outcome: String) {
+        counter("openbank.feed.fetch", "feed", feed, "outcome", outcome)
+    }
+
     // ── Reconciliation drift (ADR-0160 mechanism 4) ─────────────────────────────
 
     // One AtomicReference per (control, currency) seen so far — populated lazily since the set of
