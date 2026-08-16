@@ -2722,6 +2722,7 @@ gates:
     rationale: "The docker-dev and CI realm JSONs grant the shared M2M service account roles the deployed gitops template does not (CI additionally grants ROLE_COMPLIANCE, 15 role_action_matrix actions); until this gate nothing read either file, so the divergence had no dedicated finding anywhere."
     review_after: "2027-02-16"
     verified: "2026-08-16 — self-test falsified against a constructed over-grant case and a matching clean case; real run confirms the docker/CI ROLE_OPERATOR + CI ROLE_COMPLIANCE grants measured on issue #2540"
+    min_subjects: 2
     selftest: python3 .github/scripts/check-realm-devci-artifact-parity.py --self-test
     selftest_expect: pass
     run: |

@@ -201,6 +201,7 @@ def main(argv=None) -> int:
         entry["path"] = rel
         report["artifacts"][label] = entry
 
+    print(f"SUBJECTS={len(ARTIFACTS)}  # docker/CI realm JSONs compared against the gitops template", file=sys.stderr)
     print(json.dumps(report, indent=2, sort_keys=True))
     if findings:
         for f in findings:
