@@ -31,6 +31,21 @@ quarkus:
   oidc:
     auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
     client-id: openbank-services
+  # OIDC CLIENT (outbound M2M) — the token this service PRESENTS when it calls another.
+  # Distinct from `quarkus.oidc` above, which is the inbound resource-server side that VALIDATES
+  # tokens arriving here. The two blocks carry the same three field names and differ by one
+  # hyphen, which is how this went missing: the config reads correct at a glance and configures
+  # the wrong half. Any client annotated `@RegisterProvider(OidcClientRequestReactiveFilter)`
+  # mints its bearer token from HERE, and with no `quarkus.oidc-client` the filter has no client
+  # to mint from, so the call leaves unauthenticated and the callee answers 401 — not 403, which
+  # is the tell: there is no token at all, rather than a token missing a role.
+  # Enforced by .github/scripts/check-oidc-client-configured.py.
+  oidc-client:
+    auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+
   # Health probes and the Prometheus scrape live on the management interface, not the
   # application port — the Deployment probes /q/health/{live,ready} on 8085 and the
   # PodMonitor scrapes the same port. Without this block nothing listens there, so the
