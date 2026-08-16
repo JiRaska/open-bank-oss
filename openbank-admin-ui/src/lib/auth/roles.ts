@@ -98,6 +98,9 @@ export const PERMISSIONS = {
   // call the endpoint directly. This decides what we *render*, not what they can *fetch*.
   // Real metadata/body separation needs a policy change — issue #1326.
   "notifications:view":       [ROLES.ADMIN, ROLES.OPERATOR],
+  // Screen feedback carries free-text comments and screenshot keys (ADR-0192), so it is
+  // intentionally narrower than general docs/viewer access.
+  "feedback:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Operator-initiated customer messaging (ADR-0176 D4/D5). Matches the backend's actual rego
   // grants exactly (opsmessage-compose / opsmessage-approve in rest.rego) — any
   // ROLE_OPERATOR/ROLE_ADMIN may compose or decide, with self-approval refused server-side by
@@ -120,6 +123,55 @@ export type Permission = keyof typeof PERMISSIONS
 export function hasPermission(roles: string[], permission: Permission): boolean {
   const allowed = PERMISSIONS[permission] as readonly string[]
   return roles.some(r => allowed.includes(r))
+}
+
+/**
+ * One UI route-to-permission projection used by the edge gate and route-coverage tests.
+ *
+ * This is deliberately a route manifest, not a list of roles: adding a role to a permission
+ * immediately changes every matching page consistently, while the backend/OPA remains the
+ * enforcement authority for data and mutations. Longest prefixes win, so `/system/config` can
+ * be stricter than `/system` without an exception in a page component.
+ */
+const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = [
+  ['system:config', ['/system/config']],
+  ['catalog:read', ['/product-studio']],
+  ['templates:view', ['/document-templates']],
+  ['delegations:view', ['/delegations']],
+  ['feedback:view', ['/feedback']],
+  ['regulatory:view', ['/regulatory']],
+  ['audit:view', ['/audit']],
+  ['kyc:view', ['/kyc']],
+  ['onboarding:view', ['/onboarding', '/identity-cases']],
+  ['parties:view', ['/parties']],
+  ['transactions:view', ['/transactions']],
+  ['accounts:view', ['/accounts', '/ledger', '/day-end']],
+  ['payments:view', [
+    '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
+    '/fx', '/swift', '/cards', '/interest', '/pid', '/fees', '/lending',
+  ]],
+  ['compliance:view', [
+    '/aml', '/fraud', '/sanctions', '/disputes', '/consents', '/customer-360', '/campaigns',
+    '/segments', '/lending/compliance-packs', '/docs/compliance', '/docs/bcp',
+  ]],
+  ['system:view', [
+    '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
+    '/security', '/notifications', '/system',
+  ]],
+  ['docs:view', ['/docs', '/services']],
+  ['settings:view', ['/settings']],
+]
+
+export function permissionForPath(pathname: string): Permission | undefined {
+  let match: { permission: Permission; length: number } | undefined
+  for (const [permission, prefixes] of ROUTE_PREFIXES) {
+    for (const prefix of prefixes) {
+      if ((pathname === prefix || pathname.startsWith(`${prefix}/`)) && (!match || prefix.length > match.length)) {
+        match = { permission, length: prefix.length }
+      }
+    }
+  }
+  return match?.permission
 }
 
 export function hasRole(roles: string[], role: Role): boolean {

@@ -31,6 +31,90 @@
   gap: 10px;
 }
 
+.workspace {
+  margin-bottom: 16px;
+  padding: 18px;
+  border-color: #dbe4f2;
+  background: linear-gradient(120deg, #ffffff, #f5f7ff);
+  box-shadow: 0 12px 28px rgba(30, 41, 59, 0.06);
+}
+
+.workspaceHeading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+
+.workspaceEyebrow {
+  margin: 0 0 3px;
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workspaceTitle {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 18px;
+  letter-spacing: -0.02em;
+}
+
+.workspaceContext {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.workspaceLinks {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.workspaceLink {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  color: var(--text-primary);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 650;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.workspaceLink:hover,
+.workspaceLink:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 8px 18px rgba(79, 70, 229, 0.14);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.workspaceIcon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-radius: 9px;
+}
+
+.workspaceArrow {
+  margin-left: auto;
+  color: var(--text-tertiary);
+  font-size: 17px;
+}
+
 .lastRefresh {
   color: #cbd5e1;
   font-size: 11px;
@@ -265,6 +349,10 @@
   .healthGroups {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .workspaceLinks {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 760px) {
@@ -280,8 +368,14 @@
 
   .metrics,
   .healthGroups,
-  .serviceGroups {
+  .serviceGroups,
+  .workspaceLinks {
     grid-template-columns: 1fr;
+  }
+
+  .workspaceHeading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   .serviceGroupHeader {
