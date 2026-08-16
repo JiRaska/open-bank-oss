@@ -5,18 +5,11 @@
 'use client'
 
 import { useState } from 'react'
-import { Search, RefreshCw, Filter, X } from 'lucide-react'
+import { ArrowLeftRight, Search, RefreshCw, Filter, X } from 'lucide-react'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-
-const STATUS_PILL: Record<string, string> = {
-  COMPLETED:  'pill pill-success',
-  PENDING:    'pill pill-warning',
-  PROCESSING: 'pill pill-info',
-  FAILED:     'pill pill-danger',
-  REVERSED:   'pill pill-neutral',
-}
+import { PageHeader, StatusBadge } from '@/components/ui'
 
 const TYPE_COLOR: Record<string, string> = {
   DEBIT:      'var(--danger)',
@@ -127,16 +120,12 @@ export default function TransactionsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Transakce', 'Transactions')}</span>
-          </div>
-          <h1 className="page-title">{t('Transakční deník', 'Transaction Ledger')}</h1>
-          <p className="page-subtitle">{t('BIAN vyhledávání — Account ID, IBAN, BBAN, reference, protistrana, částka, datum', 'BIAN-aligned search — Account ID, IBAN, BBAN, reference, counterparty, amount, date range')}</p>
-        </div>
-      </div>
+      <PageHeader
+        title={t('Transakční deník', 'Transaction Ledger')}
+        subtitle={t('BIAN vyhledávání — Account ID, IBAN, BBAN, reference, protistrana, částka, datum', 'BIAN-aligned search — Account ID, IBAN, BBAN, reference, counterparty, amount, date range')}
+        icon={<ArrowLeftRight size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Transakce', 'Transactions')}</span></div>}
+      />
 
       <div className="card" style={{ marginBottom: '16px' }}>
         {/* Primary search bar */}
@@ -265,7 +254,7 @@ export default function TransactionsPage() {
                       <td style={{ fontWeight: 600, color: tx.type === 'DEBIT' ? 'var(--danger)' : 'var(--success)' }}>
                         {tx.type === 'DEBIT' ? '-' : '+'}{Number(tx.amount).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {tx.currencyCode}
                       </td>
-                      <td><span className={STATUS_PILL[tx.status] || 'pill pill-neutral'}>{tx.status}</span></td>
+                      <td><StatusBadge status={tx.status} /></td>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId?.slice(0, 8)}…</td>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.targetAccountId?.slice(0, 8)}…</td>
                       <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>{tx.description || '—'}</td>
@@ -289,4 +278,3 @@ export default function TransactionsPage() {
     </div>
   )
 }
-

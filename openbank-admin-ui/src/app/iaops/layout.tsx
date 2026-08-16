@@ -2,10 +2,4 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { AppShell } from "@/components/layout/AppShell"
-
-export default function IAOpsLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <AppShell>{children}</AppShell>
-  )
-}
+export { default } from '@/components/layout/OperatorLayout'
