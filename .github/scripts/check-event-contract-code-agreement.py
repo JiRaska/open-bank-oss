@@ -653,11 +653,38 @@ def check_contract(path: pathlib.Path) -> list[str]:
             f'`const val EVENT_TYPE = "{name}"`). Either the producer was renamed and the contract '
             f"was not, or this message describes an event that is never emitted."
         )
-    for name in sorted(set(declared) - ordinary_doc_names):
+    # An outbox is not necessarily a Kafka producer. billing-service dispatches ON eventType:
+    # `billing.fee.post-intent.v1` and `...reversal-intent.v1` are posted to ledger-service over
+    # REST via LedgerPostingPort, and only `billing.annual-fee-summary.ready` reaches the Kafka
+    # emitter (LedgerOutboxEventPublisher.dispatch). Demanding a channel message for the REST ones
+    # would document as published events two things that never touch a topic — which is the
+    # opposite of this gate's purpose, and which billing's contract header already forbids in prose.
+    #
+    # So a contract may declare `x-openbank-not-published` with a REASON per event type. The reason
+    # is required: a bare list would become a silent mute, and the next reader needs to know why an
+    # emitted-looking type is exempt rather than merely that someone exempted it.
+    not_published = doc.get("x-openbank-not-published") or {}
+    if not isinstance(not_published, dict):
+        errors.append(
+            f"{rel}: x-openbank-not-published must be a mapping of event type -> reason, so each "
+            f"exemption carries why it is not a published event. A bare list is a silent mute."
+        )
+        not_published = {}
+    for name, reason in not_published.items():
+        if not isinstance(reason, str) or not reason.strip():
+            errors.append(f"{rel}: x-openbank-not-published[{name}] has no reason.")
+        if name not in declared:
+            errors.append(
+                f"{rel}: x-openbank-not-published lists `{name}`, but no producer in "
+                f"{service}/src/main declares that event type — a stale exemption."
+            )
+    for name in sorted(set(declared) - ordinary_doc_names - set(not_published)):
         info = declared[name]
         errors.append(
             f"{rel}: {info['path']} declares event type `{name}` ({info['class'] or 'hand-built outbox'}) "
-            f"and the contract has no message for it — an emitted event no consumer has been told about."
+            f"and the contract has no message for it — an emitted event no consumer has been told about. "
+            f"If it is not published to a topic at all (an outbox row dispatched by another transport), "
+            f"declare it under x-openbank-not-published with a reason."
         )
 
     # ---- C. payload properties vs constructor properties --------------------------------
