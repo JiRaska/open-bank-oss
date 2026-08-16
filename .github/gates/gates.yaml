@@ -2277,7 +2277,7 @@ gates:
   - id: db-migration-gate
     name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
     group: data
-    mode: advisory
+    mode: enforced
     verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
     when: pull_request
     needs_base: required

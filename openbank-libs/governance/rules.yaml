@@ -215,7 +215,7 @@ change_requirements:
       - "every property a request-body schema declares exists on the DTO the resource parses"
       - "every property the DTO has is declared on the request-body schema"
     gate: openapi-request-schema-conformance
-    enforced: advisory
+    enforced: enforce
     target_enforce_date: "2026-09-30"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
     # openapi_route_conformance (above) is ROUTE SET ONLY — it does not read schemas, so aml's
@@ -253,7 +253,7 @@ change_requirements:
       - "a CNPG cluster declaring barmanObjectStore -> the managed bucket has a matching
          aws_eks_pod_identity_association in db-backups.tf"
     gate: db-backup-associations
-    enforced: advisory
+    enforced: enforce
     target_enforce_date: "2026-08-15"   # ADR-0144
     ci_producer: "openbank-infra/scripts/check-db-backup-associations.py"
     # Backup credentials arrive via EKS Pod Identity, granted per (namespace, serviceAccount) by
@@ -278,7 +278,7 @@ change_requirements:
       - "new Flyway migration (forward)"
       - "rollback note in PR"
     gate: db-migration
-    enforced: advisory
+    enforced: enforce
     target_enforce_date: "2026-08-15"   # ADR-0144
     # The rollback note lives IN the migration, as a `-- Rollback:` comment — single-line or
     # spanning the following comment lines. blocked_on used to call for a PR-BODY-parsing check,
