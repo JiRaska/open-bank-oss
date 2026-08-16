@@ -107,7 +107,12 @@ def artifact_set(path: pathlib.Path) -> set[str]:
 
 # `--write-verification-metadata` OOMs at Gradle's default heap: measured, it dies
 # with `Java heap space` even on a single module. This is not optional tuning.
-GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx6g"
+# 6g itself started OOMing on openbank-libs-runtime alone (2026-08-16, 3 consecutive
+# failed runs, `Multiple build operations failed. Java heap space` — the fleet's
+# heaviest shared dependency graph, resolved cold with no prior verification-metadata
+# to skip re-hashing). Bumped to 8g, still comfortably under the 16GB GitHub-hosted
+# ubuntu-24.04 runner's total memory.
+GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx8g"
 
 
 def regenerate(modules: list[str]) -> None:
@@ -318,7 +323,7 @@ def main() -> int:
           f"Regenerate locally and commit the additions: "
           f"./gradlew --write-verification-metadata sha256 "
           f"{' '.join(f':{m}:{t}' for m in modules for t in tasks_for(m))} "
-          f"-Dorg.gradle.jvmargs=-Xmx6g")
+          f"-Dorg.gradle.jvmargs=-Xmx8g")
     for key in missing:
         component, artifact = key.split("|", 1)
         print(f"  missing: {artifact}  ({component})")
