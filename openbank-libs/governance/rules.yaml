@@ -2820,6 +2820,36 @@ shared_m2m_matrix_write_grants:
     - transaction.create
     - transaction.reverse
 
+# Docker-dev and CI Keycloak realm JSONs vs the deployed gitops template (issue #2540
+# gate-scope follow-up). check-roles-allowed-realm.py, check-realm-role-parity.py,
+# check-realm-user-role-parity.py and check-realm-template-importable.py all glob only
+# `openbank-infra/gitops/components/keycloak/*realm-template*.json`. Two other tracked realm
+# JSONs — openbank-infra/docker/keycloak/realm/openbank-realm.json (local dev) and
+# .github/workflows/keycloak/openbank-realm.json (CI/api-fuzz) — grant roles to the shared
+# M2M service account (`service-account-openbank-services`) and neither was read by any check.
+# Measured 2026-08-16: both grant it ROLE_OPERATOR beyond the template's ROLE_API, and the CI
+# realm additionally grants ROLE_COMPLIANCE (15 role_action_matrix actions, see above) — a
+# third, unreviewed answer to "what does the shared client hold".
+realm_devci_artifact_parity:
+  detect: [
+    "openbank-infra/gitops/components/keycloak/*realm-template*.json",
+    "openbank-infra/docker/keycloak/realm/openbank-realm.json",
+    ".github/workflows/keycloak/openbank-realm.json",
+  ]
+  require:
+    - "every realm role the docker-dev or CI realm JSON declares also exists in the deployed gitops template"
+    - "every realm role the docker-dev or CI realm JSON grants a service-account-* principal is also granted to that principal in the deployed gitops template"
+  gate: realm-devci-artifact-parity
+  # ADVISORY, and deliberately not on a graduation path to enforce: whether the docker/CI
+  # realms should track the template, and the #3246 owner-gated Vault reconcile that would
+  # make the template authoritative in practice, are both open policy calls (issue #2540)
+  # this gate does not make. The date below is the review point for the DETECTOR (is the
+  # comparison still accurate, has either open question resolved), not a promise to flip
+  # --enforce — same shape as pr_file_overlap below.
+  enforced: advisory
+  target_enforce_date: "2027-02-16"   # ADR-0144 — review the detector, not a flip to enforce
+  ci_producer: ".github/scripts/check-realm-devci-artifact-parity.py"
+
 # ---------------------------------------------------------------------------------------
 pr_file_overlap:
   # Every check in this repo is scoped to ONE pull request, computed against ONE base. So
