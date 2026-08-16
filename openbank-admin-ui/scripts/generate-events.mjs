@@ -12,12 +12,12 @@
 // names went stale, and several publisher attributions were wrong (party events
 // are published by party-service, not pid-service). Retyping the corrected 15
 // names would only recreate the drift with a fresh timestamp; this script derives
-// the table so `.github/scripts/check-asyncapi-doc-discriminator.py` — which
-// already asserts every channel `address` is a topic some in-tree service speaks
-// — covers this surface too, instead of a second, ungated copy going stale again.
+// the table directly from the AsyncAPI document instead of a second, ungated copy
+// going stale again.
 //
-// publisher/consumer attribution comes from the SAME source the gate trusts:
-// each service's own `mp.messaging.outgoing.*.topic` (publisher) and
+// publisher/consumer attribution comes from the SAME source
+// `check-event-contract-code-agreement.py` trusts (ADR-0006): each service's own
+// `mp.messaging.outgoing.*.topic` (publisher) and
 // `mp.messaging.incoming.*.topic` / `.topics` (consumer, comma-separated fan-in —
 // audit-service subscribes to ~21 topics that way). This is stronger than eyeballing
 // the spec, because it is derived from what services actually declare, not prose.
@@ -51,8 +51,7 @@ function readText(p) {
 }
 
 // Every topic each in-tree service publishes to / consumes from, derived from its
-// own application.yaml — same idiom as check-asyncapi-doc-discriminator.py's
-// spoken_topics(), kept per-service instead of collapsed to one set.
+// own application.yaml, kept per-service instead of collapsed to one set.
 function messagingTopics(root) {
   const publishers = new Map() // topic -> Set(service short name)
   const consumers = new Map()
