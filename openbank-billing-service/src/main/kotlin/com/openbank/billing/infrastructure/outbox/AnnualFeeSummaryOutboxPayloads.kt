@@ -28,8 +28,14 @@ import java.time.format.DateTimeFormatter
  */
 internal object AnnualFeeSummaryOutboxPayloads {
 
-    /** `"AnnualFeeSummaryReady"` — the contract's `eventType` literal (ADR-0248). */
-    const val EVENT_TYPE: String = "AnnualFeeSummaryReady"
+    /**
+     * `"AnnualFeeSummaryReady"` — the contract's `eventType` literal (ADR-0248).
+     *
+     * Declared on [AnnualFeeSummaryReadyPayload] rather than here: `check-event-contract-code-agreement`
+     * looks for `const val EVENT_TYPE` inside the BODY of the data class it is matching, so a copy
+     * living in this object is invisible to it and the contract's message reads as having no producer.
+     */
+    const val EVENT_TYPE: String = AnnualFeeSummaryReadyPayload.EVENT_TYPE
 
     // setDefaultPropertyInclusion, not setSerializationInclusion: the latter is deprecated
     // (CodeQL alert 413) and this is the only call site in the fleet, so there was no local
@@ -67,7 +73,7 @@ internal object AnnualFeeSummaryOutboxPayloads {
  * document-service's consumer is built against; do not rename without coordinating that change.
  */
 internal data class AnnualFeeSummaryReadyPayload(
-    val eventType: String = AnnualFeeSummaryOutboxPayloads.EVENT_TYPE,
+    val eventType: String = EVENT_TYPE,
     val accountId: String,
     val partyRef: String,
     val year: Int,
@@ -78,4 +84,9 @@ internal data class AnnualFeeSummaryReadyPayload(
     val occurredAt: String,
 ) {
     data class FeeLine(val code: String, val name: String, val category: String, val amount: String)
+
+    companion object {
+        /** The event type this payload IS. Read by the contract-agreement gate from this body. */
+        const val EVENT_TYPE: String = "AnnualFeeSummaryReady"
+    }
 }

@@ -15,7 +15,9 @@
 # intent.v1", "billing.fee.reversal-intent.v1") posts to ledger-service directly via
 # `LedgerPostingPort`, never emitted as an event. Only the third eventType,
 # `billing.annual-fee-summary.ready`, is relayed to Kafka. Do not add the charge/reversal intents
-# here — they are not events this service publishes, they are internal ledger-posting outbox rows.
+# here AS MESSAGES — they are not events this service publishes, they are internal ledger-posting
+# outbox rows. They ARE declared below under `x-openbank-not-published`, which is how that fact is
+# stated to the agreement gate instead of being left for it to misread as an undocumented producer.
 
 asyncapi: 3.0.0
 
@@ -29,6 +31,26 @@ info:
     url: https://www.apache.org/licenses/LICENSE-2.0
 
 defaultContentType: application/json
+
+# The other two eventTypes billing-service's outbox carries are NOT published to any topic, and
+# saying so here is what keeps `check-event-contract-code-agreement` honest about them. Before this
+# block the gate reported them as "an emitted event no consumer has been told about", and the only
+# way to silence it was to document them as messages — which would have asserted a Kafka contract
+# for two payloads that never reach Kafka, the opposite of what this file is for.
+#
+# `LedgerOutboxEventPublisher.dispatch` branches on eventType: these two call `LedgerPostingPort`
+# (REST, to ledger-service) and only `billing.annual-fee-summary.ready` reaches the emitter. An
+# outbox is a delivery mechanism, not a publication.
+x-openbank-not-published:
+  billing.fee.post-intent.v1: |
+    Not a published event. LedgerOutboxEventPublisher.dispatch posts this row's journal to
+    ledger-service via LedgerPostingPort (REST); it never reaches a Kafka topic, so no consumer
+    can subscribe to it and there is no contract to keep. Documented here rather than as a
+    message so the agreement gate can tell "not published" from "published and undocumented".
+  billing.fee.reversal-intent.v1: |
+    Not a published event, same path as the charge intent above — dispatched to
+    LedgerPostingPort.postReversal, which is a REST call, not a topic.
+
 
 servers:
   sandbox:
