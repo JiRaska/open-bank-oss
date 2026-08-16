@@ -103,9 +103,9 @@ function StatusPill({ status, large }: { status: DStatus; large?: boolean }) {
   )
 }
 
-function Card({ children, accent }: { children: React.ReactNode; accent?: string }) {
+function Card({ children, accent, id }: { children: React.ReactNode; accent?: string; id?: string }) {
   return (
-    <div style={{ background: 'var(--surface)', border: accent ? `1px solid ${accent}40` : '1px solid var(--border)',
+    <div id={id} style={{ background: 'var(--surface)', border: accent ? `1px solid ${accent}40` : '1px solid var(--border)',
       borderRadius: 'var(--r-lg)', padding: '20px 24px', marginBottom: '20px' }}>
       {children}
     </div>
@@ -392,7 +392,7 @@ function IAOpsContent() {
           )}
 
           {/* ── B. Agent roster ── */}
-          <Card>
+          <Card id="agent-roster">
             <SectionTitle icon={<Users size={16} />}
               sub={data.chartersAvailable
                 ? t('Chartery z agents.yaml — jediná strojově čitelná pravda (konzumuje ji OPA gate i runtime).', 'Charters from agents.yaml — the single machine-readable source of truth (consumed by the OPA gate and the runtime).')
