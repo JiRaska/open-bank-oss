@@ -15,6 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { CURRENCY_META } from '@/lib/currency-meta'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface FxRate { baseCurrency: string; quoteCurrency: string; rate: number; timestamp: string }
 interface FxConversion { id: string; fromCurrency: string; toCurrency: string; fromAmount: number; toAmount: number; rate: number; status: string; createdAt: string }
@@ -302,17 +303,12 @@ export default function FxPage() {
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-              {t('Devizové operace', 'Foreign Exchange')}
-              <button onClick={loadData} disabled={loading} style={{ background: 'none', border: 'none', cursor: loading ? 'default' : 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center' }}>
-                <RefreshCw size={18} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
-              </button>
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{t('CNB, ECB & Bankovní kurzovní lístek', 'CNB, ECB & bank rate sheet')}</p>
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <PageHeader
+          icon={<Globe size={20} aria-hidden="true" />}
+          title={t('Devizové operace', 'Foreign Exchange')}
+          subtitle={t('CNB, ECB & Bankovní kurzovní lístek', 'CNB, ECB & bank rate sheet')}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button onClick={loadData} disabled={loading} className="btn btn-secondary btn-sm"><RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>
             <button onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
               <Download size={13} style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
               {t('Stáhnout vše', 'Fetch All')}
@@ -328,8 +324,8 @@ export default function FxPage() {
                 </span>
               )
             })()}
-          </div>
-        </div>
+          </div>}
+        />
 
         {unavailable && (
           <div className="card" style={{ padding: 0, marginBottom: '20px' }}>
