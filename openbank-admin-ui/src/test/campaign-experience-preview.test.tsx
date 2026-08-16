@@ -30,6 +30,8 @@ describe('campaign customer experience preview', () => {
     expect(screen.getByText(/Summer saving → Savings/)).toBeTruthy()
     expect(container.querySelector('[data-preview-channel="PUSH"]')).toBeTruthy()
     expect(screen.getByText('openbank://savings')).toBeTruthy()
+    expect(container.querySelector('.campaign-phone-cta')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Explore' })).toBeNull()
   })
 
   it('does not pretend an email is a push notification', () => {
