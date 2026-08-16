@@ -209,4 +209,21 @@ class AbstractOutboxDispatcherTest {
         assertThat(AbstractOutboxDispatcher.deriveServiceName("StandingOrderOutboxDispatcher"))
             .isEqualTo("standing-order")
     }
+
+    // Issue #5143: `this::class.java.simpleName`, read from a method inherited from THIS abstract
+    // class, is Quarkus Arc's generated bean subclass name at runtime, not the developer's class.
+    // Reproduces the exact string observed live in production on the first real dispatch after
+    // this mechanism deployed: openbank_outbox_dispatched_total{service=
+    // "ledger-outbox-dispatcher_-subclass"} where the sibling openbank_outbox_backlog gauge (whose
+    // `service` is `abstract`, not derived) correctly read "ledger" on the same dispatcher, same
+    // pod, same moment. A plain unit-test instantiation (`class Foo(...) : AbstractOutboxDispatcher()`,
+    // as every other case in this file uses) never goes through Arc, so it cannot catch this class
+    // of bug -- this test supplies the exact runtime-observed string directly instead.
+    @Test
+    fun `strips a Quarkus Arc-generated bean subclass suffix before deriving the service name`() {
+        assertThat(AbstractOutboxDispatcher.deriveServiceName("LedgerOutboxDispatcher_Subclass"))
+            .isEqualTo("ledger")
+        assertThat(AbstractOutboxDispatcher.deriveServiceName("PartyOutboxDispatcher_ClientProxy"))
+            .isEqualTo("party")
+    }
 }
