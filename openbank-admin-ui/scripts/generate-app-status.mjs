@@ -26,7 +26,7 @@
 // hand in #25. `deriveCapabilityStatus` below computes a `derivedStatus` for the
 // SUBSET of capabilities that are cheap presence/shape checks against the app
 // source (tls-pinning, sca-device-key, auth-pkce, credential-storage,
-// diagnostics, payment-initiation). It is diffed against the curatorial `status`
+// diagnostics, payment-initiation, qrless-pay). It is diffed against the curatorial `status`
 // in --check mode and printed as a `::warning` on disagreement — advisory, not
 // enforced (unlike the derived-facts diff below): status has genuinely ambiguous
 // cases (e.g. an iOS-live/Android-stub split) the curator must still be able to
@@ -61,7 +61,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { parse as parseYaml } from 'yaml'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -158,7 +158,7 @@ function deriveFromCode(appRepo) {
 // returns null (never guesses) and is surfaced as a gap; the capability's
 // derivedStatus itself is then also null and is skipped in the drift diff — an
 // absent signal has no verdict, exactly like the derived-facts layer.
-function deriveCapabilityStatus(appRepo, certPinningConfigured) {
+export function deriveCapabilityStatus(appRepo, certPinningConfigured) {
   const gaps = []
   const read = (rel) => {
     const p = path.join(appRepo, rel)
@@ -234,6 +234,38 @@ function deriveCapabilityStatus(appRepo, certPinningConfigured) {
     signals['payment-initiation'] = src === null ? null : wired ? 'live' : 'planned'
   }
 
+  // qrless-pay: two independent halves, and the interesting one is a switch.
+  // PAYEE is live when RequestScreen actually advertises a minted session
+  // (startReceiving); it is the QR-equivalent surface and ships on. PAYER is held
+  // behind NearPay.PAYER_DISCOVERY_ENABLED, off until the threat-model §8 rollout
+  // gates are met. Both halves on ⇒ live, exactly one ⇒ partial, neither ⇒ planned.
+  //
+  // This capability is here because it rotted twice in one week (openbank-app #445,
+  // #455): the yaml said `planned`/"NO implementation" while the protocol core, both
+  // transports and the payee surface were merged, and the correction was itself stale
+  // four PRs later. Both were single-field drifts of exactly the kind this signal sees.
+  //
+  // A MISSING flag constant is null, never a status. The constant exists precisely
+  // because dormancy used to rest on nothing happening to call startDiscovery — a
+  // control any refactor removes without noticing. If it is gone, this check has no
+  // verdict, and saying so is the honest answer; guessing the safer-looking one would
+  // hide the removal it is here to notice.
+  {
+    const proto = read('shared/src/commonMain/kotlin/tech/openbank/app/payment/nearpay/NearPay.kt')
+    const request = read('composeApp/src/commonMain/kotlin/tech/openbank/app/ui/RequestScreen.kt')
+    const flag = proto === null ? null : proto.match(/PAYER_DISCOVERY_ENABLED\s*=\s*(true|false)/)
+    if (proto !== null && !flag) {
+      gaps.push('NearPay.PAYER_DISCOVERY_ENABLED not found in NearPay.kt — qrless-pay derivedStatus signal unavailable')
+    }
+    if (proto === null || request === null || !flag) {
+      signals['qrless-pay'] = null
+    } else {
+      const payerOn = flag[1] === 'true'
+      const payeeWired = /startReceiving\s*\(/.test(request)
+      signals['qrless-pay'] = payerOn && payeeWired ? 'live' : payerOn || payeeWired ? 'partial' : 'planned'
+    }
+  }
+
   return { signals, gaps }
 }
 
@@ -251,148 +283,154 @@ function loadDeclared(appRepo) {
   }
 }
 
-// ── Join ─────────────────────────────────────────────────────────────────────
-const { derived, gaps: derivedGaps } = deriveFromCode(APP_REPO)
-const { declared, gaps: declaredGaps } = loadDeclared(APP_REPO)
-const { signals: statusSignals, gaps: statusGaps } = deriveCapabilityStatus(APP_REPO, derived.certPinningConfigured)
+// CLI entrypoint only — importing this module (tests) must not read the app repo,
+// write the artefact or exit the process.
+function main() {
+  // ── Join ─────────────────────────────────────────────────────────────────────
+  const { derived, gaps: derivedGaps } = deriveFromCode(APP_REPO)
+  const { declared, gaps: declaredGaps } = loadDeclared(APP_REPO)
+  const { signals: statusSignals, gaps: statusGaps } = deriveCapabilityStatus(APP_REPO, derived.certPinningConfigured)
 
-// Attach derivedStatus only to capabilities we have a signal for; everything
-// else (ui-stack, shared-domain, customer-edge, keycloak-realm, crash-monitoring,
-// qrless-pay, dossier) stays purely curatorial — no cheap code check calls those,
-// and guessing one would be exactly the fabricated-value ADR-0074 forbids.
-const capabilities = (declared?.capabilities ?? []).map((c) =>
-  Object.prototype.hasOwnProperty.call(statusSignals, c.id) ? { ...c, derivedStatus: statusSignals[c.id] } : c,
-)
-const decisionMissing = capabilities.filter((c) => c.decisionMissing === true)
-const byStatus = capabilities.reduce((acc, c) => {
-  acc[c.status] = (acc[c.status] || 0) + 1
-  return acc
-}, {})
-// status vs derivedStatus disagreement — the rot signal issue #26 exists to catch.
-// null derivedStatus (signal source unavailable) is never compared: no verdict.
-const statusDrift = capabilities.filter((c) => c.derivedStatus != null && c.derivedStatus !== c.status)
-
-const out = {
-  schema: 'openbank.appstatus/v1',
-  // generatedAt is intentionally omitted to keep the artefact diff-stable in CI
-  // (the content check in ADR-0074 diffs the derived block, not a timestamp).
-  app: declared?.app ?? { name: 'openbank-app' },
-  asOf: declared?.asOf ?? null,
-  // Stable repo identifier (not a local filesystem path) — keeps the artefact
-  // byte-identical regardless of WHERE the app source is checked out in CI, so the
-  // content check diffs source-derived facts, not the runner's directory layout.
-  appRepo: declared?.app?.repo ?? 'JiRaska/openbank-app',
-  derived,
-  capabilities,
-  summary: {
-    total: capabilities.length,
-    byStatus,
-    decisionMissing: decisionMissing.map((c) => c.id),
-  },
-  gaps: [...derivedGaps, ...declaredGaps, ...statusGaps],
-}
-
-const serialized = JSON.stringify(out, null, 2) + '\n'
-
-function summarize() {
-  console.log(
-    `  derived: ${derived.sourceAvailable ? `version=${derived.version} useFakeData=${derived.useFakeData} edge=${derived.edgeBaseUrl}` : 'SOURCE UNAVAILABLE'}`,
+  // Attach derivedStatus only to capabilities we have a signal for; everything
+  // else (ui-stack, shared-domain, customer-edge, keycloak-realm, crash-monitoring,
+  // dossier) stays purely curatorial — no cheap code check calls those, and guessing
+  // one would be exactly the fabricated-value ADR-0074 forbids.
+  const capabilities = (declared?.capabilities ?? []).map((c) =>
+    Object.prototype.hasOwnProperty.call(statusSignals, c.id) ? { ...c, derivedStatus: statusSignals[c.id] } : c,
   )
-  console.log(`  capabilities: ${capabilities.length} (${Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join(', ')})`)
-  if (decisionMissing.length) console.log(`  decision-missing: ${decisionMissing.map((c) => c.id).join(', ')}`)
-  if (statusDrift.length) {
-    console.log(`  ⚠ status drift: ${statusDrift.length}`)
-    for (const c of statusDrift) console.log(`    - ${c.id}: yaml says '${c.status}' but code looks '${c.derivedStatus}'`)
-  }
-  if (out.gaps.length) console.log(`  ⚠ gaps: ${out.gaps.length}\n    - ${out.gaps.join('\n    - ')}`)
-}
+  const decisionMissing = capabilities.filter((c) => c.decisionMissing === true)
+  const byStatus = capabilities.reduce((acc, c) => {
+    acc[c.status] = (acc[c.status] || 0) + 1
+    return acc
+  }, {})
+  // status vs derivedStatus disagreement — the rot signal issue #26 exists to catch.
+  // null derivedStatus (signal source unavailable) is never compared: no verdict.
+  const statusDrift = capabilities.filter((c) => c.derivedStatus != null && c.derivedStatus !== c.status)
 
-// Print one ::warning per drifted capability (issue #26). Always advisory,
-// independent of --enforce: unlike the derived-facts diff, curatorial `status`
-// is allowed to legitimately override a single code signal (e.g. an iOS-live/
-// Android-stub split the curator judges still `partial`) — a human call, so a
-// disagreement is a prompt to re-check the yaml, not necessarily a bug.
-function reportStatusDrift() {
-  for (const c of statusDrift) {
+  const out = {
+    schema: 'openbank.appstatus/v1',
+    // generatedAt is intentionally omitted to keep the artefact diff-stable in CI
+    // (the content check in ADR-0074 diffs the derived block, not a timestamp).
+    app: declared?.app ?? { name: 'openbank-app' },
+    asOf: declared?.asOf ?? null,
+    // Stable repo identifier (not a local filesystem path) — keeps the artefact
+    // byte-identical regardless of WHERE the app source is checked out in CI, so the
+    // content check diffs source-derived facts, not the runner's directory layout.
+    appRepo: declared?.app?.repo ?? 'JiRaska/openbank-app',
+    derived,
+    capabilities,
+    summary: {
+      total: capabilities.length,
+      byStatus,
+      decisionMissing: decisionMissing.map((c) => c.id),
+    },
+    gaps: [...derivedGaps, ...declaredGaps, ...statusGaps],
+  }
+
+  const serialized = JSON.stringify(out, null, 2) + '\n'
+
+  function summarize() {
     console.log(
-      `::warning title=app-status status drift::dossier status is stale: ${c.id} code looks '${c.derivedStatus}' but yaml says '${c.status}'`,
+      `  derived: ${derived.sourceAvailable ? `version=${derived.version} useFakeData=${derived.useFakeData} edge=${derived.edgeBaseUrl}` : 'SOURCE UNAVAILABLE'}`,
     )
-  }
-}
-
-// Read the committed artefact's `derived` block (the layer the content check
-// governs), tolerating an absent/garbled file by returning null.
-function committedDerived(file) {
-  try {
-    return JSON.parse(readFileSync(file, 'utf8')).derived ?? null
-  } catch {
-    return null
-  }
-}
-
-// Field-by-field diff of two `derived` objects — the README-vs-code drift this
-// check exists to catch surfaces here (e.g. useFakeData: false → true).
-function diffDerived(committed, fresh) {
-  const keys = Array.from(new Set([...Object.keys(committed ?? {}), ...Object.keys(fresh ?? {})])).sort()
-  const lines = []
-  for (const k of keys) {
-    const a = JSON.stringify(committed?.[k])
-    const b = JSON.stringify(fresh?.[k])
-    if (a !== b) lines.push(`    ${k}: committed=${a} → regenerated=${b}`)
-  }
-  return lines
-}
-
-// ── --check: regenerate and diff the derived block (ADR-0074 invariant 5) ─────
-if (CHECK) {
-  console.log(`app-status check (advisory${ENFORCE ? '→ENFORCE' : ''}) against ${path.relative(process.cwd(), AGAINST)}`)
-  summarize()
-
-  if (!derived.sourceAvailable) {
-    // No app checkout ⇒ nothing to compare. Degrade to a skip, never a failure:
-    // a content check that can't see the source has no verdict to give.
-    console.log('::warning title=app-status::app source unavailable — skipping derived-block content check (no openbank-app checkout)')
-    process.exit(0)
+    console.log(`  capabilities: ${capabilities.length} (${Object.entries(byStatus).map(([k, v]) => `${k}=${v}`).join(', ')})`)
+    if (decisionMissing.length) console.log(`  decision-missing: ${decisionMissing.map((c) => c.id).join(', ')}`)
+    if (statusDrift.length) {
+      console.log(`  ⚠ status drift: ${statusDrift.length}`)
+      for (const c of statusDrift) console.log(`    - ${c.id}: yaml says '${c.status}' but code looks '${c.derivedStatus}'`)
+    }
+    if (out.gaps.length) console.log(`  ⚠ gaps: ${out.gaps.length}\n    - ${out.gaps.join('\n    - ')}`)
   }
 
-  // Status drift (issue #26) is checked whenever the source IS available,
-  // independent of the derived-facts diff below and never gated by --enforce
-  // (see reportStatusDrift). Report it before the facts-diff early-exits so a
-  // clean facts-diff doesn't hide a stale curatorial status.
-  reportStatusDrift()
+  // Print one ::warning per drifted capability (issue #26). Always advisory,
+  // independent of --enforce: unlike the derived-facts diff, curatorial `status`
+  // is allowed to legitimately override a single code signal (e.g. an iOS-live/
+  // Android-stub split the curator judges still `partial`) — a human call, so a
+  // disagreement is a prompt to re-check the yaml, not necessarily a bug.
+  function reportStatusDrift() {
+    for (const c of statusDrift) {
+      console.log(
+        `::warning title=app-status status drift::dossier status is stale: ${c.id} code looks '${c.derivedStatus}' but yaml says '${c.status}'`,
+      )
+    }
+  }
 
-  const committed = committedDerived(AGAINST)
-  if (committed === null) {
-    console.log(`::warning title=app-status::no committed artefact at ${path.relative(process.cwd(), AGAINST)} to diff against — first run?`)
+  // Read the committed artefact's `derived` block (the layer the content check
+  // governs), tolerating an absent/garbled file by returning null.
+  function committedDerived(file) {
+    try {
+      return JSON.parse(readFileSync(file, 'utf8')).derived ?? null
+    } catch {
+      return null
+    }
+  }
+
+  // Field-by-field diff of two `derived` objects — the README-vs-code drift this
+  // check exists to catch surfaces here (e.g. useFakeData: false → true).
+  function diffDerived(committed, fresh) {
+    const keys = Array.from(new Set([...Object.keys(committed ?? {}), ...Object.keys(fresh ?? {})])).sort()
+    const lines = []
+    for (const k of keys) {
+      const a = JSON.stringify(committed?.[k])
+      const b = JSON.stringify(fresh?.[k])
+      if (a !== b) lines.push(`    ${k}: committed=${a} → regenerated=${b}`)
+    }
+    return lines
+  }
+
+  // ── --check: regenerate and diff the derived block (ADR-0074 invariant 5) ─────
+  if (CHECK) {
+    console.log(`app-status check (advisory${ENFORCE ? '→ENFORCE' : ''}) against ${path.relative(process.cwd(), AGAINST)}`)
+    summarize()
+
+    if (!derived.sourceAvailable) {
+      // No app checkout ⇒ nothing to compare. Degrade to a skip, never a failure:
+      // a content check that can't see the source has no verdict to give.
+      console.log('::warning title=app-status::app source unavailable — skipping derived-block content check (no openbank-app checkout)')
+      process.exit(0)
+    }
+
+    // Status drift (issue #26) is checked whenever the source IS available,
+    // independent of the derived-facts diff below and never gated by --enforce
+    // (see reportStatusDrift). Report it before the facts-diff early-exits so a
+    // clean facts-diff doesn't hide a stale curatorial status.
+    reportStatusDrift()
+
+    const committed = committedDerived(AGAINST)
+    if (committed === null) {
+      console.log(`::warning title=app-status::no committed artefact at ${path.relative(process.cwd(), AGAINST)} to diff against — first run?`)
+      process.exit(ENFORCE ? 1 : 0)
+    }
+
+    const drift = diffDerived(committed, derived)
+    if (drift.length === 0) {
+      console.log('  ✓ derived block matches the committed app-status.json')
+      process.exit(0)
+    }
+
+    // Drift found — this is the signal the ADR wants. GitHub renders ::warning/::error
+    // annotations inline on the PR; the body is also printed for the PR-comment step.
+    const level = ENFORCE ? 'error' : 'warning'
+    console.log(`::${level} title=app-status derived drift::the committed app-status.json no longer matches openbank-app source (${drift.length} field(s)). Regenerate & publish.`)
+    console.log('  derived-block drift:')
+    for (const l of drift) console.log(l)
     process.exit(ENFORCE ? 1 : 0)
   }
 
-  const drift = diffDerived(committed, derived)
-  if (drift.length === 0) {
-    console.log('  ✓ derived block matches the committed app-status.json')
+  // ── write mode ────────────────────────────────────────────────────────────────
+  // Guard the transport copy: a run WITHOUT the app source must not overwrite a
+  // committed artefact with a null-derived stub (that would silently erase the
+  // transported facts). Only refuse when there is something to lose.
+  if (!derived.sourceAvailable && existsSync(OUT)) {
+    console.log(`app-status: app source unavailable — PRESERVING committed ${path.relative(process.cwd(), OUT)} (not clobbering with a null-derived stub)`)
+    summarize()
     process.exit(0)
   }
 
-  // Drift found — this is the signal the ADR wants. GitHub renders ::warning/::error
-  // annotations inline on the PR; the body is also printed for the PR-comment step.
-  const level = ENFORCE ? 'error' : 'warning'
-  console.log(`::${level} title=app-status derived drift::the committed app-status.json no longer matches openbank-app source (${drift.length} field(s)). Regenerate & publish.`)
-  console.log('  derived-block drift:')
-  for (const l of drift) console.log(l)
-  process.exit(ENFORCE ? 1 : 0)
-}
+  writeFileSync(OUT, serialized)
 
-// ── write mode ────────────────────────────────────────────────────────────────
-// Guard the transport copy: a run WITHOUT the app source must not overwrite a
-// committed artefact with a null-derived stub (that would silently erase the
-// transported facts). Only refuse when there is something to lose.
-if (!derived.sourceAvailable && existsSync(OUT)) {
-  console.log(`app-status: app source unavailable — PRESERVING committed ${path.relative(process.cwd(), OUT)} (not clobbering with a null-derived stub)`)
+  console.log(`app-status → ${path.relative(process.cwd(), OUT)}`)
   summarize()
-  process.exit(0)
 }
 
-writeFileSync(OUT, serialized)
-
-console.log(`app-status → ${path.relative(process.cwd(), OUT)}`)
-summarize()
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main()
