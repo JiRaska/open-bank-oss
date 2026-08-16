@@ -174,6 +174,18 @@ class AccountService(
         // account) so a doomed request fails on "wrong state" rather than a balance lookup it
         // was never going to need.
         val closed = account.close(clock)
+        // KNOWN LIMITATIONS (flagged for review, not silently swept under the guard):
+        //  1. This is a point-in-time balance read, not a lock — a credit that settles between
+        //     this check and accountRepository.update() below still lands on the now-CLOSED
+        //     account. account-service's own optimistic version check (AccountUpdateConflict-
+        //     Exception) does not cover this: the race is against balance-service state, not
+        //     this row's version.
+        //  2. It only sees CURRENT booked/reserved balance, not money already in flight to this
+        //     account — a future-dated standing order or an internal transfer sitting on its
+        //     documented value-date delay reads as zero here today and still executes later
+        //     against a closed account. Catching that needs a cross-service check (standing-
+        //     order-service, sepa-instant, etc.) that does not exist yet — out of scope for this
+        //     guard; closing this gap is a follow-up, not something this check can fix alone.
         val balances = balancePort.getByAccount(command.accountId)
         val notEmpty = balances.filter { it.booked.signum() != 0 || it.reserved.signum() != 0 }
         if (notEmpty.isNotEmpty()) {
@@ -499,6 +511,9 @@ class AccountUpdateConflictException(message: String, cause: Throwable? = null) 
  * the account moves to CLOSED and stops appearing anywhere a customer or ops person would think
  * to look for it. [closeAccount] refuses rather than closing anyway; the caller must move the
  * balance out (or open a dispute) first.
+ *
+ * Best-effort, not a guarantee: see the KNOWN LIMITATIONS note at the [closeAccount] call site
+ * for the point-in-time race and the in-flight-money gap this check does not cover.
  */
 class AccountNotEmptyException(message: String) : RuntimeException(message)
 
