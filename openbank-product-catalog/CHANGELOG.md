@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.1...product-catalog-v0.13.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **product-catalog:** three native-image defects blocking main-red [#4797](https://github.com/JiRaska/open-bank-oss/issues/4797) ([#5028](https://github.com/JiRaska/open-bank-oss/issues/5028)) ([f757efa](https://github.com/JiRaska/open-bank-oss/commit/f757efa7f2a8d3975db45afa12d61e9a4921dd1b))
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.0...product-catalog-v0.13.1) (2026-08-16)
 
 

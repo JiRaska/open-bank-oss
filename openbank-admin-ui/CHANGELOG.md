@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.145.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.144.0...admin-ui-v0.145.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify operational workspaces ([#5045](https://github.com/JiRaska/open-bank-oss/issues/5045)) ([042e263](https://github.com/JiRaska/open-bank-oss/commit/042e263508ca967f3587a3c690ca31a7a9a59ff3))
+
+
+### Bug Fixes
+
+* **admin-ui:** make campaign preview CTA non-interactive ([#5027](https://github.com/JiRaska/open-bank-oss/issues/5027)) ([f89e568](https://github.com/JiRaska/open-bank-oss/commit/f89e568f4d762366a2e9d6bc41648b4b7460ffec))
+
 ## [0.144.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.143.1...admin-ui-v0.144.0) (2026-08-16)
 
 
