@@ -11,6 +11,7 @@ import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 
 interface Dispute {
   id: string; referenceNumber: string; disputeType: string; status: string
@@ -37,13 +38,6 @@ export default function DisputesPage() {
   const resolved = disputes.filter(d => ['RESOLVED', 'CLOSED', 'CHARGEBACK_ISSUED'].includes(d.status))
   const slaBreached = disputes.filter(d => d.slaDeadline && new Date(d.slaDeadline) < new Date() && !['RESOLVED', 'CLOSED'].includes(d.status))
 
-  const statusBadgeClass = (s: string) => {
-    if (['RESOLVED', 'CLOSED'].includes(s)) return 'badge badge-success'
-    if (['CHARGEBACK_ISSUED'].includes(s)) return 'badge badge-warning'
-    if (['REJECTED'].includes(s)) return 'badge badge-danger'
-    return 'badge badge-info'
-  }
-
   const slaStatus = (deadline: string, status: string) => {
     if (['RESOLVED', 'CLOSED'].includes(status)) return null
     if (!deadline) return null
@@ -58,16 +52,11 @@ export default function DisputesPage() {
   return (
     <AuthGuard permission="compliance:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div className="page-header" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-          <div>
-            <h1 className="page-title">
-              {t('Reklamace & Spory', 'Disputes & Complaints')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Správa sporů — chargeback · SLA 45 dní · PSD2 čl. 73', 'Dispute management — chargeback · SLA 45 days · PSD2 Art. 73')}
-            </p>
-          </div>
-          <ServiceStatusBadge
+        <PageHeader
+          title={t('Reklamace & Spory', 'Disputes & Complaints')}
+          subtitle={t('Správa sporů — chargeback · SLA 45 dní · PSD2 čl. 73', 'Dispute management — chargeback · SLA 45 days · PSD2 Art. 73')}
+          icon={<MessageSquareWarning size={18} aria-hidden="true" />}
+          actions={<ServiceStatusBadge
             label="dispute-service :8135"
             loading={loading}
             waking={waking}
@@ -78,8 +67,8 @@ export default function DisputesPage() {
               down: t('dispute-service neodpovídá', 'dispute-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
             }}
-          />
-        </div>
+          />}
+        />
 
         {slaBreached.length > 0 && (
           <div style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px',
@@ -94,17 +83,12 @@ export default function DisputesPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Spory celkem', 'Total disputes'), value: disputes.length, icon: <MessageSquareWarning size={16} />, color: 'var(--accent)' },
-            { label: t('Otevřené', 'Open'), value: open.length, icon: <Clock size={16} />, color: 'var(--warning)' },
-            { label: t('Vyřešené', 'Resolved'), value: resolved.length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('SLA porušení', 'SLA breaches'), value: slaBreached.length, icon: <Timer size={16} />, color: 'var(--danger)' },
+            { label: t('Spory celkem', 'Total disputes'), value: disputes.length, icon: <MessageSquareWarning size={16} />, tone: undefined },
+            { label: t('Otevřené', 'Open'), value: open.length, icon: <Clock size={16} />, tone: 'warning' },
+            { label: t('Vyřešené', 'Resolved'), value: resolved.length, icon: <CheckCircle2 size={16} />, tone: 'success' },
+            { label: t('SLA porušení', 'SLA breaches'), value: slaBreached.length, icon: <Timer size={16} />, tone: 'danger' },
           ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
+            <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone as Tone | undefined} />
           ))}
         </div>
 
@@ -143,7 +127,7 @@ export default function DisputesPage() {
                       {(d.amount ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {d.currency}
                     </td>
                     <td>
-                      <span className={statusBadgeClass(d.status)}>{d.status}</span>
+                      <StatusBadge status={d.status} />
                     </td>
                     <td>{slaStatus(d.slaDeadline, d.status)}</td>
                     <td style={{ color: 'var(--text-tertiary)' }}>{d.createdAt ? new Date(d.createdAt).toLocaleString('cs-CZ') : '—'}</td>
