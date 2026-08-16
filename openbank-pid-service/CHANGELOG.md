@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.16](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.15...pid-service-v0.8.16) (2026-08-16)
+
+
+### Bug Fixes
+
+* **pid:** track trusted-list refresh liveness ([#5085](https://github.com/JiRaska/open-bank-oss/issues/5085)) ([bea782f](https://github.com/JiRaska/open-bank-oss/commit/bea782f0af29b04dee0d25233454205138bc4d03))
+
 ## [0.8.15](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.14...pid-service-v0.8.15) (2026-08-09)
 
 
