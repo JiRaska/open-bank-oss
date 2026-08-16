@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.141.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.140.0...admin-ui-v0.141.0) (2026-08-16)
+
+
+### Features
+
+* **product-catalog:** govern bundles and private offers ([#4969](https://github.com/JiRaska/open-bank-oss/issues/4969)) ([f2d2f45](https://github.com/JiRaska/open-bank-oss/commit/f2d2f45117b89c2c28861fa9b7ff6d7751c9e64e))
+
 ## [0.140.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.139.0...admin-ui-v0.140.0) (2026-08-16)
 
 
