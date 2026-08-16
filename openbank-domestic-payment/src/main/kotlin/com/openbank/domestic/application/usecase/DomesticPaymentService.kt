@@ -24,6 +24,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
+import java.time.Duration
 import java.time.Instant
 import java.util.Locale
 import java.util.UUID
@@ -68,6 +69,13 @@ class DomesticPaymentService(
         private const val PAYMENT_STATUS_CHANGED_EVENT = "domestic.payment.status-changed"
 
         private const val OWN_BANK_CODE = "0000"
+
+        private val TERMINAL_STATUSES = setOf(
+            DomesticPaymentStatus.SETTLED,
+            DomesticPaymentStatus.REJECTED,
+            DomesticPaymentStatus.RETURNED,
+            DomesticPaymentStatus.CANCELLED,
+        )
     }
 
     /** Derive transferScope server-side — never trust the value from the client. */
@@ -189,6 +197,27 @@ class DomesticPaymentService(
         } catch (ex: IllegalArgumentException) {
             throw InvalidDomesticPaymentStateTransitionException(
                 ex.message ?: "Invalid domestic payment state transition",
+            )
+        }
+
+        // Only paymentSubmitted() was ever called for this rail (createPayment, above) --
+        // paymentCompleted()/paymentProcessingDuration() had no call site anywhere in this file, so
+        // openbank_payments_completed_total{type="domestic",...} and
+        // openbank_payment_processing_duration_seconds{type="domestic",...} could never have a
+        // sample regardless of how much domestic-payment traffic occurred (issue #5049). "settled"
+        // matches sepa-instant's existing convention for the same terminal concept -- both are
+        // covered by openbank-payment-sla's outcome=~"completed|settled" already, so no dashboard
+        // change is needed to read it.
+        if (updated.status in TERMINAL_STATUSES) {
+            val outcome = when (updated.status) {
+                DomesticPaymentStatus.SETTLED -> "settled"
+                else -> updated.status.name.lowercase()
+            }
+            metrics.paymentCompleted("domestic", updated.currency, outcome)
+            metrics.paymentProcessingDuration(
+                "domestic",
+                outcome,
+                Duration.between(updated.createdAt, Instant.now(clock)),
             )
         }
 

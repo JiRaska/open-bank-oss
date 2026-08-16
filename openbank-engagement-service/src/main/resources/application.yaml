@@ -21,8 +21,11 @@ quarkus:
     auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
     client-id: openbank-services
   # Outbound M2M token for the consent-service check (ContactPolicyGate's consent port).
+  # Its inbound block two lines up reads KEYCLOAK_URL, which is what the workload sets; this
+  # one read QUARKUS_OIDC_AUTH_SERVER_URL, which it does not — so the outbound URL silently
+  # fell back to localhost, i.e. this pod, and the consent check went out unauthenticated.
   oidc-client:
-    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080}/realms/openbank
+    auth-server-url: ${KEYCLOAK_URL:http://localhost:8080}/realms/openbank
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}

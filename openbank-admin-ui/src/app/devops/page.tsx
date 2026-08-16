@@ -19,6 +19,7 @@ import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { QualityGateHealthPanel } from '@/components/devops/QualityGateHealthPanel'
 import type { TestResultsResponse, ServiceTestResult } from '@/lib/types/test-results'
 import type { DevOpsFinding } from '@/app/api/devops/insights/route'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -315,24 +316,12 @@ function DevOpsContent() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-      {/* Header */}
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">DevOps</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '8px 0 4px', letterSpacing: '-0.03em' }}>
-            {t('DevOps metriky', 'DevOps Metrics')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            {t(
-              'DORA metriky, pokrytí testy a zdraví pipeline — Google State of DevOps 2023',
-              'DORA metrics, test coverage, and pipeline health — Google State of DevOps 2023',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">DevOps</span></div>}
+        icon={<GitBranch size={20} aria-hidden="true" />}
+        title={t('DevOps metriky', 'DevOps Metrics')}
+        subtitle={t('DORA metriky, pokrytí testy a zdraví pipeline — Google State of DevOps 2023', 'DORA metrics, test coverage, and pipeline health — Google State of DevOps 2023')}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           {dora && (
             <div style={{ display: 'flex', gap: '6px' }}>
               <SourceChip available={dora.sources.git} label="Git" />
@@ -354,8 +343,8 @@ function DevOpsContent() {
             <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !dora ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>

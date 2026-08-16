@@ -267,7 +267,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md) | Perpetual KYC: event-driven re-screening between periodic reviews | Proposed | Planned | kyc,aml-sanctions,kafka,ai-agents | — |
 | [0257](0257-industry-neutral-product-catalog-kernel-and-standalone-distribution.md) | Industry-neutral product catalog kernel and standalone distribution | Accepted | Shipped | product-catalog,architecture,api-contract,database | — |
 | [0258](0258-trusted-json-schema-profile-for-industry-packs.md) | Trusted JSON Schema profile for industry packs | Accepted | Shipped | product-catalog,api-contract,security | — |
-| [0259](0259-ai-assisted-product-catalog-authoring-and-offer-intelligence.md) | AI-assisted product-catalog authoring and offer intelligence | Accepted | Partial | product-catalog,ai-agents,governance,compliance | — |
+| [0259](0259-ai-assisted-product-catalog-authoring-and-offer-intelligence.md) | AI-assisted product-catalog authoring and offer intelligence | Accepted | Shipped | product-catalog,ai-agents,governance,compliance | — |
 
 ## By tag
 

@@ -9,6 +9,7 @@ import { ScrollText, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const AUDIT_SERVICE = '/api/svc/audit-service'
 
@@ -57,19 +58,12 @@ export default function AuditPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Auditní log', 'Audit Log')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ScrollText size={18} style={{ color: 'var(--accent)' }} />
-            {t('Auditní log', 'Audit Log')}
-          </h1>
-          <p className="page-subtitle">{t('Neměnný auditní záznam pro všechny entity platformy', 'Immutable audit trail for all platform entities')}</p>
-        </div>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Auditní log', 'Audit Log')}</span></div>}
+        icon={<ScrollText size={18} aria-hidden="true" />}
+        title={t('Auditní log', 'Audit Log')}
+        subtitle={t('Neměnný auditní záznam pro všechny entity platformy', 'Immutable audit trail for all platform entities')}
+      />
 
       {/* Search */}
       <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>

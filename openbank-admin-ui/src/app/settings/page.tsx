@@ -10,6 +10,7 @@ import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { ROLE_LABELS } from '@/lib/auth/roles'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 type Tab = 'profile' | 'notifications' | 'security' | 'api' | 'regional'
 
@@ -20,17 +21,12 @@ export default function SettingsPage() {
   return (
     <AuthGuard permission="settings:view">
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Nastavení', 'Settings')}</span>
-          </div>
-          <h1 className="page-title">{t('Nastavení', 'Settings')}</h1>
-          <p className="page-subtitle">{t('Spravujte předvolby účtu a konfiguraci systému', 'Manage your account preferences and system configuration')}</p>
-        </div>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Nastavení', 'Settings')}</span></div>}
+        icon={<User size={20} aria-hidden="true" />}
+        title={t('Nastavení', 'Settings')}
+        subtitle={t('Spravujte předvolby účtu a konfiguraci systému', 'Manage your account preferences and system configuration')}
+      />
 
       <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
         {/* Sidebar nav */}

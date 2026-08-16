@@ -107,7 +107,22 @@ def artifact_set(path: pathlib.Path) -> set[str]:
 
 # `--write-verification-metadata` OOMs at Gradle's default heap: measured, it dies
 # with `Java heap space` even on a single module. This is not optional tuning.
-GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx6g"
+#
+# 6g was not enough either (#4907): `openbank-libs-runtime` — the largest shared dependency graph
+# in the tree — still died with `Java heap space` under
+# `--refresh-dependencies --write-verification-metadata sha256`, twice, including a clean re-run.
+# That blocks a required context on ANY pull request that touches a libs module's build file.
+#
+# Before raising it, the mechanism was verified rather than assumed: `org.gradle.jvmargs` passed as
+# `-D` on the command line is a classic place for a setting to be silently dropped. An init script
+# printing the build JVM's Runtime.maxMemory() reports 6144 MB with this flag and 3072 MB without
+# it (the gradle.properties default), so the value does reach the build JVM. The flag works; the
+# number was too small.
+#
+# 8g is a STEP, not a measured threshold — the local reproduction needed to find the real figure did
+# not complete. `ubuntu-latest` has 16 GB, so 8g leaves headroom for the launcher and the Kotlin
+# daemons. If this recurs, raise the number; do not re-litigate whether the flag applies.
+GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx8g"
 
 
 def regenerate(modules: list[str]) -> None:

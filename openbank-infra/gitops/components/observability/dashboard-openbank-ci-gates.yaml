@@ -183,10 +183,29 @@ data:
           "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
         },
         {
+          "id": 20,
+          "type": "stat",
+          "title": "Budget coverage — gates declaring budget_seconds (denominator for panel 7)",
+          "description": "Reads `N / M declare a budget`. M counts gates OBSERVED running in the last 30 days, not the gate estate: a gate that never ran appears in neither number, so M is itself a lower bound and the estate total lives in .github/gates/gates.yaml. Both figures are QUERIED rather than written down, because a hand-kept denominator is exactly what lets a narrow subject set read as fleet-wide once it drifts. Panel 7 and any alert built on it see only the N.",
+          "gridPos": { "x": 0, "y": 35, "w": 12, "h": 3 },
+          "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+          "targets": [
+            {
+              "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
+              "refId": "A",
+              "editorType": "sql",
+              "format": 2,
+              "rawSql": "SELECT concat(toString(countDistinctIf(gate_id, has_budget)), ' / ', toString(countDistinct(gate_id)), ' declare a budget') AS value FROM (SELECT gate_id, max(budget_seconds IS NOT NULL) AS has_budget FROM openbank_analytics.ci_gate_runs WHERE run_created_at >= now() - INTERVAL 30 DAY GROUP BY gate_id)"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "none" }, "overrides": [] },
+          "options": { "textMode": "value", "colorMode": "none" }
+        },
+        {
           "id": 7,
           "type": "timeseries",
           "title": "Shard p95 wall time vs its declared budget (ADR-0255 alert candidate)",
-          "description": "One line per shard's slowest gate p95 against the SUM of that shard's own gates' budget_seconds (only gates that declare one). A shard whose p95 crosses its budget line is the shape run-gates.py's own budget_seconds field exists to catch — see gates.yaml's `budget_seconds:` comments for why it is enforced only under CI, not here: this panel is advisory trend, not a gate.",
+          "description": "One line per shard's slowest gate p95 against the LARGEST declared budget_seconds among that shard's gates. SUBJECT SET IS NARROW — see the `Budget coverage` panel beside this one for how many gates actually declare a budget; a shard's line is drawn from those gates only, and a shard whose gates all lack one has no line at all rather than a passing one. The budget line is a MAX, not a sum: series A is the p95 of each run's SLOWEST gate, gates in a shard run concurrently, and summing N budgets against a max-based observation makes the threshold roughly N times too lenient — as drawn that way it could hardly ever cross, which reads as healthy. See gates.yaml's `budget_seconds:` comments for why the budget is enforced only under CI, not here: this panel is advisory trend, not a gate.",
           "gridPos": { "x": 12, "y": 29, "w": 12, "h": 9 },
           "datasource": { "type": "grafana-clickhouse-datasource", "uid": "clickhouse" },
           "targets": [
@@ -202,7 +221,7 @@ data:
               "refId": "B",
               "editorType": "sql",
               "format": 1,
-              "rawSql": "SELECT now() AS time, shard, sum(gate_budget) AS budget_line FROM (SELECT DISTINCT shard, gate_id, argMax(budget_seconds, run_created_at) AS gate_budget FROM openbank_analytics.ci_gate_runs WHERE budget_seconds IS NOT NULL GROUP BY shard, gate_id) GROUP BY shard"
+              "rawSql": "SELECT now() AS time, shard, max(gate_budget) AS budget_line FROM (SELECT DISTINCT shard, gate_id, argMax(budget_seconds, run_created_at) AS gate_budget FROM openbank_analytics.ci_gate_runs WHERE budget_seconds IS NOT NULL GROUP BY shard, gate_id) GROUP BY shard"
             }
           ],
           "fieldConfig": {

@@ -22,6 +22,7 @@ import com.openbank.productcatalog.domain.SavingsConfig
 import com.openbank.productcatalog.domain.TermDepositConfig
 import com.openbank.productcatalog.domain.TermsAndConditions
 import com.openbank.productcatalog.domain.WithdrawalNotice
+import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
 import io.quarkus.runtime.annotations.RegisterForReflection
 
 /**
@@ -31,6 +32,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection
 @RegisterForReflection(
     targets = [
         Product::class,
+        CatalogChangeEvent::class,
         Fee::class,
         InterestTier::class,
         CardConfig::class,
