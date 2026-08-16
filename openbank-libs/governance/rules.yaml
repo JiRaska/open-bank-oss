@@ -1476,12 +1476,6 @@ scheduled_methods:
   # idiom as the ktlint/detekt baselines and event_consumer_liveness.allowlist. A stale entry
   # is itself a violation.
   runblocking_allowlist:
-    - method: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt#scheduledSweep"
-      reason: >-
-        agent-service has NO Hibernate Reactive on its classpath (build.gradle.kts: the
-        proposals store is plain Agroal JDBC, deliberately not the reactive stack). The sweep
-        drives blocking OPA/MCP/LLM clients and needs to stay on a worker thread — the same
-        bridge ChatEndpoint uses. `suspend` here would move blocking I/O onto an event loop.
     - method: "openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ReconciliationJob.kt#scheduled"
       reason: >-
         analytics-sink deliberately DROPS hibernate-reactive-panache, reactive-pg-client and
