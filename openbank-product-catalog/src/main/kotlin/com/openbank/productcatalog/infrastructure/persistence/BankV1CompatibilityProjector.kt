@@ -35,7 +35,9 @@ class BankV1CompatibilityProjector(
     private val clock: Clock,
 ) {
     fun ensureMapped(session: Mutiny.Session, product: Product, legacyCode: String?, actorId: String): Uni<Boolean> =
-        session.find(BankV1ProductMappingEntity::class.java, UUID.fromString(product.id)).flatMap { existing ->
+        lockLegacyProduct(session, product).flatMap {
+            session.find(BankV1ProductMappingEntity::class.java, UUID.fromString(product.id))
+        }.flatMap { existing ->
             if (existing == null) {
                 createMapping(session, product, legacyCode, actorId).replaceWith(true)
             } else {
@@ -43,8 +45,41 @@ class BankV1CompatibilityProjector(
             }
         }
 
+    /**
+     * Serialises "is this legacy product mapped yet?" against every other reconciler, by taking the
+     * row lock on `products` BEFORE reading `bank_v1_product_mapping`.
+     *
+     * Without it the check is a read-then-insert with no mutual exclusion: two reconcilers each read
+     * "no mapping" under READ COMMITTED (neither sees the other's uncommitted rows) and both run
+     * [createMapping], whose first INSERT is `catalog_specifications` keyed by the canonical product
+     * id — so the loser dies on `catalog_specifications_pkey`. That is not hypothetical timing: a pod
+     * runs the [BankV1CompatibilityBackfill] startup pass and its scheduled reconciliation, and a
+     * rolling deploy or a KEDA 0 -> N scale-up runs the startup pass on every replica at once.
+     *
+     * Locking rather than tolerating the unique violation is deliberate. The loser blocks, and once
+     * the winner commits it re-reads and finds the mapping, so it reconciles instead of skipping —
+     * whereas swallowing a 23505 would also swallow the genuinely broken state where a specification
+     * exists for a product that has no mapping, which must still fail loudly. Same lock order as
+     * [projectLegacy], so the two cannot deadlock. See [ProductCatalogSeeder] for the sibling race on
+     * the seed itself, which is tolerated instead because its loser has nothing left to do.
+     *
+     * Locks through a query, NOT `session.find(entity, id, PESSIMISTIC_WRITE)`: for an entity already
+     * managed in this session, that form emits a version-checked lock statement that names the
+     * `@Version` **property** rather than its column — `... where id = $1 and revision = $2 for no key
+     * update` against a table whose column is `row_version` — so every call fails with
+     * `column "revision" does not exist (42703)`. [projectLegacy] already uses this query form.
+     */
+    private fun lockLegacyProduct(session: Mutiny.Session, product: Product): Uni<ProductEntity?> = session.createQuery(
+        "FROM ProductEntity WHERE id = :id",
+        ProductEntity::class.java,
+    ).setParameter("id", UUID.fromString(product.id))
+        .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+        .singleResultOrNull
+
     fun syncDraft(session: Mutiny.Session, previous: Product, product: Product, actorId: String): Uni<Void> =
-        session.find(BankV1ProductMappingEntity::class.java, UUID.fromString(product.id)).flatMap { existing ->
+        lockLegacyProduct(session, product).flatMap {
+            session.find(BankV1ProductMappingEntity::class.java, UUID.fromString(product.id))
+        }.flatMap { existing ->
             if (existing == null) {
                 createMapping(session, product, null, actorId)
             } else {
