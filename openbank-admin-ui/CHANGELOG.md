@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.147.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.146.0...admin-ui-v0.147.0) (2026-08-16)
+
+
+### Features
+
+* **catalog:** explain safe offer matches ([#5057](https://github.com/JiRaska/open-bank-oss/issues/5057)) ([bff6e61](https://github.com/JiRaska/open-bank-oss/commit/bff6e614bd886a7b91fc62e1b3d7e715ce55208b))
+
 ## [0.146.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.145.0...admin-ui-v0.146.0) (2026-08-16)
 
 
