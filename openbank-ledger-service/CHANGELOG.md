@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.2...ledger-service-v1.21.0) (2026-08-15)
+
+
+### Features
+
+* **ledger:** persist frozen trial balance evidence ([#4826](https://github.com/JiRaska/open-bank-oss/issues/4826)) ([22d8120](https://github.com/JiRaska/open-bank-oss/commit/22d812083c1c1f5d177e4718bdb1e95e12c6f06e))
+
 ## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.20.1...ledger-service-v1.20.2) (2026-08-13)
 
 

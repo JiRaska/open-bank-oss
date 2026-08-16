@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.5...finrep-service-v0.7.0) (2026-08-15)
+
+
+### Features
+
+* **ledger:** persist frozen trial balance evidence ([#4826](https://github.com/JiRaska/open-bank-oss/issues/4826)) ([22d8120](https://github.com/JiRaska/open-bank-oss/commit/22d812083c1c1f5d177e4718bdb1e95e12c6f06e))
+
 ## [0.6.5](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.6.4...finrep-service-v0.6.5) (2026-08-07)
 
 
