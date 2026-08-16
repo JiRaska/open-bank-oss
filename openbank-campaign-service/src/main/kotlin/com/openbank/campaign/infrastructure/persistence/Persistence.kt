@@ -6,6 +6,7 @@ package com.openbank.campaign.infrastructure.persistence
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.campaign.application.port.out.AudienceRegistry
 import com.openbank.campaign.application.port.out.CampaignContentExperimentRepository
 import com.openbank.campaign.application.port.out.CampaignEngagementEvent
 import com.openbank.campaign.application.port.out.CampaignEngagementEventType
@@ -23,6 +24,8 @@ import com.openbank.campaign.application.port.out.ExperimentCohortMetrics
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.port.out.SendLogRepository
 import com.openbank.campaign.application.port.out.StepOutcomeCount
+import com.openbank.campaign.domain.model.Audience
+import com.openbank.campaign.domain.model.AudienceState
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignDecision
 import com.openbank.campaign.domain.model.CampaignSchedule
@@ -258,6 +261,17 @@ class SegmentEntity : PanacheEntityBase() {
 
     @Column(nullable = false)
     lateinit var createdAt: Instant
+
+    @Column(nullable = false, length = 32)
+    lateinit var state: String
+
+    @Column(nullable = false)
+    lateinit var createdBy: String
+
+    var approvedBy: String? = null
+
+    @Column(nullable = false)
+    lateinit var updatedAt: Instant
 }
 
 @ApplicationScoped
@@ -729,7 +743,10 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
      * approved campaign reaches, with no version bump and no trace.
      */
     override suspend fun load(name: String, version: Int): Segment? = SegmentCatalog.find(name, version)
-        ?: Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
+        ?: Panache.withSession {
+            find("name = ?1 and version = ?2 and state = ?3", name, version, AudienceState.APPROVED.name)
+                .firstResult<SegmentEntity>()
+        }
             .awaitSuspending()?.let { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
 
     override suspend fun save(segment: Segment): Segment {
@@ -741,6 +758,10 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
                     version = segment.version
                     rulesJson = SegmentRuleSerde.write(mapper, segment.rules)
                     createdAt = Instant.now()
+                    state = AudienceState.APPROVED.name
+                    createdBy = "legacy-catalogue"
+                    approvedBy = "legacy-catalogue"
+                    updatedAt = createdAt
                 },
             )
         }.awaitSuspending()
@@ -748,10 +769,67 @@ class PanacheSegmentRegistry(private val mapper: ObjectMapper) :
     }
 
     override suspend fun list(): List<Segment> {
-        val legacy = Panache.withSession { listAll() }.awaitSuspending()
+        val legacy = Panache.withSession { list("state", AudienceState.APPROVED.name) }.awaitSuspending()
             .map { Segment(it.name, it.version, SegmentRuleSerde.read(mapper, it.rulesJson)) }
         val catalogKeys = SegmentCatalog.ALL.map { it.name to it.version }.toSet()
         return SegmentCatalog.ALL + legacy.filterNot { (it.name to it.version) in catalogKeys }
+    }
+}
+
+/** Database-backed audiences are mutable only through their governed lifecycle. */
+@ApplicationScoped
+class PanacheAudienceRegistry(private val mapper: ObjectMapper) :
+    AudienceRegistry,
+    PanacheRepository<SegmentEntity> {
+
+    override suspend fun load(name: String, version: Int): Audience? =
+        SegmentCatalog.find(name, version)?.let(Audience::catalogue)
+            ?: Panache.withSession { find("name = ?1 and version = ?2", name, version).firstResult<SegmentEntity>() }
+                .awaitSuspending()?.toAudience(mapper)
+
+    override suspend fun list(): List<Audience> {
+        val stored = Panache.withSession { listAll() }.awaitSuspending().map { it.toAudience(mapper) }
+        val catalogueKeys = SegmentCatalog.ALL.map { it.name to it.version }.toSet()
+        return SegmentCatalog.ALL.map(Audience::catalogue) +
+            stored.filterNot { (it.segment.name to it.segment.version) in catalogueKeys }
+    }
+
+    override suspend fun nextVersion(name: String): Int {
+        val stored = Panache.withSession { list("name", name) }.awaitSuspending().map { it.version }
+        val catalogue = SegmentCatalog.ALL.filter { it.name == name }.map { it.version }
+        return (stored + catalogue).maxOrNull()?.plus(1) ?: 1
+    }
+
+    override suspend fun save(audience: Audience): Audience {
+        val existingId = Panache.withSession {
+            find("name = ?1 and version = ?2", audience.segment.name, audience.segment.version)
+                .firstResult<SegmentEntity>()
+        }.awaitSuspending()?.id
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session -> session.merge(audience.toEntity(mapper, existingId)) }
+        }.awaitSuspending()
+        return audience
+    }
+
+    private fun SegmentEntity.toAudience(mapper: ObjectMapper) = Audience(
+        segment = Segment(name, version, SegmentRuleSerde.read(mapper, rulesJson)),
+        state = AudienceState.valueOf(state),
+        createdBy = createdBy,
+        approvedBy = approvedBy,
+        createdAt = createdAt,
+        updatedAt = updatedAt,
+    )
+
+    private fun Audience.toEntity(mapper: ObjectMapper, existingId: UUID?) = SegmentEntity().apply {
+        id = existingId ?: Ids.newId()
+        name = segment.name
+        version = segment.version
+        rulesJson = SegmentRuleSerde.write(mapper, segment.rules)
+        state = this@toEntity.state.name
+        createdBy = this@toEntity.createdBy
+        approvedBy = this@toEntity.approvedBy
+        createdAt = this@toEntity.createdAt
+        updatedAt = this@toEntity.updatedAt
     }
 }
 

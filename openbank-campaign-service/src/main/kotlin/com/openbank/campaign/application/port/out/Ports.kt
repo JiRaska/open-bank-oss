@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.application.port.out
 
+import com.openbank.campaign.domain.model.Audience
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.ContentVariant
@@ -229,6 +230,18 @@ interface SegmentRegistry {
     suspend fun load(name: String, version: Int): Segment?
     suspend fun save(segment: Segment): Segment
     suspend fun list(): List<Segment>
+}
+
+/**
+ * Lifecycle store for marketer-authored audiences. Its approved projection is intentionally kept
+ * separate from [SegmentRegistry]: campaign execution must not accidentally load a draft merely
+ * because it has a valid typed rule shape.
+ */
+interface AudienceRegistry {
+    suspend fun load(name: String, version: Int): Audience?
+    suspend fun list(): List<Audience>
+    suspend fun nextVersion(name: String): Int
+    suspend fun save(audience: Audience): Audience
 }
 
 /** ADR-0210: evaluates a segment against the silver layer and returns matching party ids. */
