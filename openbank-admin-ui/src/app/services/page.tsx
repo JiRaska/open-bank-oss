@@ -11,6 +11,7 @@ import { BookOpen, FileText, ArrowRight, AlertCircle, Package } from 'lucide-rea
 import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { findService } from '@/lib/services/registry'
 
 // Static fallback / backlog base. The live list comes from the cluster at runtime
@@ -217,18 +218,11 @@ export default function ServicesDocsOverviewPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div>
-        <h1 style={{ fontSize: '24px', fontWeight: 300, margin: 0, letterSpacing: '-0.02em' }}>
-          <BookOpen size={20} style={{ display: 'inline', marginRight: '8px', verticalAlign: '-2px' }} />
-          {t('Dokumentace služeb', 'Service Documentation')}
-        </h1>
-        <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-          {t('Per-service business + technical + compliance dokumentace.',
-             'Per-service business + technical + compliance documentation.')} {' '}
-          {t('Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).',
-             'Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).')}
-        </div>
-      </div>
+      <PageHeader
+        icon={<BookOpen size={20} aria-hidden="true" />}
+        title={t('Dokumentace služeb', 'Service Documentation')}
+        subtitle={`${t('Per-service business + technical + compliance dokumentace.', 'Per-service business + technical + compliance documentation.')} ${t('Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).', 'Standard: arc42-lite + C4 + Backstage TechDocs file layout (markdown).')}`}
+      />
 
       {/* Summary banner */}
       <div style={{
