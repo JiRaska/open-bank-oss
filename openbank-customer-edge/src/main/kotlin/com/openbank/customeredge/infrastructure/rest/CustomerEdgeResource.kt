@@ -1402,6 +1402,58 @@ class CustomerEdgeResource(
         )
     }
 
+    // ─── Saved payees (TOP-10 #5) ──────────────────────────────────────────────
+    // Server side of the mobile app's device-local PayeeStore. Same shape as /profile above:
+    // party-scoped by the JWT party — never a client-supplied id — so a customer only ever
+    // reads/writes their own list (no IDOR).
+
+    @GET
+    @Path("/payees")
+    @Authorize(action = "customer.payees.read")
+    @Blocking
+    fun listPayees(): Response {
+        val customer = customer()
+        return upstream.get("$partyServiceUrl/api/v1/parties/${customer.partyId}/payees", customer.partyId.toString())
+    }
+
+    @PUT
+    @Path("/payees")
+    @Authorize(action = "customer.payees.write")
+    @Blocking
+    fun savePayee(body: String): Response {
+        val customer = customer()
+        // Re-serialize through Jackson (not raw string interpolation) — name/iban/bic are
+        // customer-authored free text and must be JSON-escaped, not spliced into a template.
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed payee request body")
+        val name = node.get("name")?.takeIf { it.isTextual }?.asText()
+            ?: return badRequest("Missing payee name")
+        val iban = node.get("iban")?.takeIf { it.isTextual }?.asText()
+            ?: return badRequest("Missing payee iban")
+        val forwarded = objectMapper.createObjectNode().apply {
+            put("name", name)
+            put("iban", iban)
+            node.get("bic")?.takeIf { it.isTextual }?.let { put("bic", it.asText()) }
+        }
+        return upstream.put(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/payees",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(forwarded),
+        )
+    }
+
+    @DELETE
+    @Path("/payees/{iban}")
+    @Authorize(action = "customer.payees.write")
+    @Blocking
+    fun deletePayee(@PathParam("iban") iban: String): Response {
+        val customer = customer()
+        return upstream.delete(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/payees/$iban",
+            customer.partyId.toString(),
+        )
+    }
+
     /**
      * Pay-to-phone directory lookup. The app sends SHA-256 hashes of phone numbers from the
      * customer's own address book and gets back the subset belonging to parties who opted into
