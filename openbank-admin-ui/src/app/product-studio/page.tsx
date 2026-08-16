@@ -17,6 +17,7 @@ import {
   removeOfferingRelationship,
   type MarketContextInput,
 } from '@/lib/catalog-offer-composition'
+import { proposeBundleComponents } from '@/lib/catalog-bundle-proposals'
 import { selectOffersForMarket } from '@/lib/catalog-offer-selection'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
@@ -126,6 +127,12 @@ export default function ProductStudioPage() {
   const relationshipCandidates = useMemo(
     () => offerings.filter(item => item.id !== selectedOffering?.id),
     [offerings, selectedOffering?.id],
+  )
+  const bundleProposals = useMemo(
+    () => selectedOffering
+      ? proposeBundleComponents(selectedOffering, offerings, draftRelationships.map(item => item.targetOfferingId))
+      : [],
+    [draftRelationships, offerings, selectedOffering],
   )
   const compatibleSchemas = useMemo(
     () => schemas.filter(item => !selectedSpec || item.id === selectedSpec.schemaRef.id),
@@ -268,6 +275,19 @@ export default function ProductStudioPage() {
     setDraftText(JSON.stringify(removeOfferingRelationship(parsedDraft, relationship), null, 2))
     setValidationState('idle')
     setReview(null)
+  }
+
+  const applyBundleProposal = (targetOfferingId: string) => {
+    if (!parsedDraft || !selectedOffering) return
+    try {
+      setDraftText(JSON.stringify(addOfferingRelationship(parsedDraft, selectedOffering.id, {
+        kind: 'BUNDLE', targetOfferingId,
+      }), null, 2))
+      setValidationState('idle')
+      setReview(null)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
   }
 
   const createDraft = () => {
@@ -429,6 +449,18 @@ export default function ProductStudioPage() {
                 <select className="input" value={relationshipKind} onChange={event => setRelationshipKind(event.target.value as RelationshipKind)}>{relationshipKinds.map(kind => <option key={kind}>{kind}</option>)}</select>
                 <select className="input" value={relationshipTargetId} onChange={event => setRelationshipTargetId(event.target.value)}><option value="">{t('Vyberte nabídku', 'Select an offer')}</option>{relationshipCandidates.map(item => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
                 <button className="btn btn-secondary" disabled={!relationshipTargetId} onClick={addRelationship}><Plus size={13} />{t('Přidat', 'Add')}</button>
+              </div>}
+              {selectedRevision?.state === 'DRAFT' && <div className={styles.bundleProposals}>
+                <div className={styles.bundleProposalsHead}>
+                  <span><Sparkles size={13} />{t('Doporučené komponenty', 'Suggested components')}</span>
+                  <small>{t('Deterministicky podle kompatibility trhu; návrh nic sám neuloží.', 'Deterministic market compatibility only; a proposal never saves itself.')}</small>
+                </div>
+                {bundleProposals.length === 0
+                  ? <div className={styles.bundleProposalEmpty}>{t('Žádná další bezpečně kompatibilní komponenta.', 'No further safely compatible component.')}</div>
+                  : <div className={styles.bundleProposalList}>{bundleProposals.slice(0, 3).map(proposal => <div className={styles.bundleProposal} key={proposal.offering.id}>
+                    <div><strong>{proposal.offering.code}</strong><small>{proposal.reasons.slice(0, 2).join(' · ')}</small></div>
+                    <button className="btn btn-secondary" onClick={() => applyBundleProposal(proposal.offering.id)}><Plus size={13} />{t('Navrhnout', 'Propose')}</button>
+                  </div>)}</div>}
               </div>}
               {draftRelationships.length === 0 ? <div className={styles.compositionEmpty}>{t('Žádné vazby. Samostatná nabídka zůstává beze změny.', 'No connections. A standalone offer remains unchanged.')}</div> : <div className={styles.relationships}>{draftRelationships.map(relationship => {
                 const target = offerings.find(item => item.id === relationship.targetOfferingId)

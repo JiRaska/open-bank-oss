@@ -64,6 +64,18 @@
 .compositionHead p { margin: 4px 0 0; color: #52607b; font-size: 10px; line-height: 1.45; }
 .compositionControls { display: grid; grid-template-columns: 118px minmax(0, 1fr) auto; gap: 7px; margin-top: 10px; }
 .compositionControls select { min-width: 0; font-size: 11px; }
+.bundleProposals { margin-top: 10px; padding: 9px; border: 1px dashed #b9c9e6; border-radius: 10px; background: rgba(255,255,255,.56); }
+.bundleProposalsHead { display: grid; gap: 3px; }
+.bundleProposalsHead span { display: inline-flex; align-items: center; gap: 6px; color: #3730a3; font-size: 11px; font-weight: 800; }
+.bundleProposalsHead small { color: #5b5b86; font-size: 10px; line-height: 1.4; }
+.bundleProposalEmpty { margin-top: 7px; color: var(--text-tertiary); font-size: 10px; }
+.bundleProposalList { display: grid; gap: 5px; margin-top: 8px; }
+.bundleProposal { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px; border: 1px solid #d6dfef; border-radius: 8px; background: white; }
+.bundleProposal > div { min-width: 0; }
+.bundleProposal strong, .bundleProposal small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bundleProposal strong { color: var(--text-primary); font-size: 11px; }
+.bundleProposal small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; }
+.bundleProposal button { flex: 0 0 auto; padding: 6px 8px; font-size: 10px; }
 .compositionEmpty { margin-top: 9px; color: var(--text-tertiary); font-size: 10px; }
 .relationships { display: grid; gap: 5px; margin-top: 9px; }
 .relationship { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 8px; border: 1px solid #d6dfef; border-radius: 8px; background: rgba(255,255,255,.75); color: var(--text-secondary); font-size: 11px; }
