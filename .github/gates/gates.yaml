@@ -2267,24 +2267,24 @@ gates:
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
-  # ADVISORY until rules.yaml change_classes.db_change flips to enforced
-  # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
+  # ENFORCED after the 2026-08-15 ADR-0144 graduation target: a migration must
+  # carry a rollback note and never edit an applied checksum.
   # Covers BOTH halves of db_change.require: an added migration carries a
   # `-- Rollback:` note, and an already-committed migration is not edited
   # (Flyway checksums the whole file — an edit to an applied migration fails
   # startup with `checksum mismatch`). PR-only and diff-scoped against the
   # resolved PR diff base, same as api-contract above.
   - id: db-migration-gate
-    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
+    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, enforced)"
     group: data
-    mode: advisory
-    verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
+    mode: enforced
+    verified: "2026-08-16 — producer self-test and enforced PR-diff mode pass"
     when: pull_request
     needs_base: required
     selftest: python3 openbank-infra/scripts/check-db-migration.py --self-test
     selftest_expect: pass
     run: |
-      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
+      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}" --enforce
 
   # contract is the set of Kotlin data classes extending DomainEvent (JSON on
   # Kafka via the outbox; no .avsc files exist yet — the script covers those
