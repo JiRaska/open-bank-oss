@@ -11,6 +11,9 @@ import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatCard } from '@/components/ui/StatCard'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 
 interface ClearingBatch {
   id: string; batchReference: string; paymentRail: string; status: string
@@ -36,25 +39,14 @@ export default function ClearingPage() {
   const pending = batches.filter(b => b.status === 'PENDING' || b.status === 'PROCESSING')
   const totalVolume = batches.reduce((s, b) => s + (b.totalAmount ?? 0), 0)
 
-  const statusColor = (s: string) => {
-    if (s === 'SETTLED') return { bg: 'var(--success-bg)', text: 'var(--success-text)', border: 'var(--success-border)' }
-    if (s === 'FAILED') return { bg: 'var(--danger-bg)', text: 'var(--danger-text)', border: 'var(--danger-border)' }
-    return { bg: 'var(--warning-bg)', text: 'var(--warning-text)', border: 'var(--warning-border)' }
-  }
-
   return (
     <AuthGuard permission="payments:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Zúčtování & Vypořádání', 'Clearing & Settlement')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Mezibankovní zúčtování — SEPA · SWIFT · Domestic netting', 'Interbank clearing — SEPA · SWIFT · Domestic netting')}
-            </p>
-          </div>
-          <ServiceStatusBadge
+        <PageHeader
+          icon={<Layers size={20} aria-hidden="true" />}
+          title={t('Zúčtování & Vypořádání', 'Clearing & Settlement')}
+          subtitle={t('Mezibankovní zúčtování — SEPA · SWIFT · Domestic netting', 'Interbank clearing — SEPA · SWIFT · Domestic netting')}
+          actions={<ServiceStatusBadge
             label="clearing-service :8124"
             loading={loading}
             waking={waking}
@@ -65,23 +57,16 @@ export default function ClearingPage() {
               down: t('clearing-service neodpovídá', 'clearing-service is not responding'),
               checking: t('Zjišťuji stav služby…', 'Checking service…'),
             }}
-          />
-        </div>
+          />}
+        />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} />, color: 'var(--accent)' },
-            { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} />, color: 'var(--warning)' },
-            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }), icon: <Banknote size={16} />, color: 'var(--accent-2)' },
-          ].map(k => (
-            <div key={k.label} className="stat-card">
-              <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
-                display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
-              <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em' }}>{k.value}</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontWeight: 500 }}>{k.label}</div>
-            </div>
-          ))}
+            { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} /> },
+            { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} />, tone: 'success' as const },
+            { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} />, tone: 'warning' as const },
+            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }), icon: <Banknote size={16} /> },
+          ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
         </div>
 
         <div className="card">
@@ -112,7 +97,6 @@ export default function ClearingPage() {
                 ))}
               </tr></thead>
               <tbody>{filtered.map(b => {
-                const sc = statusColor(b.status)
                 return (
                   <tr key={b.id} style={{ borderBottom: '1px solid var(--border)' }}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
@@ -122,9 +106,7 @@ export default function ClearingPage() {
                     <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)' }}>{b.itemCount}</td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(b.totalAmount ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })}</td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.currency}</td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{b.status}</span>
-                    </td>
+                    <td style={{ padding: '12px 16px' }}><StatusBadge status={b.status} tone={b.status === 'FAILED' ? 'danger' : b.status === 'SETTLED' ? 'success' : 'warning'} /></td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{b.createdAt ? new Date(b.createdAt).toLocaleString('cs-CZ') : '—'}</td>
                   </tr>
                 )
