@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.135.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.1...admin-ui-v0.135.2) (2026-08-15)
+
+
+### Bug Fixes
+
+* **admin-ui:** show unavailable AI review ([#4910](https://github.com/JiRaska/open-bank-oss/issues/4910)) ([ae579a8](https://github.com/JiRaska/open-bank-oss/commit/ae579a8ad4d092caabe7a6a43ce3974a0ab84396))
+
 ## [0.135.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.0...admin-ui-v0.135.1) (2026-08-15)
 
 
