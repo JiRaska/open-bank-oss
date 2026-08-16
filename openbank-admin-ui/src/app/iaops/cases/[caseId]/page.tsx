@@ -7,10 +7,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, Bot, CheckCircle2, CircleDot, FileText, Flag, GitMerge, RefreshCw, Sparkles, TriangleAlert } from 'lucide-react'
+import { ArrowLeft, Bot, CheckCircle2, CircleDot, FileText, Flag, GitMerge, RefreshCw, Sparkles, TriangleAlert, UsersRound } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
 
 type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED'
 type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
@@ -169,6 +170,64 @@ export default function IaopsCaseThreadPage() {
             <span>{t('Deadline', 'Deadline')}: <strong style={{ color: 'var(--text-secondary)' }}>{fmt(thread.deadlineAtEpochMs)}</strong></span>
             <span>{t('Míra sporu', 'Contested rate')}: <strong style={{ color: 'var(--text-secondary)' }}>{Math.round(thread.contestedRate * 100)} %</strong></span>
           </div>
+
+          {(() => {
+            const brief = deriveCaseDecisionBrief(thread)
+            const stage = brief.stage === 'proposal_recorded'
+              ? {
+                  title: t('Návrh zaznamenán ve vlákně', 'Proposal recorded in the thread'),
+                  detail: t('Koordinátor vytvořil proposal event. Stav doručení a lidského rozhodnutí tato stránka nesleduje.', 'The coordinator created a proposal event. This page does not track delivery or the human decision.'),
+                  tone: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)',
+                }
+              : brief.stage === 'needs_convergence'
+                ? {
+                    title: t('Neshoda zůstává viditelná', 'Dissent remains visible'),
+                    detail: t('Příspěvky si odporují; koordinátor zatím nepředstírá shodu ani nevydal návrh.', 'Inputs conflict; the coordinator does not pretend there is agreement or emit a proposal yet.'),
+                    tone: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)',
+                  }
+                : {
+                    title: brief.contributorCount > 0 ? t('Koordinátor porovnává podklady', 'The coordinator is comparing inputs') : t('Čeká se na řízené podklady', 'Waiting for governed inputs'),
+                    detail: t('Tato stránka shrnuje jen příspěvky, které už ve vlákně jsou — nic sama nedoplňuje.', 'This page summarises only contributions already in the thread — it adds nothing itself.'),
+                    tone: 'var(--blue)', bg: 'var(--info-bg)', border: 'var(--border)',
+                  }
+
+            return (
+              <section aria-labelledby="case-decision-brief-title" style={{ marginBottom: '18px', padding: '16px 18px', borderRadius: '14px', background: 'var(--surface)', border: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', color: 'var(--accent-text)', fontSize: '10px', fontWeight: 800, letterSpacing: '.08em', textTransform: 'uppercase' }}>
+                      <UsersRound size={13} /> {t('Rozhodovací přehled', 'Decision brief')}
+                    </div>
+                    <h2 id="case-decision-brief-title" style={{ margin: '5px 0 0', color: 'var(--text-primary)', fontSize: '15px', letterSpacing: '-.015em' }}>{stage.title}</h2>
+                  </div>
+                  {brief.stage === 'proposal_recorded' && (
+                    <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '7px 10px', borderRadius: '8px', color: 'var(--accent-text)', background: 'var(--accent-bg)', fontSize: '11px', fontWeight: 750, textDecoration: 'none' }}>
+                      {t('Přejít do HITL fronty', 'Go to HITL queue')}
+                    </Link>
+                  )}
+                </div>
+                <p style={{ margin: '8px 0 14px', color: 'var(--text-secondary)', fontSize: '12px', lineHeight: 1.5 }}>{stage.detail}</p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '8px' }}>
+                  <div style={{ padding: '9px 10px', borderRadius: '10px', background: stage.bg, border: `1px solid ${stage.border}` }}>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: '10px', fontWeight: 700 }}>{t('Další krok', 'Next step')}</div>
+                    <div style={{ marginTop: '3px', color: stage.tone, fontSize: '11px', fontWeight: 800 }}>{stage.title}</div>
+                  </div>
+                  <div style={{ padding: '9px 10px', borderRadius: '10px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: '10px', fontWeight: 700 }}>{t('Role s příspěvkem', 'Contributing roles')}</div>
+                    <div style={{ marginTop: '3px', color: 'var(--text-primary)', fontSize: '11px', fontWeight: 800 }}>{brief.contributorCount}</div>
+                  </div>
+                  <div style={{ padding: '9px 10px', borderRadius: '10px', background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: '10px', fontWeight: 700 }}>{t('Odkazy na důkazy', 'Evidence references')}</div>
+                    <div style={{ marginTop: '3px', color: 'var(--text-primary)', fontSize: '11px', fontWeight: 800 }}>{brief.evidenceRefCount}</div>
+                  </div>
+                  <div style={{ padding: '9px 10px', borderRadius: '10px', background: brief.contestedContributionCount > 0 ? 'var(--warning-bg)' : 'var(--surface-2)', border: `1px solid ${brief.contestedContributionCount > 0 ? 'var(--warning-border)' : 'var(--border)'}` }}>
+                    <div style={{ color: 'var(--text-tertiary)', fontSize: '10px', fontWeight: 700 }}>{t('Označené nesouhlasy', 'Marked dissent')}</div>
+                    <div style={{ marginTop: '3px', color: brief.contestedContributionCount > 0 ? 'var(--warning-text)' : 'var(--text-primary)', fontSize: '11px', fontWeight: 800 }}>{brief.contestedContributionCount}</div>
+                  </div>
+                </div>
+              </section>
+            )
+          })()}
 
           {thread.status === 'CONTESTED' && (
             <div style={{
