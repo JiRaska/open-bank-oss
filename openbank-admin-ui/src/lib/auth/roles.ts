@@ -124,7 +124,17 @@ export const PERMISSIONS = {
   "opsmessage:compose":       [ROLES.ADMIN, ROLES.OPERATOR],
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
-  "system:view":              [ROLES.ADMIN, ROLES.OPERATOR],
+  // ROLES.DEMO added 2026-08-16 (issue #5020), verified safe two independent ways before
+  // adding: middleware.ts's routeGuards array has a pattern for /system/config (ADMIN only,
+  // the mutation path — untouched) but NONE for the general /system/* view pages, so no
+  // route-level role check exists to conflict with; and every BFF route these pages call
+  // (finops/*, devops/*, security, observability/*, temporal/status) either has no
+  // permission check of its own at all, or (api/iaops/rca) checks this exact
+  // hasPermission(roles, 'system:view') — same source of truth, so widening it here widens
+  // consistently everywhere it is read. Unlike onboarding:view above, there is no backend
+  // @RolesAllowed/rego to have verified against, because these pages proxy telemetry
+  // (Prometheus, Holmes, k8s) rather than calling a service with its own RBAC.
+  "system:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.DEMO],
   "system:config":            [ROLES.ADMIN],
   // Docs
   "docs:view":                [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
