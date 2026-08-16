@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.143.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.143.0...admin-ui-v0.143.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **iam:** strip demo@openbank.local's real admin roles, widen its safe view ([#5022](https://github.com/JiRaska/open-bank-oss/issues/5022)) ([bbc53dc](https://github.com/JiRaska/open-bank-oss/commit/bbc53dcb2bd10e1dc082119938d9e205c7150765)), closes [#5020](https://github.com/JiRaska/open-bank-oss/issues/5020)
+
 ## [0.143.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.142.0...admin-ui-v0.143.0) (2026-08-16)
 
 
