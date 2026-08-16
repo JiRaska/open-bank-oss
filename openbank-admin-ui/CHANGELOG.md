@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.151.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.150.0...admin-ui-v0.151.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** show registered devices on Customer 360 ([#5117](https://github.com/JiRaska/open-bank-oss/issues/5117)) ([9be5afc](https://github.com/JiRaska/open-bank-oss/commit/9be5afc5ce41b66aa49338b39f103dfabf8190d2))
+
 ## [0.150.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.149.0...admin-ui-v0.150.0) (2026-08-16)
 
 
