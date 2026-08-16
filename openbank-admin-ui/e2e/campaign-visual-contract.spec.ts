@@ -18,6 +18,11 @@ const CONTENT_CATALOGUE = [
 ]
 
 async function mockComposerCatalogues(page: Page) {
+  await page.route(/\/api\/audiences$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ state: 'ok', items: [{ name: 'active-savers', version: 2, rules: ['party status is ACTIVE'], state: 'APPROVED' }] }),
+  }))
   await page.route(/\/api\/segments$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -47,6 +52,11 @@ async function mockComposerCatalogues(page: Page) {
     }),
   }))
   await page.route(/\/api\/segments\/active-savers\/2\/preview$/, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ state: 'ok', size: 12480 }),
+  }))
+  await page.route(/\/api\/audiences\/active-savers\/2\/preview$/, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
     body: JSON.stringify({ state: 'ok', size: 12480 }),
