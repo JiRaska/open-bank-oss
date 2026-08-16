@@ -126,6 +126,64 @@ class OutboxDispatchTest {
         assertThat(repo.sent).containsExactly(rows[1].eventId)
     }
 
+    // Issue #5091 phase 1: OutboxDispatchObserver.onDispatched is the port that lets a
+    // framework-touching layer (this module has none, ADR-0002/ADR-0122) observe real dispatches.
+    @Test
+    fun `notifies the observer once per successfully dispatched row, with the full entry`() {
+        val rows = listOf(entry("a.created"), entry("b.created"))
+        val repo = FakeRepo(rows)
+        val observed = mutableListOf<OutboxEntry>()
+
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo, observer = OutboxDispatchObserver { e -> observed += e }) { }
+        }
+
+        assertThat(observed).containsExactlyElementsOf(rows)
+    }
+
+    @Test
+    fun `does not notify the observer for a row that fails to publish`() {
+        val row = entry("boom")
+        val repo = FakeRepo(listOf(row))
+        val observed = mutableListOf<OutboxEntry>()
+
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo, observer = OutboxDispatchObserver { e -> observed += e }) {
+                throw IllegalStateException("kafka down")
+            }
+        }
+
+        assertThat(observed).isEmpty()
+    }
+
+    @Test
+    fun `does not notify the observer when the batch is abandoned on a breaker-open`() {
+        val rows = listOf(entry("a.created"), entry("b.created"))
+        val repo = FakeRepo(rows)
+        val observed = mutableListOf<OutboxEntry>()
+
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo, observer = OutboxDispatchObserver { e -> observed += e }) {
+                throw breakerOpen()
+            }
+        }
+
+        assertThat(observed).isEmpty()
+    }
+
+    @Test
+    fun `dispatchOnce with the default (NOOP) observer behaves exactly as before -- no crash, no calls`() {
+        val rows = listOf(entry("a.created"))
+        val repo = FakeRepo(rows)
+
+        // No observer argument at all -- the pre-existing call shape from every current caller.
+        runBlocking {
+            OutboxDispatch.dispatchOnce(repo) { }
+        }
+
+        assertThat(repo.sent).containsExactly(rows[0].eventId)
+    }
+
     @Test
     fun `a timeout is NOT treated as transport-unavailable`() {
         // A @Timeout can fire after the record already reached the broker, so it must keep

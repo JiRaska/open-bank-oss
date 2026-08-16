@@ -4,6 +4,7 @@
 
 package com.openbank.libs.persistence.outbox
 
+import com.openbank.libs.observability.DomainMetrics
 import org.jboss.logging.Logger
 
 /**
@@ -48,11 +49,30 @@ import org.jboss.logging.Logger
  * Resilience interceptors must instead be triggered via CDI injection of the concrete bean
  * itself — callers of [dispatchScheduledBatch] should be annotated `@Scheduled` methods on
  * the concrete bean, which already goes through the proxy.
+ *
+ * ### Metrics (issue #5091 phase 1)
+ * [metrics] and [service] are `open` with `null` defaults, not `abstract` — every existing
+ * concrete dispatcher across the fleet compiles unchanged. A subclass opts in to
+ * `openbank_outbox_dispatched_total` by overriding both:
+ * ```
+ * override val metrics: DomainMetrics get() = domainMetrics   // inject it in the constructor
+ * override val service: String get() = "ledger"
+ * ```
+ * With either left `null` (the default), dispatch behaves exactly as before — no metric, no
+ * behaviour change. This is deliberately NOT the same "every subclass must implement" shape as
+ * [outboxRepository]/[outboxEventPublisher]: those are load-bearing to dispatch AT ALL, these two
+ * are purely observational, and forcing every one of the ~30 existing dispatchers to add them in
+ * the same change that introduces the mechanism would turn a scoped, verified rollout into a
+ * fleet-wide breaking change reviewed all at once. Remaining services are tracked as a checklist
+ * in issue #5091 — adding metrics/service to one is a two-line, low-risk follow-up once this
+ * mechanism has proven itself live on the first services that opt in.
  */
 abstract class AbstractOutboxDispatcher {
 
     protected abstract val outboxRepository: OutboxRepository
     protected abstract val outboxEventPublisher: OutboxEventPublisher
+    protected open val metrics: DomainMetrics? = null
+    protected open val service: String? = null
 
     /**
      * Core dispatch loop. Call this from the concrete subclass's `@Scheduled` method.
@@ -63,7 +83,14 @@ abstract class AbstractOutboxDispatcher {
      */
 
     protected open suspend fun dispatchScheduledBatch() {
-        OutboxDispatch.dispatchOnce(outboxRepository) { entry ->
+        val m = metrics
+        val svc = service
+        val observer = if (m != null && svc != null) {
+            OutboxDispatchObserver { entry -> m.outboxDispatched(svc, entry.eventType) }
+        } else {
+            OutboxDispatchObserver.NOOP
+        }
+        OutboxDispatch.dispatchOnce(outboxRepository, observer = observer) { entry ->
             publishWithResilience(entry)
         }
     }

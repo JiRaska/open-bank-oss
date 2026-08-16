@@ -90,6 +90,7 @@ object OutboxDispatch {
     suspend fun dispatchOnce(
         repository: OutboxRepository,
         batchSize: Int = DEFAULT_BATCH_SIZE,
+        observer: OutboxDispatchObserver = OutboxDispatchObserver.NOOP,
         publish: suspend (entry: OutboxEntry) -> Unit,
     ) {
         val claimed = runCatching { repository.claimProcessable(batchSize) }
@@ -100,6 +101,7 @@ object OutboxDispatch {
             try {
                 publish(entry)
                 repository.markSent(entry.eventId)
+                observer.onDispatched(entry)
             } catch (ex: Exception) {
                 if (isTransportUnavailable(ex)) {
                     log.log(

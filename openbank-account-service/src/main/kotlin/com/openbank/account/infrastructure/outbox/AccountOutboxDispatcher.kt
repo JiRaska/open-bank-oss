@@ -4,6 +4,7 @@
 package com.openbank.account.infrastructure.outbox
 
 import com.openbank.account.application.port.out.AccountOutboxRepository
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -31,11 +32,16 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 class AccountOutboxDispatcher(
     private val repo: AccountOutboxRepository,
     private val publisher: OutboxEventPublisher,
+    private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
 ) : AbstractOutboxDispatcher() {
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
+
+    // Issue #5091 phase 1: opts this dispatcher in to openbank_outbox_dispatched_total.
+    override val metrics: DomainMetrics get() = domainMetrics
+    override val service: String get() = "account"
 
     @Scheduled(
         every = "\${openbank.outbox.poll-interval:5s}",

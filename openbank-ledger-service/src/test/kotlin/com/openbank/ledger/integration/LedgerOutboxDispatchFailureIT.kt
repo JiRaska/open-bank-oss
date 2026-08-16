@@ -94,7 +94,12 @@ class LedgerOutboxDispatchFailureIT {
         val failingPublisher = mockk<KafkaLedgerOutboxEventPublisher>()
         coEvery { failingPublisher.publish(any<OutboxEntry>()) } throws RuntimeException("simulated broker outage")
         // Construct directly with dispatchEnabled=true so the guard does not suppress the tick.
-        val dispatcher = LedgerOutboxDispatcher(repository, failingPublisher, dispatchEnabled = true)
+        val dispatcher = LedgerOutboxDispatcher(
+            repository,
+            failingPublisher,
+            domainMetrics = mockk(relaxed = true),
+            dispatchEnabled = true,
+        )
 
         val msg = OutboxMessage(
             eventId = UUID.randomUUID(),

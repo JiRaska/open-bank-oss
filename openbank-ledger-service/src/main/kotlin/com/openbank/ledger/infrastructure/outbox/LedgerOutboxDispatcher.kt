@@ -5,6 +5,7 @@ package com.openbank.ledger.infrastructure.outbox
 
 import com.openbank.ledger.infrastructure.messaging.KafkaLedgerOutboxEventPublisher
 import com.openbank.ledger.infrastructure.persistence.repository.LedgerOutboxRepositoryImpl
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -36,12 +37,17 @@ import org.eclipse.microprofile.faulttolerance.Timeout
 class LedgerOutboxDispatcher(
     private val repo: LedgerOutboxRepositoryImpl,
     private val publisher: KafkaLedgerOutboxEventPublisher,
+    private val domainMetrics: DomainMetrics,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
 ) : AbstractOutboxDispatcher() {
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
+
+    // Issue #5091 phase 1: opts this dispatcher in to openbank_outbox_dispatched_total.
+    override val metrics: DomainMetrics get() = domainMetrics
+    override val service: String get() = "ledger"
 
     @Scheduled(
         every = "\${openbank.outbox.poll-interval:5s}",
