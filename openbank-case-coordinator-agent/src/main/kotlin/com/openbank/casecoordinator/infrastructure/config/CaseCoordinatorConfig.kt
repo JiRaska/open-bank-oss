@@ -43,6 +43,25 @@ interface CaseCoordinatorConfig {
         @WithDefault("case-coordinator")
         fun swarmAgents(): Set<String>
 
+        /**
+         * Which agent identity an authenticated caller may ACT AS, keyed by the caller's verified
+         * role: `ROLE_A=agent1,agent2;ROLE_B=agent3`. Deny-by-default — a role with no entry may
+         * assert no agent identity at all, and there is deliberately no wildcard.
+         *
+         * This is a different question from [openAgents]/[swarmAgents], and the distinction is the
+         * whole point (#4834). Those lists say which agent identities hold a capability; this one
+         * says which of them a given caller is allowed to claim to be. Without it the capability
+         * lists were consulted against a string taken from the request body, so the decision tested
+         * an asserted identity rather than a proved one.
+         *
+         * The default binds both admitted roles to the single chartered opener, which is exactly
+         * today's reachable set — so this changes no behaviour now. What it changes is later: the
+         * config comment above says the capability lists are expected to grow, and a new entry
+         * there no longer becomes assertable by every operator on its own.
+         */
+        @WithDefault("ROLE_ADMIN=case-coordinator;ROLE_OPERATOR=case-coordinator")
+        fun identityBindings(): String
+
         @WithDefault("INCIDENT_RESPONSE")
         fun enabledClasses(): Set<CaseClass>
 

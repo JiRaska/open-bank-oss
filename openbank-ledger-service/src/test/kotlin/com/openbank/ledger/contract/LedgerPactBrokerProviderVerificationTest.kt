@@ -59,7 +59,7 @@ import javax.sql.DataSource
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-ledger-service")
-@PactBroker
+@PactBroker(enablePendingPacts = "true")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class LedgerPactBrokerProviderVerificationTest {

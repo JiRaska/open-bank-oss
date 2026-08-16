@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.143.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.142.0...admin-ui-v0.143.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** preview market-matched offers ([#5004](https://github.com/JiRaska/open-bank-oss/issues/5004)) ([97610e6](https://github.com/JiRaska/open-bank-oss/commit/97610e630d250b4b9b4b40abb6d5b765fc8ef710))
+
+
+### Bug Fixes
+
+* **admin-ui:** make campaign canvas keyboard-operable ([#4991](https://github.com/JiRaska/open-bank-oss/issues/4991)) ([a86f4ab](https://github.com/JiRaska/open-bank-oss/commit/a86f4ab0ff1e86e921e7e84f26a762e22d2484f5))
+
+## [0.142.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.141.0...admin-ui-v0.142.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify identity operations workspaces ([#4988](https://github.com/JiRaska/open-bank-oss/issues/4988)) ([7d857cd](https://github.com/JiRaska/open-bank-oss/commit/7d857cd8e0c8d7888b27208c7317a9a224353ae1))
+
+## [0.141.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.140.0...admin-ui-v0.141.0) (2026-08-16)
+
+
+### Features
+
+* **product-catalog:** govern bundles and private offers ([#4969](https://github.com/JiRaska/open-bank-oss/issues/4969)) ([f2d2f45](https://github.com/JiRaska/open-bank-oss/commit/f2d2f45117b89c2c28861fa9b7ff6d7751c9e64e))
+
+## [0.140.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.139.0...admin-ui-v0.140.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify payment operations workspaces ([#4968](https://github.com/JiRaska/open-bank-oss/issues/4968)) ([ddb047d](https://github.com/JiRaska/open-bank-oss/commit/ddb047d7bc908877275b16d9538760ed4f9724c3))
+
+## [0.139.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.1...admin-ui-v0.139.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify compliance workspaces ([#4958](https://github.com/JiRaska/open-bank-oss/issues/4958)) ([db38812](https://github.com/JiRaska/open-bank-oss/commit/db38812c645359108f37e82f8ac49c376733c119))
+
+## [0.138.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.0...admin-ui-v0.138.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify private AI review ([#4956](https://github.com/JiRaska/open-bank-oss/issues/4956)) ([8aa5fd6](https://github.com/JiRaska/open-bank-oss/commit/8aa5fd6fb95629fe055871e41eb83eed9ac37f4b))
+* **admin-ui:** derive Kafka topic table from AsyncAPI doc instead of hand-kept array ([#4948](https://github.com/JiRaska/open-bank-oss/issues/4948)) ([4254d24](https://github.com/JiRaska/open-bank-oss/commit/4254d24cec9690bc1141fa68a14b7df346ab026c))
+
+## [0.138.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.137.0...admin-ui-v0.138.0) (2026-08-15)
+
+
+### Features
+
+* **admin-ui:** consolidate operator workspace shell ([#4936](https://github.com/JiRaska/open-bank-oss/issues/4936)) ([974a7f3](https://github.com/JiRaska/open-bank-oss/commit/974a7f368ce3a1327c7bd4651532b21af73b3d2b))
+
+## [0.137.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.136.0...admin-ui-v0.137.0) (2026-08-15)
+
+
+### Features
+
+* **admin-ui:** guide catalog authoring ([#4928](https://github.com/JiRaska/open-bank-oss/issues/4928)) ([553cdfa](https://github.com/JiRaska/open-bank-oss/commit/553cdfaea5f731afb7b8ef26c06a36c8f0862438)), closes [#4501](https://github.com/JiRaska/open-bank-oss/issues/4501)
+
+## [0.136.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.2...admin-ui-v0.136.0) (2026-08-15)
+
+
+### Features
+
+* **admin-ui:** derive a qrless-pay status signal, and make the deriver testable ([#4922](https://github.com/JiRaska/open-bank-oss/issues/4922)) ([3edfb66](https://github.com/JiRaska/open-bank-oss/commit/3edfb66d401d1ceb08a84d07c6bcc6067a801a74))
+
+## [0.135.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.1...admin-ui-v0.135.2) (2026-08-15)
+
+
+### Bug Fixes
+
+* **admin-ui:** show unavailable AI review ([#4910](https://github.com/JiRaska/open-bank-oss/issues/4910)) ([ae579a8](https://github.com/JiRaska/open-bank-oss/commit/ae579a8ad4d092caabe7a6a43ce3974a0ab84396))
+
 ## [0.135.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.135.0...admin-ui-v0.135.1) (2026-08-15)
 
 

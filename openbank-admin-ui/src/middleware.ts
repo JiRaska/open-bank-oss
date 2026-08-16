@@ -4,6 +4,7 @@
 
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
+import { hasPermission, permissionForPath } from "@/lib/auth/roles"
 
 // ADR-0080 P1 (F-AUTH-06): per-request CSP with a nonce + 'strict-dynamic' instead of
 // 'unsafe-inline' on script-src. A static next.config header can't carry a fresh nonce, so the
@@ -76,27 +77,14 @@ export default auth((req) => {
 
   const roles: string[] = session.user.roles ?? []
 
-  // Role-based route guards
-  const routeGuards: { pattern: RegExp; required: string[] }[] = [
-    { pattern: /^\/audit/,              required: ["ROLE_ADMIN", "ROLE_AUDITOR", "ROLE_COMPLIANCE"] },
-    { pattern: /^\/kyc/,               required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER"] },
-    { pattern: /^\/regulatory/,        required: ["ROLE_ADMIN", "ROLE_COMPLIANCE"] },
-    // Screen feedback carries free-text comments and screenshot keys — personal data (ADR-0192).
-    { pattern: /^\/feedback/,          required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE"] },
-    { pattern: /^\/system\/config/,    required: ["ROLE_ADMIN"] },
-    { pattern: /^\/payments/,          required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_PAYMENTS", "ROLE_SUPERVISOR"] },
-    { pattern: /^\/parties/,           required: ["ROLE_ADMIN", "ROLE_OPERATOR", "ROLE_COMPLIANCE", "ROLE_KYC", "ROLE_KYC_OPENER", "ROLE_KYC_REVIEWER"] },
-  ]
-
-  for (const guard of routeGuards) {
-    if (guard.pattern.test(pathname)) {
-      const allowed = roles.some(r => guard.required.includes(r))
-      if (!allowed) {
-        const forbidden = new URL("/auth/forbidden", req.url)
-        forbidden.searchParams.set("path", pathname)
-        return withCsp(NextResponse.redirect(forbidden))
-      }
-    }
+  // ADR-0229 D3: one permission projection covers every authenticated console route instead
+  // of seven hand-maintained role lists. The route map shares the UI permission matrix, so nav,
+  // deep links and the initial response cannot disagree about a destination's visibility.
+  const permission = permissionForPath(pathname)
+  if (permission && !hasPermission(roles, permission)) {
+    const forbidden = new URL("/auth/forbidden", req.url)
+    forbidden.searchParams.set("path", pathname)
+    return withCsp(NextResponse.redirect(forbidden))
   }
 
   return nextWithNonce()

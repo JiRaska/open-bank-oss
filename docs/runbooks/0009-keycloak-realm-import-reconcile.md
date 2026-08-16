@@ -77,8 +77,9 @@ survives in it.
 2. **Read the committed templates, and know they carry placeholders.** Every client
    secret and user password in `realm-template.json` is a `__PLACEHOLDER__` token
    (this is asserted by `check_realm_import_parity_test.py` and must stay true — the
-   repo is public). The write below substitutes real values in a local shell; the
-   substituted file must never be committed, echoed, or left on disk.
+   repo is public). The substitution below must never be committed, echoed, or left
+   on disk — see the script in step 4, which enforces this rather than relying on
+   the operator remembering it.
 
 3. **Collect the real values from the live realm, not from memory.** For each client
    the template declares, the live secret is the authority:
@@ -103,43 +104,69 @@ survives in it.
    name only. This is a template defect the reconcile surfaces; it is not caused by
    it.
 
-4. **Verify the substituted file against a LOCAL Keycloak before writing it to
-   Vault.** Import runs on cold start only, so a malformed template ships silently
-   and is discovered by the rebuild it was meant to survive. The realm-JSON shapes
-   are version-specific traps (authorization policies want `config` maps; a scope
-   permission is `type: "scope"`; the `token-exchange` scope must be declared before
-   a permission references it; a client description over 255 chars fails the whole
-   import):
+4. **Render and verify against a LOCAL Keycloak before writing anything to
+   Vault — use `openbank-infra/scripts/render-verify-keycloak-realm-import.sh`,
+   not a hand-run `docker` command.** Import runs on cold start only, so a
+   malformed template ships silently and is discovered by the rebuild it was meant
+   to survive; the realm-JSON shapes are version-specific traps (authorization
+   policies want `config` maps; a scope permission is `type: "scope"`; the
+   `token-exchange` scope must be declared before a permission references it; a
+   client description over 255 chars fails the whole import). The script exists
+   because those traps, and "don't leave the substituted file on disk," are easy to
+   get right once and easy to skip under time pressure the next time:
 
    ```sh
-   docker run --rm -v /tmp/ob-realm-substituted.json:/opt/keycloak/data/import/realm.json \
-     quay.io/keycloak/keycloak:<the version keycloak.yaml runs> start-dev --import-realm
+   ADMINUI_CLIENT_SECRET=... ARGOCD_CLIENT_SECRET=... EDGE_CLIENT_SECRET=... \
+   GLITCHTIP_CLIENT_SECRET=... GOALERT_CLIENT_SECRET=... MCP_OBO_CLIENT_SECRET=... \
+   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+   DEMO_USER_PASSWORD=... COMPLIANCE_USER_PASSWORD=... COMPLIANCE2_USER_PASSWORD=... \
+   ADMIN_HOST=admin.openbank.local \
+     ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank
+
+   CUSTOMER_EDGE_ADMIN_CLIENT_SECRET=... EDGE_WEBAUTHN_CLIENT_SECRET=... \
+     ./openbank-infra/scripts/render-verify-keycloak-realm-import.sh openbank-customers
    ```
 
-   Watch for `Realm 'openbank' imported` and no `ERROR`. Then mint a token for one
-   client and inspect the JWT's roles — an import that "succeeds" with a dropped
-   role block prints nothing useful.
+   It fails closed: any placeholder without an env var stops the run before
+   anything is written to disk, and the rendered file is a mode-600 temp file
+   removed by a trap that fires on every exit path (success, failure, or Ctrl-C) —
+   never a file you have to remember to delete. It resolves the Keycloak version to
+   test against from `keycloak.yaml` itself, boots that version against the
+   rendered file, and reports PASS only on `KC-SERVICES0032: Import finished
+   successfully` with zero `ERROR` lines. What it does **not** replace: minting a
+   token and inspecting the JWT's roles by hand for at least one client per realm —
+   an import that "succeeds" with a dropped role block prints nothing useful, and
+   only a real token proves the role block survived. (Verified this way for both
+   realms while preparing this runbook update — see the PR that landed the script.)
 
 ## Procedure (owner-gated — a Vault write, not a PR)
 
-Run from a trusted shell. Do not echo the values; do not leave the substituted file
-behind.
+Run from a trusted shell. Use the step-4 script with `--out` to produce a verified
+(boot-tested) render and keep it only as long as the write needs it — that is the
+one deliberate exception to "never leave the substituted file on disk," and the
+script still refuses to hand you a file that skipped the boot test (see
+`OutFlagRefusedWithoutBootVerification` in
+`render_verify_keycloak_realm_import_test.py`).
 
 ```sh
-# 1. openbank realm
+# 1. openbank realm — render, boot-verify, and keep the render just long enough
+#    to write it (re-supply the same env vars as the pre-flight step above)
+./openbank-infra/scripts/render-verify-keycloak-realm-import.sh \
+  --out /tmp/ob-realm-verified.json openbank
 vault kv put openbank/keycloak-realm-import \
-  openbank-realm.json=@/tmp/ob-realm-substituted.json
+  openbank-realm.json=@/tmp/ob-realm-verified.json
+shred -u /tmp/ob-realm-verified.json 2>/dev/null; rm -f /tmp/ob-realm-verified.json
 
 # 2. openbank-customers realm. The KV key and property are declared in
 #    es-keycloak-customers-realm.yaml (`keycloak-customers-realm-import` /
 #    `openbank-customers-realm.json`); re-read them before writing, and note the
 #    ClusterSecretStore's mount path prefixes the key. The property name IS the
 #    mounted filename and Keycloak scans the directory for *.json.
+./openbank-infra/scripts/render-verify-keycloak-realm-import.sh \
+  --out /tmp/ob-customers-verified.json openbank-customers
 vault kv put openbank/keycloak-customers-realm-import \
-  openbank-customers-realm.json=@/tmp/ob-customers-substituted.json
-
-# 3. clean up
-shred -u /tmp/ob-realm-substituted.json /tmp/ob-customers-substituted.json
+  openbank-customers-realm.json=@/tmp/ob-customers-verified.json
+shred -u /tmp/ob-customers-verified.json 2>/dev/null; rm -f /tmp/ob-customers-verified.json
 ```
 
 > The `vault kv put` recipe in

@@ -108,6 +108,10 @@ class NotificationConsumerIT {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.failureReason
 
+    private fun sentAtFor(partyId: UUID): java.time.Instant? = VertxContextSupport.subscribeAndAwait {
+        Panache.withSession { repository.find("partyId", partyId).firstResult() }
+    }?.sentAt
+
     private fun notificationIdFor(partyId: UUID): UUID? = VertxContextSupport.subscribeAndAwait {
         Panache.withSession { repository.find("partyId", partyId).firstResult() }
     }?.notificationId
@@ -166,10 +170,13 @@ class NotificationConsumerIT {
         // (a stalling suspend handler that never acks) fail loudly instead of hanging the build.
         acked.get(20, TimeUnit.SECONDS)
 
-        // …and the reactive transaction actually committed: exactly one row for this party, marked
-        // SENT (the %test profile mocks the mailer, so the email leg succeeds).
+        // …and the reactive transaction actually committed: exactly one row for this party. The
+        // %test profile mocks the mailer, so the terminal status is SUPPRESSED / mailer_mocked
+        // (issue #4737) — this used to assert SENT, which was the defect stated as an expectation.
+        // The subject of THIS test is the ack and the commit, not the delivery outcome.
         assertThat(countFor(partyId)).isEqualTo(1L)
-        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
+        assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
         assertThat(notificationIdFor(partyId)?.version()).isEqualTo(7)
     }
 
@@ -200,10 +207,11 @@ class NotificationConsumerIT {
         assertThat(sent).hasSize(1)
         assertThat(sent.first().html).contains(code)
 
-        // Stored: the row exists and is SENT, but its body is the placeholder — an operator
-        // reading it through NotificationResource cannot recover the code.
+        // Stored: the row exists, but its body is the placeholder — an operator reading it
+        // through NotificationResource cannot recover the code. The status is SUPPRESSED because
+        // the %test mailer is the mock (#4737); the redaction assertions below are the subject.
         assertThat(countFor(partyId)).isEqualTo(1L)
-        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
         assertThat(bodyFor(partyId)).isEqualTo(TemplateSensitivity.REDACTED_BODY)
         assertThat(bodyFor(partyId)).doesNotContain(code)
     }
@@ -309,7 +317,7 @@ class NotificationConsumerIT {
             ),
         )
 
-        assertThat(statusFor(partyId)).isEqualTo("SENT")
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
         val notificationId = notificationIdFor(partyId)!!
         val rows = outcomeRowsFor(notificationId)
         assertThat(rows)
@@ -318,11 +326,14 @@ class NotificationConsumerIT {
         assertThat(rows.single().eventType).isEqualTo("NotificationOutcome")
 
         val event = objectMapper.readTree(rows.single().payload)
-        assertThat(event.path("outcome").asText()).isEqualTo("SENT")
+        // SUPPRESSED / mailer_mocked, not SENT: the %test mailer is the mock (#4737). The subject
+        // here is that an outcome event is emitted at all and carries the correlation id — the
+        // outcome VALUE is incidental to it, and asserting SENT asserted the defect.
+        assertThat(event.path("outcome").asText()).isEqualTo("SUPPRESSED")
+        assertThat(event.path("reason").asText()).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
         assertThat(event.path("correlationId").asText()).isEqualTo(correlationId.toString())
         assertThat(event.path("notificationId").asText()).isEqualTo(notificationId.toString())
         assertThat(event.path("partyId").asText()).isEqualTo(partyId.toString())
-        assertThat(event.path("reason").isNull).isTrue()
         // The row itself carries the correlation id too, so an operator can join it back without
         // replaying the topic.
         assertThat(correlationIdFor(partyId)).isEqualTo(correlationId)
@@ -350,7 +361,7 @@ class NotificationConsumerIT {
         val rows = outcomeRowsFor(notificationIdFor(partyId)!!)
         assertThat(rows).hasSize(1)
         val event = objectMapper.readTree(rows.single().payload)
-        assertThat(event.path("outcome").asText()).isEqualTo("SENT")
+        assertThat(event.path("outcome").asText()).isEqualTo("SUPPRESSED")
         assertThat(event.path("correlationId").isNull).isTrue()
         assertThat(correlationIdFor(partyId)).isNull()
     }
@@ -485,6 +496,54 @@ class NotificationConsumerIT {
         assertThat(countFor(partyId)).isEqualTo(1)
         assertThat(statusFor(partyId)).isEqualTo("FAILED")
         assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_NO_DEVICE)
+    }
+
+    /**
+     * Issue #4737 — a send through a MOCKED mailer must not read as a delivery.
+     *
+     * The EMAIL twin of the push case below, and the same defect. `quarkus.mailer.mock=true` makes
+     * `ReactiveMailer.send` complete successfully without opening an SMTP connection; the consumer
+     * asked only whether the call threw, so the row committed `SENT` **with `sent_at` populated**
+     * and the outcome event announced a delivery for a message that never left the process. The
+     * deployed sandbox carries `QUARKUS_MAILER_MOCK=true` deliberately (its gitops manifest says
+     * so), which is exactly why the record has to disagree with the configuration.
+     *
+     * `sent_at` is the assertion that matters most: the column means "when did this leave the
+     * process", and a timestamp there is the concrete false claim the old code committed. The
+     * whole `%test` profile runs mocked, so this passes trivially *now* — the falsification lives
+     * in `EmailSendOutcomeTest`, which shows the old predicate computing SENT from the same two
+     * facts. Asserted through the real consumer path rather than on the mapping function alone:
+     * the unit test pins the mapping, this pins that the email leg actually calls it.
+     */
+    @Test
+    fun `EMAIL through a mocked mailer is SUPPRESSED with a null sent_at, never SENT`() {
+        val partyId = UUID.randomUUID()
+        mailbox.clear()
+
+        consumeAndAwait(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.EMAIL,
+                template = NotificationTemplate.WELCOME,
+                recipient = "mocked-mailer@example.com",
+                variables = mapOf("name" to "Mock"),
+            ),
+        )
+
+        // The message really did reach the mailer — this is not a suppression upstream of the
+        // channel, which is what makes the status below a statement about the MAILER.
+        assertThat(mailbox.getMailMessagesSentTo("mocked-mailer@example.com")).hasSize(1)
+
+        assertThat(statusFor(partyId)).isEqualTo("SUPPRESSED")
+        assertThat(failureReasonFor(partyId)).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
+        // The core of #4737: no timestamp for a transmission that never happened.
+        assertThat(sentAtFor(partyId)).isNull()
+
+        // ...and the outcome stream says the same thing, so a downstream consumer (campaign's
+        // funnel) cannot count this as delivered either.
+        val event = objectMapper.readTree(outcomeRowsFor(notificationIdFor(partyId)!!).single().payload)
+        assertThat(event.path("outcome").asText()).isEqualTo("SUPPRESSED")
+        assertThat(event.path("reason").asText()).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
     }
 
     /**

@@ -110,6 +110,7 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   BOUNCED: 'danger',
   CRITICAL: 'danger',
   ERROR: 'danger',
+  ESCALATED: 'danger',
   FAIL: 'danger',
   FAILED: 'danger',
   REJECTED: 'danger',
@@ -126,6 +127,7 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   // — see its `tone` prop. Do not "fix" this map to match one domain; that just moves the conflict.
   CANCELLED: 'neutral',
   CLOSED: 'neutral',
+  CLEAN: 'neutral',
   DISABLED: 'neutral',
   EXPIRED: 'neutral',
   MERGED: 'neutral',

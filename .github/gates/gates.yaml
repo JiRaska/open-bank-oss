@@ -2267,24 +2267,24 @@ gates:
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
-  # ADVISORY until rules.yaml change_classes.db_change flips to enforced
-  # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
+  # ENFORCED after the 2026-08-15 ADR-0144 graduation target: a migration must
+  # carry a rollback note and never edit an applied checksum.
   # Covers BOTH halves of db_change.require: an added migration carries a
   # `-- Rollback:` note, and an already-committed migration is not edited
   # (Flyway checksums the whole file — an edit to an applied migration fails
   # startup with `checksum mismatch`). PR-only and diff-scoped against the
   # resolved PR diff base, same as api-contract above.
   - id: db-migration-gate
-    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
+    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, enforced)"
     group: data
-    mode: advisory
-    verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
+    mode: enforced
+    verified: "2026-08-16 — producer self-test and enforced PR-diff mode pass"
     when: pull_request
     needs_base: required
     selftest: python3 openbank-infra/scripts/check-db-migration.py --self-test
     selftest_expect: pass
     run: |
-      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
+      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}" --enforce
 
   # contract is the set of Kotlin data classes extending DomainEvent (JSON on
   # Kafka via the outbox; no .avsc files exist yet — the script covers those
@@ -2354,6 +2354,45 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
+
+  # The PUBLISHED fleet-wide event document (#4761). `docs/asyncapi/openbank-events.yaml` is linked
+  # from the admin-ui developer-docs page, and until this gate NOTHING under `.github/` read it —
+  # the two ADR-0006 gates above scope to `openbank-contracts/`, so this file had never been
+  # validated against a producer in its life. It had drifted accordingly: 18 of 21 payload schemas
+  # asserted `eventType` as a BODY field, which is false for the 27-of-29 outbox-relayed producers
+  # (the dispatcher moves it to the `ce-type` Kafka header), and 15 of its 23 channel addresses
+  # named topics no service produces or consumes at all.
+  #
+  # That is not a cosmetic drift. A consumer author who follows the published schema writes
+  # `node.path("eventType")`, gets "", takes a quiet `?: return`, and discards 100% of messages with
+  # no error and no log — the failure state is indistinguishable from success at every layer. It
+  # blocked #1035 for four weeks on the sanctions channel.
+  #
+  # Checks: (A) every channel address is a topic some service actually speaks, derived from
+  # `mp.messaging.outgoing|incoming.*.topic` (and the `topics:` fan-in idiom audit-service uses);
+  # (B) every channel says where its discriminator lives — `ce-type` or `direct emitter`; (C) a
+  # channel claiming the header must not also declare a body `eventType`, resolved through
+  # `allOf`/`$ref` so inheriting EventEnvelope counts.
+  #
+  # It deliberately does NOT check the payload field set, and that is a limitation of the source,
+  # not of the effort: an outbox-relayed producer serialises the AGGREGATE, so there is no
+  # constructor at the call site and no literal JSON key anywhere in the tree — the same blind spot
+  # that makes event-contract-code-agreement structurally unable to cover these producers. The true
+  # field set needs a captured message or a registered wire schema (#1916; Apicurio is deployed,
+  # healthy, and holds zero artifacts). Retire this gate together with the document when #1916
+  # supersedes it with `openbank-contracts/`.
+  - id: asyncapi-doc-discriminator
+    name: "published AsyncAPI doc — discriminator + address reality (#4761, enforced)"
+    group: data
+    mode: enforced
+    rationale: "The published event document told consumers to read eventType from the body; it is a Kafka header for 27 of 29 producers, so a correct-looking consumer silently discards every message."
+    review_after: "2027-02-15"
+    min_subjects: 20
+    selftest: |
+      python3 .github/scripts/check-asyncapi-doc-discriminator.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-asyncapi-doc-discriminator.py
 
   - id: schema-compat-gate
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
@@ -2637,6 +2676,28 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
+  # NEEDS can exist, this one whether the caller can present a token at all. An outbound client
+  # annotated @RegisterProvider(OidcClientRequest*Filter) mints from `quarkus.oidc-client`, a
+  # different extension from `quarkus.oidc` (inbound) that shares its three field names and
+  # differs by one hyphen. Missing it, or leaving its auth-server-url on the localhost default
+  # in a pod (where localhost is the service itself), sends every outbound call out bare and the
+  # callee answers 401 — not 403, so the natural first hypothesis sends you to Keycloak instead.
+  # Found by observability sweep 2026-08-16: ledger's daily FX revaluation had failed on every
+  # run it ever made and only an absent() alert noticed; settlement (money-path) had no block.
+  # The gate resolves the interpolation rather than matching an env NAME — the fleet spells the
+  # deployed override three ways and a name-match draft failed 16 correct services.
+  - id: oidc-client-configured
+    name: "outbound OIDC filter ⇒ a client it can actually mint from (enforced)"
+    group: security
+    mode: enforced
+    rationale: "An unmintable outbound token fails as a 401 from the CALLEE, which reads as an authorization problem and sends the reader to Keycloak; no test can catch it because a mock port, a @QuarkusTest security context and a pact mock server all supply the very token the real client cannot obtain (#3921: ledger's daily FX revaluation had never once succeeded, and settlement, money-path, had no client block at all)."
+    review_after: "2027-02-16"
+    min_subjects: 25   # 30 modules register the filter today (2026-08-16)
+    selftest: python3 .github/scripts/check-oidc-client-configured.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-oidc-client-configured.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to

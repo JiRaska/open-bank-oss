@@ -10,6 +10,8 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
+import { StatCard } from '@/components/ui/StatCard'
 
 // Shape served by openbank-product-catalog GET /api/v1/fees — the bank-wide fee
 // schedule, flattened from the per-product Fee model. The UI no longer hardcodes
@@ -105,41 +107,22 @@ export default function FeesPage() {
   return (
     <AuthGuard permission="payments:view">
       <div>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">{t('Poplatky', 'Fees')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Receipt size={18} style={{ color: 'var(--accent)' }} />
-              {t('Ceník poplatků', 'Fee Schedule')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Ceník poplatků ze service product-catalog', 'Fee schedule served by the product-catalog service')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+        <PageHeader
+          icon={<Receipt size={20} aria-hidden="true" />}
+          title={t('Ceník poplatků', 'Fee Schedule')}
+          subtitle={t('Ceník poplatků ze service product-catalog', 'Fee schedule served by the product-catalog service')}
+          actions={<div className="flex gap-2">
             <button className="btn btn-secondary" onClick={() => void load()} disabled={loading}>
               <RefreshCw size={14} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
               {t('Obnovit', 'Refresh')}
             </button>
-          </div>
-        </div>
+          </div>}
+        />
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
-          <div className="stat-card">
-            <div className="stat-value">{fees.length}</div>
-            <div className="stat-label">{t('Celkem poplatků', 'Total Fees')}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--green)' }}>{activeCount}</div>
-            <div className="stat-label">{t('Aktivní (na aktivním produktu)', 'Active (on active product)')}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value" style={{ color: 'var(--accent)' }}>{uniqueTypes.length}</div>
-            <div className="stat-label">{t('Kategorie poplatků', 'Fee Categories')}</div>
-          </div>
+          <StatCard label={t('Celkem poplatků', 'Total Fees')} value={fees.length} icon={<Receipt size={14} aria-hidden="true" />} />
+          <StatCard label={t('Aktivní (na aktivním produktu)', 'Active (on active product)')} value={activeCount} tone="success" />
+          <StatCard label={t('Kategorie poplatků', 'Fee Categories')} value={uniqueTypes.length} />
         </div>
 
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
