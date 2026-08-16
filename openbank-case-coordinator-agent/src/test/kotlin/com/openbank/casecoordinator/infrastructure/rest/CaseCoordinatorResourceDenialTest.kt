@@ -43,6 +43,10 @@ class CaseCoordinatorResourceDenialTest {
     @Test
     fun `a denied signal does not echo the caller's agentId back`() {
         every { temporalConfig.enabled() } returns true
+        // The identity binding must PASS here, or the response under test is the wrong denial:
+        // this test is about the capability branch, and the asserted-identity branch now runs
+        // first (#4834) and carries its own, differently-worded body.
+        every { gate.permitsAssertedIdentity(any(), any()) } returns true
         every { gate.canContribute(any()) } returns false
 
         val marker = "spoofed-agent-DEADBEEF"
