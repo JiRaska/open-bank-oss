@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, ListChecks, Plus, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
+import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
 import { catalogFieldValue, catalogSchemaFields, type CatalogSchemaField, withCatalogFieldValue } from '@/lib/catalog-schema-form'
 import { catalogRevisionEditorDocument, diffCatalogDocuments } from '@/lib/catalog-structural-diff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
@@ -83,6 +84,7 @@ export default function ProductStudioPage() {
   const [review, setReview] = useState<CatalogReview | null>(null)
   const [reviewing, setReviewing] = useState(false)
   const [validationState, setValidationState] = useState<'idle' | 'valid' | 'invalid'>('idle')
+  const [reviewCapability, setReviewCapability] = useState<'checking' | 'available' | 'unavailable'>('checking')
 
   const selectedSpec = specifications.find(item => item.id === specificationId)
   const selectedOffering = offerings.find(item => item.id === offeringId)
@@ -145,6 +147,14 @@ export default function ProductStudioPage() {
     const task = window.setTimeout(() => { void loadRevisions(offeringId) }, 0)
     return () => window.clearTimeout(task)
   }, [offeringId, loadRevisions])
+  useEffect(() => {
+    const controller = new AbortController()
+    void fetch('/api/agent/chat', { signal: controller.signal, cache: 'no-store' })
+      .then(async response => response.ok ? response.json() as Promise<{ models?: AgentModelDescriptor[] }> : null)
+      .then(result => setReviewCapability(canReviewPrivateCatalogDraft(result?.models ?? []) ? 'available' : 'unavailable'))
+      .catch(() => setReviewCapability('unavailable'))
+    return () => controller.abort()
+  }, [])
   useEffect(() => {
     const nextDraft = selectedRevision
       ? JSON.stringify(catalogRevisionEditorDocument(selectedRevision), null, 2)
@@ -236,7 +246,7 @@ export default function ProductStudioPage() {
   }
 
   const reviewDraft = async () => {
-    if (!selectedRevision || selectedRevision.state !== 'DRAFT') return
+    if (!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewCapability !== 'available') return
     setReviewing(true); setReview(null); setMessage('')
     try {
       const response = await fetch('/api/agent/catalog-reviews', {
@@ -247,7 +257,11 @@ export default function ProductStudioPage() {
       if (!response.ok) throw new Error(body.error ?? response.statusText)
       setReview(body)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      const detail = error instanceof Error ? error.message : String(error)
+      setReviewCapability(detail === 'model unavailable' ? 'unavailable' : reviewCapability)
+      setMessage(detail === 'model unavailable'
+        ? t('Privátní AI kontrola není v tomto prostředí dostupná. Návrh zůstává uvnitř platformy; použijte kontrolu schématu a dopadu změny.', 'Private AI review is unavailable in this environment. The draft stays inside the platform; use schema validation and change impact instead.')
+        : detail)
     } finally {
       setReviewing(false)
     }
@@ -362,7 +376,8 @@ export default function ProductStudioPage() {
 
           <div className={styles.aiPanel}>
             <div className={styles.aiHead}><div><div className={styles.aiTitle}><Bot size={15} />{t('Catalog intelligence review', 'Catalog intelligence review')}</div><div className={styles.aiCopy}>{t('Připne přesný draft, vytvoří pouze návrh pro lidské posouzení a nikdy nemění ani nepublikuje nabídku.', 'Pins the exact draft, creates only a human-review proposal and never changes or publishes an offer.')}</div></div><span className={styles.aiGuard}><ShieldCheck size={11} />HITL</span></div>
-            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing} onClick={() => void reviewDraft()}><Sparkles size={13} />{reviewing ? t('Kontroluji…', 'Reviewing…') : t('Spustit AI kontrolu', 'Run AI review')}</button></div></Can>
+            <Can permission="catalog:author"><div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || reviewing || reviewCapability !== 'available'} onClick={() => void reviewDraft()}><Sparkles size={13} />{reviewing ? t('Kontroluji…', 'Reviewing…') : reviewCapability === 'checking' ? t('Ověřuji AI kapacitu…', 'Checking AI availability…') : reviewCapability === 'available' ? t('Spustit AI kontrolu', 'Run AI review') : t('Privátní AI kontrola nedostupná', 'Private AI review unavailable')}</button></div></Can>
+            {reviewCapability === 'unavailable' && <div className={styles.aiUnavailable}><ShieldCheck size={13} /><span>{t('Toto prostředí nemá schválený interní model pro neveřejné drafty. Nic se neposílá do hostovaného modelu — k dispozici zůstává deterministická kontrola schématu a dopadu.', 'This environment has no approved internal model for unpublished drafts. Nothing is sent to a hosted model — deterministic schema and change-impact checks remain available.')}</span></div>}
             {!selectedRevision && <div className={styles.schemaHint}>{t('Vyberte draft revizi; review nikdy nepracuje s neurčitým nebo živým obsahem.', 'Select a draft revision; review never works from an ambiguous or live document.')}</div>}
             {review && <div aria-live="polite"><div className={styles.findingText} style={{ marginTop: 11, fontWeight: 700 }}>{review.summary}</div>{review.findings.length === 0 && <div className={styles.schemaHint}>{t('Model nenašel strukturované nálezy. To nenahrazuje lidskou obchodní kontrolu.', 'The model found no structured findings. That never replaces human business review.')}</div>}{review.findings.map(finding => <div key={`${finding.category}:${finding.instancePath}`} className={`${styles.finding} ${finding.severity === 'HIGH' ? styles.findingHigh : finding.severity === 'WARNING' ? styles.findingWarning : ''}`}><div className={styles.findingTitle}><span>{finding.category}</span><span>{finding.severity}</span></div><div className={styles.findingText}>{finding.recommendation}</div><div className={styles.evidence}>{finding.instancePath} · {finding.evidence}</div></div>)}<div className={styles.provenance}><span>proposal {review.proposalId.slice(0, 8)}</span><span>model {review.model}</span><span>context {review.contextHash.slice(0, 12)}…</span></div></div>}
           </div>
