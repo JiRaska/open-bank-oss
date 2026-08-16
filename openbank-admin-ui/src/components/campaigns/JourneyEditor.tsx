@@ -4,6 +4,7 @@
 
 'use client'
 
+import type { KeyboardEvent } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 /**
@@ -162,6 +163,14 @@ export function JourneyEditor({
 
   const colX = (i: number) => PAD + i * (NODE_W + GAP_X)
 
+  // SVG groups are not keyboard-operable by default. Keep the pointer canvas, but give its
+  // genuine controls the same Enter/Space contract as a native button.
+  const activateFromKeyboard = (event: KeyboardEvent<SVGGElement>, action: () => void) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return
+    event.preventDefault()
+    action()
+  }
+
   /**
    * A connector, and the wait it represents.
    *
@@ -254,7 +263,7 @@ export function JourneyEditor({
       <svg
         viewBox={`0 0 ${width} ${height}`}
         style={{ width: '100%', minWidth: Math.min(width, 820), height: 'auto', display: 'block' }}
-        role="img"
+        role="group"
         aria-label={t('Plátno pro sestavení kampaně', 'Campaign builder canvas')}
       >
         <defs>
@@ -313,7 +322,10 @@ export function JourneyEditor({
                 filter="url(#je-shadow)"
                 style={{ cursor: 'pointer' }}
                 onClick={() => onSelect(isSelected ? null : i)}
+                onKeyDown={event => activateFromKeyboard(event, () => onSelect(isSelected ? null : i))}
                 role="button"
+                tabIndex={0}
+                aria-pressed={isSelected}
                 aria-label={t(`Upravit krok ${i + 1}`, `Edit step ${i + 1}`)}
                 data-step={i}
                 data-channel={step.channel}
@@ -362,7 +374,9 @@ export function JourneyEditor({
               <g
                 style={{ cursor: 'pointer' }}
                 onClick={() => onRemove(i)}
+                onKeyDown={event => activateFromKeyboard(event, () => onRemove(i))}
                 role="button"
+                tabIndex={0}
                 aria-label={t(`Odebrat krok ${i + 1}`, `Remove step ${i + 1}`)}
                 data-remove-step={i}
               >
@@ -422,7 +436,9 @@ export function JourneyEditor({
             <g
               style={{ cursor: 'pointer' }}
               onClick={onAdd}
+              onKeyDown={event => activateFromKeyboard(event, onAdd)}
               role="button"
+              tabIndex={0}
               aria-label={t('Přidat krok', 'Add a step')}
               data-add-step="true"
             >
