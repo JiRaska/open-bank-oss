@@ -10,6 +10,7 @@ import { Activity, AlertTriangle, RefreshCw, Zap, Server, Clock, Database, XCirc
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface MetricResult {
   value: number | null
@@ -125,7 +126,7 @@ export default function ObservabilityPage() {
   return (
     <AuthGuard permission="system:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '28px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+      <PageHeader title={t('Obchodní observabilita', 'Business Observability')} subtitle={t('Přehledové metriky platformy pro business operace', 'High-level platform metrics for business operations')} icon={<Activity size={20} aria-hidden="true" />} actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
         <div>
           <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
             {t('Obchodní observabilita', 'Business Observability')}
@@ -168,8 +169,7 @@ export default function ObservabilityPage() {
             <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>} />
 
       {!metrics?.prometheusUp && !loading && (
         <div style={{ 
