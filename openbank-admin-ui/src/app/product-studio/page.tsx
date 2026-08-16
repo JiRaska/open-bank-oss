@@ -5,11 +5,18 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, ListChecks, Plus, RefreshCw, Send, ShieldCheck, Sparkles } from 'lucide-react'
+import { Bot, Boxes, CheckCircle2, CircleAlert, Eye, FileJson, Link2, ListChecks, LockKeyhole, Plus, RefreshCw, Send, ShieldCheck, Sparkles, X } from 'lucide-react'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { canReviewPrivateCatalogDraft, type AgentModelDescriptor } from '@/lib/catalog-review-capability'
 import { catalogFieldValue, catalogSchemaFields, type CatalogSchemaField, withCatalogFieldValue } from '@/lib/catalog-schema-form'
 import { catalogRevisionEditorDocument, diffCatalogDocuments } from '@/lib/catalog-structural-diff'
+import {
+  addOfferingRelationship,
+  defaultMarketContextInput,
+  marketContextFromInput,
+  removeOfferingRelationship,
+  type MarketContextInput,
+} from '@/lib/catalog-offer-composition'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   catalogV2Operation, type CatalogSchema, type Offering, type OfferingRequest, type ProductRevision,
@@ -64,6 +71,20 @@ interface CatalogReview {
   model: string
 }
 
+const relationshipKinds = ['BUNDLE', 'ADD_ON', 'REPLACEMENT', 'DEPENDENCY', 'COMPATIBLE_WITH'] as const
+type RelationshipKind = typeof relationshipKinds[number]
+
+interface DraftRelationship {
+  kind: RelationshipKind
+  targetOfferingId: string
+}
+
+function isDraftRelationship(value: unknown): value is DraftRelationship {
+  return Boolean(value) && typeof value === 'object' &&
+    relationshipKinds.includes((value as DraftRelationship).kind) &&
+    typeof (value as DraftRelationship).targetOfferingId === 'string'
+}
+
 export default function ProductStudioPage() {
   const { language } = useLanguage()
   const t = (cs: string, en: string) => language === 'cs' ? cs : en
@@ -79,6 +100,9 @@ export default function ProductStudioPage() {
   const [busy, setBusy] = useState(false)
   const [newSpecCode, setNewSpecCode] = useState('')
   const [newOfferingCode, setNewOfferingCode] = useState('')
+  const [marketContextInput, setMarketContextInput] = useState<MarketContextInput>(defaultMarketContextInput)
+  const [relationshipTargetId, setRelationshipTargetId] = useState('')
+  const [relationshipKind, setRelationshipKind] = useState<RelationshipKind>('BUNDLE')
   const [publishReason, setPublishReason] = useState('')
   const [newSpecSchema, setNewSpecSchema] = useState('')
   const [review, setReview] = useState<CatalogReview | null>(null)
@@ -93,6 +117,14 @@ export default function ProductStudioPage() {
   const parsedDraft = useMemo(() => {
     try { return draftText ? JSON.parse(draftText) as Record<string, unknown> : null } catch { return null }
   }, [draftText])
+  const draftRelationships = useMemo(
+    () => Array.isArray(parsedDraft?.relationships) ? parsedDraft.relationships.filter(isDraftRelationship) : [],
+    [parsedDraft],
+  )
+  const relationshipCandidates = useMemo(
+    () => offerings.filter(item => item.id !== selectedOffering?.id),
+    [offerings, selectedOffering?.id],
+  )
   const compatibleSchemas = useMemo(
     () => schemas.filter(item => !selectedSpec || item.id === selectedSpec.schemaRef.id),
     [schemas, selectedSpec],
@@ -194,11 +226,35 @@ export default function ProductStudioPage() {
     if (!selectedSpec || !newOfferingCode.trim()) return
     const body: OfferingRequest = {
       specificationId: selectedSpec.id, code: newOfferingCode.trim().toUpperCase(),
-      market: { countries: [], channels: [], brands: [], segments: [], locales: ['en'] },
+      market: marketContextFromInput(marketContextInput),
     }
     void run(() => catalogV2Operation('createOfferingV2', {
       body,
     }), t('Nabídka vytvořena', 'Offering created'))
+  }
+
+  const updateMarketContext = (field: keyof MarketContextInput, value: string) => {
+    setMarketContextInput(current => ({ ...current, [field]: value }))
+  }
+
+  const addRelationship = () => {
+    if (!parsedDraft || !selectedOffering || !relationshipTargetId) return
+    try {
+      setDraftText(JSON.stringify(addOfferingRelationship(parsedDraft, selectedOffering.id, {
+        kind: relationshipKind, targetOfferingId: relationshipTargetId,
+      }), null, 2))
+      setValidationState('idle')
+      setReview(null)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const removeRelationship = (relationship: DraftRelationship) => {
+    if (!parsedDraft) return
+    setDraftText(JSON.stringify(removeOfferingRelationship(parsedDraft, relationship), null, 2))
+    setValidationState('idle')
+    setReview(null)
   }
 
   const createDraft = () => {
@@ -330,6 +386,17 @@ export default function ProductStudioPage() {
           </select>
           <Can permission="catalog:author">
             <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input className="input" value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button className="btn btn-secondary" onClick={createOffering} aria-label={t('Vytvořit nabídku', 'Create offering')}><Plus size={13} /></button></div>
+            <div className={styles.marketContext}>
+              <div className={styles.marketTitle}><LockKeyhole size={13} /><span>{t('Dostupnost nabídky', 'Offer availability')}</span></div>
+              <p>{t('Neveřejná nabídka používá obchodní segment, nikoli identitu zákazníka. Katalog neobsahuje osobní údaje.', 'A private offer uses a commercial segment, never a customer identity. The catalog contains no personal data.')}</p>
+              <div className={styles.marketGrid}>
+                <label><span>{t('Značky', 'Brands')}</span><input className="input" value={marketContextInput.brands} onChange={event => updateMarketContext('brands', event.target.value)} placeholder="retail" /></label>
+                <label><span>{t('Země', 'Countries')}</span><input className="input" value={marketContextInput.countries} onChange={event => updateMarketContext('countries', event.target.value)} placeholder="CZ, DE" /></label>
+                <label><span>{t('Kanály', 'Channels')}</span><input className="input" value={marketContextInput.channels} onChange={event => updateMarketContext('channels', event.target.value)} placeholder="WEB, BRANCH" /></label>
+                <label><span>{t('Segmenty', 'Segments')}</span><input className="input" value={marketContextInput.segments} onChange={event => updateMarketContext('segments', event.target.value)} placeholder="employee, premium" /></label>
+                <label><span>{t('Lokality', 'Locales')}</span><input className="input" value={marketContextInput.locales} onChange={event => updateMarketContext('locales', event.target.value)} placeholder="cs-CZ, en" /></label>
+              </div>
+            </div>
             <button className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} disabled={!selectedOffering} onClick={createDraft}><Plus size={13} />{t('Založit novou revizi', 'Create a new revision')}</button>
           </Can>
           <div className={styles.revisionList}>{revisions.length === 0 && <div className={styles.schemaHint}>{t('Vyberte nabídku a otevřete její rozhodovací historii.', 'Select an offer to open its decision history.')}</div>}{revisions.map(item => <button key={item.id} onClick={() => { setRevisionId(item.id); setReview(null) }} className={`${styles.revision} ${revisionId === item.id ? styles.revisionSelected : ''}`}>
@@ -343,6 +410,18 @@ export default function ProductStudioPage() {
         <div className={styles.panelBody}>
           <div className={styles.draftBanner}><CheckCircle2 size={15} /><span>{selectedRevision?.state === 'DRAFT' ? t('Draft lze ukládat a ověřovat. Publikaci provede jiný uživatel.', 'This draft can be saved and checked. A different user performs publication.') : t('Toto je neměnný historický záznam.', 'This is an immutable historical record.')}</span></div>
           <Can permission="catalog:author" fallback={<textarea className={`input ${styles.editor}`} value={draftText} disabled />}>
+            {parsedDraft && <div className={styles.composition}>
+              <div className={styles.compositionHead}><div><span><Link2 size={13} />{t('Složení nabídky', 'Offer composition')}</span><p>{t('Bundle přidá existující publikovatelnou nabídku jako komponentu. Služba při publikaci znovu ověří existenci, účinnost i cykly.', 'A bundle adds an existing publishable offer as a component. The service rechecks existence, effectiveness and cycles at publication.')}</p></div><span className="badge badge-neutral">{draftRelationships.length}</span></div>
+              {selectedRevision?.state === 'DRAFT' && <div className={styles.compositionControls}>
+                <select className="input" value={relationshipKind} onChange={event => setRelationshipKind(event.target.value as RelationshipKind)}>{relationshipKinds.map(kind => <option key={kind}>{kind}</option>)}</select>
+                <select className="input" value={relationshipTargetId} onChange={event => setRelationshipTargetId(event.target.value)}><option value="">{t('Vyberte nabídku', 'Select an offer')}</option>{relationshipCandidates.map(item => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
+                <button className="btn btn-secondary" disabled={!relationshipTargetId} onClick={addRelationship}><Plus size={13} />{t('Přidat', 'Add')}</button>
+              </div>}
+              {draftRelationships.length === 0 ? <div className={styles.compositionEmpty}>{t('Žádné vazby. Samostatná nabídka zůstává beze změny.', 'No connections. A standalone offer remains unchanged.')}</div> : <div className={styles.relationships}>{draftRelationships.map(relationship => {
+                const target = offerings.find(item => item.id === relationship.targetOfferingId)
+                return <div className={styles.relationship} key={`${relationship.kind}:${relationship.targetOfferingId}`}><span className="badge badge-info">{relationship.kind}</span><span>{target?.code ?? relationship.targetOfferingId}</span>{selectedRevision?.state === 'DRAFT' && <button aria-label={t('Odebrat vazbu', 'Remove relationship')} className={styles.removeRelationship} onClick={() => removeRelationship(relationship)}><X size={13} /></button>}</div>
+              })}</div>}
+            </div>}
             {guidedFields.length > 0 && parsedDraft && <div className={styles.guidedForm}>
               <div className={styles.guidedHead}><span><Sparkles size={13} />{t('Průvodce povinnými údaji', 'Guided essentials')}</span><small>{t('Pouze skalární pole; pole a složité struktury zůstávají níže v expertním dokumentu.', 'Scalar fields only; arrays and complex structures remain in the expert document below.')}</small></div>
               <div className={styles.fieldGrid}>{guidedFields.map(field => {
