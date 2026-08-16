@@ -47,11 +47,29 @@
 .panelBody { padding: 15px 17px 17px; }
 .smallLabel { display: block; margin: 11px 0 5px; color: var(--text-tertiary); font-size: 10px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .schemaHint { margin-top: 10px; padding: 10px; border-radius: 10px; background: var(--surface-2); color: var(--text-secondary); font-size: 11px; line-height: 1.55; }
+.marketContext { margin-top: 10px; padding: 11px; border: 1px solid #d9d8ee; border-radius: 11px; background: linear-gradient(135deg, #fbfbff, #f4f8ff); }
+.marketTitle { display: flex; align-items: center; gap: 6px; color: #3730a3; font-size: 11px; font-weight: 800; }
+.marketContext p { margin: 5px 0 9px; color: #5b5b86; font-size: 10px; line-height: 1.45; }
+.marketGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.marketGrid label { display: grid; gap: 3px; color: var(--text-tertiary); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.marketGrid input { min-width: 0; font-size: 11px; }
 .revisionList { display: flex; flex-direction: column; gap: 5px; margin-top: 13px; }
 .revision { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--text-primary); cursor: pointer; text-align: left; }
 .revision:hover { background: var(--surface-2); border-color: var(--border); }
 .revisionSelected { background: var(--ob-accent-light); border-color: var(--ob-accent-border); }
 .draftBanner { display: flex; gap: 9px; padding: 11px; border: 1px solid var(--ob-accent-border); border-radius: 10px; background: var(--ob-accent-light); color: var(--ob-accent-text); font-size: 11px; line-height: 1.5; }
+.composition { margin-top: 11px; padding: 12px; border: 1px solid #c9d7ef; border-radius: 12px; background: linear-gradient(135deg, #f7fbff, #f4f3ff); }
+.compositionHead { display: flex; justify-content: space-between; gap: 9px; }
+.compositionHead span { display: inline-flex; align-items: center; gap: 6px; color: #1e3a8a; font-size: 12px; font-weight: 800; }
+.compositionHead p { margin: 4px 0 0; color: #52607b; font-size: 10px; line-height: 1.45; }
+.compositionControls { display: grid; grid-template-columns: 118px minmax(0, 1fr) auto; gap: 7px; margin-top: 10px; }
+.compositionControls select { min-width: 0; font-size: 11px; }
+.compositionEmpty { margin-top: 9px; color: var(--text-tertiary); font-size: 10px; }
+.relationships { display: grid; gap: 5px; margin-top: 9px; }
+.relationship { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 7px 8px; border: 1px solid #d6dfef; border-radius: 8px; background: rgba(255,255,255,.75); color: var(--text-secondary); font-size: 11px; }
+.relationship > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.removeRelationship { display: grid; width: 24px; height: 24px; margin-left: auto; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--text-tertiary); cursor: pointer; }
+.removeRelationship:hover { background: #fee2e2; color: var(--danger); }
 .guidedForm { margin-top: 10px; padding: 12px; border: 1px solid #d8d5ff; border-radius: 12px; background: linear-gradient(135deg, #fbfbff, #f3f8ff); }
 .guidedHead { display: grid; gap: 3px; color: #312e81; font-size: 12px; font-weight: 800; }
 .guidedHead span { display: inline-flex; align-items: center; gap: 6px; }
@@ -85,6 +103,8 @@
 .aiTitle { display: flex; align-items: center; gap: 7px; color: #312e81; font-size: 13px; font-weight: 800; }
 .aiCopy { margin-top: 4px; color: #5b5b86; font-size: 11px; line-height: 1.5; }
 .aiGuard { display: inline-flex; align-items: center; gap: 4px; padding: 4px 7px; border-radius: 999px; background: white; color: #4f46e5; font-size: 10px; font-weight: 800; white-space: nowrap; }
+.aiUnavailable { display: flex; gap: 7px; margin-top: 10px; padding: 9px; border: 1px solid #d7d8e8; border-radius: 9px; background: rgba(255, 255, 255, .72); color: #5b5b86; font-size: 10px; line-height: 1.45; }
+.aiUnavailable svg { flex: 0 0 auto; margin-top: 1px; color: #4f46e5; }
 .finding { margin-top: 9px; padding: 10px; border: 1px solid var(--border); border-left: 3px solid var(--info); border-radius: 9px; background: white; }
 .findingHigh { border-left-color: var(--danger); }
 .findingWarning { border-left-color: var(--warning); }
@@ -96,10 +116,24 @@
 .diffList { max-height: 178px; overflow: auto; margin: 10px 0 0; padding-left: 18px; color: var(--text-secondary); }
 .diffList li { margin: 4px 0; font-size: 11px; }
 .preview { display: flex; flex-direction: column; min-height: 100%; padding: 20px; border-radius: 15px; background: linear-gradient(145deg, #f8fafc, #eef2ff); }
+.previewContext { margin-bottom: 12px; padding: 11px; border: 1px solid #d9d8ee; border-radius: 11px; background: linear-gradient(135deg, #fbfbff, #f4f8ff); }
+.previewContextTitle { display: flex; align-items: center; gap: 6px; color: #3730a3; font-size: 11px; font-weight: 800; }
+.previewContext p { margin: 5px 0 9px; color: #5b5b86; font-size: 10px; line-height: 1.45; }
+.previewContextGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.previewContextGrid label { display: grid; gap: 3px; color: var(--text-tertiary); font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.previewContextGrid input { min-width: 0; font-size: 11px; }
+.selectionList { display: grid; gap: 5px; margin-bottom: 12px; }
+.selection { display: grid; grid-template-columns: 28px 1fr auto; align-items: center; gap: 8px; width: 100%; padding: 9px; border: 1px solid #d6dfef; border-radius: 10px; background: white; color: var(--text-primary); cursor: pointer; text-align: left; }
+.selection:hover, .selectionActive { border-color: var(--ob-accent-border); background: var(--ob-accent-light); }
+.selectionRank { display: grid; width: 23px; height: 23px; place-items: center; border-radius: 50%; background: var(--surface-2); color: var(--text-secondary); font-size: 10px; font-weight: 800; }
+.selectionCopy { min-width: 0; }
+.selectionCopy strong, .selectionCopy small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selectionCopy strong { font-size: 11px; }
+.selectionCopy small { margin-top: 2px; color: var(--text-tertiary); font-family: var(--font-mono); font-size: 9px; }
 .previewEyebrow { color: var(--ob-accent-text); font-size: 10px; font-weight: 800; letter-spacing: .09em; text-transform: uppercase; }
 .previewName { margin-top: 8px; font-size: 22px; letter-spacing: -.035em; }
 .previewCopy { margin-top: 6px; color: var(--text-secondary); font-size: 12px; line-height: 1.6; }
 .previewFoot { margin-top: auto; padding-top: 18px; color: var(--text-tertiary); font-size: 11px; }
 .message { margin: 14px 0; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary); white-space: pre-wrap; font-family: var(--font-sans); font-size: 12px; }
 @media (max-width: 1120px) { .workspace { grid-template-columns: 1fr 1fr; } .workspace > :last-child { grid-column: span 2; } .metrics { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 760px) { .hero { padding: 20px; } .heroTop, .lowerGrid { display: block; } .refresh { margin-top: 16px; } .journey { grid-template-columns: 1fr 1fr; } .journeyStep:nth-child(2) { border-right: 0; } .journeyStep:nth-child(-n+2) { border-bottom: 1px solid var(--border); } .workspace, .fieldGrid { grid-template-columns: 1fr; } .workspace > :last-child { grid-column: auto; } .lowerGrid > * { margin-bottom: 14px; } }
+@media (max-width: 760px) { .hero { padding: 20px; } .heroTop, .lowerGrid { display: block; } .refresh { margin-top: 16px; } .journey { grid-template-columns: 1fr 1fr; } .journeyStep:nth-child(2) { border-right: 0; } .journeyStep:nth-child(-n+2) { border-bottom: 1px solid var(--border); } .workspace, .fieldGrid, .marketGrid, .compositionControls, .previewContextGrid { grid-template-columns: 1fr; } .workspace > :last-child { grid-column: auto; } .lowerGrid > * { margin-bottom: 14px; } }

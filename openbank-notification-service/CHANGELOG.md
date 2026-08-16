@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.0...notification-service-v0.23.1) (2026-08-15)
+
+
+### Bug Fixes
+
+* **notification:** a mocked mailer committed status=SENT with sent_at for mail that never left ([#4938](https://github.com/JiRaska/open-bank-oss/issues/4938)) ([7a01350](https://github.com/JiRaska/open-bank-oss/commit/7a01350af1531eb7ac78cb2fdb844c84a2840d9e)), closes [#4737](https://github.com/JiRaska/open-bank-oss/issues/4737) [#4363](https://github.com/JiRaska/open-bank-oss/issues/4363)
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.22.2...notification-service-v0.23.0) (2026-08-14)
 
 

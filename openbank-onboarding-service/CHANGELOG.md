@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.1...onboarding-service-v0.7.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.0...onboarding-service-v0.7.1) (2026-08-14)
 
 

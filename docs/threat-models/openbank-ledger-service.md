@@ -237,6 +237,23 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-16** — Outbound OIDC client was never configured (#3921, follow-up to the 2026-08-09
+  entry below). That entry's "Same … OIDC client-credentials posture" line described a posture
+  that did not exist: `application.yaml` declared `quarkus.oidc` (inbound, validates tokens
+  arriving here) and no `quarkus.oidc-client` (outbound, mints the token `FxServiceClient`'s
+  `OidcClientRequestReactiveFilter` attaches). The two blocks share three field names and differ
+  by one hyphen, so the gap read as configured on inspection. Effect: every `FxServiceClient` call
+  left with no `Authorization` header at all — a 401 from fx-service, not a 403 — and the daily FX
+  revaluation had failed on **every run it ever made**
+  (`openbank_workflow_success_recorded{workflow="ledger-fx-revaluation"} = 0`; caught only by
+  `FxFixingAgeAbsent`, an `absent()` alert on a gauge the run never got far enough to register).
+  Fixed by adding `quarkus.oidc-client` with `auth-server-url:
+  ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}` — the same variable the
+  inbound `quarkus.oidc` block already reads, and which the deployed workload already sets, so no
+  gitops change was needed. **No new trust boundary**: the edge, host, route, authz posture and
+  Vault-projected `OIDC_CLIENT_SECRET` (S2 above) are unchanged — this restores the M2M identity
+  the edge was always meant to present, rather than adding a capability. Enforced fleet-wide by
+  `check-oidc-client-configured.py` (six services fixed; ledger and settlement money-path).
 - **2026-08-09** — Outbound client edge + posting semantics (#3921, correctness half). Two changes to
   the money path, and the second is the one that needs the scrutiny.
   **(a) Outbound edge.** `FxServiceClient.getRate` now sends `asOf=<business day>` alongside

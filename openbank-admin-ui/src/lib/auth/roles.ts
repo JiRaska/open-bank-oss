@@ -28,7 +28,11 @@ export type Role = typeof ROLES[keyof typeof ROLES]
 // Permission matrix — what each role can access
 export const PERMISSIONS = {
   // Dashboard
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
+  // Every interactive staff persona needs the workspace landing page. Without
+  // the KYC and supervisor entries their role-specific workspace can be
+  // derived, but the role matrix says they may not view the dashboard — a
+  // contradiction ADR-0229 D4 explicitly rules out.
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -134,6 +138,7 @@ export function hasPermission(roles: string[], permission: Permission): boolean 
  * be stricter than `/system` without an exception in a page component.
  */
 const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = [
+  ['dashboard:view', ['/dashboard']],
   ['system:config', ['/system/config']],
   ['catalog:read', ['/product-studio']],
   ['templates:view', ['/document-templates']],

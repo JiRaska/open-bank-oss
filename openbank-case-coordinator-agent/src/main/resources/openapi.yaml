@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.0.0
+  version: 1.1.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -67,7 +67,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '403':
-          description: case.open denied by the capability gate, or case class not enabled
+          description: >-
+            The authenticated caller may not act as the requested `openedBy` agent identity, or
+            case.open is denied by the capability gate, or the case class is not enabled.
           content:
             application/json:
               schema:
@@ -175,7 +177,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '403':
-          description: Signal type denied for this agent by the capability gate
+          description: >-
+            The authenticated caller may not act as the requested `agentId`, or the signal type is
+            denied for that agent by the capability gate.
           content:
             application/json:
               schema:
@@ -222,7 +226,10 @@ components:
           description: Stable subject reference; part of the deduplicating workflow id
         openedBy:
           type: string
-          description: Agent id opening the case (capability-gated)
+          description: >-
+            Agent identity the call REQUESTS to act as. It is not an identity claim the server
+            believes: the caller is proved by its bearer token, and this value is authorised
+            against that caller's verified roles before any capability decision uses it.
         dispositionTarget:
           type: string
           description: What the case is deciding about (alert, incident, proposal lineage)
@@ -243,6 +250,10 @@ components:
           enum: [join, contribute, supersede, request-synthesis]
         agentId:
           type: string
+          description: >-
+            Agent identity the signal REQUESTS to act as, and the recorded author of the
+            contribution. Authorised against the authenticated caller's verified roles before the
+            capability gate consults it.
         role:
           type: string
           description: Participant role for join signals

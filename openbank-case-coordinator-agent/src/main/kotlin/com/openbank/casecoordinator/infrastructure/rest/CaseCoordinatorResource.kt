@@ -122,6 +122,12 @@ class CaseCoordinatorResource(
         // the header only names which.
         val callerPrincipal = identity.principal?.name?.takeIf { it.isNotBlank() } ?: "anonymous"
 
+        // …and the identity it may CLAIM is decided against the roles it proved, before any
+        // capability decision runs on the claim (#4834). `canOpenCase(openedBy)` asks whether the
+        // named agent holds `case.open`; it cannot ask whether the caller is that agent, so on its
+        // own it tests an assertion. Deny-by-default, and the value is not echoed back.
+        if (!gate.permitsAssertedIdentity(identity.roles, openedBy)) return assertedIdentityDenied()
+
         return when (
             val result = openService.open(callerPrincipal, openedBy, caseClass, subjectRef, dispositionTarget)
         ) {
@@ -150,6 +156,12 @@ class CaseCoordinatorResource(
         requireNotNull(request) { "request body is required" }
         val type = requireNotNull(request.type) { "type is required" }
         val agentId = requireNotNull(request.agentId) { "agentId is required" }
+        // Authorisation before availability, deliberately ahead of the Temporal check (#4834). The
+        // claimed agentId is carried into the workflow as the AUTHOR of the contribution, which is
+        // the guarantee ADR-0244 rests on — "who detected is never who coordinated" — so it must be
+        // one the caller proved it may act as, not one it named. Answering 503 first would also
+        // make the decision unobservable wherever Temporal is off.
+        if (!gate.permitsAssertedIdentity(identity.roles, agentId)) return assertedIdentityDenied()
         if (!temporalConfig.enabled()) return temporalUnavailable()
         if (!capable(type, agentId)) {
             return Response.status(Response.Status.FORBIDDEN)
@@ -201,6 +213,15 @@ class CaseCoordinatorResource(
                 .entity(errorBody("no running case with id '$id'")).build()
         }
     }
+
+    /**
+     * The asserted agent identity is not one this caller's roles may act as. The requested id is
+     * NOT echoed, for the same reason the other denials stopped echoing it (#4215): it is
+     * free-form request input, and repeating it back tells the caller nothing it did not send.
+     */
+    private fun assertedIdentityDenied(): Response = Response.status(Response.Status.FORBIDDEN)
+        .entity(errorBody("the authenticated caller may not act as the requested agent identity"))
+        .build()
 
     private fun temporalUnavailable(): Response = Response.status(Response.Status.SERVICE_UNAVAILABLE)
         .entity(errorBody("Temporal case workflows are disabled (openbank.temporal.enabled=false)"))

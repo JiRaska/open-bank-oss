@@ -188,6 +188,28 @@ class CatalogPlatformResourceTest {
     }
 
     @Test
+    fun publishesOnlyBundlesWithPublishedNonCyclicComponents() {
+        val specificationId = createSpecification("INS_BUNDLE_E2E")
+        val componentOfferingId = createOffering(specificationId, "INS_BUNDLE_COMPONENT")
+        val componentRevisionId = createRevision(componentOfferingId, "Bundle component")
+        setMaker(componentRevisionId, "component-author")
+        publish(componentOfferingId, componentRevisionId)
+
+        val bundleOfferingId = createOffering(specificationId, "INS_BUNDLE_STARTER")
+        val bundleRevisionId = createRevision(
+            bundleOfferingId,
+            "Starter bundle",
+            "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$componentOfferingId\"}]",
+        )
+        setMaker(bundleRevisionId, "bundle-author")
+        publish(bundleOfferingId, bundleRevisionId)
+
+        assertSelfRelationshipIsRejected(bundleOfferingId)
+        assertUnpublishedBundleComponentIsRejected(specificationId)
+        assertBroaderBundleAudienceIsRejected(specificationId)
+    }
+
+    @Test
     fun acceptsOutboxWritesFromThePreviousV2BinaryDuringRollingDeployment() {
         val eventId = UUID.randomUUID()
         dataSource.connection.use { connection ->
@@ -436,28 +458,33 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun createOffering(specificationId: UUID, code: String): UUID = UUID.fromString(
-        (
-            Given {
-                contentType("application/json")
-                body(
-                    """{"specificationId":"$specificationId","code":"$code","market":""" +
-                        """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}}""",
-                )
-            } When {
-                post("/api/v2/offerings")
-            } Then {
-                statusCode(201)
-                header("ETag", equalTo("\"0\""))
-            }
-            ).extract().jsonPath().getString("id"),
-    )
+    private fun createOffering(specificationId: UUID, code: String, market: String = DEFAULT_MARKET): UUID =
+        UUID.fromString(
+            (
+                Given {
+                    contentType("application/json")
+                    body(
+                        """{"specificationId":"$specificationId","code":"$code","market":$market}""",
+                    )
+                } When {
+                    post("/api/v2/offerings")
+                } Then {
+                    statusCode(201)
+                    header("ETag", equalTo("\"0\""))
+                }
+                ).extract().jsonPath().getString("id"),
+        )
 
-    private fun createRevision(offeringId: UUID, name: String, schemaVersion: Int = 2): UUID = UUID.fromString(
+    private fun createRevision(
+        offeringId: UUID,
+        name: String,
+        relationships: String = "[]",
+        schemaVersion: Int = 2,
+    ): UUID = UUID.fromString(
         (
             Given {
                 contentType("application/json")
-                body(revisionPayload(name, schemaVersion))
+                body(revisionPayload(name, relationships, schemaVersion))
             } When {
                 post("/api/v2/offerings/$offeringId/revisions")
             } Then {
@@ -468,11 +495,85 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun revisionPayload(name: String, schemaVersion: Int = 2): String =
+    private fun revisionPayload(name: String, relationships: String = "[]", schemaVersion: Int = 2): String =
         """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion},""" +
             """"name":{"en":"$name"},"attributes":${attributesFor(schemaVersion)},"prices":[{""" +
             """"code":"PREMIUM","kind":"AMOUNT","value":"$EXACT_PRICE","currency":"EUR","unit":"policy",""" +
-            """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}]}"""
+            """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}],"relationships":$relationships}"""
+
+    private fun publish(offeringId: UUID, revisionId: UUID) {
+        Given {
+            contentType("application/json")
+            body("{\"reason\":\"independent bundle component approval\"}")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+        }
+    }
+
+    private fun assertSelfRelationshipIsRejected(bundleOfferingId: UUID) {
+        Given {
+            contentType("application/json")
+            body(
+                revisionPayload(
+                    "Self relationship",
+                    relationships = "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$bundleOfferingId\"}]",
+                ),
+            )
+        } When {
+            post("/api/v2/offerings/$bundleOfferingId/revisions")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    private fun assertUnpublishedBundleComponentIsRejected(specificationId: UUID) {
+        val unpublishedOfferingId = createOffering(specificationId, "INS_BUNDLE_UNPUBLISHED")
+        createRevision(unpublishedOfferingId, "Unpublished component")
+        val bundleOfferingId = createOffering(specificationId, "INS_BUNDLE_INVALID")
+        val bundleRevisionId = createRevision(
+            bundleOfferingId,
+            "Invalid bundle",
+            "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$unpublishedOfferingId\"}]",
+        )
+        setMaker(bundleRevisionId, "bundle-author")
+        publishExpecting(bundleOfferingId, bundleRevisionId, 409)
+    }
+
+    private fun assertBroaderBundleAudienceIsRejected(specificationId: UUID) {
+        val privateComponentOfferingId = createOffering(
+            specificationId,
+            "INS_BUNDLE_PRIVATE_COMPONENT",
+            """{"countries":["CZ"],"channels":["WEB"],"segments":["employee"],"locales":["cs-CZ"]}""",
+        )
+        val privateComponentRevisionId = createRevision(privateComponentOfferingId, "Employee component")
+        setMaker(privateComponentRevisionId, "private-component-author")
+        publish(privateComponentOfferingId, privateComponentRevisionId)
+        val broadBundleOfferingId = createOffering(specificationId, "INS_BUNDLE_BROAD")
+        val broadBundleRevisionId = createRevision(
+            broadBundleOfferingId,
+            "Broad bundle",
+            "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$privateComponentOfferingId\"}]",
+        )
+        setMaker(broadBundleRevisionId, "broad-bundle-author")
+        publishExpecting(broadBundleOfferingId, broadBundleRevisionId, 400)
+    }
+
+    private fun publishExpecting(offeringId: UUID, revisionId: UUID, status: Int) {
+        Given {
+            contentType("application/json")
+            body("{\"reason\":\"components are ready\"}")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(status)
+            if (status == 409) body("code", equalTo("CATALOG_CONFLICT"))
+        }
+    }
 
     private fun attributesFor(schemaVersion: Int): String =
         if (schemaVersion == 1) LEGACY_INSURANCE_ATTRIBUTES else INSURANCE_ATTRIBUTES
@@ -752,6 +853,7 @@ class CatalogPlatformResourceTest {
     private companion object {
         const val OUTBOX_FAILURE_ACTOR = "outbox-rollback-test-operator"
         const val EXACT_PRICE = "10000000000000000000.10"
+        const val DEFAULT_MARKET = """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}"""
         const val LEGACY_INSURANCE_ATTRIBUTES =
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"CALCULATED"}"""
         const val INSURANCE_ATTRIBUTES =

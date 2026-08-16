@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.16.0...party-service-v0.16.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **party:** bump the API contract version to 1.16.0 ([#4986](https://github.com/JiRaska/open-bank-oss/issues/4986)) ([f731440](https://github.com/JiRaska/open-bank-oss/commit/f73144007ecd27cd322fea497a475b7fc18b92eb)), closes [#4808](https://github.com/JiRaska/open-bank-oss/issues/4808)
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.15.6...party-service-v0.16.0) (2026-08-14)
 
 
