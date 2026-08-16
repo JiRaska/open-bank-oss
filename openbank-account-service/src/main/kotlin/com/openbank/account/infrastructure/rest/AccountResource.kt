@@ -431,12 +431,20 @@ class AccountResource(
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "account.close", resource = "#accountId")
     @Operation(summary = "Close an account")
-    suspend fun closeAccount(@PathParam("accountId") accountId: UUID, request: CloseAccountRequest): Response {
+    suspend fun closeAccount(
+        @PathParam("accountId") accountId: UUID,
+        request: CloseAccountRequest,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): Response {
+        customerPartyId?.let {
+            val account = accountUseCase.getAccount(GetAccountQuery(accountId))
+            denyIfNotOwner(account.partyId, it)?.let { deny -> return deny }
+        }
         val account = accountUseCase.closeAccount(
             CloseAccountCommand(
                 accountId = accountId,
                 reason = request.reason,
-                requestedBy = operatorId(),
+                requestedBy = customerPartyId ?: operatorId(),
             ),
         )
         return Response.ok(account.toResponse()).build()
