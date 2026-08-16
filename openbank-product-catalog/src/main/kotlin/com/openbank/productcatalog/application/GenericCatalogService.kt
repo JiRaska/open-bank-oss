@@ -12,6 +12,7 @@ import com.openbank.productcatalog.domain.catalog.MarketContext
 import com.openbank.productcatalog.domain.catalog.ProductOffering
 import com.openbank.productcatalog.domain.catalog.ProductRevision
 import com.openbank.productcatalog.domain.catalog.ProductSpecification
+import com.openbank.productcatalog.domain.catalog.RelationshipKind
 import com.openbank.productcatalog.domain.catalog.RevisionContent
 import com.openbank.productcatalog.domain.catalog.RevisionState
 import com.openbank.productcatalog.domain.catalog.SchemaRef
@@ -94,6 +95,7 @@ class GenericCatalogService(
         }
         findSchema(schemaRef)
         validateOrThrow(schemaRef, content.attributes)
+        validateRelationshipReferences(offeringId, content)
         val now = Instant.now(clock)
         return repository.createDraft(
             ProductRevision(
@@ -133,6 +135,7 @@ class GenericCatalogService(
             throw CatalogConflictException("published revisions are immutable")
         }
         validateOrThrow(existing.schemaRef, content.attributes)
+        validateRelationshipReferences(existing.offeringId, content)
         return repository.updateDraft(
             existing.copy(
                 content = content,
@@ -159,6 +162,8 @@ class GenericCatalogService(
         }
         require(reason.isNotBlank()) { "publication reason must not be blank" }
         validateOrThrow(draft.schemaRef, draft.content.attributes)
+        val publicationAt = Instant.now(clock)
+        requirePublishableBundleComponents(draft, draft.effectiveFrom ?: publicationAt)
         val hash = catalogJson.sha256(catalogJson.toContentNode(draft.content))
         return repository.publishDraft(
             revisionId = revisionId,
@@ -166,7 +171,7 @@ class GenericCatalogService(
             checkerId = checkerId,
             reason = reason,
             contentHash = hash,
-            at = Instant.now(clock),
+            at = publicationAt,
         )
     }
 
@@ -190,6 +195,78 @@ class GenericCatalogService(
             throw CatalogPreconditionFailedException(
                 "revision ${revision.id} was modified (expected $expected, current ${revision.revision})",
             )
+        }
+    }
+
+    /**
+     * Relationships retain stable offering references rather than copying terms. Checking them
+     * while drafting makes invalid references visible before an approval is requested.
+     */
+    private suspend fun validateRelationshipReferences(offeringId: UUID, content: RevisionContent) {
+        val relationships = content.relationships
+        require(relationships.none { it.targetOfferingId == offeringId }) {
+            "an offering cannot reference itself"
+        }
+        require(relationships.distinctBy { it.kind to it.targetOfferingId }.size == relationships.size) {
+            "offering relationships must be unique"
+        }
+        relationships.forEach { relationship -> findOffering(relationship.targetOfferingId) }
+    }
+
+    /** A published bundle may contain only effective, published offerings and may not form a cycle. */
+    private suspend fun requirePublishableBundleComponents(draft: ProductRevision, effectiveAt: Instant) {
+        val bundleMarket = findOffering(draft.offeringId).market
+        draft.content.relationships
+            .filter { it.kind == RelationshipKind.BUNDLE }
+            .forEach { relationship ->
+                requirePublishedBundlePath(
+                    offeringId = relationship.targetOfferingId,
+                    effectiveAt = effectiveAt,
+                    path = setOf(draft.offeringId),
+                    bundleMarket = bundleMarket,
+                )
+            }
+    }
+
+    private suspend fun requirePublishedBundlePath(
+        offeringId: UUID,
+        effectiveAt: Instant,
+        path: Set<UUID>,
+        bundleMarket: MarketContext,
+    ) {
+        if (offeringId in path) {
+            throw CatalogConflictException("bundle relationships must not form a cycle")
+        }
+        requireBundleMarketCompatibility(bundleMarket, findOffering(offeringId).market, offeringId)
+        val component = repository.findPublished(offeringId, effectiveAt)
+            ?: throw CatalogConflictException("bundle component $offeringId is not published")
+        component.content.relationships
+            .filter { it.kind == RelationshipKind.BUNDLE }
+            .forEach { child ->
+                requirePublishedBundlePath(child.targetOfferingId, effectiveAt, path + offeringId, bundleMarket)
+            }
+    }
+
+    /** A bundle can narrow an audience, but it must never make a component available more broadly. */
+    private fun requireBundleMarketCompatibility(
+        bundle: MarketContext,
+        component: MarketContext,
+        componentOfferingId: UUID,
+    ) {
+        listOf(
+            "brands" to (bundle.brands to component.brands),
+            "countries" to (bundle.countries to component.countries),
+            "channels" to (bundle.channels to component.channels),
+            "segments" to (bundle.segments to component.segments),
+            "locales" to (bundle.locales to component.locales),
+        ).forEach { (dimension, audiences) ->
+            val (bundleAudience, componentAudience) = audiences
+            require(
+                componentAudience.isEmpty() ||
+                    (bundleAudience.isNotEmpty() && bundleAudience.all(componentAudience::contains)),
+            ) {
+                "bundle $dimension must not be broader than component $componentOfferingId"
+            }
         }
     }
 }
