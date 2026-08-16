@@ -7,6 +7,8 @@ import com.openbank.dispute.application.port.out.ComplaintRepository
 import com.openbank.dispute.application.usecase.isBreached
 import com.openbank.dispute.domain.model.ComplaintStatus
 import com.openbank.libs.domain.calendar.BusinessCalendar
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -17,6 +19,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import java.time.Clock
+import java.time.Duration
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.concurrent.atomic.AtomicLong
@@ -73,8 +76,13 @@ class ComplaintDeadlineGauge(
     private val dueSoon = AtomicLong(0)
     private val breached = AtomicLong(0)
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+    private var liveness: WorkflowLivenessRecorder? = null
+
     @PostConstruct
     fun register() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
         val r = registry ?: return
         gauge(r, "openbank.complaints.open", open)
         gauge(r, "openbank.complaints.due_soon", dueSoon)
@@ -104,10 +112,13 @@ class ComplaintDeadlineGauge(
         dueSoon.set(
             openComplaints.count { !isBreached(it, today) && !it.dueDate.isAfter(soonCutoff) }.toLong(),
         )
+        liveness?.recordSuccess()
     }
 
     companion object {
         private const val SERVICE = "dispute"
+        private const val WORKFLOW_NAME = "complaint-deadline-gauge-refresh"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofSeconds(30)
 
         /** Warn this many business days before the statutory deadline (PSD2 Art. 101 is 15 BD). */
         const val DUE_SOON_BUSINESS_DAYS = 3
