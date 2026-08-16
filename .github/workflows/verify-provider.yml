@@ -27,9 +27,9 @@ on:
         default: ""
         type: string
       provider_version:
-        # Blank deliberately means the checked-out ref. A distinct value is fail-closed in
-        # _service-ci.yml and exists only for a merged, test-fixture-only provider-state repair.
-        description: "Provider version to publish. Blank = ref; a distinct version must be an older main ancestor differing only in this service's src/test tree."
+        # Blank deliberately means the checked-out ref. A distinct value checks out deployed P,
+        # then overlays the one approved Ledger provider-state fixture blob from ref F.
+        description: "Provider version P to publish. Blank = ref; distinct P is Ledger-only and uses one approved fixture from ref F."
         required: false
         default: ""
         type: string
