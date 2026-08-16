@@ -98,25 +98,60 @@ if [ "${1:-}" = "--self-test" ]; then
     cp "$REAL_ADR/lib-frontmatter.sh" "$REAL_ADR/tags.txt" "$REAL_ADR/known-repos.txt" "$d/" 2>/dev/null
     echo "$d"
   }
+  # Print captured gate output as INERT log lines. `$out` is full of `::error::` /
+  # `::warning::` workflow commands, and interpolating it into an `echo "::error::… $out"`
+  # hands those embedded lines straight back to the Actions runner, which re-parses each one
+  # as its own command. That is what made the #4850 log read as self-contradictory: the
+  # single `expect` failure rendered as three unrelated annotations
+  # (`##[error]self-test: …`, then a stray `##[warning]…`, then `##[error]check-adr-registry:
+  # ADR registry has integrity violations`), so the evidence for one case looked like output
+  # from somewhere else entirely. Neutralising `::` and prefixing every line keeps a
+  # multi-line capture readable as ONE block.
+  show_out() { # show_out <what> <text>
+    printf '  [%s] %s\n' "$1" "----------------------------------------" >&2
+    printf '%s\n' "$2" | sed -e 's/::/:!:/g' -e "s/^/  [$1] /" >&2
+  }
+
   expect() { # expect <label> <adr-dir> <want-rc> [substring]
-    local label="$1" d="$2" want="$3" sub="${4:-}" out rc
+    local label="$1" d="$2" want="$3" sub="${4:-}" out rc mrc=0
     # cd OUT of this repo: see the note above about check 5's repo-wide git grep.
     out=$(cd "$td" && bash "$SELF" "$d" 2>&1); rc=$?
+    # The match is evaluated HERE, not inside the `elif`, for one reason: its exit status has
+    # to survive into the diagnostic. #4854 printed `PIPESTATUS` from inside the branch, where
+    # the most recent pipeline is the preceding `echo` — so it reported `0` unconditionally,
+    # on a path only reachable because grep returned non-zero. A diagnostic that cannot vary
+    # is not evidence.
+    #
+    # `LC_ALL=C` closes the last untested candidate for #4850. GNU grep's matching is
+    # locale-dependent even under `-F`, and `$out` is not pure ASCII (`err` writes an em dash,
+    # and every fixture path is interpolated), so an encoding the runner's locale rejects can
+    # make an ASCII pattern silently miss a line that contains it. That is the shape of the
+    # one observed failure: an assertion that a substring was absent from output the log shows
+    # containing it, on a job that passed on re-run with no code change. It is not confirmed
+    # to be the cause — it could not be reproduced — but byte matching is what this assertion
+    # always meant, and it removes the variable.
+    #
+    # (#4854 already removed the earlier candidate, a `printf | grep -q` pipeline whose `-q`
+    # early exit can SIGPIPE the writer under `set -o pipefail`. The here-string below keeps
+    # that closed.)
+    if [ -n "$sub" ]; then LC_ALL=C grep -qF -- "$sub" <<<"$out" || mrc=$?; fi
     if [ "$rc" -ne "$want" ]; then
-      echo "::error::self-test: $label — want rc=$want got $rc: $out" >&2; fails=$((fails+1))
-    # Here-string, NOT `printf | grep -q` (#4850). Under `set -o pipefail` a `-q` early exit can
-    # SIGPIPE the writer and the pipeline then reports failure even though grep matched — this
-    # repo documents that footgun, and services-ci.yml carries the same note. It is written here
-    # as a precaution, not as a diagnosis: the one observed failure (#4850) could not be
-    # reproduced under bash 3.2 or 5.2 with the match at the head of a 5 MB payload, so the
-    # mechanism is unconfirmed. Removing the pipeline costs nothing and closes the candidate.
-    elif [ -n "$sub" ] && ! grep -qF -- "$sub" <<<"$out"; then
-      # Carry the evidence, so a recurrence diagnoses itself instead of needing a repro. The
-      # failure this replaces printed an $out that visibly CONTAINED the substring it said was
-      # missing, and nothing in the log could explain the contradiction.
-      echo "::error::self-test: $label — rc right, reason wrong (no '$sub'): $out" >&2
-      echo "::error::self-test: matcher PIPESTATUS=${PIPESTATUS[*]-n/a}; \$out as bytes:" >&2
-      od -c <<<"$out" | head -20 >&2
+      echo "::error::self-test: $label — want rc=$want got $rc (gate output below)" >&2
+      show_out "$label" "$out"
+      fails=$((fails+1))
+    elif [ "$mrc" -ne 0 ]; then
+      # Carry the evidence, so a recurrence diagnoses itself instead of needing a repro:
+      # grep's REAL status, the locale it ran under, both byte lengths, and the bytes of both
+      # sides. Dumping `$sub` matters as much as dumping `$out` — the assertion is a
+      # comparison, and #4850 could not be settled precisely because only one side was ever
+      # visible.
+      echo "::error::self-test: $label — rc right, reason wrong (no '$sub')" >&2
+      echo "::error::self-test: grep rc=$mrc LC_ALL=C; \${#out}=${#out} \${#sub}=${#sub}; LANG=${LANG:-unset} LC_ALL(env)=${LC_ALL:-unset}" >&2
+      show_out "$label" "$out"
+      echo "  [$label] \$out as bytes:" >&2
+      od -c <<<"$out" >&2
+      echo "  [$label] \$sub as bytes:" >&2
+      od -c <<<"$sub" >&2
       fails=$((fails+1))
     fi
   }
