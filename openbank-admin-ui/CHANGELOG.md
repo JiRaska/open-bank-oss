@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.142.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.141.0...admin-ui-v0.142.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify identity operations workspaces ([#4988](https://github.com/JiRaska/open-bank-oss/issues/4988)) ([7d857cd](https://github.com/JiRaska/open-bank-oss/commit/7d857cd8e0c8d7888b27208c7317a9a224353ae1))
+
 ## [0.141.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.140.0...admin-ui-v0.141.0) (2026-08-16)
 
 
