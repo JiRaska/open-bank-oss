@@ -390,7 +390,8 @@
         }
       ],
       "realmRoles": [
-        "ROLE_VIEWER"
+        "ROLE_VIEWER",
+        "ROLE_DEMO"
       ]
     },
     {
