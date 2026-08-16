@@ -3,6 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.onboarding.infrastructure.observability
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.onboarding.application.port.out.OnboardingRepository
 import com.openbank.onboarding.domain.model.FunnelStage
 import io.micrometer.core.instrument.Gauge
@@ -13,6 +15,7 @@ import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -41,9 +44,13 @@ class OnboardingFunnelGauge(private val repository: OnboardingRepository, privat
 
     private val stageCounts: Map<FunnelStage, AtomicLong> =
         FunnelStage.entries.associateWith { AtomicLong(0) }
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+    private var liveness: WorkflowLivenessRecorder? = null
 
     @PostConstruct
     fun register() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
         val r = registry ?: return
         for ((stage, counter) in stageCounts) {
             Gauge.builder(METRIC_FUNNEL, counter) { it.get().toDouble() }
@@ -64,10 +71,13 @@ class OnboardingFunnelGauge(private val repository: OnboardingRepository, privat
         for ((stage, counter) in stageCounts) {
             counter.set(repository.countByStage(stage))
         }
+        liveness?.recordSuccess()
     }
 
     companion object {
         private const val SERVICE = "onboarding"
         private const val METRIC_FUNNEL = "openbank.onboarding.funnel"
+        private const val WORKFLOW_NAME = "onboarding-funnel-gauge-refresh"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofSeconds(30)
     }
 }
