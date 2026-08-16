@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.146.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.145.0...admin-ui-v0.146.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify customer operations workspaces ([#5056](https://github.com/JiRaska/open-bank-oss/issues/5056)) ([e6cb356](https://github.com/JiRaska/open-bank-oss/commit/e6cb35601966f841a32660e883ff0201441894a0))
+
 ## [0.145.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.144.0...admin-ui-v0.145.0) (2026-08-16)
 
 
