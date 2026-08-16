@@ -124,6 +124,22 @@ def artifact_set(path: pathlib.Path) -> set[str]:
 # daemons. If this recurs, raise the number; do not re-litigate whether the flag applies.
 GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx8g"
 
+# "Failed to notify build model lifecycle listener > Java heap space" (2026-08-16, run 31903136753,
+# AFTER the 8g raise above had already landed on main, regenerating openbank-libs-runtime ALONE --
+# not #4793's batching shape, which #5031 already fixed and this branch already carries).
+#
+# `-Dorg.gradle.jvmargs` on the command line configures the DAEMON/worker JVM Gradle spawns; it does
+# NOT touch the `./gradlew` LAUNCHER process's own heap, which Gradle's wrapper script reads from
+# `GRADLE_OPTS`/`JAVA_OPTS` instead. "Build model lifecycle listener" notification happens in that
+# launcher process during configuration, before the worker JVM's heap is even relevant -- so raising
+# GRADLE_HEAP was raising the wrong pool for this failure. The same distinction is already made
+# fleet-wide: `openbank-product-catalog/Dockerfile.native`'s builder stage sets a bare `GRADLE_OPTS`
+# for exactly this reason, on a comparably large full-repo `settings.gradle.kts` (30+ modules).
+#
+# Passed as `env`, not appended to the command line -- GRADLE_OPTS is read from the environment, a
+# `-D` argument on the invoked `./gradlew` script would just be an inert positional argument to it.
+GRADLE_LAUNCHER_OPTS = "-Xmx1g"
+
 
 def regenerate(modules: list[str]) -> None:
     """Run the metadata writer for each module IN ITS OWN Gradle invocation, in place.
@@ -148,6 +164,8 @@ def regenerate(modules: list[str]) -> None:
     failures: list[tuple[str, int]] = []
     for module in modules:
         targets = [f":{module}:{task}" for task in tasks_for(module)]
+        env = dict(os.environ)
+        env["GRADLE_OPTS"] = GRADLE_LAUNCHER_OPTS
         result = subprocess.run(
             ["./gradlew", "--write-verification-metadata", "sha256",
              # Without this the check is vacuous on CI. A warm Gradle cache does not
@@ -158,6 +176,7 @@ def regenerate(modules: list[str]) -> None:
              "--refresh-dependencies",
              *targets, GRADLE_HEAP, "--no-daemon", "--console=plain", "-q"],
             check=False,
+            env=env,
         )
         if result.returncode != 0:
             failures.append((module, result.returncode))

@@ -11,6 +11,7 @@ import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface StandingOrder {
   id: string; debtorAccountId: string; creditorAccountId: string; creditorName: string
@@ -46,16 +47,7 @@ export default function StandingOrdersPage() {
   return (
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('Trvalé příkazy', 'Standing Orders')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Trvalé příkazy a opakované platby — SEPA SCT', 'Standing orders and recurring payments — SEPA SCT')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader icon={<Repeat size={20} aria-hidden="true" />} title={t('Trvalé příkazy', 'Standing Orders')} subtitle={t('Trvalé příkazy a opakované platby — SEPA SCT', 'Standing orders and recurring payments — SEPA SCT')} actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <ServiceStatusBadge
               label="standing-order :8121"
               loading={loading}
@@ -69,8 +61,7 @@ export default function StandingOrdersPage() {
               }}
             />
             <button className="btn btn-primary btn-sm"><Plus size={13} /> {t('Nový příkaz', 'New Order')}</button>
-          </div>
-        </div>
+          </div>} />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[

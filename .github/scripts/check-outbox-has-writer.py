@@ -7,7 +7,7 @@
 # A service that ships an outbox must write to it (issue #4007).
 #
 # THE DEFECT THIS CATCHES
-# Five services ship the whole transactional-outbox apparatus — a `*OutboxDispatcher`, a backlog
+# Four services ship the whole transactional-outbox apparatus — a `*OutboxDispatcher`, a backlog
 # gauge, a Flyway migration for the table, `openbank.outbox.dispatch-enabled: true` — and construct
 # no `OutboxMessage` anywhere in `src/main`. The dispatcher polls a table nothing writes to, forever.
 #
@@ -40,15 +40,15 @@
 # comment.
 #
 # RATCHET, NOT A BIG BANG
-# The five below are real and each needs a per-service decision (wire it, or delete the apparatus)
+# The four below are real and each needs a per-service decision (wire it, or delete the apparatus)
 # that is not this gate's to make. They are baselined against #4007 so the gate can be ENFORCED
 # today: a sixth service cannot be added quietly. A baseline entry that becomes covered is reported
 # too, so the list keeps meaning something rather than silently becoming permanent.
 #
-# The list started at eight. Three have left it, and only two of those were fixes: `party` (#4158)
-# and `kyc` (#4378) were wired onto their outbox and their direct emitters retired, while
-# `billing` was never a violation at all — see its note in BASELINE. Worth separating, because a
-# shrinking baseline reads as progress and one third of this one was a measurement error.
+# The list started at eight. Four have left it, and only three of those were fixes: `party`
+# (#4158), `kyc` (#4378) and `tpp-registry` (#4007) were wired onto their outbox, while `billing`
+# was never a violation at all — see its note in BASELINE. Worth separating, because a shrinking
+# baseline reads as progress and one of these four was a measurement error, not a repair.
 
 from __future__ import annotations
 
@@ -77,7 +77,15 @@ BASELINE = {
     # is gone. Removing an entry from this list is the definition of done for that service.
     "openbank-pid-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
     "openbank-psd2-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
-    "openbank-tpp-registry-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    # openbank-tpp-registry-service was wired instead of deleted (#4007): TPP_REGISTERED and
+    # TPP_BLACKLISTED now go through tpp_outbox in the same transaction as the tpp_entries row
+    # (TppRepositoryImpl.save/update, which take the event as a REQUIRED parameter so there is no
+    # eventless overload to bypass). Wired rather than deleted because every other end of the arrow
+    # already existed and only the write did not: the KafkaTopic, the write ACL, the
+    # event-contract baseline entry and the gitops headers all assert a producer for
+    # openbank.tpp.registry.event. Proven by TppOutboxWriteIT — a real-DB IT, because a mocked
+    # repository cannot tell whether an outbox row was written.
+    # Removing an entry from this list is the definition of done for that service.
 }
 
 DISPATCHER_RE = re.compile(r"class\s+\w*OutboxDispatcher\b")
@@ -96,8 +104,8 @@ ENTITY_CONSTRUCTION_RE = re.compile(r"\b\w*OutboxEntity\s*\(\s*\)")
 # the DRAIN side. That mapper is plumbing, in the same category as the data-class declaration
 # above: counting it would mark all 34 dispatcher-shipping services as writers and silently retire
 # the gate — the same failure the SQL predicate's `\w*outbox\w*` narrowness exists to avoid.
-# Verified against the tree: for audit, balance, pid, psd2 and tpp-registry the ONLY
-# `*OutboxEntity()` construction is that mapper, so all five stay violations.
+# Verified against the tree: for audit, balance, pid and psd2 the ONLY `*OutboxEntity()`
+# construction is that mapper, so all four stay violations.
 OUTBOX_ADAPTER_RE = re.compile(r"Outbox\w*RepositoryImpl\.kt$")
 
 

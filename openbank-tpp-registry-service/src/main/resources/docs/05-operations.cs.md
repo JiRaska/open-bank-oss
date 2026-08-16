@@ -73,7 +73,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 1. `POST /api/v1/tpp-registry/{tppId}/blacklist` s `{ "reason": "<ref incidentu>" }` a `Idempotency-Key`.
 2. Ověř, že `GET /check` nyní vrací `403`. PSD2 plochy TPP při dalším volání odmítnou.
 
-### Outbox se nedraní (až budou události zapojeny)
+### Outbox se nedraní
 1. Dotaž `tpp_outbox WHERE status='PENDING' ORDER BY created_at` na backlog.
 2. Prohlédni `last_error` / `attempt_count` u `FAILED` řádků; ověř konektivitu Kafky (`tpp-events-out`).
 3. Dispatcher běží každých 5 s (`@Scheduled`, batch 25); zaseklý scheduler obnoví restart podu.

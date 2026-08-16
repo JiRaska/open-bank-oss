@@ -136,6 +136,68 @@ export function deriveAgentOutcomes(proposals: ProposalOutcomeInput[]): AgentOut
   }
 }
 
+// ── Weekly trend (issue #4462: "per week") ─────────────────────────────────
+// The queue is thin — 41 decided proposals across two charters over ~10 weeks in the
+// measurement that motivated this file — so most weekly buckets will legitimately read
+// "insufficient data". That is not a bug to work around: a week with 2 decisions saying
+// "67%" would be exactly the misleading-100%-on-a-thin-sample failure this file exists
+// to prevent, just at a finer grain. Reuse [MIN_DECIDED_FOR_RATE] rather than inventing a
+// second, smaller threshold — a per-week rate is a rate over the same kind of event
+// (a decided proposal) as the overall one, and a lower bar here would let a week assert
+// more confidence per-sample than the aggregate does.
+
+export interface WeeklyOutcome {
+  /** Monday 00:00 UTC of the ISO week, e.g. "2026-06-08". Weeks with zero decisions are omitted. */
+  weekStart: string
+  decided: number
+  approved: number
+  /** approved / decided, or null when [decided] < [MIN_DECIDED_FOR_RATE]. */
+  approvalRate: number | null
+  insufficientData: boolean
+}
+
+/** Monday 00:00 UTC of the ISO week containing `ms`. */
+function isoWeekStartMs(ms: number): number {
+  const d = new Date(ms)
+  const day = d.getUTCDay() // 0 = Sunday .. 6 = Saturday
+  const diffToMonday = day === 0 ? -6 : 1 - day
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + diffToMonday)
+}
+
+/**
+ * Approval rate bucketed by the ISO week of `decidedAt`. A decided proposal whose
+ * `decidedAt` is missing or unparseable is excluded from every bucket — it cannot be
+ * dated, so folding it into "this week" or "some week" would misattribute it — the same
+ * exclude-rather-than-guess rule [deriveAgentOutcomes] applies to latency.
+ */
+export function deriveWeeklyOutcomes(proposals: ProposalOutcomeInput[]): WeeklyOutcome[] {
+  const buckets = new Map<number, { decided: number; approved: number }>()
+
+  for (const p of proposals) {
+    if (p.state !== 'APPROVED' && p.state !== 'REJECTED') continue
+    const decidedMs = parseInstant(p.decidedAt)
+    if (decidedMs === null) continue
+    const weekMs = isoWeekStartMs(decidedMs)
+    const bucket = buckets.get(weekMs) ?? { decided: 0, approved: 0 }
+    bucket.decided += 1
+    if (p.state === 'APPROVED') bucket.approved += 1
+    buckets.set(weekMs, bucket)
+  }
+
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a - b)
+    .map(([weekMs, { decided, approved }]) => {
+      const insufficientData = decided < MIN_DECIDED_FOR_RATE
+      return {
+        weekStart: new Date(weekMs).toISOString().slice(0, 10),
+        decided,
+        approved,
+        approvalRate: insufficientData ? null : approved / decided,
+        insufficientData,
+      }
+    })
+}
+
 /** "2 d 12 h" / "3 h 5 m" / "45 s" — a latency a reviewer can read without dividing. */
 export function formatLatency(seconds: number): string {
   if (seconds < 60) return `${Math.round(seconds)} s`

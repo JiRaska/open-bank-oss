@@ -66,7 +66,7 @@ Vzor transactional-outbox je zapojen end-to-end na úrovni infrastruktury:
 3. `KafkaTppOutboxEventPublisher` posílá `Record<String,String>` (náhodný klíč, payload) na topic `openbank.tpp.registry.event`.
 4. Při úspěchu se řádek označí `SENT`; při selhání `markFailed` zaznamená chybu a inkrementuje `attempt_count`.
 
-> **Přesná výhrada:** současný `TppRegistryService` zapisuje pouze do `TppRepository` — zatím **nevkládá** řádky do outboxu při register/blacklist. Outbox transport (tabulka, dispatcher, publisher, Kafka kanál) je plně přítomen a topic je nakonfigurován, ale **žádné doménové události se zatím nevypouštějí**. Toto je první follow-up k zapojení (např. `TppRegistered`, `TppBlacklisted`).
+> **Historie (issue #4007):** po většinu života této služby byl outbox transport plně přítomen — tabulka, dispatcher, publisher, Kafka kanál, zapisovací ACL, `dispatch-enabled: true` — a **nikdy nikdo nezapsal řádek**, takže `openbank.tpp.registry.event` neměl vůbec žádného producenta. `TppRegistryService` nyní emituje `TPP_REGISTERED` a `TPP_BLACKLISTED` (`TppEvents`); událost se předává do `TppRepository.save`/`update` jako POVINNÝ parametr, takže neexistuje bezudálostní varianta, kterou by šlo obejít. `TppOutboxWriteIT` proti reálné databázi dokazuje, že řádek vzniká ve stejné transakci jako změna stavu — mockovaný repozitář to poznat nedokáže, proto mezera přežila zelenou sadu testů.
 
 ## Souhrn klíčových portů
 

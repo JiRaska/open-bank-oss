@@ -72,8 +72,6 @@ ALLOWLIST = {
 # exit 1, which `mode: advisory` then converted to a warning; nothing else noticed.
 BASELINE = [
     # non-money-path
-    "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
-    "openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/crypto/TrustedListService.kt",
     "openbank-statement-service/src/main/kotlin/com/openbank/statement/infrastructure/scheduler/PeriodCloseScheduler.kt",
 ]
 

@@ -16,6 +16,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { looksLikeUuid } from '@/lib/validation/iban'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // Go through the BFF proxy directly (svcUrl → /api/svc/document-service/...), the
 // same pattern product-catalog/standing-orders/kyc now use — NOT a dedicated
@@ -431,21 +432,7 @@ export default function DocumentTemplatesPage() {
   return (
     <AuthGuard permission="templates:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">{t('Šablony dokumentů', 'Document Templates')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <FileSignature size={18} style={{ color: 'var(--accent)' }} />
-              {t('Šablony dokumentů', 'Document Templates')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Správa šablon smluv, formulářů a vygenerovaných dokumentů (openbank-document-service)', 'Manage contract/form templates and generated documents (openbank-document-service)')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
+        <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Šablony dokumentů', 'Document Templates')}</span></div>} icon={<FileSignature size={20} aria-hidden="true" />} title={t('Šablony dokumentů', 'Document Templates')} subtitle={t('Správa šablon smluv, formulářů a vygenerovaných dokumentů (openbank-document-service)', 'Manage contract/form templates and generated documents (openbank-document-service)')} actions={<div style={{ display: 'flex', gap: '8px' }}>
             {canEdit && tab === 'templates' && (
               <button className="btn btn-primary" onClick={openCreateModal} disabled={loading}>
                 <Plus size={14} /> {t('Nová šablona', 'New Template')}
@@ -455,8 +442,7 @@ export default function DocumentTemplatesPage() {
               <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
-          </div>
-        </div>
+          </div>} />
 
         <div style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
           {([
