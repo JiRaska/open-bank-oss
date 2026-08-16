@@ -72,7 +72,6 @@ BASELINE = [
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt",
     "openbank-agent-service/src/main/kotlin/com/openbank/agent/infrastructure/observability/AgentMetricsAdapter.kt",
     "openbank-audit-service/src/main/kotlin/com/openbank/audit/application/AuditAnchorService.kt",
-    "openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/ConsentExpirationJob.kt",
     "openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/DelegationExpirationJob.kt",
     "openbank-dispute-service/src/main/kotlin/com/openbank/dispute/infrastructure/observability/ComplaintDeadlineGauge.kt",
     "openbank-onboarding-service/src/main/kotlin/com/openbank/onboarding/infrastructure/observability/OnboardingFunnelGauge.kt",
