@@ -2355,6 +2355,45 @@ gates:
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
 
+  # The PUBLISHED fleet-wide event document (#4761). `docs/asyncapi/openbank-events.yaml` is linked
+  # from the admin-ui developer-docs page, and until this gate NOTHING under `.github/` read it —
+  # the two ADR-0006 gates above scope to `openbank-contracts/`, so this file had never been
+  # validated against a producer in its life. It had drifted accordingly: 18 of 21 payload schemas
+  # asserted `eventType` as a BODY field, which is false for the 27-of-29 outbox-relayed producers
+  # (the dispatcher moves it to the `ce-type` Kafka header), and 15 of its 23 channel addresses
+  # named topics no service produces or consumes at all.
+  #
+  # That is not a cosmetic drift. A consumer author who follows the published schema writes
+  # `node.path("eventType")`, gets "", takes a quiet `?: return`, and discards 100% of messages with
+  # no error and no log — the failure state is indistinguishable from success at every layer. It
+  # blocked #1035 for four weeks on the sanctions channel.
+  #
+  # Checks: (A) every channel address is a topic some service actually speaks, derived from
+  # `mp.messaging.outgoing|incoming.*.topic` (and the `topics:` fan-in idiom audit-service uses);
+  # (B) every channel says where its discriminator lives — `ce-type` or `direct emitter`; (C) a
+  # channel claiming the header must not also declare a body `eventType`, resolved through
+  # `allOf`/`$ref` so inheriting EventEnvelope counts.
+  #
+  # It deliberately does NOT check the payload field set, and that is a limitation of the source,
+  # not of the effort: an outbox-relayed producer serialises the AGGREGATE, so there is no
+  # constructor at the call site and no literal JSON key anywhere in the tree — the same blind spot
+  # that makes event-contract-code-agreement structurally unable to cover these producers. The true
+  # field set needs a captured message or a registered wire schema (#1916; Apicurio is deployed,
+  # healthy, and holds zero artifacts). Retire this gate together with the document when #1916
+  # supersedes it with `openbank-contracts/`.
+  - id: asyncapi-doc-discriminator
+    name: "published AsyncAPI doc — discriminator + address reality (#4761, enforced)"
+    group: data
+    mode: enforced
+    rationale: "The published event document told consumers to read eventType from the body; it is a Kafka header for 27 of 29 producers, so a correct-looking consumer silently discards every message."
+    review_after: "2027-02-15"
+    min_subjects: 20
+    selftest: |
+      python3 .github/scripts/check-asyncapi-doc-discriminator.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-asyncapi-doc-discriminator.py
+
   - id: schema-compat-gate
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
     group: data
