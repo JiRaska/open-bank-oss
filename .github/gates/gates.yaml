@@ -2277,7 +2277,7 @@ gates:
   - id: db-migration-gate
     name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, enforced)"
     group: data
-    mode: advisory
+    mode: enforced
     verified: "2026-08-16 — producer self-test and enforced PR-diff mode pass"
     when: pull_request
     needs_base: required
