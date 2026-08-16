@@ -6,6 +6,8 @@ package com.openbank.audit.infrastructure.observability
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.ChainVerification
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.micrometer.prometheus.PrometheusConfig
+import io.micrometer.prometheus.PrometheusMeterRegistry
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -126,5 +128,29 @@ class AuditChainIntegrityGaugeTest {
         // reporting a confident, permanent "intact".
         assertThat(registry.gaugeValue("openbank.audit.chain.last.verified.timestamp.seconds"))
             .isEqualTo(0.0)
+    }
+
+    // #5049: openbank_audit_chain_verify_duration_seconds_bucket read as empty on the Business KPIs
+    // dashboard because registry.timer(name) — the implicit-registration form previously used — never
+    // configures a histogram, so it publishes only _count/_sum/_max. SimpleMeterRegistry can't show
+    // this (it isn't Prometheus-shaped), so this test uses the same PrometheusMeterRegistry the
+    // dashboard actually scrapes and asserts a real _bucket sample exists, not just that the timer
+    // has a count.
+    @Test
+    fun `verify duration timer publishes a percentile histogram, so the dashboard's histogram_quantile panel has data`() {
+        val repo = mockk<AuditRepository>()
+        coEvery { repo.verifyChain(any()) } returns
+            ChainVerification(intact = true, checked = 3, unchained = 0, firstBrokenEntryId = null)
+        val registry = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
+        val g = AuditChainIntegrityGauge()
+        g.registry = registry
+        g.auditRepository = repo
+        g.enabled = true
+        g.register()
+
+        runBlocking { g.verify() }
+
+        val scraped = registry.scrape()
+        assertThat(scraped).contains("openbank_audit_chain_verify_duration_seconds_bucket")
     }
 }

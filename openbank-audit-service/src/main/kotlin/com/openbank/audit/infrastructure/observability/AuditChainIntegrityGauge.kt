@@ -6,6 +6,7 @@ package com.openbank.audit.infrastructure.observability
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
 import jakarta.annotation.PostConstruct
@@ -82,8 +83,19 @@ class AuditChainIntegrityGauge {
     private val unverifiableLegacy = AtomicLong(0)
     private val lastVerifiedEpochSeconds = AtomicLong(0)
 
+    // Registered once, up front, rather than via registry.timer(name) inside verify() (#5049): the
+    // implicit-registration form returns a Timer with NO histogram config, so it publishes only
+    // _count/_sum/_max — the Business KPIs dashboard's histogram_quantile() panel over
+    // openbank_audit_chain_verify_duration_seconds_bucket had nothing to read despite this control
+    // running hourly since #3505. publishPercentileHistogram() is what emits the _bucket series.
+    private lateinit var verifyDurationTimer: Timer
+
     @PostConstruct
     fun register() {
+        verifyDurationTimer = Timer.builder("openbank.audit.chain.verify.duration")
+            .description("Duration of a full audit hash-chain verification walk")
+            .publishPercentileHistogram()
+            .register(registry)
         Gauge.builder("openbank.audit.chain.intact") { intact.get().toDouble() }
             .description("1 when every audit hash-chain link recomputed correctly on the last run, 0 when broken")
             .strongReference(true)
@@ -143,8 +155,7 @@ class AuditChainIntegrityGauge {
             log.errorf(ex, "audit chain verification failed to run — leaving previous gauge values in place")
             return
         }
-        registry.timer("openbank.audit.chain.verify.duration")
-            .record(System.nanoTime() - startedAt, java.util.concurrent.TimeUnit.NANOSECONDS)
+        verifyDurationTimer.record(System.nanoTime() - startedAt, java.util.concurrent.TimeUnit.NANOSECONDS)
 
         intact.set(if (result.intact) 1 else 0)
         checked.set(result.checked)
