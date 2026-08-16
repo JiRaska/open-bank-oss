@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.152.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.151.0...admin-ui-v0.152.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify party operations workspace ([#5146](https://github.com/JiRaska/open-bank-oss/issues/5146)) ([d5a79d8](https://github.com/JiRaska/open-bank-oss/commit/d5a79d890da451e0bb96d7fbc3c961f0d5e5fb75))
+
 ## [0.151.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.150.0...admin-ui-v0.151.0) (2026-08-16)
 
 
