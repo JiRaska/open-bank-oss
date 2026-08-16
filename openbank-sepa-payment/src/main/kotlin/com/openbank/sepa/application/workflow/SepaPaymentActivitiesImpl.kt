@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.workflow
 
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
 import com.openbank.sepa.application.port.out.AmlCaseRiskLevel
 import com.openbank.sepa.application.port.out.FraudScoreCommand
@@ -51,6 +52,7 @@ open class SepaPaymentActivitiesImpl(
     private val schemeGatewayPort: SchemeGatewayPort,
     private val settlementPort: SettlementPort,
     private val clock: Clock,
+    private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.sepa.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
 ) : SepaPaymentActivities {
@@ -76,6 +78,23 @@ open class SepaPaymentActivitiesImpl(
                 matchedEntity = null,
             )
             return@runOnVertxContext ScreeningDecision.REVIEW
+        }
+
+        // openbank_sanctions_screenings_total / openbank_sanctions_hits_total had NO call site
+        // anywhere in this class before (issue #5049): sanctions-service itself has no "role"
+        // concept of its own (its EntityType is INDIVIDUAL/ORGANIZATION/VESSEL/AIRCRAFT, an
+        // orthogonal axis to debtor/creditor), so DomainMetrics.sanctionsScreening/sanctionsHit
+        // can only be recorded HERE, by the caller that knows which side of the payment each
+        // screened name is. One event per screened entity, not per payment -- results always
+        // has exactly one entry per role (debtor, creditor).
+        for (result in results) {
+            metrics.sanctionsScreening(result.role.name.lowercase())
+            val severity = when (result.status) {
+                ScreeningMatchStatus.HIT, ScreeningMatchStatus.ESCALATED -> "block"
+                ScreeningMatchStatus.POTENTIAL_HIT -> "review"
+                ScreeningMatchStatus.CLEAR, ScreeningMatchStatus.WHITELISTED -> null
+            }
+            if (severity != null) metrics.sanctionsHit(result.role.name.lowercase(), severity)
         }
 
         val decision = ScreeningPolicy.decide(results)
