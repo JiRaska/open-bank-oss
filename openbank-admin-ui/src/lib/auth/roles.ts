@@ -61,7 +61,17 @@ export const PERMISSIONS = {
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
-  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // ROLES.DEMO here (and nowhere else in this file) because onboarding-service's own
+  // @RolesAllowed(Roles.VIEWER, ...) is the one backend in this matrix that already accepts
+  // a plain viewer — verified by reading OnboardingResource.kt, not assumed. Every other
+  // *:view permission demo might plausibly want (kyc, audit, delegations, notifications:
+  // checked; compliance/regulatory/technical-accounts/templates/system: not yet checked)
+  // gates a backend or OPA rule with no viewer-equivalent tier, so adding DEMO there would
+  // render a nav link that 403s on click — worse than today's hidden link, and the opposite
+  // of what a demo account is for. Tracked as issue #5020 before widening
+  // further; do not add ROLES.DEMO to another line here without first confirming its
+  // backend accepts VIEWER-tier reads.
+  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.DEMO],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
