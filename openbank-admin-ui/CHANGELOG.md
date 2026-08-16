@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.143.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.142.0...admin-ui-v0.143.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** preview market-matched offers ([#5004](https://github.com/JiRaska/open-bank-oss/issues/5004)) ([97610e6](https://github.com/JiRaska/open-bank-oss/commit/97610e630d250b4b9b4b40abb6d5b765fc8ef710))
+
+
+### Bug Fixes
+
+* **admin-ui:** make campaign canvas keyboard-operable ([#4991](https://github.com/JiRaska/open-bank-oss/issues/4991)) ([a86f4ab](https://github.com/JiRaska/open-bank-oss/commit/a86f4ab0ff1e86e921e7e84f26a762e22d2484f5))
+
 ## [0.142.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.141.0...admin-ui-v0.142.0) (2026-08-16)
 
 
