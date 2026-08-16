@@ -126,32 +126,53 @@ GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx8g"
 
 
 def regenerate(modules: list[str]) -> None:
-    """Run the metadata writer for the given modules, in place.
+    """Run the metadata writer for each module IN ITS OWN Gradle invocation, in place.
 
-    Raises RegenerationFailed if Gradle itself failed. That is deliberately NOT the
-    same outcome as "a gap was found": a crashed build proves nothing either way,
-    and reporting it as a gap would send the author chasing entries that are fine.
+    Raises RegenerationFailed if Gradle itself failed on any module. That is
+    deliberately NOT the same outcome as "a gap was found": a crashed build proves
+    nothing either way, and reporting it as a gap would send the author chasing
+    entries that are fine.
+
+    ONE INVOCATION PER MODULE, not one invocation for the whole list (#4793). The
+    periodic sweep passes several modules per shard (`--shard I/N` strides a sorted
+    list, so a shard can land `openbank-libs-runtime` next to two or three others by
+    coincidence of alphabetical distance, not by any weighting). Bundling them into a
+    single `./gradlew ... target1 target2 target3` command line means ONE JVM holds
+    every module's resolved dependency graph in memory AT THE SAME TIME — so even
+    after #4907 raised the heap enough for libs-runtime ALONE, shard 4 still died: it
+    was libs-runtime plus three more modules in one process. Invoking Gradle once per
+    module releases the JVM (and its heap) between modules, so the peak footprint is
+    bounded by the single largest module in the shard, not their sum — the same bound
+    the PR-gate case (always exactly one module) already runs under successfully.
     """
-    targets = [f":{module}:{task}" for module in modules for task in tasks_for(module)]
-    result = subprocess.run(
-        ["./gradlew", "--write-verification-metadata", "sha256",
-         # Without this the check is vacuous on CI. A warm Gradle cache does not
-         # re-resolve metadata artifacts, so nothing gets re-hashed and the run
-         # reports "no gaps" even when an entry is demonstrably missing — measured:
-         # delete a known entry, run without --refresh-dependencies, and it passes.
-         # CI always has a warm cache (`actions/setup-java` with `cache: gradle`).
-         "--refresh-dependencies",
-         *targets, GRADLE_HEAP, "--no-daemon", "--console=plain", "-q"],
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RegenerationFailed(result.returncode)
+    failures: list[tuple[str, int]] = []
+    for module in modules:
+        targets = [f":{module}:{task}" for task in tasks_for(module)]
+        result = subprocess.run(
+            ["./gradlew", "--write-verification-metadata", "sha256",
+             # Without this the check is vacuous on CI. A warm Gradle cache does not
+             # re-resolve metadata artifacts, so nothing gets re-hashed and the run
+             # reports "no gaps" even when an entry is demonstrably missing — measured:
+             # delete a known entry, run without --refresh-dependencies, and it passes.
+             # CI always has a warm cache (`actions/setup-java` with `cache: gradle`).
+             "--refresh-dependencies",
+             *targets, GRADLE_HEAP, "--no-daemon", "--console=plain", "-q"],
+            check=False,
+        )
+        if result.returncode != 0:
+            failures.append((module, result.returncode))
+    if failures:
+        raise RegenerationFailed(failures)
 
 
 class RegenerationFailed(RuntimeError):
-    def __init__(self, code: int) -> None:
-        super().__init__(f"gradle exited {code}")
-        self.code = code
+    def __init__(self, failures: list[tuple[str, int]]) -> None:
+        detail = ", ".join(f"{module} (exit {code})" for module, code in failures)
+        super().__init__(f"gradle failed for: {detail}")
+        self.failures = failures
+        # Kept for callers that only cared about "did it fail" before this change —
+        # the first module's code, which is what a single-module (PR-gate) call always was.
+        self.code = failures[0][1]
 
 
 def selftest() -> int:
