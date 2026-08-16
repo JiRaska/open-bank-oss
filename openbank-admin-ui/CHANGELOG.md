@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.153.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.152.0...admin-ui-v0.153.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify account operations workspace ([#5150](https://github.com/JiRaska/open-bank-oss/issues/5150)) ([abee20d](https://github.com/JiRaska/open-bank-oss/commit/abee20dfcfeb7d954adb8d1ab67872c611d0a1d8))
+* **admin-ui:** unify product catalog workspace ([#5157](https://github.com/JiRaska/open-bank-oss/issues/5157)) ([2a6b14e](https://github.com/JiRaska/open-bank-oss/commit/2a6b14e2e4e679ba7f59ab4754423d128a72b15d))
+
 ## [0.152.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.151.0...admin-ui-v0.152.0) (2026-08-16)
 
 
