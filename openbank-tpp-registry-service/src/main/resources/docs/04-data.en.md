@@ -67,12 +67,17 @@ Indexes: `idx_tpp_outbox_status_created_at(status, created_at ASC)` (drain order
 | V1 | `V1__init.sql` | `tpp_entries`, `eba_sync_state`, indexes, 3 seed sandbox TPPs | `DROP TABLE tpp_entries, eba_sync_state;` |
 | V3 | `V3__create_tpp_outbox.sql` | `tpp_outbox` + 2 indexes | `DROP TABLE tpp_outbox;` |
 | V4 | `V4__hibernate_sequences.sql` | `*_seq` sequences (INCREMENT 50) required by Panache under `generation:none` | `DROP SEQUENCE eba_sync_state_seq, tpp_entries_seq, tpp_outbox_seq;` |
+| V5 | `V5__tpp_outbox_claimed_at.sql` | `tpp_outbox.claimed_at` for the atomic `FOR UPDATE SKIP LOCKED` claim | `ALTER TABLE tpp_outbox DROP COLUMN claimed_at;` |
+| V6 | `V6__tpp_entries_entry_uuid.sql` | `tpp_entries.entry_uuid` — the domain id, distinct from the internal BIGSERIAL PK (#2340) | `ALTER TABLE tpp_entries DROP COLUMN entry_uuid;` |
+| V7 | `V7__tpp_entries_seq_past_seeded_rows.sql` | `setval` on `tpp_entries_seq` past V1's seeded ids — without it the first registration collides on `tpp_entries_pkey` and answers 500 (#4007) | `SELECT setval('tpp_entries_seq', 1, false);` |
 
 > **Note:** there is no `V2` in the tree (migration history skips it). The V4 comment documents the cross-service pattern (same defect fixed for party V6 and notification V4/V5): `BIGSERIAL` alone only creates `<table>_id_seq`, but Panache expects `<table>_seq`.
 
 ### Seed data (V1)
 
 Three sandbox/test TPPs are inserted for local/dev: `CZ-CNB-SANDBOX-001` (AISP,PISP), `CZ-CNB-TEST-AISP` (AISP), `CZ-CNB-TEST-PISP` (PISP) — all `ACTIVE`, country `CZ`, NCA `CNB`.
+
+> These three take ids 1..3 from the implicit `tpp_entries_id_seq`, while Panache allocates from `tpp_entries_seq`, which V4 created starting at 1. Until V7 that made the FIRST registration through the API a guaranteed `duplicate key value violates unique constraint "tpp_entries_pkey"` → 500. Nobody had hit it: measured on the sandbox 2026-08-16, `tpp_entries_seq` read `last_value = 1, is_called = f` — never called, so no registration had ever been attempted in a deployed environment (#4007).
 
 ## PII & data classification
 

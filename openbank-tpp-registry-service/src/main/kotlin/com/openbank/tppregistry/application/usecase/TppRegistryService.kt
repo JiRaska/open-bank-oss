@@ -66,19 +66,22 @@ class TppRegistryService(private val repo: TppRepository, private val clock: Clo
             blacklistedAt = null,
             blacklistReason = null,
         )
-        return repo.save(entry)
+        // The event travels with the aggregate into ONE transaction (issue #4007) — the registry
+        // row and TPP_REGISTERED commit together, or neither does.
+        return repo.save(entry, TppEvents.registered(entry))
     }
 
     override suspend fun blacklistTpp(cmd: BlacklistTppCommand): TppEntry {
         val tpp = repo.findByTppId(cmd.tppId)
             ?: throw TppNotFoundException("TPP ${cmd.tppId} not found")
+        val now = OffsetDateTime.now(clock)
         val updated = tpp.copy(
             status = TppStatus.BLACKLISTED,
-            blacklistedAt = OffsetDateTime.now(clock),
+            blacklistedAt = now,
             blacklistReason = cmd.reason,
-            updatedAt = OffsetDateTime.now(clock),
+            updatedAt = now,
         )
-        return repo.update(updated)
+        return repo.update(updated, TppEvents.blacklisted(updated, now))
     }
 
     override suspend fun getTpp(query: GetTppQuery): TppEntry =
