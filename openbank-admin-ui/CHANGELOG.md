@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.148.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.147.0...admin-ui-v0.148.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** summarise swarm decisions ([#5076](https://github.com/JiRaska/open-bank-oss/issues/5076)) ([0b55b57](https://github.com/JiRaska/open-bank-oss/commit/0b55b5714b43a0cf77b7c3712141614210741b88))
+* **admin-ui:** unify control workspaces ([#5064](https://github.com/JiRaska/open-bank-oss/issues/5064)) ([eb4faa5](https://github.com/JiRaska/open-bank-oss/commit/eb4faa59d0c5f040161a50f227ba94475f9167e8))
+
 ## [0.147.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.146.0...admin-ui-v0.147.0) (2026-08-16)
 
 
