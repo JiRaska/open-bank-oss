@@ -15,7 +15,6 @@ import com.openbank.productcatalog.domain.MultiCurrencyConfig
 import com.openbank.productcatalog.domain.OverdraftConfig
 import com.openbank.productcatalog.domain.OverdraftType
 import com.openbank.productcatalog.domain.Product
-import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
 import com.openbank.productcatalog.domain.ProductStatus
 import com.openbank.productcatalog.domain.ProductType
 import com.openbank.productcatalog.domain.ProductVersion
@@ -23,6 +22,7 @@ import com.openbank.productcatalog.domain.SavingsConfig
 import com.openbank.productcatalog.domain.TermDepositConfig
 import com.openbank.productcatalog.domain.TermsAndConditions
 import com.openbank.productcatalog.domain.WithdrawalNotice
+import com.openbank.productcatalog.domain.catalog.CatalogChangeEvent
 import io.quarkus.runtime.annotations.RegisterForReflection
 
 /**
