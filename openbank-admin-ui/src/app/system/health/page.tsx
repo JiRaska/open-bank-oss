@@ -12,6 +12,7 @@ import type { ServiceSnapshot, ServiceConfigResponse } from '@/types'
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { cn } from '@/lib/utils'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const POLL = 15_000
 
@@ -80,19 +81,11 @@ export default function SystemHealthPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span>{t('Systém', 'System')}</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Zdraví', 'Health')}</span>
-          </div>
-          <h1 className="page-title">{t('Zdraví systému', 'System Health')}</h1>
-          <p className="page-subtitle">{t('Živý stav · automatická obnova každých', 'Live status · auto-refresh every')} {POLL / 1000}s</p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <PageHeader
+        icon={<Activity size={20} aria-hidden="true" />}
+        title={t('Zdraví systému', 'System Health')}
+        subtitle={`${t('Živý stav · automatická obnova každých', 'Live status · auto-refresh every')} ${POLL / 1000}s`}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
               <Clock size={12} /> {lastRefreshed.toLocaleTimeString()}
@@ -102,8 +95,8 @@ export default function SystemHealthPage() {
             <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' }}>
