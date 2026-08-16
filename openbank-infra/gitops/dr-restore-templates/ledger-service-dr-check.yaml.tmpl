@@ -1,0 +1,75 @@
+# Ephemeral ledger-service Deployment for the DR restore drill
+# (docs/bcp/automated-dr-restore.md). Serves ONLY the read-only trial-balance
+# check against the just-restored ledger-db-restored cluster. Substitute ${NS}
+# and ${IMAGE} before applying — see this directory's README for what was
+# deliberately left out and why, and for how ${IMAGE} must be resolved (the
+# LIVE production tag, not a stale pin).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service-dr-check
+  namespace: ${NS}
+  labels:
+    app.kubernetes.io/name: ledger-service-dr-check
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger-service-dr-check
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ledger-service-dr-check
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: ledger-service
+          image: ${IMAGE}
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8101
+            - name: management
+              containerPort: 8085
+          env:
+            - name: QUARKUS_DATASOURCE_JDBC_URL
+              value: jdbc:postgresql://ledger-db-restored-rw.${NS}.svc:5432/openbank_ledger
+            - name: QUARKUS_DATASOURCE_REACTIVE_URL
+              value: vertx-reactive:postgresql://ledger-db-restored-rw.${NS}.svc:5432/openbank_ledger
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ledger-db-restored-app
+                  key: password
+            # The whole point of the isolation guarantee: dispatch off means the outbox
+            # dispatcher never calls the Kafka emitter, so this restored pod cannot
+            # publish, no matter what a bug elsewhere in the request path might attempt.
+            - name: OPENBANK_OUTBOX_DISPATCH_ENABLED
+              value: "false"
+            # No live Keycloak in a throwaway namespace; the drill calls only the
+            # read-only trial-balance endpoint, which does not need auth for this check.
+            - name: QUARKUS_OIDC_TENANT_ENABLED
+              value: "false"
+            # Flyway must NOT run here: this is already-migrated restored data, and a
+            # restore drill exists to prove the backup, not to re-migrate it.
+            - name: QUARKUS_FLYWAY_MIGRATE_AT_START
+              value: "false"
+          readinessProbe:
+            httpGet:
+              path: /q/health/ready
+              port: management
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
