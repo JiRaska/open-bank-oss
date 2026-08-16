@@ -36,6 +36,7 @@ import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
+import com.openbank.notification.infrastructure.client.PartyMergeResolver
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -203,6 +204,10 @@ class NotificationConsumer @Inject constructor(
     @RestClient
     lateinit var partyContactClient: PartyContactClient
 
+    /** Follows the ADR-0179 `merged_into` pointer at dispatch entry (issue #1984) — see [dispatch]. */
+    @Inject
+    lateinit var partyMergeResolver: PartyMergeResolver
+
     private val log = Logger.getLogger(NotificationConsumer::class.java)
 
     /**
@@ -285,7 +290,21 @@ class NotificationConsumer @Inject constructor(
             }
     }
 
-    private fun dispatch(req: NotificationRequest): Uni<Void> {
+    /**
+     * Resolves `req.partyId` through [PartyMergeResolver] before anything else runs (issue #1984
+     * fleet sweep — ADR-0179 consumer adoption). This is the identity chokepoint: persistence,
+     * the preference check, the device-token fan-out and the EMAIL address lookup all read
+     * `partyId` off the request that reaches [dispatchResolved], so resolving once here means none
+     * of them need their own adoption. A request for a since-merged party is redirected to the
+     * survivor; an unaffected request pays one resolver call that is almost always a cache hit
+     * (see [PartyMergeResolver]).
+     */
+    private fun dispatch(req: NotificationRequest): Uni<Void> =
+        partyMergeResolver.resolve(req.partyId).chain { resolved ->
+            dispatchResolved(if (resolved == req.partyId) req else req.copy(partyId = resolved))
+        }
+
+    private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
         val (subject, body) = renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
