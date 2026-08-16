@@ -182,12 +182,12 @@ export default function QrlessPayPage() {
         </div>
         <div className="card" style={{ padding: 14, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontWeight: 700, fontSize: 13, color: INK }}>
-            {t('Dostupnost SDK — zatím nikde', 'SDK availability — nothing published yet')}
+            {t('SDK — veřejné, v0.1.0', 'SDK — public, v0.1.0')}
           </div>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
-              'Žádný balíček zatím není publikovaný a repozitář neexistuje — níže je návrh, ne changelog. Plán: rodina nativních SDK, ne jedno KMP jádro s tenkými obaly. Banka s čistě Swift aplikací si do binárky nepřidá Kotlin runtime, aby mohla přijímat platby, a profil, který má jedinou reálnou implementaci, není standard. Sdíleným artefaktem je proto conformance suite (jazykově neutrální vektory + interop matice), ne kód. Cena: čtyři implementace = čtyři krypto review, každá si 1.0.0 zaslouží vlastními důkazy.',
-              'Nothing is published and the repository does not exist yet — what follows is a proposal, not a changelog. The plan is a family of native SDKs rather than one KMP core with thin wrappers: a bank with a pure-Swift app will not add a Kotlin runtime to its binary to accept payments, and a profile with a single real implementation is not a standard. The shared artifact is therefore the conformance suite (language-neutral vectors + an interop matrix), not the code. The cost: four implementations means four crypto reviews, and each earns 1.0.0 on its own evidence.',
+              'Repozitář je veřejný pod Apache-2.0, otagovaný v0.1.0, CI zelená. Rodina nativních SDK, ne jedno KMP jádro s tenkými obaly: banka s čistě Swift aplikací si do binárky nepřidá Kotlin runtime, aby mohla přijímat platby, a profil s jedinou reálnou implementací není standard. Sdíleným artefaktem je conformance suite, ne kód — a ta se vyplatila hned: druhá implementace odhalila, že CBOR kódování referenční implementace neodpovídalo specifikaci (326 B proti 197 B a vzájemně nečitelné), což round-trip test principiálně vidět nemohl. Do 1.0 chybí nezávislé krypto review, fuzzing, DPIA a schválení podle ADR-0030 — a hlavně běh na dvou fyzických zařízeních, který zatím neproběhl.',
+              'The repository is public under Apache-2.0, tagged v0.1.0, CI green. A family of native SDKs rather than one KMP core with thin wrappers: a bank with a pure-Swift app will not add a Kotlin runtime to its binary to accept payments, and a profile with a single real implementation is not a standard. The shared artifact is the conformance suite, not the code — and it paid for itself immediately: the second implementation found that the reference CBOR encoding did not match the spec (326 B against 197 B, and mutually unreadable), which a round-trip test structurally cannot see. Reaching 1.0 needs independent cryptographic review, fuzzing, a DPIA and ADR-0030 approval — and above all a two-device run on real hardware, which has not happened.',
             )}
           </div>
           <div style={{ overflowX: 'auto' }}>
@@ -214,8 +214,8 @@ export default function QrlessPayPage() {
           </div>
           <div style={{ fontSize: 12.5, color: SUB, lineHeight: 1.6 }}>
             {t(
-              'Pořadí stavby podle dosahu, ne podle pracnosti: Swift a Kotlin první (stojí na nich vazby pro React Native i Flutter), pak React Native, pak KMP (extrakce — kód už běží v naší vlastní aplikaci), nakonec Flutter. Banky doplní jen svůj platební rail a vlastní potvrzovací UI + SCA.',
-              'Build order by reach rather than effort: Swift and Kotlin first (the React Native and Flutter bindings stand on them), then React Native, then KMP (an extraction — the code already runs in our own app), then Flutter. Banks plug in only their own payment rail plus their own confirmation UI and SCA.',
+              'Součástí je i ukázková iOS aplikace — obě role na jedné obrazovce, zároveň nosič pro test na dvou zařízeních. Banky doplní jen svůj platební rail a vlastní potvrzovací UI + SCA; SDK končí u ověřeného návrhu platby a peníze nehýbe.',
+              'It ships with an example iOS app — both roles on one screen, and the harness for the two-device run. Banks plug in only their own payment rail plus their own confirmation UI and SCA; the SDK stops at a verified proposal and moves no money.',
             )}
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -223,7 +223,8 @@ export default function QrlessPayPage() {
             <Tag>{t('Swift · Kotlin · TypeScript · Dart · KMP', 'Swift · Kotlin · TypeScript · Dart · KMP')}</Tag>
             <Tag>ČBA / EPC</Tag>
             <Tag>{t('Otevřený protokol', 'Open protocol')}</Tag>
-            <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-sdk.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Návrh SDK (spec)', 'SDK proposal (spec)')}</a>
+            <a href="https://github.com/JiRaska/qrlesspay-sdk" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('SDK na GitHubu →', 'SDK on GitHub →')}</a>
+            <a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-sdk.md" target="_blank" rel="noopener noreferrer" style={linkBtn}>{t('Architektura SDK (spec)', 'SDK architecture (spec)')}</a>
           </div>
         </div>
       </Section>
@@ -310,11 +311,11 @@ const LAYERS: { Icon: React.ElementType; req: boolean; threatCs: string; threatE
 ]
 
 const SDK_TARGETS: { platform: string; pkg: string; implCs: string; implEn: string; statusCs: string; statusEn: string }[] = [
-  { platform: 'iOS', pkg: 'SPM', implCs: 'nativní Swift', implEn: 'native Swift', statusCs: 'navrženo — 1. v pořadí', statusEn: 'proposed — first up' },
-  { platform: 'Android', pkg: 'Maven Central (AAR)', implCs: 'nativní Kotlin', implEn: 'native Kotlin', statusCs: 'navrženo — 1. v pořadí', statusEn: 'proposed — first up' },
-  { platform: 'React Native', pkg: 'npm', implCs: 'vazba na nativní SDK', implEn: 'binds the native SDKs', statusCs: 'navrženo — 2. v pořadí', statusEn: 'proposed — second' },
-  { platform: 'Kotlin Multiplatform', pkg: 'AAR + XCFramework', implCs: 'sdílený Kotlin', implEn: 'shared Kotlin', statusCs: 'kód existuje v naší aplikaci, nevytažen', statusEn: 'code exists in our app, not extracted' },
-  { platform: 'Flutter', pkg: 'pub.dev', implCs: 'vazba na nativní SDK', implEn: 'binds the native SDKs', statusCs: 'navrženo — poslední', statusEn: 'proposed — last' },
+  { platform: 'iOS', pkg: 'SPM', implCs: 'nativní Swift', implEn: 'native Swift', statusCs: 'hotovo — jádro + BLE transport, 28 testů', statusEn: 'done — core + BLE transport, 28 tests' },
+  { platform: 'Android', pkg: 'AAR', implCs: 'Kotlin', implEn: 'Kotlin', statusCs: 'hotovo — jádro + BLE transport, 27 testů', statusEn: 'done — core + BLE transport, 27 tests' },
+  { platform: 'Kotlin Multiplatform', pkg: 'AAR + XCFramework', implCs: 'sdílený Kotlin', implEn: 'shared Kotlin', statusCs: 'hotovo — buildí se, bajtově shodné CBOR se Swiftem', statusEn: 'done — builds, byte-identical CBOR to Swift' },
+  { platform: 'React Native', pkg: 'npm', implCs: 'vazba na nativní SDK', implEn: 'binds the native SDKs', statusCs: 'API a oba mosty napsané; kompilují se až v hostitelské aplikaci', statusEn: 'API and both bridges written; they compile inside a host app' },
+  { platform: 'Flutter', pkg: 'pub.dev', implCs: 'vazba na nativní SDK', implEn: 'binds the native SDKs', statusCs: 'nezačato', statusEn: 'not started' },
   { platform: 'Web', pkg: '—', implCs: 'nepodporováno', implEn: 'unsupported', statusCs: 'Web Bluetooth neumí roli příjemce', statusEn: 'Web Bluetooth cannot do the payee role' },
 ]
 
