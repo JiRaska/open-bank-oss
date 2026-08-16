@@ -44,6 +44,7 @@ class OnboardingFunnelGauge(private val repository: OnboardingRepository, privat
 
     private val stageCounts: Map<FunnelStage, AtomicLong> =
         FunnelStage.entries.associateWith { AtomicLong(0) }
+
     @Inject
     lateinit var domainMetrics: DomainMetrics
     private var liveness: WorkflowLivenessRecorder? = null

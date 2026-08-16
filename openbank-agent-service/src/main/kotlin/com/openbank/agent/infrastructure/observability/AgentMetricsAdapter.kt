@@ -45,6 +45,7 @@ class AgentMetricsAdapter(private val proposalService: ProposalService, private 
     )
 
     private val pending = AtomicLong(0)
+
     @Inject
     lateinit var domainMetrics: DomainMetrics
     private var liveness: WorkflowLivenessRecorder? = null

@@ -75,6 +75,7 @@ class ComplaintDeadlineGauge(
     private val open = AtomicLong(0)
     private val dueSoon = AtomicLong(0)
     private val breached = AtomicLong(0)
+
     @Inject
     lateinit var domainMetrics: DomainMetrics
     private var liveness: WorkflowLivenessRecorder? = null
