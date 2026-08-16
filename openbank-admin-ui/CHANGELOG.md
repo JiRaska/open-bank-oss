@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.139.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.1...admin-ui-v0.139.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify compliance workspaces ([#4958](https://github.com/JiRaska/open-bank-oss/issues/4958)) ([db38812](https://github.com/JiRaska/open-bank-oss/commit/db38812c645359108f37e82f8ac49c376733c119))
+
 ## [0.138.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.138.0...admin-ui-v0.138.1) (2026-08-16)
 
 
