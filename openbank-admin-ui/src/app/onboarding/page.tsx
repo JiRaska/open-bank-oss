@@ -10,6 +10,7 @@ import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
+import { PageHeader } from '@/components/ui'
 
 const SVC = 'onboarding-service'
 
@@ -159,22 +160,12 @@ export default function OnboardingPage() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Onboarding', 'Onboarding')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ClipboardList size={18} style={{ color: 'var(--accent)' }} />
-            {t('Onboarding cockpit', 'Onboarding Cockpit')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Přehled průběhu onboardingu zákazníků — fáze po fázi', 'Customer onboarding funnel — stage by stage')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+      <PageHeader
+        title={t('Onboarding cockpit', 'Onboarding Cockpit')}
+        subtitle={t('Přehled průběhu onboardingu zákazníků — fáze po fázi', 'Customer onboarding funnel — stage by stage')}
+        icon={<ClipboardList size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Onboarding', 'Onboarding')}</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px' }}>
           <Link href="/onboarding/analytics" className="btn btn-secondary" style={{ textDecoration: 'none' }}>
             <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
             {t('Konverze', 'Conversion')}
@@ -183,8 +174,8 @@ export default function OnboardingPage() {
             <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* KPI funnel tiles */}
       {countsUnavail ? (

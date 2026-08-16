@@ -253,8 +253,8 @@ change_requirements:
       - "a CNPG cluster declaring barmanObjectStore -> the managed bucket has a matching
          aws_eks_pod_identity_association in db-backups.tf"
     gate: db-backup-associations
-    enforced: advisory
-    target_enforce_date: "2026-08-15"   # ADR-0144
+    enforced: enforce
+    enforced_since: "2026-08-16"        # ADR-0144 — producer has run enforced in CI
     ci_producer: "openbank-infra/scripts/check-db-backup-associations.py"
     # Backup credentials arrive via EKS Pod Identity, granted per (namespace, serviceAccount) by
     # a HAND-MAINTAINED map in db-backups.tf. Nothing linked that map to the gitops manifests, so
@@ -278,8 +278,8 @@ change_requirements:
       - "new Flyway migration (forward)"
       - "rollback note in PR"
     gate: db-migration
-    enforced: advisory
-    target_enforce_date: "2026-08-15"   # ADR-0144
+    enforced: enforce
+    enforced_since: "2026-08-16"        # ADR-0144 — rollback/forward-only guard graduated
     # The rollback note lives IN the migration, as a `-- Rollback:` comment — single-line or
     # spanning the following comment lines. blocked_on used to call for a PR-BODY-parsing check,
     # but the established practice is in-file (96 of 214 migrations when the gate was written,

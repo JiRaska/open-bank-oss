@@ -47,12 +47,23 @@ function walk(dir: string): string[] {
   return out
 }
 
+function walkLayouts(dir: string): string[] {
+  const out: string[] = []
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry)
+    if (statSync(full).isDirectory()) out.push(...walkLayouts(full))
+    else if (entry === 'layout.tsx') out.push(full)
+  }
+  return out
+}
+
 // A shell layout composes the shared AppShell. We check source rather than
 // importing/executing it (the file is a server component tree we don't want
 // to render here).
 function isShellLayout(layoutPath: string): boolean {
   if (!existsSync(layoutPath)) return false
-  return /\bAppShell\b/.test(readFileSync(layoutPath, 'utf8'))
+  const source = readFileSync(layoutPath, 'utf8')
+  return /\bAppShell\b|OperatorLayout/.test(source)
 }
 
 // Walk up from the page's directory to (but NOT including) app/, looking for a
@@ -69,11 +80,27 @@ function hasShellLayoutInChain(pageFile: string): boolean {
 
 describe('admin-ui app-shell rule', () => {
   const pages = walk(APP_DIR)
+  const layouts = walkLayouts(APP_DIR)
 
   it('keeps navigation and header inside the shared app shell', () => {
     const shell = readFileSync(path.resolve(__dirname, '../components/layout/AppShell.tsx'), 'utf8')
     expect(shell).toMatch(/<Sidebar\s*\/>/)
     expect(shell).toMatch(/<Header\s*\/>/)
+  })
+
+  it('keeps the reusable operator layout as the only owner of the shell composition', () => {
+    const layout = readFileSync(path.resolve(__dirname, '../components/layout/OperatorLayout.tsx'), 'utf8')
+    expect(layout).toMatch(/<AppShell>\{children\}<\/AppShell>/)
+  })
+
+  it('does not re-declare AppShell in route layouts', () => {
+    // Route folders need a layout boundary for Next.js, but the shell itself has
+    // one owner. Re-exporting OperatorLayout keeps that boundary without another
+    // copy of the navigation/landmark tree (ADR-0208 D3).
+    for (const layout of layouts) {
+      const rel = path.relative(APP_DIR, layout).split(path.sep).join('/')
+      expect(readFileSync(layout, 'utf8'), rel).not.toMatch(/\bAppShell\b/)
+    }
   })
 
   it('discovers page files', () => {

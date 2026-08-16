@@ -3,10 +3,81 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 1.1.0
+  version: 2.0.0
   description: |
-    Kafka event streams across all OpenBank services.
-    All topics follow the naming convention: openbank.{domain}.{aggregate}.{event}
+    Kafka event streams across OpenBank services.
+
+    ## Read this before writing a consumer
+
+    **The event-type discriminator is usually a Kafka HEADER, not a body field.** Almost every
+    producer here is outbox-relayed (ADR-0003 / ADR-0050): the service writes an outbox row inside
+    its business transaction, and a generic dispatcher publishes the row's `payload` column
+    verbatim with `OutboxKafkaHeaders.headersFor(entry)` — `ce-id`, `idempotency-key` and
+    **`ce-type`**, which carries the row's `eventType`. The body is whatever the producer chose to
+    serialise, and for most producers that is the bare aggregate or a hand-built map with no type
+    field in it at all.
+
+    So a consumer written as `payload: String` + `node.path("eventType")` gets `""` on most of
+    these channels, matches no branch, takes its `?: return`, and **discards 100% of messages with
+    no error, no exception and no log line**. Take `Message<String>`, lift
+    `IncomingKafkaRecordMetadata`, and read the `ce-type` header (`AuditConsumer` in
+    openbank-audit-service is the in-fleet reference shape). Give the missing/unrecognised-header
+    outcome its own counter: on a header-discriminated channel, the failure state is
+    indistinguishable from success at every other layer.
+
+    Each channel below states explicitly where its discriminator lives. Where a producer *also*
+    duplicates the type into the body, the channel says `body eventType` and names the producer;
+    absent that phrase, there is no body field and the header is the only discriminator.
+
+    ## What this document is, and is not
+
+    It is prose, and prose is not checkable against a running producer. Every schema here was
+    derived by reading the type the producer actually serialises (or the literal keys of its
+    hand-built map), not by grepping for quoted JSON field names — a serialised Kotlin data class
+    leaves no literal key anywhere in the tree, so a grep-based audit of these payloads returns a
+    false negative by construction.
+
+    What is machine-checked (`check-asyncapi-doc-discriminator.py`, ADR-0006, #4761): every
+    channel address is a topic some service actually produces or consumes; every channel states
+    where its discriminator lives; and a body `eventType` appears in a schema if and only if the
+    channel claims it. What is NOT checked is the payload field set, because an outbox-relayed
+    producer serialises the aggregate — there is no constructor at the call site for a gate to
+    read. That needs a registered wire schema (#1916); the Apicurio registry is deployed and
+    currently holds zero artifacts.
+
+    ## Revision 2.0.0 (#4761)
+
+    Breaking, because consumers written against 1.1.0 were wrong. Previously 18 of 21 payload
+    schemas asserted `eventType` as a body field, and **15 of 23 channel addresses named topics no
+    service has ever produced or consumed** (`openbank.payments.sepa.event`,
+    `openbank.parties.party.event`, `openbank.transactions.transaction.event` and twelve more were
+    invented here and exist nowhere else in the platform). Addresses are now the real topics.
+
+    Three channels were removed rather than corrected, because their subject does not exist:
+
+    - `account-status-changed` (`openbank.accounts.account.status-changed`) — no such topic. The
+      sole `AccountEventPublisher` implementation ignores the `topic` argument its caller passes
+      and always emits on `account-events-out`, so `AccountStatusChanged` and `AccountClosed` land
+      on `openbank.accounts.account.created`. Documented there.
+    - `ledger-journal-reversed` (`openbank.ledger.journal.reversed`) — no such topic.
+      ledger-service has exactly one outgoing channel; `JournalReversed` is relayed onto
+      `openbank.ledger.journal.posted` and discriminated by `ce-type`. Documented there.
+    - `audit-events-in` (`openbank.audit.events-in`) — never a topic; `audit-events-in` is the
+      *channel* name. audit-service fans in 21 real topics via `topics:` (accounts.account.created,
+      transactions.transaction.initiated, balance.events, party.events, kyc.events, consent.events,
+      customer.audit, clearing.batch.event, security.ict.incident, security.scan.event,
+      cards.events, dispute.events, domestic.payment.events, sepa.payment.events, statement.event,
+      sanctions.screening.event, sepa.instant.events, fx.conversion.completed,
+      documents.document.event, payments.swift.event, lending.events). It stores each payload
+      verbatim; it resolves the event type body-first (`eventType`, then `type`, then the
+      `ce-type` header, else `UNKNOWN`) and reads **only** `occurredAt` for the event time,
+      substituting ingest time and flagging `occurredAtSource=INGEST` when absent — which 7 of
+      those topics trigger, so those rows assert a business time nobody measured (#3883).
+
+    Known gaps this document now records rather than hides: `openbank.accounts.account.created`
+    carries four structurally unrelated bodies; sepa-instant emits no `ce-type`, no `ce-id` and no
+    partition key at all (ADR-0003 N2/N3 violation) and drops every subtype-specific field before
+    the wire; and the interest payloads carry no event time of any kind.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -26,133 +97,266 @@ defaultContentType: application/json
 channels:
   account-events-out:
     address: openbank.accounts.account.created
-    description: Published when a new account is opened
+    description: |
+      Account lifecycle. **The address is a misnomer: four structurally unrelated bodies share
+      this one topic**, because account-service's `AccountEventPublisher` has a single
+      implementation that ignores the `topic` argument its callers pass and always emits on the
+      `account-events-out` channel. `AccountStatusChanged` and `AccountClosed` therefore land here,
+      not on the `...account.status-changed` topic their call sites name — that topic does not
+      exist, has no Kafka resource, and nothing consumes it.
+
+      Mixed relay. Three of the four are published by a **direct emitter**
+      (`KafkaAccountEventPublisher`, `writeValueAsString(event)`) which sets no headers at all;
+      `SavingsWithdrawalApproved` is outbox-relayed and so also carries `ce-type`. All four
+      serialise a `DomainEvent` subclass, so all four do carry a **body eventType** — this is one
+      of the few channels where the body-field idiom is genuinely correct. Discriminate on the body
+      field here; `ce-type` is present only on the withdrawal event.
     messages:
       AccountCreated:
         $ref: '#/components/messages/AccountCreated'
-
-  account-status-changed:
-    address: openbank.accounts.account.status-changed
-    description: Published when account status transitions (ACTIVE/FROZEN/CLOSED)
-    messages:
       AccountStatusChanged:
         $ref: '#/components/messages/AccountStatusChanged'
+      AccountClosed:
+        $ref: '#/components/messages/AccountClosed'
+      SavingsWithdrawalApproved:
+        $ref: '#/components/messages/SavingsWithdrawalApproved'
 
   ledger-journal-posted:
     address: openbank.ledger.journal.posted
-    description: Published when a double-entry journal posting is completed
+    description: |
+      Double-entry journal postings. **ledger-service has exactly one outgoing channel**, so this
+      topic carries every ledger event, not only postings: `JournalPosted`, `JournalReversed`,
+      `AccountBookedChanged`, `FxRevalued`, `AccountingDayTransitioned`, `YearCloseAttested` and
+      `PeriodFrozen`. The former `ledger-journal-reversed` channel in this document named a topic
+      that does not exist.
+
+      Outbox-relayed, so the `ce-type` header carries the outbox row's event type. The serialised
+      types extend `DomainEvent`, so there is also a **body eventType**. Note these are two
+      independently authored strings — the header comes from the `eventType` passed to
+      `OutboxMessage`, the body from the class's `override val` — and this document does not
+      assert they are equal. Prefer the header.
     messages:
       JournalPosted:
         $ref: '#/components/messages/JournalPosted'
-
-  ledger-journal-reversed:
-    address: openbank.ledger.journal.reversed
-    description: Published when a journal entry is reversed
-    messages:
       JournalReversed:
         $ref: '#/components/messages/JournalReversed'
 
   sepa-payment-events:
-    address: openbank.payments.sepa.event
-    description: SEPA payment lifecycle events (created, processing, completed, rejected, recalled)
+    address: openbank.sepa.payment.events
+    description: |
+      SEPA credit-transfer lifecycle. Outbox-relayed: the discriminator is the **`ce-type`**
+      header (`sepa.payment.created`, `sepa.payment.status-changed`) and the body carries no type
+      field whatsoever. The two bodies share a `paymentId` prefix and are otherwise
+      distinguishable only by which optional keys happen to be present — do not attempt that;
+      read the header.
     messages:
-      SepaPaymentEvent:
-        $ref: '#/components/messages/SepaPaymentEvent'
+      SepaPaymentCreated:
+        $ref: '#/components/messages/SepaPaymentCreated'
+      SepaPaymentStatusChanged:
+        $ref: '#/components/messages/SepaPaymentStatusChanged'
 
   sepa-instant-events:
-    address: openbank.payments.sct-inst.event
-    description: SEPA Instant payment lifecycle events
+    address: openbank.sepa.instant.events
+    description: |
+      SCT Inst lifecycle. **A direct emitter** — one of the very few producers on this platform
+      that bypasses the outbox entirely (`KafkaSctInstEventPublisher`, a bare `MutinyEmitter`).
+      Consequences a consumer must plan for: there is **no `ce-type` header, no `ce-id`, no
+      `idempotency-key` and no record key**, so these events cannot be deduplicated at-least-once
+      and are not ordered per aggregate (ADR-0003 N2/N3).
+
+      The discriminator is the body key **`type`** — spelled `type`, not `eventType` — whose value
+      is a Kotlin class simple name (`SctInstPaymentSubmitted`, `SctInstPaymentSettled`,
+      `SctInstPaymentRejected`, `SctInstPaymentTimeout`, `SctInstPaymentRecalled`), not a dotted
+      event name like every other channel here.
+
+      **The wire body is three keys and nothing else.** The publisher builds its own map and
+      discards every subtype-specific field of the domain event — `debtorIban`, `creditorIban`,
+      `amount`, `currency`, `endToEndId`, `settledAt`, `reason`, `recallReason` never reach the
+      wire. A consumer needing any of them must call back into the service.
     messages:
       SctInstEvent:
         $ref: '#/components/messages/SctInstEvent'
 
   domestic-payment-events:
-    address: openbank.payments.domestic.event
-    description: Czech domestic payment lifecycle events
+    address: openbank.domestic.payment.events
+    description: |
+      Czech domestic payment lifecycle. Outbox-relayed; the discriminator is the **`ce-type`**
+      header (`domestic.payment.created`, `domestic.payment.status-changed`). No body type field.
+      Structurally identical to the SEPA channel above.
     messages:
-      DomesticPaymentEvent:
-        $ref: '#/components/messages/DomesticPaymentEvent'
+      DomesticPaymentCreated:
+        $ref: '#/components/messages/DomesticPaymentCreated'
+      DomesticPaymentStatusChanged:
+        $ref: '#/components/messages/DomesticPaymentStatusChanged'
 
   transaction-events:
-    address: openbank.transactions.transaction.event
-    description: Transaction booked/reversed events
+    address: openbank.transactions.transaction.initiated
+    description: |
+      Transaction lifecycle. The address in the previous revision
+      (`openbank.transactions.transaction.event`) was fiction. Despite the `.initiated` name the
+      topic carries the whole lifecycle — initiated, completed, failed and settled.
+
+      Outbox-relayed, so **`ce-type`** carries the type; the serialised types extend `DomainEvent`
+      so there is also a **body eventType**.
     messages:
-      TransactionEvent:
-        $ref: '#/components/messages/TransactionEvent'
+      TransactionInitiated:
+        $ref: '#/components/messages/TransactionInitiated'
 
   balance-events:
-    address: openbank.balances.balance.event
-    description: Balance change events (credit/debit/hold)
+    address: openbank.balance.events
+    description: |
+      Balance movements. The address in the previous revision (`openbank.balances.balance.event`)
+      was fiction. Published by a **direct emitter** (`KafkaBalanceEventPublisher`), so no
+      `ce-type` header is set on that path.
+
+      The discriminator is a genuine, explicitly declared **body eventType** — `BalanceEvent` is a
+      plain data class (not a `DomainEvent`) that declares the field itself, with values
+      `BALANCE_UPDATED`, `HOLD_PLACED`, `HOLD_RELEASED`, `HOLD_EXPIRED`. This is one of the two or
+      three channels where the body-field idiom this document used to assert everywhere is
+      actually right.
     messages:
       BalanceEvent:
         $ref: '#/components/messages/BalanceEvent'
 
   kyc-events-out:
-    address: openbank.kyc.case.event
-    description: KYC case status changes — consumed by notification-service and audit-service
+    address: openbank.kyc.events
+    description: |
+      KYC case lifecycle. Outbox-relayed, so **`ce-type`** carries the type. The payload is a
+      hand-built `LinkedHashMap` that also puts the type in the body, so there is also a
+      **body eventType** here (`KYC_CASE_OPENED`, `KYC_CASE_STATUS_CHANGED`, `KYC_CASE_APPROVED`,
+      `KYC_CASE_REJECTED`). Either works; the header is the safer habit.
     messages:
       KycCaseEvent:
         $ref: '#/components/messages/KycCaseEvent'
 
   aml-events:
-    address: openbank.aml.case.event
-    description: AML case created/decision events
+    address: openbank.aml.events
+    description: |
+      AML case lifecycle. Outbox-relayed; the discriminator is the **`ce-type`** header
+      (`aml.case.created.v1`, `aml.case.status_changed.v1`) and there is **no type field in the
+      body at all**. The two payloads are serialised data classes sharing only `caseId`, `partyId`
+      and `occurredAt`.
     messages:
-      AmlCaseEvent:
-        $ref: '#/components/messages/AmlCaseEvent'
+      AmlCaseCreated:
+        $ref: '#/components/messages/AmlCaseCreated'
+      AmlCaseStatusChanged:
+        $ref: '#/components/messages/AmlCaseStatusChanged'
 
   party-events:
-    address: openbank.parties.party.event
-    description: Party created/updated/KYC-linked events
+    address: openbank.party.events
+    description: |
+      Party master-data lifecycle. The address in the previous revision
+      (`openbank.parties.party.event`) was fiction. Outbox-relayed, so **`ce-type`** is present —
+      and party is one of the producers that HAND-BUILDS its payload with the type inside it, so
+      there is a genuine **body eventType** (`PARTY_CREATED`, `PARTY_UPDATED`, `KYC_STATUS_CHANGED`,
+      `PARTY_ERASED`, `PARTY_MERGED`).
+
+      This channel is worth calling out because it is the origin of a fleet-wide mistake:
+      `PartyEventConsumer` reads `node.path("eventType")` and works, which made that shape look
+      like the platform idiom. It is not — it works *here* only because party hand-builds the key,
+      and copying it onto an outbox-relayed channel whose body is a serialised aggregate silently
+      discards every message.
+
+      Note the shapes differ by event type: `PARTY_ERASED` carries only `eventType`, `partyId` and
+      `erasedAt` (deliberately no actor), and `PARTY_MERGED` carries `mergedIntoPartyId`.
     messages:
       PartyEvent:
         $ref: '#/components/messages/PartyEvent'
+      PartyErased:
+        $ref: '#/components/messages/PartyErased'
+      PartyMerged:
+        $ref: '#/components/messages/PartyMerged'
 
   consent-events:
-    address: openbank.consents.consent.event
-    description: Consent lifecycle events (created, activated, revoked, expired)
+    address: openbank.consent.events
+    description: |
+      PSD2 / GDPR / delegation consent lifecycle and suppression records (ADR-0126). The address in
+      the previous revision (`openbank.consents.consent.event`) was fiction. Outbox-relayed, so
+      **`ce-type`** carries the type; the serialised types are `DomainEvent` subclasses with no
+      `@JsonIgnore`, so every message also carries a **body eventType** (`ConsentGranted`,
+      `ConsentRevoked`, `ConsentExpired`, `ConsentRejected`, `SuppressionCreated`,
+      `SuppressionRevoked`) alongside `eventId`, `aggregateId`, `aggregateType` and `version`.
     messages:
       ConsentEvent:
         $ref: '#/components/messages/ConsentEvent'
+      SuppressionEvent:
+        $ref: '#/components/messages/SuppressionEvent'
 
   card-events:
-    address: openbank.cards.card.event
-    description: Card issuance and status change events
+    address: openbank.cards.events
+    description: |
+      Card issuance and lifecycle (ADR-0113). The address in the previous revision
+      (`openbank.cards.card.event`) was fiction. Outbox-relayed; the discriminator is the
+      **`ce-type`** header (`card.issued.v1`, `card.status_changed.v1`, `card.limits_changed.v1`,
+      `card.controls_changed.v1`) and **nothing in the body names the type**. The sealed subclasses
+      carry no Jackson type info, so a consumer that ignores headers cannot tell
+      `CardLimitsChanged` from `CardControlsChanged` except by guessing from key presence.
     messages:
-      CardEvent:
-        $ref: '#/components/messages/CardEvent'
+      CardIssued:
+        $ref: '#/components/messages/CardIssued'
+      CardStatusChanged:
+        $ref: '#/components/messages/CardStatusChanged'
+      CardLimitsChanged:
+        $ref: '#/components/messages/CardLimitsChanged'
+      CardControlsChanged:
+        $ref: '#/components/messages/CardControlsChanged'
 
   standing-order-events:
     address: openbank.standing-orders.order.event
-    description: Standing order lifecycle events
+    description: |
+      Standing-order execution sweep (ADR-0114). Outbox-relayed; the discriminator is the
+      **`ce-type`** header (`standing-order.due.v1`, `standing-order.failed.v1`) and the hand-built
+      payloads contain **no type field**. standing-order-service also self-consumes this topic on
+      its `standing-order-due-in` channel. Note the two bodies are almost disjoint — `failed`
+      carries four keys and no execution detail at all.
     messages:
-      StandingOrderEvent:
-        $ref: '#/components/messages/StandingOrderEvent'
+      StandingOrderDue:
+        $ref: '#/components/messages/StandingOrderDue'
+      StandingOrderFailed:
+        $ref: '#/components/messages/StandingOrderFailed'
 
   fx-events:
     address: openbank.fx.conversion.completed
-    description: FX conversion completed events
+    description: |
+      Executed FX conversions. Outbox-relayed; the discriminator is the **`ce-type`** header
+      (`fx.conversion.executed.v1`) and there is no body type field. Single event type today.
+
+      **`fromAmount` and `toAmount` are MINOR UNITS** — the constructor is called positionally with
+      the aggregate's `fromAmountMinorUnits` / `toAmountMinorUnits`. This differs from the swift
+      and clearing channels, which put decimal major units on the wire under similarly named keys.
     messages:
-      FxConversionEvent:
-        $ref: '#/components/messages/FxConversionEvent'
+      FxConversionExecuted:
+        $ref: '#/components/messages/FxConversionExecuted'
 
   clearing-events:
     address: openbank.clearing.batch.event
-    description: Clearing batch settled/failed events
+    description: |
+      Clearing batch settlement and item clearing. Outbox-relayed, so **`ce-type`** is set — and
+      this producer *deliberately* duplicates it as a **body eventType**
+      (`openbank.clearing.batch.settled`, `openbank.clearing.item.cleared`), with a comment at the
+      construction site explaining that it does so because audit-service resolves the type
+      body-first. Both work here.
     messages:
-      ClearingBatchEvent:
-        $ref: '#/components/messages/ClearingBatchEvent'
-
-  audit-events-in:
-    address: openbank.audit.events-in
-    description: Fan-in audit channel — all services publish here, audit-service consumes
-    messages:
-      AuditEvent:
-        $ref: '#/components/messages/AuditEvent'
+      ClearingBatchSettled:
+        $ref: '#/components/messages/ClearingBatchSettled'
+      ClearingItemCleared:
+        $ref: '#/components/messages/ClearingItemCleared'
 
   notification-events-in:
-    address: openbank.notifications.events-in
-    description: Notification request channel — consumed by notification-service
+    address: openbank.notification.requests
+    description: |
+      Notification requests consumed by notification-service. The address in the previous revision
+      (`openbank.notifications.events-in`) was fiction — that was the channel name.
+
+      **There is no discriminator on this channel, in the body or in a header, and that is by
+      design**: the message type IS the contract. `NotificationConsumer` takes a plain `String` and
+      deserialises straight into `NotificationRequest`, so it has no access to headers at all and a
+      `ce-type` would be invisible to it.
+
+      All three producers — campaign-service, account-service and sca-service — are **direct
+      emitters** building the map by hand, so none carries `ce-id` or `idempotency-key` either: a
+      request is simply lost if the emit fails after the local commit. The three maps agree with
+      each other and with the data class today, and nothing in the build compares them.
     messages:
       NotificationRequest:
         $ref: '#/components/messages/NotificationRequest'
@@ -160,30 +364,67 @@ channels:
   swift-events:
     address: openbank.payments.swift.event
     description: |
-      SWIFT message lifecycle events (sent, acknowledged, rejected, failed).
-      Consumed by audit-service and notification-service.
+      SWIFT message status transitions. Outbox-relayed; the discriminator is the **`ce-type`**
+      header, which is always the single value `swift.message.status-changed`. There is no body
+      type field — the interesting state is the `status` key. Payload is a hand-built map, not a
+      serialised type.
     messages:
       SwiftMessageEvent:
         $ref: '#/components/messages/SwiftMessageEvent'
 
   dispute-events:
-    address: openbank.disputes.dispute.event
-    description: Card dispute lifecycle events (opened, evidence-submitted, resolved, chargebacked)
+    address: openbank.dispute.events
+    description: |
+      Card disputes and complaints. The address in the previous revision
+      (`openbank.disputes.dispute.event`) was fiction — and note the Strimzi ACL under
+      `openbank-infra/gitops/components/dispute-service/` still grants Write on that non-existent
+      topic, naming a channel the application does not define.
+
+      Outbox-relayed, so **`ce-type`** is set; the payloads are hand-built JSON string literals
+      that interpolate the same value, so there is also a **body eventType** and the two are
+      provably equal (`dispute.opened`, `dispute.resolved`, `dispute.remediation_requested`, plus
+      the complaint types). Consumed by audit-service and engagement-service.
+
+      `dispute.opened` carries **no `occurredAt`** — it has `openedAt` instead, so audit-service
+      substitutes ingest time for it.
+
+      Do not confuse these with `DisputeTimelineEvent`, an in-database timeline row which also has
+      an `eventType` (`OPENED`, `STATUS_CHANGED`, `EVIDENCE_ADDED`) and never appears on Kafka.
     messages:
-      DisputeEvent:
-        $ref: '#/components/messages/DisputeEvent'
+      DisputeOpened:
+        $ref: '#/components/messages/DisputeOpened'
+      DisputeResolved:
+        $ref: '#/components/messages/DisputeResolved'
+      DisputeRemediationRequested:
+        $ref: '#/components/messages/DisputeRemediationRequested'
+      ComplaintEvent:
+        $ref: '#/components/messages/ComplaintEvent'
 
   interest-events:
     address: openbank.interest.accrual.event
-    description: Interest accrual and capitalisation events
+    description: |
+      Withholding-tax records and remittances. Outbox-relayed; the discriminator is the
+      **`ce-type`** header (`interest.withholding.recorded.v1`,
+      `interest.withholding.remitted.v1`) and there is no body type field. Payloads are hand-built
+      JSON string concatenation, and each carries its own `schemaVersion` key.
+
+      **Neither payload carries `occurredAt` or any event time at all**, so audit-service records
+      these with ingest time and flags `occurredAtSource=INGEST`. Both existing consumers
+      (interest-service's own settlement consumer, and tax-reporting-service) read the header
+      correctly.
+
+      The previous revision described this channel as daily interest accrual with an
+      `accrualId`/`accrualType`/`annualRate` body. No such event is produced.
     messages:
-      InterestAccrualEvent:
-        $ref: '#/components/messages/InterestAccrualEvent'
+      WithholdingRecorded:
+        $ref: '#/components/messages/WithholdingRecorded'
+      WithholdingRemitted:
+        $ref: '#/components/messages/WithholdingRemitted'
 
   sanctions-events:
     address: openbank.sanctions.screening.event
     description: |
-      Sanctions check lifecycle events. TWO distinct event types share this channel:
+      Sanctions check lifecycle. TWO distinct event types share this channel:
         - `SanctionChecked`  — an automated screening produced a status from list matching.
         - `SanctionReviewed` — a human analyst manually dispositioned an existing check.
       Until #1035 both paths emitted `SanctionChecked`, so the two facts were indistinguishable
@@ -209,53 +450,105 @@ channels:
         $ref: '#/components/messages/SanctionsReviewEvent'
 
 operations:
-  publishAccountCreated:
+  publishAccountEvents:
     action: send
     channel:
       $ref: '#/channels/account-events-out'
-    summary: account-service publishes AccountCreated
+    summary: >-
+      account-service publishes AccountCreated, AccountStatusChanged, AccountClosed and
+      SavingsWithdrawalApproved — all onto this one topic
 
-  publishAccountStatusChanged:
-    action: send
-    channel:
-      $ref: '#/channels/account-status-changed'
-    summary: account-service publishes AccountStatusChanged
-
-  publishLedgerJournalPosted:
+  publishLedgerEvents:
     action: send
     channel:
       $ref: '#/channels/ledger-journal-posted'
-    summary: ledger-service publishes JournalPosted
-
-  publishLedgerJournalReversed:
-    action: send
-    channel:
-      $ref: '#/channels/ledger-journal-reversed'
-    summary: ledger-service publishes JournalReversed
+    summary: ledger-service publishes every ledger event onto its single outgoing channel
 
   publishSepaPaymentEvent:
     action: send
     channel:
       $ref: '#/channels/sepa-payment-events'
-    summary: sepa-payment-service publishes SepaPaymentEvent
+    summary: sepa-payment publishes created / status-changed, discriminated by ce-type
+
+  publishSctInstEvent:
+    action: send
+    channel:
+      $ref: '#/channels/sepa-instant-events'
+    summary: sepa-instant publishes SCT Inst lifecycle events directly, with no headers
+
+  publishDomesticPaymentEvent:
+    action: send
+    channel:
+      $ref: '#/channels/domestic-payment-events'
+    summary: domestic-payment publishes created / status-changed, discriminated by ce-type
+
+  publishTransactionEvent:
+    action: send
+    channel:
+      $ref: '#/channels/transaction-events'
+    summary: transaction-service publishes the transaction lifecycle
+
+  publishBalanceEvent:
+    action: send
+    channel:
+      $ref: '#/channels/balance-events'
+    summary: balance-service publishes balance movements and holds
 
   publishKycEvent:
     action: send
     channel:
       $ref: '#/channels/kyc-events-out'
-    summary: kyc-service publishes KycCaseEvent
+    summary: kyc-service publishes KYC case lifecycle events
 
-  consumeAuditEvents:
-    action: receive
+  publishAmlEvent:
+    action: send
     channel:
-      $ref: '#/channels/audit-events-in'
-    summary: audit-service consumes all domain events
+      $ref: '#/channels/aml-events'
+    summary: aml-service publishes AML case lifecycle events
 
-  consumeNotificationEvents:
+  publishPartyEvent:
+    action: send
+    channel:
+      $ref: '#/channels/party-events'
+    summary: party-service publishes party master-data events
+
+  publishConsentEvent:
+    action: send
+    channel:
+      $ref: '#/channels/consent-events'
+    summary: consent-service publishes consent and suppression lifecycle events
+
+  publishCardEvent:
+    action: send
+    channel:
+      $ref: '#/channels/card-events'
+    summary: card-issuance-service publishes card lifecycle events
+
+  publishStandingOrderEvent:
+    action: send
+    channel:
+      $ref: '#/channels/standing-order-events'
+    summary: standing-order-service publishes due and failed events, and self-consumes them
+
+  publishFxConversionEvent:
+    action: send
+    channel:
+      $ref: '#/channels/fx-events'
+    summary: fx-service publishes executed conversions
+
+  publishClearingEvent:
+    action: send
+    channel:
+      $ref: '#/channels/clearing-events'
+    summary: clearing-service publishes batch settlement and item clearing events
+
+  consumeNotificationRequests:
     action: receive
     channel:
       $ref: '#/channels/notification-events-in'
-    summary: notification-service consumes notification requests
+    summary: >-
+      notification-service consumes requests from campaign-service, account-service and
+      sca-service
 
   publishSwiftEvent:
     action: send
@@ -267,13 +560,13 @@ operations:
     action: send
     channel:
       $ref: '#/channels/dispute-events'
-    summary: dispute-service publishes DisputeEvent on lifecycle changes
+    summary: dispute-service publishes dispute and complaint lifecycle events
 
-  publishInterestAccrualEvent:
+  publishInterestEvent:
     action: send
     channel:
       $ref: '#/channels/interest-events'
-    summary: interest-service publishes InterestAccrualEvent
+    summary: interest-service publishes withholding-tax records and remittances
 
   publishSanctionsEvent:
     action: send
@@ -286,6 +579,7 @@ components:
     AccountCreated:
       name: AccountCreated
       title: Account Created
+      description: 'Direct emitter. Body `eventType` = `AccountCreated`. No Kafka headers are set.'
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AccountCreatedPayload'
@@ -293,110 +587,235 @@ components:
     AccountStatusChanged:
       name: AccountStatusChanged
       title: Account Status Changed
+      description: >-
+        Direct emitter. Body `eventType` = `AccountStatusChanged`. Lands on the
+        `...account.created` topic despite its call site naming `...account.status-changed`.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AccountStatusChangedPayload'
 
+    AccountClosed:
+      name: AccountClosed
+      title: Account Closed
+      description: 'Direct emitter. Body `eventType` = `AccountClosed`. Also lands on `...account.created`.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AccountClosedPayload'
+
+    SavingsWithdrawalApproved:
+      name: SavingsWithdrawalApproved
+      title: Savings Withdrawal Approved
+      description: >-
+        The only OUTBOX-relayed event on this topic, so the only one carrying `ce-type`, `ce-id`
+        and `idempotency-key`. Written by `WithdrawalProposalRepositoryImpl`.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SavingsWithdrawalApprovedPayload'
+
     JournalPosted:
       name: JournalPosted
       title: Journal Posted
+      description: '`ce-type` = the outbox row type; body `eventType` = `JournalPosted`.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/JournalEventPayload'
+        $ref: '#/components/schemas/JournalPostedPayload'
 
     JournalReversed:
       name: JournalReversed
       title: Journal Reversed
+      description: >-
+        Relayed onto the SAME topic as JournalPosted — the `...journal.reversed` topic this
+        document used to name does not exist. Body `eventType` = `JournalReversed`.
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/JournalEventPayload'
+        $ref: '#/components/schemas/JournalReversedPayload'
 
-    SepaPaymentEvent:
-      name: SepaPaymentEvent
+    SepaPaymentCreated:
+      name: SepaPaymentCreated
+      description: '`ce-type` = `sepa.payment.created`. No body type field.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/PaymentEventPayload'
+        $ref: '#/components/schemas/SepaPaymentCreatedPayload'
+
+    SepaPaymentStatusChanged:
+      name: SepaPaymentStatusChanged
+      description: '`ce-type` = `sepa.payment.status-changed`. No body type field.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/SepaPaymentStatusChangedPayload'
 
     SctInstEvent:
       name: SctInstEvent
+      description: >-
+        Direct emitter, no headers of any kind. The discriminator is the body key `type` (a Kotlin
+        class simple name). Three keys total.
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/PaymentEventPayload'
+        $ref: '#/components/schemas/SctInstEventPayload'
 
-    DomesticPaymentEvent:
-      name: DomesticPaymentEvent
+    DomesticPaymentCreated:
+      name: DomesticPaymentCreated
+      description: '`ce-type` = `domestic.payment.created`. No body type field.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/PaymentEventPayload'
+        $ref: '#/components/schemas/DomesticPaymentCreatedPayload'
 
-    TransactionEvent:
-      name: TransactionEvent
+    DomesticPaymentStatusChanged:
+      name: DomesticPaymentStatusChanged
+      description: '`ce-type` = `domestic.payment.status-changed`. No body type field.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/TransactionEventPayload'
+        $ref: '#/components/schemas/DomesticPaymentStatusChangedPayload'
+
+    TransactionInitiated:
+      name: TransactionInitiated
+      description: >-
+        The topic also carries TransactionCompleted / TransactionFailed / TransactionSettled,
+        which share the DomainEvent envelope and differ in their own fields. Body `eventType`
+        is present on all of them.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/TransactionInitiatedPayload'
 
     BalanceEvent:
       name: BalanceEvent
+      description: 'Direct emitter. `eventType` is an explicitly declared body property.'
       contentType: application/json
       payload:
         $ref: '#/components/schemas/BalanceEventPayload'
 
     KycCaseEvent:
       name: KycCaseEvent
+      description: 'Hand-built map; `ce-type` and a body `eventType` carry the same value.'
       contentType: application/json
       payload:
         $ref: '#/components/schemas/KycCaseEventPayload'
 
-    AmlCaseEvent:
-      name: AmlCaseEvent
+    AmlCaseCreated:
+      name: AmlCaseCreated
+      description: '`ce-type` = `aml.case.created.v1`. No body type field.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/AmlCaseEventPayload'
+        $ref: '#/components/schemas/AmlCaseCreatedPayload'
+
+    AmlCaseStatusChanged:
+      name: AmlCaseStatusChanged
+      description: '`ce-type` = `aml.case.status_changed.v1`. No body type field.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AmlCaseStatusChangedPayload'
 
     PartyEvent:
       name: PartyEvent
+      description: >-
+        `PARTY_CREATED`, `PARTY_UPDATED` and `KYC_STATUS_CHANGED`. Hand-built map, so the body
+        `eventType` is genuine here.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/PartyEventPayload'
 
+    PartyErased:
+      name: PartyErased
+      description: 'GDPR erasure. Three keys only, and deliberately no actor fields.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PartyErasedPayload'
+
+    PartyMerged:
+      name: PartyMerged
+      description: 'Identity merge (ADR-0179). Carries the surviving party id.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/PartyMergedPayload'
+
     ConsentEvent:
       name: ConsentEvent
+      description: >-
+        `ConsentGranted` / `ConsentRevoked` / `ConsentExpired` / `ConsentRejected`. DomainEvent
+        subclasses, so the envelope fields including `eventType` are on the wire.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/ConsentEventPayload'
 
-    CardEvent:
-      name: CardEvent
+    SuppressionEvent:
+      name: SuppressionEvent
+      description: '`SuppressionCreated` / `SuppressionRevoked`, on the same topic.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/CardEventPayload'
+        $ref: '#/components/schemas/SuppressionEventPayload'
 
-    StandingOrderEvent:
-      name: StandingOrderEvent
+    CardIssued:
+      name: CardIssued
+      description: '`ce-type` = `card.issued.v1`. Nothing in the body names the type.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/StandingOrderEventPayload'
+        $ref: '#/components/schemas/CardIssuedPayload'
 
-    FxConversionEvent:
-      name: FxConversionEvent
+    CardStatusChanged:
+      name: CardStatusChanged
+      description: '`ce-type` = `card.status_changed.v1`. Nothing in the body names the type.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/FxConversionEventPayload'
+        $ref: '#/components/schemas/CardStatusChangedPayload'
 
-    ClearingBatchEvent:
-      name: ClearingBatchEvent
+    CardLimitsChanged:
+      name: CardLimitsChanged
+      description: '`ce-type` = `card.limits_changed.v1`. Nothing in the body names the type.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/ClearingBatchEventPayload'
+        $ref: '#/components/schemas/CardLimitsChangedPayload'
 
-    AuditEvent:
-      name: AuditEvent
+    CardControlsChanged:
+      name: CardControlsChanged
+      description: '`ce-type` = `card.controls_changed.v1`. Nothing in the body names the type.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/AuditEventPayload'
+        $ref: '#/components/schemas/CardControlsChangedPayload'
+
+    StandingOrderDue:
+      name: StandingOrderDue
+      description: '`ce-type` = `standing-order.due.v1`. Hand-built map, no body type field.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/StandingOrderDuePayload'
+
+    StandingOrderFailed:
+      name: StandingOrderFailed
+      description: >-
+        `ce-type` = `standing-order.failed.v1`. Four keys, and no event time — deliberately
+        recorded here because it is not obvious from the sibling event.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/StandingOrderFailedPayload'
+
+    FxConversionExecuted:
+      name: FxConversionExecuted
+      description: '`ce-type` = `fx.conversion.executed.v1`. Amounts are MINOR UNITS.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/FxConversionExecutedPayload'
+
+    ClearingBatchSettled:
+      name: ClearingBatchSettled
+      description: >-
+        `ce-type` and body `eventType` both = `openbank.clearing.batch.settled`, duplicated on
+        purpose so audit-service's body-first resolution finds it.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ClearingBatchSettledPayload'
+
+    ClearingItemCleared:
+      name: ClearingItemCleared
+      description: '`ce-type` and body `eventType` both = `openbank.clearing.item.cleared`.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ClearingItemClearedPayload'
 
     NotificationRequest:
       name: NotificationRequest
+      description: >-
+        No discriminator anywhere — the type IS the contract. Deserialised directly into
+        `NotificationRequest` by a consumer that takes a plain String and cannot see headers.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/NotificationRequestPayload'
@@ -404,23 +823,60 @@ components:
     SwiftMessageEvent:
       name: SwiftMessageEvent
       title: SWIFT Message Event
+      description: >-
+        `ce-type` is always `swift.message.status-changed`. Hand-built map; the state lives in
+        `status`, and there is no body type field.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SwiftMessageEventPayload'
 
-    DisputeEvent:
-      name: DisputeEvent
-      title: Card Dispute Event
+    DisputeOpened:
+      name: DisputeOpened
+      description: >-
+        `ce-type` and body `eventType` both = `dispute.opened`. Carries `openedAt` and NO
+        `occurredAt`, so audit-service substitutes ingest time.
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/DisputeEventPayload'
+        $ref: '#/components/schemas/DisputeOpenedPayload'
 
-    InterestAccrualEvent:
-      name: InterestAccrualEvent
-      title: Interest Accrual Event
+    DisputeResolved:
+      name: DisputeResolved
+      description: '`ce-type` and body `eventType` both = `dispute.resolved`.'
       contentType: application/json
       payload:
-        $ref: '#/components/schemas/InterestAccrualEventPayload'
+        $ref: '#/components/schemas/DisputeResolvedPayload'
+
+    DisputeRemediationRequested:
+      name: DisputeRemediationRequested
+      description: '`ce-type` and body `eventType` both = `dispute.remediation_requested`.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/DisputeRemediationRequestedPayload'
+
+    ComplaintEvent:
+      name: ComplaintEvent
+      description: 'Complaint lifecycle, same topic and same body/header duplication.'
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/ComplaintEventPayload'
+
+    WithholdingRecorded:
+      name: WithholdingRecorded
+      description: >-
+        `ce-type` = `interest.withholding.recorded.v1`. Hand-built JSON, no body type field and
+        no event time of any kind.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/WithholdingRecordedPayload'
+
+    WithholdingRemitted:
+      name: WithholdingRemitted
+      description: >-
+        `ce-type` = `interest.withholding.remitted.v1`. Hand-built JSON, no body type field and
+        no event time of any kind.
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/WithholdingRemittedPayload'
 
     SanctionsScreeningEvent:
       name: SanctionsScreeningEvent
@@ -446,328 +902,765 @@ components:
         $ref: '#/components/schemas/SanctionsScreeningEventPayload'
 
   schemas:
-    EventEnvelope:
+    # The shared envelope contributed by `com.openbank.libs.domain.event.DomainEvent`. It is used
+    # ONLY by the schemas whose producer genuinely serialises a DomainEvent subclass — account,
+    # ledger, transaction and consent. The previous revision of this document applied it to almost
+    # every schema, which is how 18 of 21 payloads came to assert a body `eventType` that 27 of 29
+    # producers have never emitted (#4761). Do not add it to a schema without reading the producer.
+    DomainEventEnvelope:
       type: object
-      required: [eventType, aggregateId, occurredAt, correlationId]
+      required: [eventId, aggregateId, aggregateType, eventType, version, occurredAt]
       properties:
-        eventType:
+        eventId:
           type: string
+          format: uuid
+          description: Random per event; also the `ce-id` / `idempotency-key` header on relayed paths.
         aggregateId:
           type: string
           format: uuid
         aggregateType:
           type: string
+        eventType:
+          type: string
+          description: >-
+            Present in the BODY only because these producers serialise a DomainEvent subclass.
+            On an outbox-relayed channel the authoritative copy is the `ce-type` header.
+        version:
+          type: integer
         occurredAt:
           type: string
           format: date-time
-        correlationId:
-          type: string
-        requestedBy:
-          type: string
-          format: uuid
 
     AccountCreatedPayload:
       allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
+        - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
-            accountId:
+            accountNumber:
               type: string
-              format: uuid
+            accountType:
+              type: string
             partyId:
               type: string
               format: uuid
             productId:
               type: string
-            accountType:
-              type: string
-            currencyCode:
-              type: string
-            accountNumber:
+            currency:
               type: string
 
     AccountStatusChangedPayload:
       allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
+        - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
-            accountId:
-              type: string
-              format: uuid
             previousStatus:
               type: string
             newStatus:
               type: string
             reason:
-              type: string
+              type: [string, 'null']
 
-    JournalEventPayload:
+    AccountClosedPayload:
       allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
+        - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
-            journalId:
-              type: string
-              format: uuid
-            transactionId:
-              type: string
-              format: uuid
-            entries:
-              type: array
-              items:
-                type: object
-                properties:
-                  accountId:
-                    type: string
-                    format: uuid
-                  side:
-                    type: string
-                    enum: [DEBIT, CREDIT]
-                  amount:
-                    type: number
-                  currency:
-                    type: string
-
-    PaymentEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            paymentId:
-              type: string
-              format: uuid
-            status:
-              type: string
-            amount:
-              type: number
-            currencyCode:
-              type: string
-            debtorAccountId:
-              type: string
-              format: uuid
-            creditorIban:
-              type: string
-            endToEndId:
+            reason:
               type: string
 
-    TransactionEventPayload:
+    SavingsWithdrawalApprovedPayload:
       allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            transactionId:
-              type: string
-              format: uuid
-            referenceNumber:
-              type: string
-            type:
-              type: string
-            amount:
-              type: number
-            currencyCode:
-              type: string
-            status:
-              type: string
-
-    BalanceEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
+        - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
             accountId:
               type: string
               format: uuid
+            delegatePartyId:
+              type: string
+              format: uuid
+            amountMinor:
+              type: integer
+              format: int64
             currency:
               type: string
-            operation:
+            approvalId:
               type: string
-              enum: [CREDIT, DEBIT, HOLD_PLACED, HOLD_RELEASED, INITIALIZED]
+              format: uuid
+            scaSessionId:
+              type: string
+              format: uuid
+
+    JournalPostedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            entryNumber:
+              type: string
+            transactionId:
+              type: string
+              format: uuid
+            entryDate:
+              type: string
+              format: date
+            lineCount:
+              type: integer
+              description: >-
+                The number of journal lines — the lines themselves are NOT on the wire. The
+                previous revision declared an `entries` array of debit/credit legs; no ledger
+                event has ever carried one.
+
+    JournalReversedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            originalJournalId:
+              type: string
+              format: uuid
+            transactionId:
+              type: string
+              format: uuid
+            reason:
+              type: string
+
+    SepaPaymentCreatedPayload:
+      type: object
+      required: [paymentId, status, occurredAt]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        type:
+          type: string
+        status:
+          type: string
+        debtorAccountId:
+          type: string
+          format: uuid
+        debtorIban:
+          type: string
+        creditorIban:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        endToEndId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    SepaPaymentStatusChangedPayload:
+      type: object
+      required: [paymentId, previousStatus, newStatus, occurredAt]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        rejectReason:
+          type: [string, 'null']
+        rejectDetail:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    SctInstEventPayload:
+      # Three keys, and that is the whole message. The publisher builds this map by hand and
+      # discards every other field of the domain event before it reaches the wire.
+      type: object
+      required: [type, paymentId, occurredAt]
+      properties:
+        type:
+          type: string
+          enum:
+            - SctInstPaymentSubmitted
+            - SctInstPaymentSettled
+            - SctInstPaymentRejected
+            - SctInstPaymentTimeout
+            - SctInstPaymentRecalled
+          description: >-
+            The discriminator, spelled `type` rather than `eventType`, and valued with a Kotlin
+            class simple name rather than a dotted event name. No `ce-type` header exists here.
+        paymentId:
+          type: string
+          format: uuid
+        occurredAt:
+          type: string
+          format: date-time
+
+    DomesticPaymentCreatedPayload:
+      type: object
+      required: [paymentId, status, occurredAt]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        status:
+          type: string
+        debtorAccountId:
+          type: string
+          format: uuid
+        debtorAccountNumber:
+          type: string
+        debtorBankCode:
+          type: string
+        creditorAccountNumber:
+          type: string
+        creditorBankCode:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        priority:
+          type: string
+        endToEndId:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    DomesticPaymentStatusChangedPayload:
+      type: object
+      required: [paymentId, previousStatus, newStatus, occurredAt]
+      properties:
+        paymentId:
+          type: string
+          format: uuid
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        rejectReason:
+          type: [string, 'null']
+        rejectDetail:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    TransactionInitiatedPayload:
+      allOf:
+        - $ref: '#/components/schemas/DomainEventEnvelope'
+        - type: object
+          properties:
+            referenceNumber:
+              type: string
+            type:
+              type: string
+            sourceAccountId:
+              type: string
+              format: uuid
+            targetAccountId:
+              type: [string, 'null']
+              format: uuid
             amount:
               type: number
-            newAvailableBalance:
-              type: number
+            currencyCode:
+              type: string
+            initiatedByPartyId:
+              type: string
+              format: uuid
+            scaChallengeId:
+              type: [string, 'null']
+            scaExemption:
+              type: [string, 'null']
+            rail:
+              type: string
+            instructionType:
+              type: string
+
+    BalanceEventPayload:
+      # A plain data class, not a DomainEvent — `eventType` is declared by the class itself, which
+      # is why it is genuinely a body field here.
+      type: object
+      required: [eventId, eventType, accountId, currency, occurredAt]
+      properties:
+        eventId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+          enum: [BALANCE_UPDATED, HOLD_PLACED, HOLD_RELEASED, HOLD_EXPIRED]
+        accountId:
+          type: string
+          format: uuid
+        currency:
+          type: string
+        amount:
+          type: [number, 'null']
+        bookedAmount:
+          type: number
+        availableAmount:
+          type: number
+        reservedAmount:
+          type: number
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: [string, 'null']
+        actorType:
+          type: [string, 'null']
 
     KycCaseEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            kycCaseId:
-              type: string
-              format: uuid
-            partyId:
-              type: string
-              format: uuid
-            status:
-              type: string
-            riskLevel:
-              type: string
+      type: object
+      required: [eventType, kycCaseId, partyId, status, occurredAt]
+      properties:
+        eventType:
+          type: string
+          enum:
+            - KYC_CASE_OPENED
+            - KYC_CASE_STATUS_CHANGED
+            - KYC_CASE_APPROVED
+            - KYC_CASE_REJECTED
+          description: Hand-built into the map by the producer, and mirrored on `ce-type`.
+        kycCaseId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        status:
+          type: string
+        riskLevel:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: [string, 'null']
+        actorType:
+          type: [string, 'null']
 
-    AmlCaseEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            amlCaseId:
-              type: string
-              format: uuid
-            partyId:
-              type: string
-              format: uuid
-            triggerType:
-              type: string
-            decision:
-              type: string
-              nullable: true
+    AmlCaseCreatedPayload:
+      type: object
+      required: [caseId, partyId, status, occurredAt]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        idempotencyKey:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        accountId:
+          type: [string, 'null']
+          format: uuid
+        transactionId:
+          type: [string, 'null']
+          format: uuid
+        customerReference:
+          type: [string, 'null']
+        screeningType:
+          type: string
+        riskLevel:
+          type: string
+        status:
+          type: string
+        alertCode:
+          type: [string, 'null']
+        matchedEntity:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    AmlCaseStatusChangedPayload:
+      type: object
+      required: [caseId, partyId, previousStatus, newStatus, occurredAt]
+      properties:
+        caseId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        decisionReason:
+          type: [string, 'null']
+        assignedAnalyst:
+          type: [string, 'null']
+        decidedBy:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
 
     PartyEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            partyId:
-              type: string
-              format: uuid
-            partyType:
-              type: string
-            legalName:
-              type: string
-            materiality:
-              type: string
-              enum: [MATERIAL, NON_MATERIAL, NO_CHANGE]
-              description: >-
-                PARTY_UPDATED only. Publisher-declared materiality of the master-data change
-                (ADR-0256 D1, issue #4458) — never inferred by a consumer from the payload.
-                MATERIAL is the only value that is a KYC re-screening trigger
-                (PARTY_DATA_CHANGED); NON_MATERIAL covers contact details, trading name, address
-                and preferences; NO_CHANGE is an update that moved no compared field and is
-                deliberately NOT folded into NON_MATERIAL. Additive since party-service
-                openapi 1.15.0 — absent on events published before it, and on every event type
-                other than PARTY_UPDATED.
-            materialFields:
-              type: array
-              items:
-                type: string
-              description: >-
-                The changed fields that made the event MATERIAL (subset of legalName,
-                dateOfBirth, nationality, partyType). Empty for NON_MATERIAL and NO_CHANGE.
+      type: object
+      required: [eventType, partyId, occurredAt]
+      properties:
+        eventType:
+          type: string
+          enum: [PARTY_CREATED, PARTY_UPDATED, KYC_STATUS_CHANGED]
+          description: Hand-built into the map by the producer, and mirrored on `ce-type`.
+        partyId:
+          type: string
+          format: uuid
+        partyType:
+          type: string
+        status:
+          type: string
+        kycStatus:
+          type: string
+        legalName:
+          type: string
+        email:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: [string, 'null']
+        actorType:
+          type: [string, 'null']
+        materiality:
+          type: string
+          enum: [MATERIAL, NON_MATERIAL, NO_CHANGE]
+          description: >-
+            PARTY_UPDATED only. Publisher-declared materiality of the master-data change
+            (ADR-0256 D1, issue #4458) — never inferred by a consumer from the payload.
+            MATERIAL is the only value that is a KYC re-screening trigger; NON_MATERIAL covers
+            contact details, trading name, address and preferences; NO_CHANGE is an update that
+            moved no compared field and is deliberately NOT folded into NON_MATERIAL. Absent on
+            every other event type.
+        materialFields:
+          type: array
+          items:
+            type: string
+          description: >-
+            The changed fields that made the event MATERIAL (subset of legalName, dateOfBirth,
+            nationality, partyType). Empty for NON_MATERIAL and NO_CHANGE. Note the producer's
+            `changedFields` classification field is NOT put on the wire.
+
+    PartyErasedPayload:
+      type: object
+      required: [eventType, partyId, erasedAt]
+      properties:
+        eventType:
+          type: string
+          const: PARTY_ERASED
+        partyId:
+          type: string
+          format: uuid
+        erasedAt:
+          type: string
+          format: date-time
+          description: >-
+            The event time key for this type is `erasedAt`, not `occurredAt` — audit-service reads
+            only `occurredAt`, so it records this event with ingest time.
+
+    PartyMergedPayload:
+      type: object
+      required: [eventType, partyId, mergedIntoPartyId, occurredAt]
+      properties:
+        eventType:
+          type: string
+          const: PARTY_MERGED
+        partyId:
+          type: string
+          format: uuid
+        mergedIntoPartyId:
+          type: string
+          format: uuid
+          description: The surviving party (ADR-0179).
+        status:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+        actorId:
+          type: [string, 'null']
+        actorType:
+          type: [string, 'null']
 
     ConsentEventPayload:
       allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
+        - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
-            consentId:
-              type: string
-              format: uuid
             partyId:
               type: string
               format: uuid
             granteeId:
               type: string
-            status:
+            granteeType:
               type: string
             scopes:
               type: array
               items:
                 type: string
+              description: On ConsentGranted and ConsentRevoked.
+            validTo:
+              type: [string, 'null']
+              format: date-time
+              description: ConsentGranted only.
+            reason:
+              type: [string, 'null']
+              description: ConsentRevoked and ConsentRejected only.
 
-    CardEventPayload:
+    SuppressionEventPayload:
       allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
+        - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
-            cardId:
+            scope:
               type: string
-              format: uuid
-            partyId:
+            value:
               type: string
-              format: uuid
-            accountId:
-              type: string
-              format: uuid
-            status:
-              type: string
-            maskedPan:
-              type: string
+            reason:
+              type: [string, 'null']
+              description: SuppressionCreated only.
+            source:
+              type: [string, 'null']
+              description: SuppressionCreated only.
 
-    StandingOrderEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            orderId:
-              type: string
-              format: uuid
-            debtorAccountId:
-              type: string
-              format: uuid
-            status:
-              type: string
-            nextExecutionDate:
-              type: string
-              format: date
-
-    FxConversionEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            conversionId:
-              type: string
-              format: uuid
-            sourceAccountId:
-              type: string
-              format: uuid
-            fromCurrency:
-              type: string
-            toCurrency:
-              type: string
-            fromAmount:
-              type: number
-            toAmount:
-              type: number
-            appliedRate:
-              type: number
-
-    ClearingBatchEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            batchId:
-              type: string
-              format: uuid
-            rail:
-              type: string
-            status:
-              type: string
-            itemCount:
-              type: integer
-            totalAmount:
-              type: number
-
-    AuditEventPayload:
+    CardIssuedPayload:
       type: object
-      required: [eventType, aggregateId, aggregateType, occurredAt]
+      required: [cardId, partyId, accountId, occurredAt]
       properties:
-        eventType:
+        cardId:
           type: string
-        aggregateId:
+          format: uuid
+        partyId:
           type: string
-        aggregateType:
+          format: uuid
+        accountId:
           type: string
-        actorId:
+          format: uuid
+        cardType:
           type: string
-        actorType:
+        network:
+          type: string
+        maskedPan:
           type: string
         occurredAt:
           type: string
           format: date-time
-        correlationId:
+
+    CardStatusChangedPayload:
+      type: object
+      required: [cardId, previousStatus, newStatus, occurredAt]
+      properties:
+        cardId:
           type: string
-        payload:
-          type: object
+          format: uuid
+        previousStatus:
+          type: string
+        newStatus:
+          type: string
+        reason:
+          type: [string, 'null']
+        changedBy:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    CardLimitsChangedPayload:
+      type: object
+      required: [cardId, occurredAt]
+      properties:
+        cardId:
+          type: string
+          format: uuid
+        dailyLimitMinorUnits:
+          type: [integer, 'null']
+          format: int64
+        monthlyLimitMinorUnits:
+          type: [integer, 'null']
+          format: int64
+        changedBy:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    CardControlsChangedPayload:
+      type: object
+      required: [cardId, occurredAt]
+      properties:
+        cardId:
+          type: string
+          format: uuid
+        contactlessEnabled:
+          type: boolean
+        onlineEnabled:
+          type: boolean
+        atmEnabled:
+          type: boolean
+        abroadEnabled:
+          type: boolean
+        changedBy:
+          type: [string, 'null']
+        occurredAt:
+          type: string
+          format: date-time
+
+    StandingOrderDuePayload:
+      type: object
+      required: [orderId, debitAccountId, amountMinorUnits, currency, executionDate]
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        paymentType:
+          type: string
+        debitAccountId:
+          type: string
+          format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
+        creditorIban:
+          type: string
+        creditorName:
+          type: string
+        creditorBic:
+          type: [string, 'null']
+        amountMinorUnits:
+          type: integer
+          format: int64
+        currency:
+          type: string
+        remittanceInfo:
+          type: [string, 'null']
+        idempotencyKey:
+          type: string
+        executionDate:
+          type: string
+          format: date
+          description: >-
+            The nearest thing to an event time on this payload — there is no `occurredAt`.
+
+    StandingOrderFailedPayload:
+      type: object
+      required: [orderId, partyId, failureCount, status]
+      properties:
+        orderId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        failureCount:
+          type: integer
+          description: The order fails permanently after 3 rejections (ADR-0114).
+        status:
+          type: string
+
+    FxConversionExecutedPayload:
+      type: object
+      required: [conversionId, fromCurrency, toCurrency, fromAmount, toAmount, rate, occurredAt]
+      properties:
+        conversionId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        fromCurrency:
+          type: string
+        toCurrency:
+          type: string
+        fromAmount:
+          type: integer
+          format: int64
+          description: >-
+            MINOR UNITS, not a decimal amount — the producer passes the aggregate's
+            `fromAmountMinorUnits` positionally. The swift and clearing channels use decimal major
+            units under similar names.
+        toAmount:
+          type: integer
+          format: int64
+          description: MINOR UNITS. See `fromAmount`.
+        rate:
+          type: number
+          description: >-
+            Spelled `rate`, not `appliedRate` as the previous revision of this document claimed.
+        occurredAt:
+          type: string
+          format: date-time
+
+    ClearingBatchSettledPayload:
+      type: object
+      required: [eventType, batchId, rail, itemCount, occurredAt]
+      properties:
+        eventType:
+          type: string
+          const: openbank.clearing.batch.settled
+          description: >-
+            Duplicated into the body on purpose (see the construction site's comment) because
+            audit-service resolves the type body-first. `ce-type` carries the same value.
+        batchId:
+          type: string
+          format: uuid
+        batchReference:
+          type: string
+        rail:
+          type: string
+        cycleId:
+          type: string
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        netPosition:
+          type: number
+        itemCount:
+          type: integer
+        settledAt:
+          type: string
+          format: date-time
+        occurredAt:
+          type: string
+          format: date-time
+
+    ClearingItemClearedPayload:
+      type: object
+      required: [eventType, itemId, batchId, occurredAt]
+      properties:
+        eventType:
+          type: string
+          const: openbank.clearing.item.cleared
+        itemId:
+          type: string
+          format: uuid
+        batchId:
+          type: string
+          format: uuid
+        paymentId:
+          type: string
+          format: uuid
+        paymentReference:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        status:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
 
     NotificationRequestPayload:
       type: object
@@ -805,87 +1698,213 @@ components:
             outcome correlation.
 
     SwiftMessageEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            swiftMessageId:
-              type: string
-              format: uuid
-            messageType:
-              type: string
-              enum: [MT103, MT202, MT900, MT910, MT940, MT950, MT199]
-            senderBic:
-              type: string
-            receiverBic:
-              type: string
-            transactionReference:
-              type: string
-            currency:
-              type: string
-            amountMinorUnits:
-              type: integer
-              format: int64
-            previousStatus:
-              type: string
-              enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED]
-            newStatus:
-              type: string
-              enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED]
-            ackRef:
-              type: string
-              nullable: true
-            rejectionReason:
-              type: string
-              nullable: true
+      # A hand-built map of seven keys. The previous revision declared senderBic, receiverBic,
+      # transactionReference, amountMinorUnits, previousStatus, newStatus, ackRef and
+      # rejectionReason — none of which the producer has ever emitted.
+      type: object
+      required: [swiftMessageId, status, messageType, occurredAt]
+      properties:
+        swiftMessageId:
+          type: string
+          format: uuid
+        paymentSagaRef:
+          type: [string, 'null']
+        status:
+          type: string
+          enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED]
+          description: >-
+            The only state on the wire. `ce-type` is always `swift.message.status-changed`, so the
+            transition must be inferred from this field, not from the event type.
+        messageType:
+          type: string
+          enum: [MT103, MT202, MT900, MT910, MT940, MT950, MT199]
+        amount:
+          type: number
+        currency:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
 
-    DisputeEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            disputeId:
-              type: string
-              format: uuid
-            cardId:
-              type: string
-              format: uuid
-            partyId:
-              type: string
-              format: uuid
-            transactionId:
-              type: string
-              format: uuid
-            status:
-              type: string
-              enum: [OPENED, EVIDENCE_SUBMITTED, UNDER_REVIEW, RESOLVED_MERCHANT, RESOLVED_CUSTOMER, CHARGEBACKED, CLOSED]
-            disputeType:
-              type: string
-              enum: [UNAUTHORIZED, ITEM_NOT_RECEIVED, ITEM_NOT_AS_DESCRIBED, DUPLICATE_CHARGE, OTHER]
+    DisputeOpenedPayload:
+      type: object
+      required: [eventType, disputeId, reference, partyId, status, openedAt]
+      properties:
+        eventType:
+          type: string
+          const: dispute.opened
+        disputeId:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        disputeType:
+          type: string
+        status:
+          type: string
+        openedAt:
+          type: string
+          format: date-time
+          description: >-
+            This event has NO `occurredAt`. audit-service reads only `occurredAt`, so it records
+            these rows with ingest time and flags `occurredAtSource=INGEST`.
 
-    InterestAccrualEventPayload:
-      allOf:
-        - $ref: '#/components/schemas/EventEnvelope'
-        - type: object
-          properties:
-            accrualId:
-              type: string
-              format: uuid
-            accountId:
-              type: string
-              format: uuid
-            accrualType:
-              type: string
-              enum: [DAILY_ACCRUAL, CAPITALISATION, PENALTY]
-            currency:
-              type: string
-            accrualAmount:
-              type: number
-            accrualDate:
-              type: string
-              format: date
-            annualRate:
-              type: number
+    DisputeResolvedPayload:
+      type: object
+      required: [eventType, disputeId, reference, partyId, status, occurredAt]
+      properties:
+        eventType:
+          type: string
+          const: dispute.resolved
+        disputeId:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        partyId:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+        status:
+          type: string
+        resolvedAt:
+          type: string
+          format: date-time
+        occurredAt:
+          type: string
+          format: date-time
+
+    DisputeRemediationRequestedPayload:
+      type: object
+      required: [eventType, disputeId, reference, partyId, occurredAt]
+      properties:
+        eventType:
+          type: string
+          const: dispute.remediation_requested
+        disputeId:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        accountId:
+          type: string
+          format: uuid
+        transactionId:
+          type: string
+          format: uuid
+        partyId:
+          type: string
+          format: uuid
+        outcome:
+          type: string
+        amount:
+          type: number
+        currency:
+          type: string
+        occurredAt:
+          type: string
+          format: date-time
+
+    ComplaintEventPayload:
+      type: object
+      required: [eventType, complaintId, reference, status, occurredAt]
+      properties:
+        eventType:
+          type: string
+          description: Passed in by the caller; mirrored on `ce-type`.
+        complaintId:
+          type: string
+          format: uuid
+        reference:
+          type: string
+        category:
+          type: string
+        channel:
+          type: string
+        status:
+          type: string
+        receivedDate:
+          type: string
+          format: date
+        dueDate:
+          type: string
+          format: date
+        occurredAt:
+          type: string
+          format: date-time
+
+    WithholdingRecordedPayload:
+      # No event time of any kind. Read the `ce-type` header for the type; there is no body field.
+      type: object
+      required: [schemaVersion, withholdingId, accountId, currency, taxAmount, status]
+      properties:
+        schemaVersion:
+          type: integer
+        capitalizationId:
+          type: string
+          format: uuid
+        withholdingId:
+          type: string
+          format: uuid
+        accountId:
+          type: string
+          format: uuid
+        productId:
+          type: string
+        periodFrom:
+          type: string
+          format: date
+        periodTo:
+          type: string
+          format: date
+        currency:
+          type: string
+        grossAmount:
+          type: number
+        taxableBase:
+          type: number
+        rate:
+          type: number
+        taxAmount:
+          type: number
+        netAmount:
+          type: number
+        treatment:
+          type: string
+        status:
+          type: string
+
+    WithholdingRemittedPayload:
+      # No event time of any kind. Read the `ce-type` header for the type; there is no body field.
+      type: object
+      required: [schemaVersion, remittanceId, periodYear, periodMonth, currency, totalTaxAmount, status]
+      properties:
+        schemaVersion:
+          type: integer
+        remittanceId:
+          type: string
+          format: uuid
+        periodYear:
+          type: integer
+        periodMonth:
+          type: integer
+        authority:
+          type: string
+        currency:
+          type: string
+        totalTaxAmount:
+          type: number
+        itemCount:
+          type: integer
+        dueDate:
+          type: string
+          format: date
+        status:
+          type: string
 
     SanctionsScreeningEventPayload:
       # NOT built on EventEnvelope, and that is deliberate: this channel is outbox-relayed, so

@@ -4,10 +4,15 @@
 
 package com.openbank.campaign.integration
 
+import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
 import com.openbank.campaign.it.CampaignPostgresRedisTestResource
 import io.agroal.api.AgroalDataSource
+import io.mockk.coEvery
+import io.mockk.every
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -17,9 +22,11 @@ import io.restassured.module.kotlin.extensions.When
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.hamcrest.Matchers.containsInAnyOrder
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.nullValue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.OffsetDateTime
 import java.util.UUID
@@ -49,6 +56,18 @@ class CampaignRestContractIT {
     @Inject
     lateinit var dataSource: AgroalDataSource
 
+    private val audienceJwt = mockk<JsonWebToken>()
+    private val segmentEvaluator = mockk<SilverSegmentEvaluator>()
+
+    @BeforeEach
+    fun installAudiencePrincipal() {
+        every { audienceJwt.name } returns "maker@openbank.test"
+        every { audienceJwt.subject } returns "maker@openbank.test"
+        QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
+        coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
+        QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
+    }
+
     /**
      * No Kafka and no Temporal worker. Neither is on the path of these endpoints, and starting them
      * would let this test go red for reasons that say nothing about the HTTP contract.
@@ -72,6 +91,10 @@ class CampaignRestContractIT {
                    "variables":{"offerTitle":"T","offerText":"X","ctaText":"Go"},"delaySeconds":0}]}
     """.trimIndent()
 
+    private fun audienceBody(name: String) = """
+        {"name":"$name","rules":[{"type":"PARTY_STATUS_IS","status":"ACTIVE"}]}
+    """.trimIndent()
+
     private fun createDraft(name: String = "it-${UUID.randomUUID()}"): String = Given {
         contentType("application/json")
         body(draftBody(name))
@@ -81,6 +104,38 @@ class CampaignRestContractIT {
         statusCode(201)
     } Extract {
         path<String>("id")
+    }
+
+    private fun assertAudienceCannotBeCampaignTargeted(name: String) {
+        Given {
+            contentType("application/json")
+            body(draftBody("before-approval-${UUID.randomUUID()}", name))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("segment $name@1 not found"))
+        }
+    }
+
+    private fun approveAudienceAsIndependentChecker(name: String) {
+        When {
+            post("/api/v1/audiences/$name/1/approve")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("maker/checker: the approver must differ from the creator"))
+        }
+
+        every { audienceJwt.name } returns "checker@openbank.test"
+        every { audienceJwt.subject } returns "checker@openbank.test"
+
+        When {
+            post("/api/v1/audiences/$name/1/approve")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("APPROVED"))
+            body("approvedBy", equalTo("checker@openbank.test"))
+        }
     }
 
     private fun submit(id: String) = When { post("/api/v1/campaigns/$id/submit") } Then { statusCode(200) }
@@ -163,9 +218,7 @@ class CampaignRestContractIT {
             statusCode(201)
             body("name", equalTo("Copy of $sourceName"))
             body("state", equalTo("DRAFT"))
-            // TestSecurity supplies the operator role but no JWT subject; the resource deliberately
-            // falls back to `unknown` rather than trusting a browser-provided maker field.
-            body("createdBy", equalTo("unknown"))
+            body("createdBy", equalTo("maker@openbank.test"))
             body("approvedBy", nullValue())
         } Extract {
             path<String>("id")
@@ -202,6 +255,53 @@ class CampaignRestContractIT {
         } Then {
             statusCode(409)
             body("error", equalTo("segment $staleSegment@1 not found"))
+        }
+    }
+
+    @Test
+    fun `approved audience lifecycle is a campaign source only after an independent HTTP approval`() {
+        val audienceName = "audience-${UUID.randomUUID()}"
+
+        Given {
+            contentType("application/json")
+            body(audienceBody(audienceName))
+        } When {
+            post("/api/v1/audiences")
+        } Then {
+            statusCode(201)
+            body("name", equalTo(audienceName))
+            body("version", equalTo(1))
+            body("state", equalTo("DRAFT"))
+            body("createdBy", equalTo("maker@openbank.test"))
+        }
+
+        When {
+            post("/api/v1/audiences/$audienceName/1/submit")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PENDING_APPROVAL"))
+        }
+
+        assertAudienceCannotBeCampaignTargeted(audienceName)
+        approveAudienceAsIndependentChecker(audienceName)
+
+        When {
+            get("/api/v1/audiences/$audienceName/1/preview")
+        } Then {
+            statusCode(200)
+            body("name", equalTo(audienceName))
+            body("version", equalTo(1))
+        }
+
+        Given {
+            contentType("application/json")
+            body(draftBody("after-approval-${UUID.randomUUID()}", audienceName))
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+            body("segmentRef.name", equalTo(audienceName))
+            body("segmentRef.version", equalTo(1))
         }
     }
 

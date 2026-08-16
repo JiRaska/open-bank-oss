@@ -4,14 +4,15 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useRef, type CSSProperties, type ElementType } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CreditCard, ArrowLeftRight, Users, Activity, ShieldCheck, RefreshCw,
-  DollarSign, Globe, BarChart3, Server } from 'lucide-react'
+  DollarSign, Globe, BarChart3, Server, ClipboardList, ScrollText, Landmark } from 'lucide-react'
 import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
 import { hasPermission, type Permission } from '@/lib/auth/roles'
+import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
 import { fleetHealthState, summarizeFleetHealth } from '@/lib/dashboard/fleetHealth'
 import styles from './Dashboard.module.css'
 
@@ -41,8 +42,27 @@ const GROUP_COLORS: Record<string, string> = {
   identity: 'var(--info)', 'open-banking': 'var(--accent)', platform: 'var(--text-tertiary)'
 }
 
+const WORKSPACE_ICONS: Record<string, ElementType> = {
+  '/accounts': CreditCard,
+  '/transactions': ArrowLeftRight,
+  '/onboarding': ClipboardList,
+  '/parties': Users,
+  '/payments': DollarSign,
+  '/standing-orders': ArrowLeftRight,
+  '/clearing': Landmark,
+  '/fx': Globe,
+  '/kyc': ShieldCheck,
+  '/aml': ShieldCheck,
+  '/sanctions': ShieldCheck,
+  '/audit': ScrollText,
+  '/system/health': Activity,
+  '/devops': Activity,
+  '/observability': Activity,
+  '/services': Server,
+}
+
 export default function DashboardPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
   const { data: session } = useSession()
   const [statuses, setStatuses] = useState<SvcStatus[]>([])
   const [loading, setLoading] = useState(true)
@@ -123,14 +143,17 @@ export default function DashboardPage() {
   const healthState = fleetHealthState(health)
   const healthTone: Tone = healthState === 'healthy' ? 'success' : healthState === 'degraded' ? 'warning' : 'neutral'
   const roles = session?.user?.roles ?? []
+  const persona = personaForRoles(roles)
+  const workspace = workspaceFor(persona).filter(link => hasPermission(roles, link.permission))
+  const personaLanguage = language === 'cs' ? 'cs' : 'en'
 
   const groups = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
 
   return (
     <main className={styles.dashboard}>
       <PageHeader
-        title={t('Přehled platformy', 'Platform overview')}
-        subtitle={t('Aktuální stav health-checků nasazené části platformy.', 'Current health-check state of the deployed platform.')}
+        title={t('Můj pracovní prostor', 'My workspace')}
+        subtitle={`${personaLabel(persona, personaLanguage)} · ${t('Prioritní pracovní fronty a aktuální stav platformy.', 'Priority work queues and the current platform state.')}`}
         icon={<Activity className={styles.headerIcon} size={20} aria-hidden="true" />}
         actions={
           <div className={styles.headerActions}>
@@ -146,6 +169,28 @@ export default function DashboardPage() {
           </div>
         }
       />
+
+      <section className={`card ${styles.workspace}`} aria-labelledby="workspace-heading">
+        <div className={styles.workspaceHeading}>
+          <div>
+            <p className={styles.workspaceEyebrow}>{personaLabel(persona, personaLanguage)}</p>
+            <h2 id="workspace-heading" className={styles.workspaceTitle}>{t('Pracovní fronty', 'Work queues')}</h2>
+          </div>
+          <span className={styles.workspaceContext}>{t('Podle vašich oprávnění', 'Based on your permissions')}</span>
+        </div>
+        <div className={styles.workspaceLinks}>
+          {workspace.map(link => {
+            const Icon = WORKSPACE_ICONS[link.href] ?? Activity
+            return (
+              <Link key={link.href} href={link.href} className={styles.workspaceLink}>
+                <span className={styles.workspaceIcon}><Icon size={18} aria-hidden="true" /></span>
+                <span>{t(link.nameCs, link.nameEn)}</span>
+                <span className={styles.workspaceArrow} aria-hidden="true">→</span>
+              </Link>
+            )
+          })}
+        </div>
+      </section>
 
       {/* These are intentionally current health facts, not estimated operational or compliance metrics. */}
       <section className={styles.metrics} aria-label={t('Klíčové metriky platformy', 'Platform key metrics')}>
@@ -241,7 +286,7 @@ export default function DashboardPage() {
 
       {/* Only show destinations the operator can already access; dashboard shortcuts must not create 403 traps. */}
       <section className={`card ${styles.quickAccess}`} aria-labelledby="quick-access-heading">
-        <h2 id="quick-access-heading" className={styles.sectionLabel}>{t('Rychlý přístup', 'Quick Access')}</h2>
+        <h2 id="quick-access-heading" className={styles.sectionLabel}>{t('Další nástroje', 'More tools')}</h2>
         <div className={styles.quickLinks}>
           {[
             { href: '/accounts', label: t('Účty', 'Accounts'), icon: CreditCard, color: 'var(--accent)', permission: 'accounts:view' },

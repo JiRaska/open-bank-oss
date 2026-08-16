@@ -54,16 +54,36 @@ spec:
         # Catches fast-rising namespaces even below the absolute threshold.
         # Uses a subquery for the baseline so we avoid the rate([7d]) long-window
         # anti-pattern (Prometheus rate() is designed for short windows).
+        #
+        # ABSOLUTE FLOOR (added 2026-08-16). A pure ratio has no scale, and the `+ 1`
+        # in the denominator makes a near-idle namespace trivially exceed 2x: a
+        # namespace averaging a few hundred B/s crosses the threshold the moment a
+        # CronJob pulls one container image. Measured on 4 simultaneously firing
+        # instances — release-steward, docs-truth-agent, authz-policy-auditor,
+        # finops-agent, all agent namespaces that are idle between scheduled runs —
+        # the "spike" rates were 17.6, 16.8, 18.4 and 32.9 KB/s. At 32.9 KB/s a
+        # namespace moves 2.8 GB/day, ~$0.12 in NAT egress; the alert exists to catch
+        # a 50 GB/day-class runaway, so those four carried no cost signal at all and
+        # were 4 of the 25 firing alerts. 1 MB/s (~86 GB/day, ~$3.70/day) is the floor
+        # below which a doubling cannot matter: it is above the D1 absolute alert's own
+        # 50 GB/day trigger point in rate terms, so D1b now only fires EARLY on
+        # something D1 would eventually catch — which is exactly its stated job.
         - alert: FinOpsNatEgressSpikeRelative
           expr: |
             (
-              sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))
-            ) /
+              (
+                sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))
+              ) /
+              (
+                avg_over_time(
+                  sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))[7d:5m]
+                ) + 1
+              ) > 2
+            )
+            and
             (
-              avg_over_time(
-                sum by (namespace) (rate(container_network_transmit_bytes_total[5m]))[7d:5m]
-              ) + 1
-            ) > 2
+              sum by (namespace) (rate(container_network_transmit_bytes_total[5m])) > 1048576
+            )
           for: 20m
           labels:
             severity: warning
