@@ -4,7 +4,7 @@
 
 'use client'
 import { useState } from 'react'
-import { Repeat, Plus, Search, CheckCircle2, XCircle, Clock, RefreshCw, Calendar } from 'lucide-react'
+import { Repeat, Search, CheckCircle2, XCircle, Clock, RefreshCw, Calendar } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
@@ -60,7 +60,9 @@ export default function StandingOrdersPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button className="btn btn-primary btn-sm"><Plus size={13} /> {t('Nový příkaz', 'New Order')}</button>
+            <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>
+              {t('Založení příkazu není připojeno', 'Order creation is not connected')}
+            </span>
           </div>} />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>

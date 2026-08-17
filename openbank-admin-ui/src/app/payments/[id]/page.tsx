@@ -12,6 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // Mirrors the list-row shape on the payments page. The record can carry more
 // fields than the table showed — the detail view surfaces all of them.
@@ -101,33 +102,19 @@ function PaymentDetailContent() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <Link href="/payments" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Platby', 'Payments')}</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span className="mono" style={{ fontSize: '18px' }}>{id.slice(0, 8)}…</span>
-            {payment?.status && (
-              <span className="pill" style={{ background: `${STATUS_COLOR[payment.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[payment.status] ?? 'var(--text-muted)' }}>
-                {payment.status}
-              </span>
-            )}
-            {payment?.type && <span className="tag">{payment.type}</span>}
-          </h1>
-          <p className="page-subtitle">{t('Detail platebního příkazu', 'Payment order detail')}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Link href="/payments" className="btn btn-secondary"><ArrowLeft size={13} /> {t('Zpět', 'Back')}</Link>
+      <PageHeader
+        title={`${id.slice(0, 8)}…`}
+        subtitle={t('Detail platebního příkazu', 'Payment order detail')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/payments" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Platby', 'Payments')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {payment?.status && <span className="pill" style={{ background: `${STATUS_COLOR[payment.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[payment.status] ?? 'var(--text-muted)' }}>{payment.status}</span>}
+          {payment?.type && <span className="tag">{payment.type}</span>}
+          <Link href="/payments" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
           <button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !payment ? (
         <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>

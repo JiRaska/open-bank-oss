@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.64.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.2...customer-edge-v0.64.0) (2026-08-17)
+
+
+### Features
+
+* **payees:** server-synced saved payees (TOP-10 [#5](https://github.com/JiRaska/open-bank-oss/issues/5)) ([#5154](https://github.com/JiRaska/open-bank-oss/issues/5154)) ([9c93621](https://github.com/JiRaska/open-bank-oss/commit/9c936211df184df867a6a274ce4cb09b64114f21))
+
+## [0.63.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.1...customer-edge-v0.63.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **accounts:** refuse to close an account that still holds money ([#5072](https://github.com/JiRaska/open-bank-oss/issues/5072)) ([d7be3a3](https://github.com/JiRaska/open-bank-oss/commit/d7be3a3f82f29b190160e8cd6ebaa3dddcfc96ca))
+
 ## [0.63.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.0...customer-edge-v0.63.1) (2026-08-16)
 
 

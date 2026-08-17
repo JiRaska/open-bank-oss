@@ -72,23 +72,6 @@ class DomainMetricsTest {
     }
 
     @Test
-    fun `feedFetchOutcome counts each outcome separately under the feed and outcome tags`() {
-        val reg = SimpleMeterRegistry()
-        val dm = withRegistry(reg)
-
-        dm.feedFetchOutcome("cnb-fx-fixing", "FETCHED")
-        dm.feedFetchOutcome("cnb-fx-fixing", "FETCHED")
-        dm.feedFetchOutcome("cnb-fx-fixing", "EMPTY")
-
-        val fetched = reg.find("openbank.feed.fetch").tags("feed", "cnb-fx-fixing", "outcome", "FETCHED").counter()
-        val empty = reg.find("openbank.feed.fetch").tags("feed", "cnb-fx-fixing", "outcome", "EMPTY").counter()
-        assertThat(fetched).isNotNull
-        assertThat(fetched!!.count()).isEqualTo(2.0)
-        assertThat(empty).isNotNull
-        assertThat(empty!!.count()).isEqualTo(1.0)
-    }
-
-    @Test
     fun `recordReconciliationDrift publishes a live gauge per control and currency`() {
         val reg = SimpleMeterRegistry()
         val dm = withRegistry(reg)

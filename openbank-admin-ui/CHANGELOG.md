@@ -1,5 +1,76 @@
 # Changelog
 
+## [0.155.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.5...admin-ui-v0.155.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify swarm proposal events ([#5227](https://github.com/JiRaska/open-bank-oss/issues/5227)) ([97d3524](https://github.com/JiRaska/open-bank-oss/commit/97d35241b15140eb23c4331046dbabd817d65674))
+
+## [0.155.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.4...admin-ui-v0.155.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** make ledger controls accessible ([#5208](https://github.com/JiRaska/open-bank-oss/issues/5208)) ([e758e58](https://github.com/JiRaska/open-bank-oss/commit/e758e582074aabf98f6b5abf8428f3d20b8f4fc6))
+
+## [0.155.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.3...admin-ui-v0.155.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** add shell skip navigation ([#5187](https://github.com/JiRaska/open-bank-oss/issues/5187)) ([d31dc47](https://github.com/JiRaska/open-bank-oss/commit/d31dc477cd2824c9895c9c51ec6fdf0905949da4))
+
+## [0.155.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.2...admin-ui-v0.155.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label unwired payment actions ([#5182](https://github.com/JiRaska/open-bank-oss/issues/5182)) ([29a9e9a](https://github.com/JiRaska/open-bank-oss/commit/29a9e9a7776a373175e189e7677dd93dd0e236d7))
+
+## [0.155.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.1...admin-ui-v0.155.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove misleading settings controls ([#5178](https://github.com/JiRaska/open-bank-oss/issues/5178)) ([b7228ba](https://github.com/JiRaska/open-bank-oss/commit/b7228ba15a5732f56a6f094b98bca4d9c8fb4309))
+
+## [0.155.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.0...admin-ui-v0.155.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** load next ledger journal page ([#5171](https://github.com/JiRaska/open-bank-oss/issues/5171)) ([fd1db4e](https://github.com/JiRaska/open-bank-oss/commit/fd1db4ed07b4b355bed1d4496eee6a784d089c7a))
+
+## [0.155.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.154.0...admin-ui-v0.155.0) (2026-08-17)
+
+
+### Features
+
+* **admin-ui:** unify card detail workspace ([#5166](https://github.com/JiRaska/open-bank-oss/issues/5166)) ([a0027a4](https://github.com/JiRaska/open-bank-oss/commit/a0027a40933a29f2061ad36038a5555a581d6f64))
+
+## [0.154.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.153.0...admin-ui-v0.154.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify payment detail workspace ([#5163](https://github.com/JiRaska/open-bank-oss/issues/5163)) ([e7a8bcb](https://github.com/JiRaska/open-bank-oss/commit/e7a8bcb740f16d1c4f78eb40c9665b74da063d42))
+
+## [0.153.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.152.0...admin-ui-v0.153.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify account operations workspace ([#5150](https://github.com/JiRaska/open-bank-oss/issues/5150)) ([abee20d](https://github.com/JiRaska/open-bank-oss/commit/abee20dfcfeb7d954adb8d1ab67872c611d0a1d8))
+* **admin-ui:** unify product catalog workspace ([#5157](https://github.com/JiRaska/open-bank-oss/issues/5157)) ([2a6b14e](https://github.com/JiRaska/open-bank-oss/commit/2a6b14e2e4e679ba7f59ab4754423d128a72b15d))
+
+## [0.152.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.151.0...admin-ui-v0.152.0) (2026-08-16)
+
+
+### Features
+
+* **admin-ui:** unify party operations workspace ([#5146](https://github.com/JiRaska/open-bank-oss/issues/5146)) ([d5a79d8](https://github.com/JiRaska/open-bank-oss/commit/d5a79d890da451e0bb96d7fbc3c961f0d5e5fb75))
+
 ## [0.151.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.150.0...admin-ui-v0.151.0) (2026-08-16)
 
 

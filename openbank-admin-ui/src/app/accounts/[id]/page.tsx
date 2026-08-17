@@ -11,6 +11,7 @@ import { ArrowLeft, RefreshCw, Lock, Unlock, XCircle, AlertCircle } from 'lucide
 import { accountApi } from '@/lib/api'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { Account, AccountBalance } from '@/types'
 
 const STATUS_PILL: Record<string, string> = {
@@ -87,31 +88,21 @@ export default function AccountDetailPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <Link href="/accounts" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Účty', 'Accounts')}</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{account.accountNumber}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span className="mono">{account.accountNumber}</span>
-            <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
-          </h1>
-          <p className="page-subtitle">{account.accountType} · {account.currencyCode}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13}/> {t('Zpět', 'Back')}</Link>
+      <PageHeader
+        title={account.accountNumber}
+        subtitle={`${account.accountType} · ${account.currencyCode}`}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/accounts" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Účty', 'Accounts')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{account.accountNumber}</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
+          <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true"/> {t('Zpět', 'Back')}</Link>
           {account.status === 'ACTIVE' && (
             <button className="btn btn-secondary" onClick={() => doAction('freeze')} disabled={acting}>
-              <Lock size={13}/> {t('Zmrazit', 'Freeze')}
+              <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
             </button>
           )}
           {account.status === 'FROZEN' && (
             <button className="btn btn-secondary" onClick={() => doAction('unfreeze')} disabled={acting}>
-              <Unlock size={13}/> {t('Odzmrazit', 'Unfreeze')}
+              <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
             </button>
           )}
           {account.status !== 'CLOSED' && (
@@ -121,11 +112,11 @@ export default function AccountDetailPage() {
               disabled={acting}
               style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
             >
-              <XCircle size={13}/> {t('Zrušit účet', 'Close')}
+              <XCircle size={13} aria-hidden="true"/> {t('Zrušit účet', 'Close')}
             </button>
           )}
-        </div>
-      </div>
+        </div>}
+      />
 
       {actionError && (
         <div

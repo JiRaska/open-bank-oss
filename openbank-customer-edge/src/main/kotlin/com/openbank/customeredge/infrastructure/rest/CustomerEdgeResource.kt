@@ -974,6 +974,13 @@ class CustomerEdgeResource(
         )
     }
 
+    // NOTE: deliberately no customer-facing "close account" endpoint here. account-service's
+    // OPA policy (account_rest_ext.rego) explicitly PROHIBITS account.close for the edge's M2M
+    // principal — closed off after a fleet audit (#3734) that found a blanket role-only grant
+    // had accidentally exposed the whole sensitive lifecycle (close/freeze/unfreeze/authorize)
+    // to this exact proxy path. That is a deliberate security boundary, not a missing feature —
+    // don't add a caller here without an explicit human decision to reopen it.
+
     @GET
     @Path("/accounts/{accountId}/pockets/resolve")
     @Authorize(action = "customer.pockets.read", resource = "#accountId")
@@ -1392,6 +1399,58 @@ class CustomerEdgeResource(
             "$partyServiceUrl/api/v1/parties/${customer.partyId}/consent",
             customer.partyId.toString(),
             out,
+        )
+    }
+
+    // ─── Saved payees (TOP-10 #5) ──────────────────────────────────────────────
+    // Server side of the mobile app's device-local PayeeStore. Same shape as /profile above:
+    // party-scoped by the JWT party — never a client-supplied id — so a customer only ever
+    // reads/writes their own list (no IDOR).
+
+    @GET
+    @Path("/payees")
+    @Authorize(action = "customer.payees.read")
+    @Blocking
+    fun listPayees(): Response {
+        val customer = customer()
+        return upstream.get("$partyServiceUrl/api/v1/parties/${customer.partyId}/payees", customer.partyId.toString())
+    }
+
+    @PUT
+    @Path("/payees")
+    @Authorize(action = "customer.payees.write")
+    @Blocking
+    fun savePayee(body: String): Response {
+        val customer = customer()
+        // Re-serialize through Jackson (not raw string interpolation) — name/iban/bic are
+        // customer-authored free text and must be JSON-escaped, not spliced into a template.
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed payee request body")
+        val name = node.get("name")?.takeIf { it.isTextual }?.asText()
+            ?: return badRequest("Missing payee name")
+        val iban = node.get("iban")?.takeIf { it.isTextual }?.asText()
+            ?: return badRequest("Missing payee iban")
+        val forwarded = objectMapper.createObjectNode().apply {
+            put("name", name)
+            put("iban", iban)
+            node.get("bic")?.takeIf { it.isTextual }?.let { put("bic", it.asText()) }
+        }
+        return upstream.put(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/payees",
+            customer.partyId.toString(),
+            objectMapper.writeValueAsString(forwarded),
+        )
+    }
+
+    @DELETE
+    @Path("/payees/{iban}")
+    @Authorize(action = "customer.payees.write")
+    @Blocking
+    fun deletePayee(@PathParam("iban") iban: String): Response {
+        val customer = customer()
+        return upstream.delete(
+            "$partyServiceUrl/api/v1/parties/${customer.partyId}/payees/$iban",
+            customer.partyId.toString(),
         )
     }
 

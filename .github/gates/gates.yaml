@@ -1815,9 +1815,10 @@ gates:
   # a service whose OutboxDispatcher actually gates on this flag silently
   # never dispatches if it's left at its false default — no error,
   # attempt_count stays 0). Scoped to dispatchers that reference the flag
-  # at all; openbank-sepa-instant and openbank-security-scanner ship an
-  # older unconditional @Scheduled dispatcher that never reads it and are
-  # correctly out of scope, not exempted violations. 0 violations on
+  # at all; openbank-sepa-instant ships an older unconditional @Scheduled
+  # dispatcher that never reads it and is correctly out of scope, not an
+  # exempted violation. (openbank-security-scanner was the other such case
+  # until #4709 deleted its writer-less outbox entirely.) 0 violations on
   # origin/main at introduction — this is a regression guard. ENFORCED.
   - id: outbox-dispatch-enabled-guard
     name: "outbox dispatch-enabled guard (footgun check, enforced)"
@@ -3154,6 +3155,28 @@ gates:
     min_subjects: 3   # 5 required contexts today (2026-08-09)
     run: |
       python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
+
+  # #4716 (Refs #4533). An advisory written as a single `< X` interval misclassifies every
+  # dependency with parallel release lines: hibernate-reactive 3.4.2.Final sorts below `< 4.2.1`
+  # and CARRIES the fix (3.4.0 branched five months AFTER 4.2.1 shipped). 47 VEX statements sat
+  # at `affected` with an exit criterion no Quarkus platform can satisfy, and the "obvious"
+  # remediation would have crashed every service at boot. Version arithmetic cannot settle a
+  # cross-line case; a disassembly of the pinned jar can. This gate does not check the
+  # disassembly — it checks the one machine-checkable trace it leaves, that the verdict is
+  # anchored to a sha256 the build actually resolves rather than to sorting two strings.
+  # Falsified against the real pre-fix tree (3356426^): 47 of 47 red, exit 1.
+  - id: vex-range-reasoning
+    name: "a VEX verdict reasoned across release lines is anchored to a pinned artifact (#4716, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "Without it a VEX verdict can rest on version arithmetic alone, which is provably wrong for parallel release lines in both directions — it produced 47 false `affected` statements and an impossible remediation whose 'fix' would have failed every service at boot (#4533)."
+    review_after: "2027-02-16"
+    selftest: python3 .github/scripts/check-vex-range-reasoning.py --self-test
+    selftest_expect: pass
+    min_subjects: 400   # 824 verdict statements across 52 overlays today (2026-08-16)
+    budget_seconds: 20  # ~0.3s locally over the 52 overlays
+    run: |
+      python3 .github/scripts/check-vex-range-reasoning.py --enforce
 
   # ADR-0254. incluster-hostname-resolution shipped advisory with a "these six findings are
   # all benign" note; three were live (settlement-service and onboarding-service dialling

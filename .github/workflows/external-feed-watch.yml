@@ -37,7 +37,7 @@
 #   external probe is not a redundant second opinion, it is the only opinion outside a
 #   running pod. It deliberately does NOT decide "is the feed healthy right now" any
 #   more, though: the DEPLOYED service now classifies every real fetch attempt as
-#   FETCHED/EMPTY/HTTP_ERROR/PARSE_ERROR (`com.openbank.fx.domain.feed.FeedFetchOutcome`),
+#   FETCHED/EMPTY/HTTP_ERROR/PARSE_ERROR (`com.openbank.libs.observability.FeedFetchOutcome`),
 #   publishes it as `openbank.feed.fetch{feed,outcome}`, and records a success against a
 #   `feed-<name>` liveness gauge ONLY on FETCHED — which the existing WorkflowLivenessStale
 #   rule already alerts on (prometheus-rules-workflow-liveness.yaml), gauge-based so a

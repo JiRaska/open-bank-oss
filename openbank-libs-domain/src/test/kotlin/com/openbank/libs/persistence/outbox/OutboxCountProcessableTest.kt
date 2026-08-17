@@ -26,7 +26,7 @@ class OutboxCountProcessableTest {
             return rows.take(limit)
         }
         override suspend fun markSent(eventId: UUID, sentAt: Instant) = Unit
-        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) = Unit
+        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) = OutboxStatus.FAILED
     }
 
     private fun entry() = OutboxEntry(

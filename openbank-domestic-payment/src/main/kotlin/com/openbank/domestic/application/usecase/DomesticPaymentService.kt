@@ -163,6 +163,7 @@ class DomesticPaymentService(
             technicalAccountCode = technicalAccountCode,
             statementLabel = command.statementLabel?.trim()?.ifBlank { null },
             endToEndId = command.endToEndId?.trim()?.ifBlank { null } ?: generateEndToEndId(command.priority),
+            initiatedByPartyId = command.actorId,
             rejectReason = null,
             rejectDetail = null,
             submittedAt = null,

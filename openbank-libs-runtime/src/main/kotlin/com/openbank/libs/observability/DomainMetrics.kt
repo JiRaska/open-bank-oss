@@ -327,11 +327,16 @@ class DomainMetrics {
     /**
      * Increment each time the outbox dispatcher successfully publishes an event.
      *
-     * @param service  service name (e.g. `sepa-payment`, `ledger`)
-     * @param topic    Kafka topic
+     * @param service   service name (e.g. `sepa-payment`, `ledger`)
+     * @param eventType the outbox entry's domain event type (e.g. `PARTY_ERASED`), **not** the
+     *                  Kafka topic — every publisher in this fleet sends to one fixed topic per
+     *                  service, so a `topic` tag would be constant per `service` and add nothing;
+     *                  `eventType` is the actual per-row granularity this counter measures
+     *                  (issue #5128 finding 1). If a service ever fans out to more than one topic,
+     *                  add a separate `topic` parameter rather than overloading this one.
      */
-    fun outboxDispatched(service: String, topic: String) {
-        counter("openbank.outbox.dispatched", "service", service, "topic", topic)
+    fun outboxDispatched(service: String, eventType: String) {
+        counter("openbank.outbox.dispatched", "service", service, "event_type", eventType)
     }
 
     /**
@@ -436,33 +441,75 @@ class DomainMetrics {
         return WorkflowLivenessRecorder(lastSuccessEpochMillis, successRecorded)
     }
 
-    // ── External feeds (ADR-0237 point 2, issue #4743) ──────────────────────────
+    // ── External-feed fetch outcome (ADR-0237 point 2, issue #4743) ─────────────
 
     /**
-     * Increment on every attempt to fetch and parse an external feed, labelled by the real
-     * OUTCOME of that attempt — never merely whether the scheduled job wrapping it threw. This is
-     * the companion signal to a `feed-<name>` [registerWorkflowLiveness] entry: the gauge answers
-     * "how long since the feed last delivered", this counter answers "what happened on THIS
-     * attempt", so a dashboard can show e.g. `outcome=EMPTY` climbing well before the gauge ever
-     * crosses its staleness threshold — the ADR-0237 gap that let the ČNB fixing go un-ingested
-     * for 46 days (#2204) while every layer reported green.
+     * Register the fetch-outcome contract for an external feed, and with it the feed's own
+     * freshness heartbeat.
      *
-     * A "successful no-op" and a real fetch are deliberately never the same label. This repo's own
-     * precedent for that split is `PushSendOutcome.SKIPPED` (openbank-notification-service): a
-     * disabled adapter returned a *successful* skipped result and the fan-out counted it as
-     * delivered, until `SKIPPED` got its own enum value. Every caller here should have an
-     * equivalent local enum (e.g. `com.openbank.fx.domain.feed.FeedFetchOutcome`) and pass its
-     * `.name` — this façade takes a plain `String`, like [authzDecision]'s `outcome` above, so a
-     * new feed never needs a libs-domain dependency on another service's enum.
+     * **Why a feed needs this on top of [registerWorkflowLiveness].** That primitive answers "did
+     * the job run and finish without throwing". For a feed that is the wrong question, because a
+     * fetch can succeed *as a job* while producing nothing usable: the ČNB fixing URL was a 404 for
+     * 46 days while the downstream revaluation kept logging "no movement" (#2204). Worse, the
+     * quietest failure raises no error at all — a feed that answers 200 with a well-formed document
+     * containing none of the rows we asked for is, under a run/no-run heartbeat, **identical to a
+     * healthy one**. [FeedFetchOutcome] enumerates the four ways a fetch ends; this method is what
+     * makes them observable.
      *
-     * @param feed     stable low-cardinality feed name, e.g. `cnb-fx-fixing` — should match the
-     *                 `feed-<name>` liveness workflow tag with the `feed-` prefix stripped, so the
-     *                 two series join in a dashboard without a lookup table.
-     * @param outcome  `FETCHED` | `EMPTY` | `HTTP_ERROR` | `PARSE_ERROR` at minimum — additive,
-     *                 never exhaustively switched on by a consumer.
+     * **This sits beside the workflow heartbeat, it does not replace it.** Two registrations, two
+     * `workflow` tag values, alerting independently — ADR-0237 point 2's design, unchanged:
+     *
+     *  - the caller keeps its own `registerWorkflowLiveness("<job-name>", …)` — *the scheduler ran*;
+     *  - this method registers `registerWorkflowLiveness("feed-<feed>", …)` — *the feed delivered*,
+     *    advanced **only** on [FeedFetchOutcome.FETCHED].
+     *
+     * The two disagreeing is the diagnosis: job fresh + feed stale means the scheduler is running
+     * fine against a dead upstream, which is exactly the shape that went unnoticed for 46 days.
+     *
+     * Reusing the liveness primitive rather than inventing a second gauge family is deliberate and
+     * buys three things already built and already argued: the existing `WorkflowLivenessStale`
+     * PrometheusRule covers feed freshness with no new rule or threshold; the control-liveness
+     * sentinel (ADR-0163) correlates it with everything else; and the age gauge is **seeded at
+     * registration**, so a fresh pod reads its own uptime rather than the ~1.8e9 seconds that made
+     * an alert fire 15 minutes after every deploy (#4208).
+     *
+     * **What a cold pod reads at t=0**, before any fetch has happened — a boot reading is a fourth
+     * state beside healthy/degraded/absent and is worth stating rather than inferring:
+     *
+     *  - `openbank_workflow_last_success_age_seconds{workflow="feed-<feed>"}` ≈ *pod uptime in
+     *    seconds*, so it cannot cross `2 * expectedInterval` until a genuine grace period has
+     *    elapsed. Never decades.
+     *  - `openbank_workflow_success_recorded{workflow="feed-<feed>"}` = `0` — "this pod has not seen
+     *    this feed deliver", which triage reads and the alert deliberately does not.
+     *  - `openbank_feed_fetch_total{feed="<feed>",outcome="…"}` = `0` for **every** outcome, present
+     *    and zero rather than absent (see below).
+     *
+     * Every [FeedFetchOutcome] counter is created at registration so a feed that has never failed
+     * still publishes `outcome="http_error"` at 0. A counter created lazily on first increment makes
+     * "this never happened" and "this was never instrumented" the same empty vector, and a triage
+     * query cannot tell them apart — the #2187 shape, where a consumer that could only ever report
+     * "nothing wrong" read as reassurance.
+     *
+     * Call **once at startup**, then [FeedFetchRecorder.record] on every fetch attempt including the
+     * failed ones — a recorder that is only called on the happy path measures traffic, not health.
+     * A no-op recorder is returned when no [MeterRegistry] is resolvable, matching every method
+     * above.
+     *
+     * @param feed              stable low-cardinality feed name, e.g. `cnb-daily-fixing` — the same
+     *                          name the feed is declared under in `check-external-feeds.py`
+     * @param expectedInterval  the feed's publication cadence; freshness alerts at 2x this
      */
-    fun feedFetchOutcome(feed: String, outcome: String) {
-        counter("openbank.feed.fetch", "feed", feed, "outcome", outcome)
+    fun registerFeedFetch(feed: String, expectedInterval: Duration): FeedFetchRecorder {
+        val freshness = registerWorkflowLiveness(FeedFetchMetrics.freshnessWorkflow(feed), expectedInterval)
+        val counters = FeedFetchOutcome.entries.associateWith { outcome ->
+            reg()?.let { r ->
+                Counter.builder(FeedFetchMetrics.FETCH_TOTAL)
+                    .tag(FeedFetchMetrics.FEED_TAG, feed)
+                    .tag(FeedFetchMetrics.OUTCOME_TAG, outcome.name.lowercase())
+                    .register(r)
+            }
+        }
+        return FeedFetchRecorder(freshness, counters)
     }
 
     // ── Reconciliation drift (ADR-0160 mechanism 4) ─────────────────────────────
@@ -543,6 +590,41 @@ class DomainMetrics {
  * the workflow's success path on every run. Not a CDI bean — a plain value object held by the
  * scheduled job that registered it.
  */
+/**
+ * Handle returned by [DomainMetrics.registerFeedFetch]; call [record] once per fetch **attempt**,
+ * whatever the outcome.
+ *
+ * **The one invariant worth having a class for.** Freshness and outcome cannot be recorded
+ * separately: [record] both increments the outcome counter and advances the freshness heartbeat, and
+ * it advances the heartbeat **iff** the outcome is [FeedFetchOutcome.FETCHED]. So a caller cannot
+ * mark a feed fresh without saying what it fetched, and cannot report a successful fetch that leaves
+ * the feed looking stale. The two signals are physically unable to drift apart, which is the failure
+ * mode this whole mechanism exists to catch — a heartbeat that says green about a feed that stopped
+ * delivering.
+ *
+ * That is also why [FeedFetchOutcome.EMPTY] is a value here and not a `success` boolean set to
+ * `true`. `PushResult.skipped()` carried `success = true`, so pushes that never left the process were
+ * counted as delivered and the row committed `SENT` (ADR-0252 phase 0, #4348). The same shape applied
+ * to a feed reads: fetched on schedule, produced nothing, every time, and no error anywhere.
+ *
+ * Not a CDI bean — a plain value object held by whatever owns the feed.
+ */
+class FeedFetchRecorder internal constructor(
+    private val freshness: WorkflowLivenessRecorder,
+    private val counters: Map<FeedFetchOutcome, Counter?>,
+) {
+    /**
+     * Record one fetch attempt. Advances the feed's freshness heartbeat only for
+     * [FeedFetchOutcome.FETCHED] — every other outcome lets the age gauge keep growing, which is
+     * what eventually raises `WorkflowLivenessStale` for the feed while the job's own heartbeat
+     * stays green.
+     */
+    fun record(outcome: FeedFetchOutcome) {
+        counters[outcome]?.increment()
+        if (outcome == FeedFetchOutcome.FETCHED) freshness.recordSuccess()
+    }
+}
+
 class WorkflowLivenessRecorder internal constructor(
     private val lastSuccessEpochMillis: java.util.concurrent.atomic.AtomicLong,
     private val successRecorded: java.util.concurrent.atomic.AtomicLong,

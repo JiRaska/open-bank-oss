@@ -6,8 +6,8 @@ package com.openbank.fx.infrastructure.schedule
 
 import com.openbank.fx.application.port.`in`.CnbRateIngestionUseCase
 import com.openbank.fx.application.port.`in`.IngestCnbFixingCommand
-import com.openbank.fx.domain.feed.FeedFetchOutcome
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.FeedFetchRecorder
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
@@ -34,14 +34,13 @@ class CnbRateIngestionScheduler(
     // into an UninitializedPropertyAccessException thrown from the middle of the run.
     private var liveness: WorkflowLivenessRecorder? = null
 
-    // ADR-0237 point 2: a SEPARATE liveness entry from the scheduler heartbeat above, under the
-    // `feed-` prefix, gated on the REAL fetch outcome rather than "the job ran without throwing".
-    // `fx-cnb-ingestion` kept recording success through the whole #2204 outage — the ingestion
-    // swallowed the parse failure into one log line and never reached a point where it could fail —
-    // so this entry's recordSuccess() below is called ONLY for FeedFetchOutcome.FETCHED. A repeat
-    // of #2204 now stales THIS gauge within its 2x-daily grace even while the scheduler heartbeat
-    // above stays green, because the two answer different questions (issue #4743).
-    private var feedLiveness: WorkflowLivenessRecorder? = null
+    // ADR-0237 point 2 / #4743: the FEED's own signal, registered beside — never instead of — the
+    // workflow heartbeat above. The heartbeat answers "did this job run"; a fetch can pass that test
+    // while producing nothing usable, which is the entire ČNB incident (#2204: 404 for 46 days while
+    // the downstream revaluation logged "no movement"). `feed-cnb-daily-fixing` advances only when
+    // rates actually arrived, so the two gauges disagreeing IS the diagnosis, and the outcome
+    // counter beside them says which of 404 / timeout / HTML-error-page / nothing-we-asked-for it is.
+    private var feed: FeedFetchRecorder? = null
 
     // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run —
     // matches DomainMetrics.registerOutboxBacklog's "call once" contract and the one pre-existing
@@ -50,7 +49,7 @@ class CnbRateIngestionScheduler(
     // kind, so success and failure both ended in a log line (#2239).
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
-        feedLiveness = domainMetrics.registerWorkflowLiveness(FEED_WORKFLOW_NAME, Duration.ofDays(1))
+        feed = domainMetrics.registerFeedFetch(FEED_NAME, Duration.ofDays(1))
     }
 
     // `suspend`, never `runBlocking` (#2187, the fleet sweep of #2148). Quarkus invokes a plain
@@ -71,62 +70,39 @@ class CnbRateIngestionScheduler(
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun ingestDailyFixing() {
-        // The scheduler heartbeat below (`liveness`) intentionally still records on every path
-        // that reaches this point without throwing OUT of the job — that is what ADR-0237 point 1
-        // means by "the job executed", and swallowing this exception is what keeps the Quarkus
-        // scheduler thread alive for tomorrow's run. What changed is that a run reaching here no
-        // longer implies the FEED delivered anything: `outcome` below, and `feedLiveness`, answer
-        // that question separately (issue #4743).
-        // `var`, not `val`: the compiler cannot prove the try-block's assignment happens strictly
-        // before any exception (recordSuccess()/log calls after it can themselves throw), so it
-        // conservatively refuses a `val` reassigned from a catch block.
-        var outcome: FeedFetchOutcome
         try {
             val result = useCase.ingest(IngestCnbFixingCommand(date = null))
-            outcome = if (result.ingested + result.skipped > 0) FeedFetchOutcome.FETCHED else FeedFetchOutcome.EMPTY
             log.infof(
-                "ČNB fixing ingested for %s (#%s): %d new, %d unchanged %s (outcome=%s)",
+                "ČNB fixing ingested for %s (#%s): %d new, %d unchanged %s",
                 result.date,
                 result.sequence,
                 result.ingested,
                 result.skipped,
                 result.currencies,
-                outcome,
             )
+            // Success path only — the catch below is a failed run. Unchanged by #4743: this is the
+            // JOB's heartbeat and the job did complete, including on the EMPTY outcome below. A run
+            // that legitimately stored nothing is a run, not a miss (ADR-0237 point 1); it is the
+            // feed's own gauge that must not advance for it.
             liveness?.recordSuccess()
-            if (outcome == FeedFetchOutcome.FETCHED) {
-                feedLiveness?.recordSuccess()
-            } else {
-                log.warnf(
-                    "ČNB fixing feed answered but had nothing for the configured currencies — " +
-                        "feed=%s outcome=%s",
-                    FEED_NAME,
-                    outcome,
-                )
-            }
-        } catch (ex: IllegalArgumentException) {
-            // CnbFixingParser's require()s — a 2xx body that is not the feed's declared shape,
-            // including a "soft 404" (#2204: a 200 status carrying a 58 KB HTML error page).
-            outcome = FeedFetchOutcome.PARSE_ERROR
-            log.errorf(ex, "ČNB fixing ingestion failed to PARSE the fetched body: %s", ex.message)
+            feed?.record(CnbFetchOutcomes.of(result))
         } catch (ex: Exception) {
-            // Everything else originates below the parser: a non-2xx WebApplicationException from
-            // the rest client, a transport failure, a @Timeout, or an open @CircuitBreaker — the
-            // fetch itself, never its content.
-            outcome = FeedFetchOutcome.HTTP_ERROR
-            log.errorf(ex, "ČNB fixing ingestion failed to FETCH the feed: %s", ex.message)
+            // Record before logging: the metric is the signal that survives, and a log line is what
+            // this failure has already been reduced to once, for 46 days.
+            feed?.record(CnbFetchOutcomes.ofFailure(ex))
+            log.errorf(ex, "ČNB fixing ingestion failed: %s", ex.message)
         }
-        domainMetrics.feedFetchOutcome(FEED_NAME, outcome.name)
     }
 
     private companion object {
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "fx-cnb-ingestion"
 
-        /** ADR-0237 point 2 feed name — matches [DomainMetrics.feedFetchOutcome]'s `feed` tag. */
-        const val FEED_NAME = "cnb-fx-fixing"
-
-        /** The `feed-` prefix is ADR-0237 point 2's convention for a feed-freshness liveness entry. */
-        const val FEED_WORKFLOW_NAME = "feed-$FEED_NAME"
+        /**
+         * ADR-0237 point 2 feed name — deliberately the same string the feed is declared under in
+         * `.github/scripts/check-external-feeds.py`'s `FEEDS` list, so the CI probe that falsifies
+         * the URL from outside and the gauge that measures freshness from inside name the same feed.
+         */
+        const val FEED_NAME = "cnb-daily-fixing"
     }
 }

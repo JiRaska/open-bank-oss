@@ -10,6 +10,7 @@ import { Users, Plus, Search, RefreshCw, ChevronRight, ChevronDown } from 'lucid
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const PAGE_SIZE = 25
 
@@ -144,28 +145,21 @@ export default function PartiesPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Subjekty', 'Parties')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={18} style={{ color: 'var(--accent)' }} />
-            {t('Subjekty', 'Parties')}
-          </h1>
-          <p className="page-subtitle">{t('Zákazníci a společnosti registrované v platformě', 'Customers and companies registered in the platform')}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={t('Subjekty', 'Parties')}
+        subtitle={t('Zákazníci a společnosti registrované v platformě', 'Customers and companies registered in the platform')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Subjekty', 'Parties')}</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px' }}>
           <button className="btn btn-secondary" onClick={load} disabled={loading || inSearchMode}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
           <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-            <Plus size={13} /> {t('Nový subjekt', 'New Party')}
+            <Plus size={13} aria-hidden="true" /> {t('Nový subjekt', 'New Party')}
           </Link>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* Search toolbar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>

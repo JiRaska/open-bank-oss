@@ -9,7 +9,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 | Sekce | Publikum | Co tam najdete |
 |---|---|---|
 | [01 — Přehled](./01-overview.md) | Produkt, audit, management | Co služba dělá, kdo ji volá, kde sídlí v doméně |
-| [02 — Architektura](./02-architecture.md) | Inženýři, tech leadi | C4 diagramy, hexagonální vrstvy, sankční brána, outbox tok |
+| [02 — Architektura](./02-architecture.md) | Inženýři, tech leadi | C4 diagramy, hexagonální vrstvy, sankční brána, přímá publikace událostí |
 | [03 — API](./03-api.md) | Vývojáři služeb, integrátoři | REST kontrakt, idempotence, model chyb |
 | [04 — Data](./04-data.md) | Data, analytika, DBA | Schéma, migrace, retence, PII pole |
 | [05 — Provoz](./05-operations.md) | DevOps, SRE, release inženýři | Build, deploy, runbooky, SLO |
@@ -19,8 +19,8 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
 
 - **Tech stack:** Kotlin / Quarkus 3.x / Hibernate Reactive (Panache) + reaktivní PostgreSQL / SmallRye Reactive Messaging (Kafka) — sestaveno přes konvenční plugin `openbank.quarkus-service`
 - **Port:** 8127 (app), 8085 (management — `/q`)
-- **Persistence:** dedikovaná databáze `openbank_sepa_instant`, deklarované schéma `sepa_instant_schema`, Flyway migrace V1..V3
-- **Outbox:** `sct_inst_outbox` → Kafka topic `openbank.sepa.instant.events` (polling po 5 s, dávka 25)
+- **Persistence:** dedikovaná databáze `openbank_sepa_instant`, deklarované schéma `sepa_instant_schema`, Flyway migrace V1..V4
+- **Události:** přímá, synchronní publikace ze `SctInstPaymentService` při každém přechodu stavu přes `KafkaSctInstEventPublisher` → Kafka topic `openbank.sepa.instant.events` (nejde o transakční outbox — dřívější outbox pipeline byla postavena, ale nikdy napojena na žádné reálné volání, a byla odstraněna, issue #1034)
 - **Idempotence:** hlavička `Idempotency-Key` (fallback na pole v těle) → unique constraint na `sct_inst_payments.idempotency_key`
 - **Auth:** Keycloak OIDC (klient `openbank-services`); OPA autorizace (ADR-0034) ve výchozím stavu advisory; `@Authorize` na recallu
 - **Money-path:** ANO — uvedeno v `rules.yaml: money_path_services`; ADR-0057 tier **T0 (always-on)**; threat model v `docs/threat-models/openbank-sepa-instant.md`
