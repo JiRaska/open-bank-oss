@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.3...admin-ui-v0.157.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** modernize PID and regulatory headers ([60f9c9f](https://github.com/JiRaska/open-bank-oss/commit/60f9c9f2d8568d2fd2e9b576550866629ffc444b))
+
 ## [0.157.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.2...admin-ui-v0.157.3) (2026-08-17)
 
 
