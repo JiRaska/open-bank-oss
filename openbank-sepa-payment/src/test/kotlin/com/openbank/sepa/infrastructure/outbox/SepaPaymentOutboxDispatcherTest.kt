@@ -76,7 +76,7 @@ class SepaPaymentOutboxDispatcherTest {
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("broker down")
         coJustRun { eventPublisher.publish(ok) }
         coJustRun { outboxRepository.markSent(any(), any()) }
-        coJustRun { outboxRepository.markFailed(any(), any(), any()) }
+        coEvery { outboxRepository.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
 
         dispatcher.dispatch()
 
