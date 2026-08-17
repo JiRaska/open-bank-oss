@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.5...admin-ui-v0.157.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** modernize compliance pack header ([57d9b3f](https://github.com/JiRaska/open-bank-oss/commit/57d9b3f760705b230831cd252ed89c354e68d5aa))
+
 ## [0.157.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.4...admin-ui-v0.157.5) (2026-08-17)
 
 
