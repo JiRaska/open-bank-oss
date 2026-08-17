@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.14.0...product-catalog-v0.15.0) (2026-08-17)
+
+
+### Features
+
+* **product-catalog:** expose immutable revision lookup ([#5201](https://github.com/JiRaska/open-bank-oss/issues/5201)) ([78d4efe](https://github.com/JiRaska/open-bank-oss/commit/78d4efe5beec8f42d379bb9efd1ba350a6bee2a9))
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.3...product-catalog-v0.14.0) (2026-08-16)
 
 
