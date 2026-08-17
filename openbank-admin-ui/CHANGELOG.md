@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.0...admin-ui-v0.158.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label product catalog fields ([922a3b7](https://github.com/JiRaska/open-bank-oss/commit/922a3b7ccc3aaddd5dd2634edd7843118ed11de8))
+
 ## [0.158.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.11...admin-ui-v0.158.0) (2026-08-17)
 
 
