@@ -33,6 +33,7 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1731: plai
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1993: plaintext http:// env value http://keda-add-ons-http-interceptor-proxy.keda:8080
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1998: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2257: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2047: plaintext http:// env value http://openbao.vault.svc:8200
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2496: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2548: plaintext http:// env value http://sepa-payment.payments.svc:8115
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:2651: plaintext http:// env value http://tempo.observability.svc:4317

@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-246ab02a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -405,7 +405,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-ce0ef795
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-246ab02a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -754,7 +754,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-e80f4bc7
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-246ab02a
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -826,8 +826,12 @@ spec:
             # here meant DomesticPaymentActivitiesImpl.shadowFraudScore resolved
             # `http://localhost:8133`, the fail-open adapter swallowed the refusal as
             # "shadow ALLOW", and the DOMESTIC rail scored nothing for its entire life.
-            # Behaviour-neutral: shadowFraudScore only logs a non-ALLOW verdict. Enforcement is
-            # DOMESTIC_FRAUD_ENFORCEMENT_ENABLED, deliberately left off (and today unread).
+            # Behaviour-neutral: shadowFraudScore only logs a non-ALLOW verdict. There is no
+            # enforcement toggle: DOMESTIC_FRAUD_ENFORCEMENT_ENABLED named a control the Temporal
+            # migration (#1917) had deleted, and #4221 removed the orphaned key rather than leave a
+            # lever that does not move. Rebuilding enforcement is tracked in #4403.
+            # Whether this rail is actually being scored is now visible in
+            # openbank_fraud_scoring_degraded{service="domestic"} — see prometheus-rules.yaml.
             - name: FRAUD_SERVICE_URL
               value: http://fraud-service.fraud.svc:8133
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
@@ -1087,7 +1091,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-6265ea86
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1406,7 +1410,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-6265ea86
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1704,7 +1708,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-2330eeea
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1764,6 +1768,17 @@ spec:
             # dialled a name that does not exist, on a port that belongs to another service.
             - name: SEPA_PAYMENT_SERVICE_URL
               value: http://sepa-payment.payments.svc:8115
+            # #889 follow-up: DOMESTIC/INTERNAL routing. The app only ever sends these two payment
+            # types, so before this every real standing order was accepted, shown ACTIVE, and
+            # silently failed on every due date — no rail existed for either. A creditor IBAN that
+            # resolves through account-service never leaves the bank, so it books straight through
+            # transaction-service as a same-day TRANSFER. Verified Service name/port against the
+            # live cluster (account-service.accounts.svc:8100, transaction-service.payments.svc:8102)
+            # rather than assumed, per the SEPA_PAYMENT_SERVICE_URL lesson two lines above.
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
             - name: QUARKUS_REDIS_HOSTS
               value: redis://redis.payments.svc:6379
             - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
@@ -1970,7 +1985,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-6265ea86
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2037,6 +2052,14 @@ spec:
                 secretKeyRef:
                   name: card-issuance-pan-key
                   key: CARD_PAN_ENCRYPTION_KEY
+            # ADR-0262: OpenBao Transit address for the envelope-encryption key source
+            # (OpenBaoEnvelopeCardSecretCipher). Only consulted when
+            # openbank.card.key-source=openbao-transit is built in — inert otherwise, but declaring
+            # it here (rather than relying only on the @ConfigProperty code default) is what makes
+            # gen-network-policies.py emit the payments -> vault egress edge, same pattern as
+            # document-service's OPENBANK_SIGNATURE_CLIENT_PKI_BAO_ADDR.
+            - name: OPENBANK_CARD_ENVELOPE_BAO_ADDR
+              value: http://openbao.vault.svc:8200
             - name: PRODUCT_CATALOG_SERVICE_URL
               value: http://keda-add-ons-http-interceptor-proxy.keda:8080
             # ADR-0083 T1 re-entry: the interceptor dispatches on Host (see account-service).
@@ -2240,7 +2263,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-6265ea86
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2549,7 +2572,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-9e8fa868
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-6265ea86
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2668,7 +2691,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-6265ea86
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -2981,7 +3004,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-8922f9b3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-6265ea86
 
           imagePullPolicy: IfNotPresent
           ports:

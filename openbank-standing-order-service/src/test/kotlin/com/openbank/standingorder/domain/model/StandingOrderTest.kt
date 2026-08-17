@@ -120,8 +120,15 @@ class StandingOrderTest {
         assertThat(updated.status).isEqualTo(StandingOrderStatus.ACTIVE)
     }
 
+    /**
+     * Regression coverage for the #3931-class defect this pair of tests guards: `recordExecution`
+     * runs at SCHEDULING time, before the payment is even attempted. Completing a ONCE order here
+     * meant a one-off payment that then failed left the order COMPLETED with zero money moved —
+     * `recordFailure`'s `status == ACTIVE` guard threw on the already-COMPLETED order, and the
+     * consumer's `runCatching` swallowed it. A ONCE order must stay ACTIVE through scheduling.
+     */
     @Test
-    fun `recordExecution completes a ONCE order after its single execution`() {
+    fun `recordExecution does NOT complete a ONCE order — only schedules the attempt`() {
         val order = standingOrder(
             frequency = Frequency.ONCE,
             startDate = LocalDate.of(2026, 6, 1),
@@ -130,10 +137,45 @@ class StandingOrderTest {
             status = StandingOrderStatus.ACTIVE,
         )
 
-        val executed = order.recordExecution(order.calculateNextDate(order.nextExecutionDate), FIXED_NOW)
+        val scheduled = order.recordExecution(order.calculateNextDate(order.nextExecutionDate), FIXED_NOW)
 
-        assertThat(executed.status).isEqualTo(StandingOrderStatus.COMPLETED)
-        assertThat(executed.executionCount).isEqualTo(order.executionCount + 1)
+        assertThat(scheduled.status).isEqualTo(StandingOrderStatus.ACTIVE)
+        assertThat(scheduled.executionCount).isEqualTo(order.executionCount + 1)
+    }
+
+    /** The other half: only [StandingOrder.confirmExecution] — the real success signal — completes it. */
+    @Test
+    fun `confirmExecution completes a ONCE order once the payment is actually confirmed`() {
+        val order = standingOrder(frequency = Frequency.ONCE, status = StandingOrderStatus.ACTIVE)
+
+        val confirmed = order.confirmExecution(FIXED_NOW)
+
+        assertThat(confirmed.status).isEqualTo(StandingOrderStatus.COMPLETED)
+    }
+
+    /** confirmExecution must not complete a still-recurring order — only ONCE is spent by one run. */
+    @Test
+    fun `confirmExecution leaves a recurring order ACTIVE`() {
+        val order = standingOrder(frequency = Frequency.MONTHLY, status = StandingOrderStatus.ACTIVE)
+
+        val confirmed = order.confirmExecution(FIXED_NOW)
+
+        assertThat(confirmed.status).isEqualTo(StandingOrderStatus.ACTIVE)
+    }
+
+    /**
+     * A failed ONCE execution must be recordable at all — before this fix it threw (`recordFailure`
+     * requires ACTIVE, but the order was already COMPLETED by the time it failed).
+     */
+    @Test
+    fun `a failed ONCE execution can still be recorded, and retried until it hits the failure cap`() {
+        val order = standingOrder(frequency = Frequency.ONCE, status = StandingOrderStatus.ACTIVE, failureCount = 0)
+        val scheduled = order.recordExecution(order.calculateNextDate(order.nextExecutionDate), FIXED_NOW)
+
+        val failed = scheduled.recordFailure(FIXED_NOW)
+
+        assertThat(failed.status).isEqualTo(StandingOrderStatus.ACTIVE)
+        assertThat(failed.failureCount).isEqualTo(1)
     }
 
     private fun standingOrder(
@@ -203,7 +245,7 @@ class StandingOrderTest {
 
         @JvmStatic
         fun frequencyNextDateCases(): Stream<Arguments> = Stream.of(
-            // ONCE never advances — the returned date is unused (recordExecution completes it).
+            // ONCE never advances — the returned date is unused (confirmExecution completes it).
             Arguments.of(Frequency.ONCE, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 1)),
             Arguments.of(Frequency.DAILY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 2)),
             Arguments.of(Frequency.WEEKLY, LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 8)),

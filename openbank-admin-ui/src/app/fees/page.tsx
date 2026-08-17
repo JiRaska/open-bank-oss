@@ -44,6 +44,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function FeesPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [fees, setFees] = useState<FeeScheduleItem[]>([])
   const [loading, setLoading] = useState(true)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
@@ -113,7 +114,7 @@ export default function FeesPage() {
           subtitle={t('Ceník poplatků ze service product-catalog', 'Fee schedule served by the product-catalog service')}
           actions={<div className="flex gap-2">
             <button className="btn btn-secondary" onClick={() => void load()} disabled={loading}>
-              <RefreshCw size={14} style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
+              <RefreshCw size={14} aria-hidden="true" style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
               {t('Obnovit', 'Refresh')}
             </button>
           </div>}
@@ -127,18 +128,19 @@ export default function FeesPage() {
 
         <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: '250px', maxWidth: '320px' }}>
-            <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+            <Search size={14} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
             <input
               className="input"
               style={{ paddingLeft: '32px', width: '100%' }}
               placeholder={t('Hledat kód, název, produkt…', 'Search code, name, product…')}
+              aria-label={t('Hledat v ceníku poplatků', 'Search fee schedule')}
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
           </div>
           <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
             <span style={{ fontSize: '12px', color: 'var(--text-muted)', marginRight: '4px' }}>{t('Typ', 'Type')}:</span>
-            <select className="input" style={{ width: 'auto', padding: '6px 12px' }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
+            <select className="input" aria-label={t('Typ poplatku', 'Fee type')} style={{ width: 'auto', padding: '6px 12px' }} value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}>
               <option value="ALL">{t('Všechny', 'All')}</option>
               {uniqueTypes.map(typ => <option key={typ} value={typ}>{typ}</option>)}
             </select>
@@ -208,7 +210,7 @@ export default function FeesPage() {
                   </td>
                   <td><span className="tag" style={{ color: 'var(--accent)' }}>{fee.type}</span></td>
                   <td style={{ fontFamily: 'var(--font-mono)' }}>
-                    {fee.amount.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })}
+                    {fee.amount.toLocaleString(numberLocale, { minimumFractionDigits: 2 })}
                   </td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{fee.currency}</td>
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{fee.frequency}</td>

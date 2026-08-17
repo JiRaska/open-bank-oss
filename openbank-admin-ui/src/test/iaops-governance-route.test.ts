@@ -26,6 +26,10 @@ describe('GET /api/iaops/governance', () => {
       totalPhases: 5,
       phaseLabel: 'Read-only oversight active — HITL proposal queue live; HolmesGPT + copilot deployed (proposal-only, no autonomous state-changing action)',
       agentsActing: 0,
+      phaseRoadmap: [
+        { number: 1, status: 'complete', title: 'Safety foundations', outcome: 'Enforced.' },
+        { number: 2, status: 'active', title: 'Read-only oversight', outcome: 'Human decides.' },
+      ],
       decisions: [{ id: 'D1', title: 'Agents as code (agents.yaml + charter)', status: 'built', detail: 'details' }],
       decisionSummary: { built: 1, partial: 0, planned: 0, total: 1 },
       compliance: [{ framework: 'GDPR', requirement: 'Art. 30', control: 'Masked', status: 'built' }],
@@ -50,6 +54,7 @@ describe('GET /api/iaops/governance', () => {
     const body = await res.json()
     expect(body.phase).toBe(2)
     expect(body.phaseLabel).toContain('Read-only oversight active')
+    expect(body.phaseRoadmap[1]).toMatchObject({ number: 2, status: 'active' })
     expect(body.enforcement).toBe('block')
     expect(body.policyDefault).toBe('deny')
     expect(body.chartersAvailable).toBe(true)

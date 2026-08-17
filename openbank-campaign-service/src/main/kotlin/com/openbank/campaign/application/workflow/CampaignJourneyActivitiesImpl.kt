@@ -267,9 +267,15 @@ open class CampaignJourneyActivitiesImpl(
         nextStepOrder: Int,
     ) = runBlockingOnWorker {
         enrolments.findByCampaignAndParty(campaignId, partyId)?.let { enrolment ->
+            // Re-read the raw fact rather than have the workflow pass it in: the workflow already
+            // called this exact port (deliveryStatusForStep) to choose `path`, and re-deriving the
+            // snapshot here keeps this an activity-side-only addition (ADR-0263 Phase A) — neither
+            // the workflow code nor the CampaignJourneyActivities interface changes shape, so no
+            // Workflow.getVersion gate is needed for it.
+            val observedStatus = sendLog.deliveryStatusForStep(campaignId, partyId, sourceStepOrder)
             // Temporal retries an activity at least once. Source order is a graph-node identity,
             // so replacing the same record is idempotent and cannot inflate a person's path.
-            val selection = DecisionPathSelection(sourceStepOrder, path, nextStepOrder, Instant.now())
+            val selection = DecisionPathSelection(sourceStepOrder, path, nextStepOrder, Instant.now(), observedStatus)
             val updatedPath = enrolment.decisionPath.filterNot { it.sourceStepOrder == sourceStepOrder } + selection
             enrolments.save(enrolment.copy(currentStep = nextStepOrder, decisionPath = updatedPath))
         }

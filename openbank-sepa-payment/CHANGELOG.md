@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.3...sepa-payment-v0.9.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.2...sepa-payment-v0.9.3) (2026-08-16)
 
 

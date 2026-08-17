@@ -478,6 +478,11 @@ jobs:
         # looks perfectly healthy. Harmless for the other services: only this module reads it.
         env:
           ANALYTICS_SINK_TYPE: clickhouse
+          # agent-service selects its NonceStore binding with @IfBuildProperty (same trap as
+          # analytics-sink above — resolved at AUGMENTATION time, so a runtime env var cannot
+          # reach it). Without this the image ships the @Default InMemoryNonceStore, and the PoP
+          # replay guard silently weakens to per-pod once replicas > 1 (issue #4728).
+          AGENT_SVID_NONCE_STORE: redis
         run: |
           set -euo pipefail
           SERVICES='${{ needs.changes.outputs.services }}'

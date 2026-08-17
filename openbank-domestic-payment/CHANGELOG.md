@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.0...domestic-payment-v0.14.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **domestic-payment:** put the authenticated actor on the wire for domestic.payment.created ([#4997](https://github.com/JiRaska/open-bank-oss/issues/4997)) ([1a333f0](https://github.com/JiRaska/open-bank-oss/commit/1a333f047781ecb360d9c5bc53920e94f4b37c04)), closes [#3994](https://github.com/JiRaska/open-bank-oss/issues/3994)
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.13.6...domestic-payment-v0.14.0) (2026-08-16)
 
 

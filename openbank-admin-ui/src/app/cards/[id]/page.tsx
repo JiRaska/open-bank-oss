@@ -23,10 +23,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import {
   ArrowLeft, CreditCard, Info, RefreshCw, ShieldCheck, Clock, User, Landmark,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
@@ -73,7 +75,10 @@ function Panel({ icon, title, children, span }: { icon: React.ReactNode; title: 
 export default function CardDetailPage() {
   const { id } = useParams<{ id: string }>()
   const { t, language } = useLanguage()
+  const { data: session } = useSession()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-US'
+  const canManage = hasPermission(session?.user?.roles ?? [], 'cards:manage')
+  const canBlock = hasPermission(session?.user?.roles ?? [], 'cards:block')
 
   const { data: card, loading, unavailable, waking, reload } = useServiceResource<Card>(
     id ? svcUrl('card-issuance-service', `/api/v1/cards/${id}`) : null,
@@ -157,7 +162,7 @@ export default function CardDetailPage() {
   }
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="cards:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <div style={{ marginBottom: '18px' }}>
           <Link href="/cards" className="btn btn-ghost btn-sm" style={{ textDecoration: 'none' }}>
@@ -187,7 +192,7 @@ export default function CardDetailPage() {
               subtitle={[card.cardType, card.productCode, card.currency].filter(Boolean).join(' · ')}
               actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <CardStatusChip status={card.status} current />
-                <CardTransitionButtons card={card} busy={ops.busy} onSelect={onSelectTransition} />
+                {(canManage || canBlock) && <CardTransitionButtons card={card} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={onSelectTransition} />}
                 <button className="btn btn-ghost btn-sm" onClick={reload} disabled={ops.busy !== null}>
                   <RefreshCw size={12} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
                 </button>
@@ -285,18 +290,22 @@ export default function CardDetailPage() {
               {/* The `key` carries the server's own values: when the service hands
                   back a changed card the editor remounts on the new truth instead
                   of keeping a stale draft alive. */}
-              <CardLimitsPanel
-                key={`limits-${card.dailyLimitMinorUnits}-${card.monthlyLimitMinorUnits}-${card.status}`}
-                card={card}
-                busy={ops.busy}
-                onSave={(daily, monthly) => ops.saveLimits(card, daily, monthly)}
-              />
-              <CardControlsPanel
-                key={`controls-${card.contactlessEnabled}-${card.onlineEnabled}-${card.atmEnabled}-${card.abroadEnabled}-${card.status}`}
-                card={card}
-                busy={ops.busy}
-                onSave={controls => ops.saveControls(card, controls)}
-              />
+              {canManage && (
+                <>
+                  <CardLimitsPanel
+                    key={`limits-${card.dailyLimitMinorUnits}-${card.monthlyLimitMinorUnits}-${card.status}`}
+                    card={card}
+                    busy={ops.busy}
+                    onSave={(daily, monthly) => ops.saveLimits(card, daily, monthly)}
+                  />
+                  <CardControlsPanel
+                    key={`controls-${card.contactlessEnabled}-${card.onlineEnabled}-${card.atmEnabled}-${card.abroadEnabled}-${card.status}`}
+                    card={card}
+                    busy={ops.busy}
+                    onSave={controls => ops.saveControls(card, controls)}
+                  />
+                </>
+              )}
 
               {/* ── audit trail ─────────────────────────────────────────── */}
               <Panel icon={<Clock size={15} style={{ color: 'var(--accent)' }} />} title={t('Časová osa', 'Timeline')}>

@@ -36,6 +36,7 @@ function scoreTone(score: number): Tone {
 
 export default function FraudPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [rows, setRows] = useState<ScoredRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -71,9 +72,9 @@ export default function FraudPage() {
           'Platby označené enginem jako REVIEW. Rozhodnutí zůstává ve čtyřočkovém compliance toku.',
           'Payments flagged REVIEW by the engine. Resolution remains in the four-eyes compliance flow.',
         )}
-        icon={<ShieldAlert size={20} style={{ color: 'var(--accent)' }} />}
+        icon={<ShieldAlert size={20} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
         actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+          <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
 
@@ -102,7 +103,7 @@ export default function FraudPage() {
               return (
                 <tr key={r.scoreId} style={{ borderTop: '1px solid var(--border)' }}>
                   <td style={{ padding: '10px 14px', fontWeight: 700 }}>
-                    {r.amount.toLocaleString('cs-CZ')} {r.currency}
+                    {r.amount.toLocaleString(numberLocale)} {r.currency}
                   </td>
                   <td style={{ padding: '10px 14px' }}><span className="pill">{r.rail}</span></td>
                   <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
@@ -115,7 +116,7 @@ export default function FraudPage() {
                     {r.ruleVersion}
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
-                    {new Date(r.createdAt).toLocaleString()}
+                    {new Date(r.createdAt).toLocaleString(numberLocale)}
                   </td>
                 </tr>
               )

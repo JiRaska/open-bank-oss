@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.6.0...flaky-test-hunter-v0.7.0) (2026-08-17)
+
+
+### Features
+
+* **flaky-test-hunter:** add bounded development PR path ([#5289](https://github.com/JiRaska/open-bank-oss/issues/5289)) ([66e02f0](https://github.com/JiRaska/open-bank-oss/commit/66e02f0e6cf95f50fe78b310d4c31b3a305bb387))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.5.0...flaky-test-hunter-v0.6.0) (2026-08-06)
 
 

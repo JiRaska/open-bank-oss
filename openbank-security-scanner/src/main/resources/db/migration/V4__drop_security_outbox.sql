@@ -1,0 +1,43 @@
+-- Drops the transactional outbox that never had a producer (#4709).
+--
+-- V2 created `security_outbox` and V3 gave it the Panache `_seq` sequence. The port, entity,
+-- repository, @Scheduled dispatcher, backlog gauge, Kafka publisher, the `security-events-out`
+-- channel and the `openbank.security.scan.event` topic were all built and wired correctly —
+-- and nothing ever constructed a `SecurityOutboxMessage`. Measured before this migration was
+-- written: 0 rows in `security_outbox` on the live database (which HAS the table — the #3350
+-- "Flyway never ran" defect is fixed), and end offset 0 on `openbank.security.scan.event`
+-- against known-positive controls in the same read (openbank.customer.audit at 823,
+-- openbank.sanctions.screening.event at 55/68/55). No message has ever existed.
+--
+-- The pipeline is not merely unused, it is unbuildable as designed. An outbox exists to write
+-- the event in the SAME transaction as the aggregate change; this service has no aggregate to
+-- be atomic with. `SecurityScannerService` keeps its scan results in a ConcurrentHashMap and
+-- `IctIncidentService` keeps its incidents in another one — `security_outbox` was the only
+-- business table in the whole service. An outbox row committed next to an in-memory map buys
+-- nothing a direct publish does not, which is the idiom `IctIncidentService` already uses.
+--
+-- V2/V3 are left in place, not deleted: both are recorded as applied in the live
+-- flyway_schema_history, and removing an applied migration's file fails validation just as
+-- surely as editing one fails the checksum.
+--
+-- Rollback:
+--   CREATE TABLE security_outbox (
+--       id BIGSERIAL PRIMARY KEY,
+--       event_id UUID NOT NULL UNIQUE,
+--       aggregate_id UUID NOT NULL,
+--       event_type VARCHAR(128) NOT NULL,
+--       payload TEXT NOT NULL,
+--       status VARCHAR(16) NOT NULL,
+--       attempt_count INTEGER NOT NULL DEFAULT 0,
+--       sent_at TIMESTAMPTZ,
+--       last_error TEXT,
+--       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+--   );
+--   CREATE INDEX idx_security_outbox_status_created_at ON security_outbox(status, created_at ASC);
+--   CREATE INDEX idx_security_outbox_aggregate_id ON security_outbox(aggregate_id);
+--   CREATE SEQUENCE IF NOT EXISTS security_outbox_seq INCREMENT BY 50;
+-- No data restore clause is needed or possible: the table has never held a row.
+
+DROP TABLE IF EXISTS security_outbox;
+DROP SEQUENCE IF EXISTS security_outbox_seq;

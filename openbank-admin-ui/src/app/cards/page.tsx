@@ -6,11 +6,13 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -38,6 +40,10 @@ const ALL = '__ALL__'
 export default function CardsPage() {
   const { t, language } = useLanguage()
   const router = useRouter()
+  const { data: session } = useSession()
+  const canIssue = hasPermission(session?.user?.roles ?? [], 'cards:issue')
+  const canManage = hasPermission(session?.user?.roles ?? [], 'cards:manage')
+  const canBlock = hasPermission(session?.user?.roles ?? [], 'cards:block')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>(ALL)
   const [typeFilter, setTypeFilter] = useState<string>(ALL)
@@ -97,7 +103,7 @@ export default function CardsPage() {
   })
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="cards:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           icon={<CreditCard size={20} aria-hidden="true" />}
@@ -116,9 +122,11 @@ export default function CardsPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
-              <Plus size={13} /> {t('Vydat kartu', 'Issue a card')}
-            </button>
+            {canIssue && (
+              <button className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
+                <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
               <RefreshCw size={13} /> {t('Obnovit', 'Refresh')}
             </button>
@@ -239,7 +247,7 @@ export default function CardsPage() {
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.cardholderName || '—'}</td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(language === 'cs' ? 'cs-CZ' : 'en-US') : '—'}</td>
                         <td style={{ padding: '10px 16px' }} onClick={e => e.stopPropagation()}>
-                          <CardTransitionButtons card={c} busy={ops.busy} onSelect={tr => onSelectTransition(c, tr)} />
+                          {(canManage || canBlock) && <CardTransitionButtons card={c} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={tr => onSelectTransition(c, tr)} />}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-tertiary)' }}><ChevronRight size={14} /></td>
                       </tr>

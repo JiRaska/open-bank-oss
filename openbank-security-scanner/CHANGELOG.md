@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.2...security-scanner-v0.7.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** delete the openbank.security.scan.event outbox, which never had a writer ([#4940](https://github.com/JiRaska/open-bank-oss/issues/4940)) ([9d1d095](https://github.com/JiRaska/open-bank-oss/commit/9d1d0954c418722adc1beb712956209d98eb6a0c))
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.1...security-scanner-v0.7.2) (2026-08-17)
 
 

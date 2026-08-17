@@ -64,9 +64,15 @@ data class StandingOrder(
         nextExecutionDate = nextDate,
         executionCount = executionCount + 1,
         updatedAt = now,
-        // A ONCE order is spent after its single execution; a recurring order completes only once
-        // it runs past its (optional) endDate.
-        status = if (frequency == Frequency.ONCE || (endDate != null && nextDate.isAfter(endDate))) {
+        // A recurring order past its (optional) endDate has nothing left to execute regardless of
+        // today's outcome, so it completes here. A ONCE order does NOT: this method runs BEFORE the
+        // payment is even attempted, and completing it here meant a ONCE order that failed its
+        // single execution ended up COMPLETED with zero money moved — recordFailure requires
+        // status==ACTIVE, so the consumer's failure report silently threw and was swallowed. It
+        // stays ACTIVE (so it is re-picked and retried on the next sweep, and can still reach
+        // FAILED after MAX_CONSECUTIVE_FAILURES) until [confirmExecution] proves the payment
+        // actually went through.
+        status = if (frequency != Frequency.ONCE && endDate != null && nextDate.isAfter(endDate)) {
             StandingOrderStatus.COMPLETED
         } else {
             status
@@ -74,8 +80,8 @@ data class StandingOrder(
     )
 
     fun calculateNextDate(from: LocalDate): LocalDate = when (frequency) {
-        // ONCE never recurs (recordExecution completes it); the returned date is unused, so keep it
-        // unchanged rather than inventing a future occurrence.
+        // ONCE never recurs (confirmExecution completes it once the payment is confirmed); the
+        // returned date is unused, so keep it unchanged rather than inventing a future occurrence.
         Frequency.ONCE -> from
         Frequency.DAILY -> from.plusDays(1)
         Frequency.WEEKLY -> from.plusWeeks(1)
@@ -97,7 +103,13 @@ data class StandingOrder(
 
     fun confirmExecution(now: Instant): StandingOrder {
         require(status == StandingOrderStatus.ACTIVE) { "Cannot confirm execution for $status order" }
-        return copy(failureCount = 0, updatedAt = now)
+        // A ONCE order is spent once its single execution is actually confirmed — see the note on
+        // recordExecution for why that used to happen too early.
+        return copy(
+            failureCount = 0,
+            updatedAt = now,
+            status = if (frequency == Frequency.ONCE) StandingOrderStatus.COMPLETED else status,
+        )
     }
 
     companion object {

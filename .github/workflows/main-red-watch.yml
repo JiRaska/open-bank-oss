@@ -67,10 +67,12 @@ on:
       - "AI governance snapshot"
       - "API contract post-merge guard"
       - "EU AI Act registry"
+      - "Evals - fraud review"
       - "Fleet lint"
       - "Label sync"
       - "Pact drift check"
       - "Product Catalog Native Build (T1 enabler smoke test)"
+      - "Schema registry apply (document-service pilot)"
     types: [completed]
   pull_request:
     paths:
