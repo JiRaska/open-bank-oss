@@ -6,6 +6,7 @@
 
 import { Fingerprint, ShieldCheck, GitMerge, KeyRound, Layers, AlertTriangle, Lock, ArrowRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Status pill mirrored from the docs status vocabulary (live / partial / planned).
 function Status({ kind, t }: { kind: 'live' | 'partial' | 'planned'; t: (cs: string, en: string) => string }) {
@@ -112,27 +113,21 @@ export default function IdentityDedupPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span>
             <span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Identita a deduplikace', 'Identity & Deduplication')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Fingerprint size={18} style={{ color: 'var(--accent)' }} />
-            {t('Identita a deduplikace', 'Identity & Deduplication')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Identita a deduplikace', 'Identity & Deduplication')}
+        subtitle={t(
               'Jak je moderně postavená jednotná identita klienta: principy, privacy-preserving deduplikace, tříúrovňový resolver a konkrétní ukázka (ADR-0072, ADR-0094)',
               'How unified customer identity is built the modern way: principles, privacy-preserving deduplication, a three-tier resolver and a worked example (ADR-0072, ADR-0094)',
             )}
-          </p>
-        </div>
-      </div>
+        icon={<Fingerprint aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* ---- TL;DR banner ---- */}
       <div className="card" style={{ padding: '18px 22px', marginBottom: '20px', borderLeft: '3px solid var(--accent)', display: 'flex', gap: '14px', alignItems: 'flex-start' }}>
