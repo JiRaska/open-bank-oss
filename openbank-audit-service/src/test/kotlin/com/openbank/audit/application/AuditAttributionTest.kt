@@ -69,6 +69,25 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `document-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's document-service fix: DocumentGenerated and
+        // SignatureCeremonyCompleted (both objectMapper.writeValueAsString) now carry
+        // "sourceService". Before this, EventAttribution's `openbank.documents.document.event` ->
+        // `document-service` entry already resolved these rows correctly, but as TOPIC-sourced —
+        // and this topic IS in audit-service's consumed-topics list today, so this is a live
+        // attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"documentId":"${UUID.randomUUID()}","sourceService":"document-service"}""",
+            EventAddress(topic = "openbank.documents.document.event"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("document-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
