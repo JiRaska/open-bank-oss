@@ -7,7 +7,6 @@
     <ID>LongParameterList:IctIncidentService.kt$IctIncidentService$( id: UUID, status: IncidentStatus, containedAt: Instant?, resolvedAt: Instant?, rtoMinutes: Int?, rpoMinutes: Int? )</ID>
     <ID>MagicNumber:IctIncidentResource.kt$IctIncidentResource$201</ID>
     <ID>MagicNumber:IctIncidentService.kt$IctIncidentService$200</ID>
-    <ID>MagicNumber:SecurityOutboxRepositoryImpl.kt$SecurityOutboxRepositoryImpl$4000</ID>
     <ID>MagicNumber:SecurityScannerResource.kt$SecurityScannerResource$404</ID>
     <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$0.8</ID>
     <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$100</ID>
@@ -27,6 +26,5 @@
     <ID>MagicNumber:SecurityScannerService.kt$SecurityScannerService$95</ID>
     <ID>SwallowedException:SecurityScannerService.kt$SecurityScannerService$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SecurityScannerService.kt$SecurityScannerService$e: Exception</ID>
-    <ID>TooManyFunctions:SecurityOutboxRepositoryImpl.kt$SecurityOutboxRepositoryImpl : SecurityOutboxRepositoryPanacheRepository</ID>
   </CurrentIssues>
 </SmellBaseline>

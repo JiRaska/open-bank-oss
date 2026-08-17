@@ -51,6 +51,30 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-08-09** — Fraud shadow scoring's fallback is now observable (#4221). **No new trust
+  boundary and no new caller**: the outbound edge to fraud-service (OIDC client-credentials + mTLS,
+  cluster-internal, shadow) is the same edge, and the verdict is still *observed, never enforced* —
+  the caller logs a non-ALLOW and proceeds identically either way. What changed is that a failure of
+  that edge is no longer indistinguishable from a clean payment.
+  - **The property at stake is detectability, not integrity.** `catch (Exception)` returned a
+    synthetic ALLOW down the same silent branch a real ALLOW takes, so fraud scoring being wholly
+    down and every payment being clean produced identical observable behaviour. A control nobody
+    can see fail is a control nobody knows they have lost.
+  - **Mitigation**: the synthetic answer is flagged on the outcome (`FraudScoreOutcome.synthetic`),
+    counted, and exported as the `openbank_fraud_scoring_degraded` gauge, where **`-1` means never
+    attempted** — deliberately distinct from a healthy `0`, because a counter that has never been
+    incremented is not created at all and an alert on it matches nothing, forever.
+  - **`Throwable`, not `Exception`**, and this is a real change in fault containment: a fault
+    crossing into a rest-client or fault-tolerance interceptor can surface as an `Error`, which the
+    previous `catch (Exception)` did not hold. An `Error` escaping here would propagate out of a
+    path whose entire contract is that it cannot affect the payment. Verified against `origin/main`:
+    a `NoClassDefFoundError` escapes the old catch and the containment test fails.
+    `CancellationException` is rethrown — cancelling the caller's coroutine is not a fraud-service
+    outage and must not be reported as one.
+  - **Fail-open is retained deliberately.** Failing closed would stop payments on a money-path rail
+    to protect a value nothing reads. Real enforcement is tracked separately (#4403); until then
+    this service must not pretend to have a fraud control it does not have.
+  - **Rollback**: revert the commit; the previous behaviour was a silent synthetic ALLOW.
 - **2026-08-09** — Trust-boundary change (#3921): `GET /api/v1/fx/rates/{base}/{quote}` gains an optional `asOf` query parameter, so ledger's daily revaluation can ask for the CNB fixing that was **in effect on the business day it is marking** instead of the newest one. Same authz (`fx.read`, unchanged roles), same response shape, no new caller and no new outbound edge; the surface change is one read parameter on an existing authenticated route.
   Tampering column, sharpened: the row already named "off-market / stale rate used for conversion" with "staleness check" as the mitigation, and no such check was reachable — the seam carried no date at all until #3921 step 1, and even then the *lookup* was still date-blind. `asOf` closes the second half. Three properties were chosen so the parameter cannot itself become the tampering vector it exists to remove: a day with no fixing in effect is **404, never a silent fall-back to the newest fixing** (falling back is the defect — it is how a backfill marks an old day at today's rate and reports success); the stored `validTo` bound is kept, so a dead feed still resolves to *absent* rather than to the last fixing it ever published; and `asOf` without `source=CNB` is **rejected 400 rather than ignored**, because a silently-dropped date parameter reads as a correct backfill. `asOf` is parsed with `runCatching`, so a malformed value is 400 (libs-runtime maps `IllegalArgumentException`), not a 500 — and it is declared **nullable**, the #3104 rule in this same log one entry down.
   Info-disclosure delta: the parameter widens what a `fx.read`-authorised caller can retrieve from "the current fixing" to "any historical fixing", which the pre-existing `GET .../history` route already exposed to the same roles — no new class of data, and CNB fixings are public statutory rates. DoS: bounded, single indexed row per call, no unbounded range. Rollback: revert; omitting `asOf` is byte-for-byte the previous behaviour, which `getCnbRate without asOf keeps asking for the latest still-valid fixing` pins.

@@ -10,14 +10,14 @@ graph LR
   fleet[27 fleet služeb<br/>account / sanctions / payments / ...]
 
   scanner[(security-scanner)]:::svc
-  db[(PostgreSQL<br/>schema: openbank_security)]
-  kafka[(Kafka<br/>security.scan.event<br/>security.ict.incident)]
+  db[(PostgreSQL<br/>schema: openbank_security<br/>pouze Flyway historie)]
+  kafka[(Kafka<br/>security.ict.incident)]
 
   admin -- "GET /report, /services" --> scanner
   ops -- "POST /ict-incidents<br/>PATCH /status" --> scanner
   scanner -- "HTTP sondy<br/>/q/health + API port" --> fleet
-  scanner --> db
-  scanner -- "outbox → publish" --> kafka
+  scanner -.-> db
+  scanner -- "přímý emitter" --> kafka
   kafka --> audit
 
   classDef svc fill:#dbeafe,stroke:#2563eb
@@ -32,49 +32,44 @@ graph TB
     rest[REST<br/>SecurityScannerResource<br/>IctIncidentResource]
     scanner[Application<br/>SecurityScannerService<br/>IctIncidentService]
     dom[Domain<br/>SecurityScanResult / PlatformSecurityReport<br/>IctIncident / SecurityFinding<br/>Severity / OwaspCategory / IncidentStatus]
-    persist[Persistence<br/>SecurityOutboxRepositoryImpl<br/>JPA / Panache]
-    outbox[Outbox<br/>SecurityOutboxDispatcher]
+    mem[In-memory stav<br/>ConcurrentHashMap<br/>lastResults / lastReport / incidenty]
+    emit[Kafka emitter<br/>@Channel ict-incident-events-out]
     sched[Scheduler<br/>@Scheduled každých 30m]
   end
 
   sched --> scanner
   rest --> scanner
   scanner --> dom
-  scanner --> persist
-  scanner --> outbox
+  scanner --> mem
+  scanner --> emit
   scanner -- "HTTP sondy" --> fleet[(fleet služby)]
 
-  persist -.-> db[(PostgreSQL)]
-  outbox -.-> kafka[(Kafka)]
+  emit -.-> kafka[(Kafka<br/>security.ict.incident)]
 ```
+
+Persistentní vrstva neexistuje: služba nevlastní žádnou entitu, repozitář ani byznysovou tabulku.
 
 ## Struktura balíčků
 
 ```
-com.openbank.security/                 ◄── outbox infrastruktura (sdílený balíček)
-├── application/port/out/              SecurityOutboxPort
-├── infrastructure/
-│   ├── kafka/                         KafkaSecurityOutboxEventPublisher
-│   ├── outbox/                        SecurityOutboxDispatcher
-│   └── persistence/
-│       ├── entity/                    SecurityOutboxEntity
-│       └── repository/                SecurityOutboxRepositoryImpl
-
-com.openbank.securityscanner/          ◄── scanner aplikace
+com.openbank.securityscanner/          ◄── jediný kořen balíčků
 ├── domain/
 │   ├── SecurityScanResult             ServiceScanResult, PlatformSecurityReport,
 │   │                                  SecurityFinding, Severity, OwaspCategory
 │   └── IctIncident                    IctIncident, IncidentSeverity, IncidentStatus, IncidentCategory
 ├── application/
 │   ├── SecurityScannerService         scan pipeline, in-memory cache výsledků
-│   └── IctIncidentService             DORA incident lifecycle
+│   └── IctIncidentService             DORA incident lifecycle, in-memory úložiště,
+│                                      přímý @Channel Kafka emitter
 └── infrastructure/
     └── rest/
         ├── SecurityScannerResource    scan + report endpointy, @Scheduled trigger
         └── IctIncidentResource        ICT incident CRUD
 ```
 
-Pozn.: rozdělené kořeny balíčků (`security` vs `securityscanner`) odráží outbox v sdíleném infrastrukturním balíčku.
+Pozn.: služba dříve měla druhý kořen balíčků `com.openbank.security` s outbox infrastrukturou. Do toho
+outboxu nikdy nikdo nezapsal, takže byl smazán (#4709) — `com.openbank.securityscanner` je nyní jediný
+kořen balíčků.
 
 ## Interní scan pipeline
 
@@ -111,32 +106,33 @@ fun scheduledScan() { scanner.scanAll(serviceList()) }
 
 - Spustí se 2 minuty po startu služby (warm-up zpoždění), pak každých 30 minut.
 - Seznam služeb se načítá z konfigurace `openbank.security-scanner.services` (27 záznamů v produkci).
-- Výsledky jsou cachované in-memory v `ConcurrentHashMap<String, ServiceScanResult>` — poslední výsledek na službu je vždy dostupný bez dotazu do DB.
+- Výsledky jsou drženy in-memory v `ConcurrentHashMap<String, ServiceScanResult>` (`lastResults`) plus `lastReport` — poslední výsledek na službu je vždy dostupný a zaniká s restartem podu, dokud neproběhne další sken.
 
-## Outbox flow
+## Vysílání eventů
 
 ```
-SecurityScannerService zapíše PlatformSecurityReport
-    ↓ (SecurityOutboxDispatcher, poll 500ms)
-KafkaSecurityOutboxEventPublisher → openbank.security.scan.event
-
-IctIncidentService zapíše IctIncident
-    ↓ (stejný dispatcher)
-KafkaSecurityOutboxEventPublisher → openbank.security.ict.incident
+IctIncidentService (nahlášení / změna stavu / regulatorní report)
+    ↓ @Channel("ict-incident-events-out") — přímý SmallRye emitter
+openbank.security.ict.incident
+    ↓
+audit-service
 ```
+
+Výsledky skenů se jako eventy **nevysílají** vůbec — jsou dostupné přes REST
+(`GET /api/v1/security/report`) a nikde jinde. Vysílání je fire-and-forget: outbox neexistuje,
+takže výpadek Kafky znamená ztrátu eventu incidentu bez jakéhokoli lokálního záznamu (#4709).
 
 ## Komponenty z `openbank-libs`
 
 | Modul | Použití zde |
 |---|---|
-| `libs.persistence.outbox` | OutboxEntity základ, OutboxRepository, OutboxDispatcherBase |
 | `libs.web.ServiceInfoResource` | `/api/v1/info` (build metadata) |
 | `libs.docs.DocsResource` | **tato dokumentace** (`/q/openbank/docs`) |
 | `libs.util.BuildInfo` | runtime snapshot tech stacku |
 
 ## Návrhová rozhodnutí
 
-1. **In-memory cache výsledků** — poslední sken na službu je v `ConcurrentHashMap`, ne v PostgreSQL. Rychlé čtení pro dashboard; přežije restart podu díky dalšímu naplánovanému skenu.
+1. **Žádná persistence** — poslední sken na službu, poslední platformový report i všechny ICT incidenty žijí v `ConcurrentHashMap`. Rychlé čtení pro dashboard; vše zaniká s restartem podu — stav skenů obnoví další naplánovaný sken, incidenty obnovit nelze.
 2. **Synchronní HTTP sondy** — blokující `HttpClient` s timeouty 5s. Skeny běží sekvenčně na službu, paralelizovány přes služby thread poolem scheduleru.
 3. **Žádná autentizace na sondovaných službách** — sondy používají neautentizované HTTP; `/q/health` je záměrně veřejný. To je samo o sobě zjištěním, pokud jsou management endpointy expozovány na API portu.
 4. **OIDC vypnuto** — scanner je interní platformový nástroj; admin-ui ho volá přímo in-cluster bez tokenu. Do budoucna: přidat ROLE_PLATFORM_INTERNAL.

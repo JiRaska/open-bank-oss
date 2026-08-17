@@ -110,6 +110,10 @@ class AuthorizeInterceptorTest {
     @Authorize(action = "consent.grant", resource = "#request.granteeId")
     fun dummyMethodWithNullableFieldResource(request: DummyRequestWithNullableField?) = Unit
 
+    @Suppress("UnusedParameter")
+    @Authorize(action = "campaign.activate", resource = "#name@#version")
+    fun dummyMethodWithVersionedResource(name: String, version: Int) = Unit
+
     private val annotatedMethod: Method =
         AuthorizeInterceptorTest::class.java.getDeclaredMethod("dummyMethod")
 
@@ -132,6 +136,13 @@ class AuthorizeInterceptorTest {
         AuthorizeInterceptorTest::class.java.getDeclaredMethod(
             "dummyMethodWithNullableFieldResource",
             DummyRequestWithNullableField::class.java,
+        )
+
+    private val annotatedMethodWithVersionedResource: Method =
+        AuthorizeInterceptorTest::class.java.getDeclaredMethod(
+            "dummyMethodWithVersionedResource",
+            String::class.java,
+            Int::class.java,
         )
 
     @Test
@@ -175,6 +186,20 @@ class AuthorizeInterceptorTest {
         assertThat(capturedQuery).hasSize(1)
         assertThat(capturedQuery[0].resource?.id).isEqualTo("party-service:marketing-comms")
         assertThat(capturedQuery[0].resource?.type).isEqualTo("consent")
+    }
+
+    @Test
+    fun `versioned resource expression binds approval to the immutable version`() {
+        every { identity.roles } returns emptySet()
+        val capturedQuery = mutableListOf<AuthzQuery>()
+        wirePdp(object : PolicyDecisionPoint {
+            override suspend fun allow(query: AuthzQuery): AuthzDecision {
+                capturedQuery += query
+                return AuthzDecision(allow = true, reason = "ok", policyVersion = "test")
+            }
+        })
+        interceptor.authorize(makeCtx(annotatedMethodWithVersionedResource, "offer", 2))
+        assertThat(capturedQuery.single().resource?.id).isEqualTo("offer@2")
     }
 
     @Test

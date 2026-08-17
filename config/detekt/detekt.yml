@@ -22,6 +22,14 @@ openbank-contact-policy:
   MarketingCallSiteWiringRule:
     active: true
 
+# ADR-0220 D3's structural safety invariant (openbank-libs-detekt-rules): a lending/credit-
+# decisioning module must never import gamification domain state. See
+# GamificationModuleBoundaryRule's KDoc for why this is a preventive rule, not a reactive one.
+openbank-module-boundaries:
+  active: true
+  GamificationModuleBoundaryRule:
+    active: true
+
 # --- correctness: keep strict ------------------------------------------------------
 
 exceptions:

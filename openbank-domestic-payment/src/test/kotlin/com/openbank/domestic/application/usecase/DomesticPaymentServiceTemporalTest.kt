@@ -86,6 +86,29 @@ class DomesticPaymentServiceTemporalTest {
     }
 
     @Test
+    fun `createPayment carries the command's actorId onto the persisted payment as initiatedByPartyId`() {
+        val actorId = UUID.randomUUID()
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+
+        val result = runBlocking { service.createPayment(command(actorId = actorId)) }
+
+        // #3994: the JWT-authenticated caller was already derived for transferScope and then
+        // discarded before reaching the wire — this is what makes it survive onto the payment so
+        // DomesticPaymentCreatedEvent (and, via AuditConsumer's existing initiatedByPartyId
+        // fallback, the audit trail) can name an actor.
+        assertThat(result.initiatedByPartyId).isEqualTo(actorId)
+    }
+
+    @Test
+    fun `createPayment leaves initiatedByPartyId null when the command carries no actor`() {
+        coEvery { repo.findByIdempotencyKey(any()) } returns null
+
+        val result = runBlocking { service.createPayment(command(actorId = null)) }
+
+        assertThat(result.initiatedByPartyId).isNull()
+    }
+
+    @Test
     fun `createPayment derives EXTERNAL scope for a non-own-bank creditor`() {
         coEvery { repo.findByIdempotencyKey(any()) } returns null
 

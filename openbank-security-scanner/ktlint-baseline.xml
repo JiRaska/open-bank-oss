@@ -3,35 +3,6 @@
     <file name="settings.gradle.kts">
         <error line="21" column="1" source="standard:no-consecutive-blank-lines" />
     </file>
-    <file name="src/main/kotlin/com/openbank/security/application/port/out/SecurityOutboxPort.kt">
-        <error line="22" column="43" source="standard:trailing-comma-on-declaration-site" />
-        <error line="36" column="27" source="standard:trailing-comma-on-declaration-site" />
-    </file>
-    <file name="src/main/kotlin/com/openbank/security/infrastructure/kafka/KafkaSecurityOutboxEventPublisher.kt">
-        <error line="15" column="89" source="standard:trailing-comma-on-declaration-site" />
-    </file>
-    <file name="src/main/kotlin/com/openbank/security/infrastructure/outbox/SecurityOutboxBacklogGauge.kt">
-        <error line="6" column="1" source="standard:import-ordering" />
-        <error line="46" column="31" source="standard:function-signature" />
-    </file>
-    <file name="src/main/kotlin/com/openbank/security/infrastructure/outbox/SecurityOutboxDispatcher.kt">
-        <error line="19" column="89" source="standard:trailing-comma-on-declaration-site" />
-        <error line="24" column="65" source="standard:trailing-comma-on-call-site" />
-        <error line="26" column="46" source="standard:function-signature" />
-    </file>
-    <file name="src/main/kotlin/com/openbank/security/infrastructure/persistence/repository/SecurityOutboxRepositoryImpl.kt">
-        <error line="6" column="1" source="standard:import-ordering" />
-        <error line="20" column="38" source="standard:class-signature" />
-        <error line="20" column="64" source="standard:class-signature" />
-        <error line="22" column="63" source="standard:function-signature" />
-        <error line="25" column="73" source="standard:function-signature" />
-        <error line="30" column="49" source="standard:trailing-comma-on-call-site" />
-        <error line="40" column="43" source="standard:function-signature" />
-        <error line="45" column="49" source="standard:trailing-comma-on-call-site" />
-        <error line="49" column="81" source="standard:function-signature" />
-        <error line="77" column="52" source="standard:function-signature" />
-        <error line="109" column="30" source="standard:trailing-comma-on-call-site" />
-    </file>
     <file name="src/main/kotlin/com/openbank/securityscanner/application/IctIncidentService.kt">
         <error line="7" column="1" source="standard:import-ordering" />
         <error line="8" column="1" source="standard:no-wildcard-imports" />
@@ -193,9 +164,6 @@
     <file name="src/test/kotlin/com/openbank/governance/HibernateSequenceGuardTest.kt">
         <error line="54" column="33" source="standard:trailing-comma-on-call-site" />
         <error line="68" column="36" source="standard:trailing-comma-on-call-site" />
-    </file>
-    <file name="src/test/kotlin/com/openbank/security/infrastructure/outbox/SecurityOutboxBacklogGaugeTest.kt">
-        <error line="6" column="1" source="standard:import-ordering" />
     </file>
     <file name="src/test/kotlin/com/openbank/securityscanner/application/SecurityScannerServiceTest.kt">
         <error line="41" column="92" source="standard:trailing-comma-on-call-site" />
