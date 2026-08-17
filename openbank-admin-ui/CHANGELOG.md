@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.4...admin-ui-v0.157.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** modernize system operation headers ([2ffef36](https://github.com/JiRaska/open-bank-oss/commit/2ffef3636453792988d6b4639d320b7179ea188e))
+
 ## [0.157.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.3...admin-ui-v0.157.4) (2026-08-17)
 
 
