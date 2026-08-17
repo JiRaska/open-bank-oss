@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.158.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.2...admin-ui-v0.158.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label payment form controls ([c3bbca1](https://github.com/JiRaska/open-bank-oss/commit/c3bbca10690b3acef9a273928022c2d688a4c484))
+* **admin-ui:** label search controls ([140273a](https://github.com/JiRaska/open-bank-oss/commit/140273a6ed45a6941de8283b645fe75bb6723c9d))
+
 ## [0.158.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.1...admin-ui-v0.158.2) (2026-08-17)
 
 
