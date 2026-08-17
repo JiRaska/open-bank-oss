@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.156.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.156.0...admin-ui-v0.156.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** improve operations table accessibility ([#5269](https://github.com/JiRaska/open-bank-oss/issues/5269)) ([16ae7b7](https://github.com/JiRaska/open-bank-oss/commit/16ae7b7c5fa6e29d4bc26bd820283dd62790b501))
+* **admin-ui:** localize fraud review queue ([#5259](https://github.com/JiRaska/open-bank-oss/issues/5259)) ([041a157](https://github.com/JiRaska/open-bank-oss/commit/041a15724a42491b3a3d0e9b4b7f4b7518ce7bd1))
+* **admin-ui:** unify operations page headers ([#5265](https://github.com/JiRaska/open-bank-oss/issues/5265)) ([165c32f](https://github.com/JiRaska/open-bank-oss/commit/165c32f9ff457286ca9eb7ebb0677a8f5b25ded9))
+
 ## [0.156.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.6...admin-ui-v0.156.0) (2026-08-17)
 
 
