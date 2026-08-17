@@ -133,23 +133,23 @@ export default function TransactionsPage() {
           <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
             <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
             <input className="input" style={{ paddingLeft: '30px', width: '100%' }}
-              placeholder="Account ID (UUID)…"
+              placeholder={t('ID účtu (UUID)…', 'Account ID (UUID)…')}
               value={accountId} onChange={e => setAccountId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
             <input className="input" style={{ width: '100%' }}
-              placeholder="IBAN (CZ65 0800 …)"
+              placeholder={t('IBAN (CZ65 0800 …)', 'IBAN (CZ65 0800 …)')}
               value={iban} onChange={e => setIban(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '160px' }}>
             <input className="input" style={{ width: '100%' }}
-              placeholder="BBAN (123456-1234567890/0800)"
+              placeholder={t('BBAN (123456-1234567890/0800)', 'BBAN (123456-1234567890/0800)')}
               value={bban} onChange={e => setBban(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
-          <button className="btn btn-secondary" onClick={() => setShowFilters(f => !f)}>
+          <button className="btn btn-secondary" onClick={() => setShowFilters(f => !f)} aria-expanded={showFilters} aria-controls="transaction-search-filters">
             <Filter size={13} />
             {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax,channel].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
           </button>
@@ -161,19 +161,19 @@ export default function TransactionsPage() {
 
         {/* Extended filters */}
         {showFilters && (
-          <div style={{ padding: '16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
+          <div id="transaction-search-filters" style={{ padding: '16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Referenční číslo', 'Reference number')}</label>
-                <input className="input" style={{ width: '100%' }} placeholder="TXN202506…" value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} />
+                <input className="input" style={{ width: '100%' }} placeholder={t('TXN202506…', 'TXN202506…')} value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} />
               </div>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('End-to-End ID', 'End-to-End ID')}</label>
-                <input className="input" style={{ width: '100%' }} placeholder="E2E-ID…" value={endToEndId} onChange={e => setEndToEndId(e.target.value)} />
+                <input className="input" style={{ width: '100%' }} placeholder={t('E2E-ID…', 'E2E-ID…')} value={endToEndId} onChange={e => setEndToEndId(e.target.value)} />
               </div>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Protistrana (název)', 'Counterparty (name)')}</label>
-                <input className="input" style={{ width: '100%' }} placeholder="Jan Novák…" value={counterparty} onChange={e => setCounterparty(e.target.value)} />
+                <input className="input" style={{ width: '100%' }} placeholder={t('Jan Novák…', 'Jane Smith…')} value={counterparty} onChange={e => setCounterparty(e.target.value)} />
               </div>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
@@ -206,11 +206,11 @@ export default function TransactionsPage() {
               </div>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka od (CZK)', 'Amount from (CZK)')}</label>
-                <input className="input" type="number" style={{ width: '100%' }} placeholder="0.00" value={amountMin} onChange={e => setAmountMin(e.target.value)} />
+                <input className="input" type="number" style={{ width: '100%' }} placeholder={t('0,00', '0.00')} value={amountMin} onChange={e => setAmountMin(e.target.value)} />
               </div>
               <div>
                 <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka do (CZK)', 'Amount to (CZK)')}</label>
-                <input className="input" type="number" style={{ width: '100%' }} placeholder="999999.00" value={amountMax} onChange={e => setAmountMax(e.target.value)} />
+                <input className="input" type="number" style={{ width: '100%' }} placeholder={t('999999,00', '999999.00')} value={amountMax} onChange={e => setAmountMax(e.target.value)} />
               </div>
             </div>
             {hasFilters && (
@@ -252,7 +252,7 @@ export default function TransactionsPage() {
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>{tx.referenceNumber}</td>
                       <td><span style={{ fontSize: '11px', fontWeight: 600, color: TYPE_COLOR[tx.type] || 'var(--text-secondary)' }}>{tx.type}</span></td>
                       <td style={{ fontWeight: 600, color: tx.type === 'DEBIT' ? 'var(--danger)' : 'var(--success)' }}>
-                        {tx.type === 'DEBIT' ? '-' : '+'}{Number(tx.amount).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {tx.currencyCode}
+                        {tx.type === 'DEBIT' ? '-' : '+'}{Number(tx.amount).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 })} {tx.currencyCode}
                       </td>
                       <td><StatusBadge status={tx.status} /></td>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId?.slice(0, 8)}…</td>
