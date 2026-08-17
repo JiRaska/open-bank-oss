@@ -25,11 +25,11 @@ package com.openbank.libs.persistence.outbox
  * real-but-retryable failure from a terminal DEAD row, so a runtime-layer caller (see
  * `AbstractOutboxDispatcher.dispatchScheduledBatch`) can attribute
  * `DomainMetrics.outboxDispatched`/`.outboxDead` correctly without duplicating
- * [OutboxFailurePolicy]'s terminal-vs-retry decision. [Failed.terminal] mirrors exactly what the
- * row's own `markFailed` independently computes — both read the SAME
- * [OutboxFailurePolicy.statusAfterFailure] over the entry's pre-failure `attemptCount + 1`, so
- * this can never disagree with the status a repository implementation actually persists (see
- * every `<Service>OutboxRepositoryImpl.applyFailure`, which does the identical computation).
+ * [OutboxFailurePolicy]'s terminal-vs-retry decision. [Failed.terminal] is read directly from the
+ * [OutboxStatus] [OutboxRepository.markFailed] returns — the status the repository actually
+ * persisted — rather than independently recomputed by this class (#5128 finding 3: recomputing it
+ * here could only ever agree with a repository's own write by convention, never by the type
+ * system).
  */
 sealed class OutboxDispatchOutcome {
     abstract val entry: OutboxEntry
@@ -147,12 +147,15 @@ object OutboxDispatch {
                     )
                     return OutboxDispatchResult(outcomes)
                 }
-                repository.markFailed(entry.eventId, ex.message ?: ex.javaClass.simpleName)
-                // Same computation `markFailed` applies internally (see the class doc on
-                // OutboxDispatchOutcome) — attemptCount BEFORE this failure was recorded, so the
-                // post-failure count is entry.attemptCount + 1.
-                val terminal = OutboxFailurePolicy.statusAfterFailure(entry.attemptCount + 1) == OutboxStatus.DEAD
-                outcomes += OutboxDispatchOutcome.Failed(entry, terminal)
+                // Read back what markFailed actually persisted rather than independently
+                // recomputing OutboxFailurePolicy.statusAfterFailure over entry.attemptCount + 1
+                // (#5128 finding 3) — the two could only ever agree by convention (every
+                // <Service>OutboxRepositoryImpl.markFailed happening to apply the identical
+                // policy with the same maxAttempts), never by the type system, and a future repo
+                // impl with different backoff/maxAttempts would silently desync this metric from
+                // the DB's real row status.
+                val persistedStatus = repository.markFailed(entry.eventId, ex.message ?: ex.javaClass.simpleName)
+                outcomes += OutboxDispatchOutcome.Failed(entry, terminal = persistedStatus == OutboxStatus.DEAD)
             }
         }
         return OutboxDispatchResult(outcomes)

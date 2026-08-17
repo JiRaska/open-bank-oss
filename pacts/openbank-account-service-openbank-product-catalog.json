@@ -1,0 +1,100 @@
+{
+  "consumer": {
+    "name": "openbank-account-service"
+  },
+  "interactions": [
+    {
+      "description": "GET product by id for an existing product",
+      "providerStates": [
+        {
+          "name": "a product with card configuration exists for code CURRENT_PERSONAL"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/products/3f20a53e-5ea4-307a-8a0f-9605728381ba"
+      },
+      "response": {
+        "body": {
+          "code": "CURRENT_PERSONAL",
+          "id": "3f20a53e-5ea4-307a-8a0f-9605728381ba",
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.status": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET product by an unknown id",
+      "providerStates": [
+        {
+          "name": "no product exists with id 00000000-0000-0000-0000-000000000fff"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v1/products/00000000-0000-0000-0000-000000000fff"
+      },
+      "response": {
+        "body": {
+          "error": "Product 00000000-0000-0000-0000-000000000fff not found"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.error": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-product-catalog"
+  }
+}

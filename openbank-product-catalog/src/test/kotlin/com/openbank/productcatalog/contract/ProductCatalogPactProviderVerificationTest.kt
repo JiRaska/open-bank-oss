@@ -99,6 +99,26 @@ class ProductCatalogPactProviderVerificationTest {
         // Intentionally empty — see the KDoc above.
     }
 
+    /**
+     * No seeding: `CURRENT_PERSONAL` (prod-003) carries four seeded fees in `ProductSeed` on
+     * every boot (`ProductCatalogFeesPactConsumerTest`, ADR-0264 Phase A). Same rationale as
+     * [cardEnabledProductIsSeeded] above — seeding again here would fork a second source of truth
+     * for a product the service already owns.
+     */
+    @State("a product with fees exists for code CURRENT_PERSONAL")
+    fun feeBearingProductIsSeeded() {
+        // Intentionally empty — see the KDoc above.
+    }
+
+    /**
+     * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`
+     * (`ProductCatalogLookupPactConsumerTest`, ADR-0264 Phase A).
+     */
+    @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
+    fun unknownProductIdIsAbsent() {
+        // Intentionally empty — see the KDoc above.
+    }
+
     @State("trusted insurance term-life schema version 1 is installed")
     fun trustedInsuranceSchemaIsInstalled() {
         // CatalogPackSeeder installs the trusted test pack before provider verification.
