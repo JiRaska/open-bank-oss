@@ -76,9 +76,11 @@ export default function KycPage() {
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
           <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Hledat podle ID nebo stavu…', 'Search by ID or status…')} value={search} onChange={e => setSearch(e.target.value)} />
+          <label className="sr-only" htmlFor="kyc-search">{t('Hledat KYC případy', 'Search KYC cases')}</label>
+          <input id="kyc-search" className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Hledat podle ID nebo stavu…', 'Search by ID or status…')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
-        <input className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyId} onChange={e => setPartyId(e.target.value)} />
+        <label className="sr-only" htmlFor="kyc-party-id">{t('Filtrovat podle Party ID', 'Filter by Party ID')}</label>
+        <input id="kyc-party-id" className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyId} onChange={e => setPartyId(e.target.value)} />
         <button className="btn btn-secondary" onClick={load}>{t('Hledat', 'Search')}</button>
       </div>
 
