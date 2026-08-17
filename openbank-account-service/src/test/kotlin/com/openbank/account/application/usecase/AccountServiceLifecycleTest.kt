@@ -38,6 +38,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -363,6 +364,8 @@ class AccountServiceLifecycleTest {
         }.isInstanceOf(AccountNotEmptyException::class.java)
 
         coVerify(exactly = 0) { accountRepository.update(any()) }
+        // #4348 hazard: a refused close must never share the accountClosed count with a real one.
+        verify(exactly = 0) { metrics.accountClosed(any(), any()) }
     }
 
     @Test

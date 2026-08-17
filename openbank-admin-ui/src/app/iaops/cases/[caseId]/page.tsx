@@ -265,7 +265,7 @@ export default function IaopsCaseThreadPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <Sparkles size={14} style={{ color: 'var(--accent-text)' }} />
                       <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)' }}>
-                        {t('Koordinátor syntetizoval návrh', 'Coordinator synthesized a proposal')}
+                        {t('Návrh zaznamenán ve vlákně', 'Proposal recorded in the thread')}
                       </span>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)' }}>{entry.proposalType ?? ''}</span>
                       <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-tertiary)' }}>{fmt(entry.atEpochMs)}</span>
@@ -274,7 +274,7 @@ export default function IaopsCaseThreadPage() {
                       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '8px 0 0', lineHeight: 1.5 }}>{entry.summary}</p>
                     )}
                     <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
-                      {t('Otevřít HITL frontu ke schválení', 'Open the HITL queue for approval')}
+                      {t('Procházet HITL frontu', 'Browse the HITL queue')}
                     </Link>
                   </div>
                 )
