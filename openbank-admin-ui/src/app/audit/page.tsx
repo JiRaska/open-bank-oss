@@ -75,6 +75,7 @@ export default function AuditPage() {
               className="input"
               style={{ paddingLeft: '32px', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
               placeholder="Aggregate ID (account UUID, party UUID, transaction UUID…)"
+              aria-label={t('ID agregátu', 'Aggregate ID')}
               value={aggregateId}
               onChange={e => setAggregateId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()}

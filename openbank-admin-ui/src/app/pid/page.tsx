@@ -461,6 +461,7 @@ export default function PidPage() {
               className="input"
               style={{ paddingLeft: '32px', width: '100%' }}
               placeholder={t('Hledat hodnotu, ID osoby...', 'Search value, person ID...')}
+              aria-label={t('Hledat PID případy', 'Search PID cases')}
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
