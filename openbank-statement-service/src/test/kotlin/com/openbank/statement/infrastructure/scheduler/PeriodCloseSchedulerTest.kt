@@ -6,6 +6,7 @@ package com.openbank.statement.infrastructure.scheduler
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.statement.application.port.`in`.RunCloseUseCase
+import com.openbank.statement.domain.model.CloseRun
 import com.openbank.statement.domain.model.CloseTrigger
 import io.mockk.every
 import io.mockk.mockk
@@ -24,7 +25,7 @@ class PeriodCloseSchedulerTest {
         val metrics = mockk<DomainMetrics> {
             every { registerWorkflowLiveness(any(), any()) } returns liveness
         }
-        every { runClose.runClose(CloseTrigger.SCHEDULED) } returns Uni.createFrom().item(mockk())
+        every { runClose.runClose(CloseTrigger.SCHEDULED) } returns Uni.createFrom().item(mockk<CloseRun>())
 
         val scheduler = PeriodCloseScheduler(runClose, enabled = true, domainMetrics = metrics)
         scheduler.registerLiveness()

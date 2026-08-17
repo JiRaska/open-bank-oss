@@ -59,7 +59,7 @@ class PeriodCloseSchedulerVertxContextIT {
     class RecordingRunCloseUseCase : RunCloseUseCase {
         override fun runClose(trigger: CloseTrigger): Uni<CloseRun> {
             if (trigger == CloseTrigger.SCHEDULED) invocations.incrementAndGet()
-            return Uni.createFrom().item(mockk())
+            return Uni.createFrom().item(mockk<CloseRun>())
         }
 
         companion object {
