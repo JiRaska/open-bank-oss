@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.2...admin-ui-v0.155.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label unwired payment actions ([#5182](https://github.com/JiRaska/open-bank-oss/issues/5182)) ([29a9e9a](https://github.com/JiRaska/open-bank-oss/commit/29a9e9a7776a373175e189e7677dd93dd0e236d7))
+
 ## [0.155.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.1...admin-ui-v0.155.2) (2026-08-17)
 
 
