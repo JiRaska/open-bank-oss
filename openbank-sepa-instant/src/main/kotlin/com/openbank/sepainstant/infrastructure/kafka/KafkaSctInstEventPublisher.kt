@@ -23,6 +23,11 @@ class KafkaSctInstEventPublisher @Inject constructor(
         emitter.send(objectMapper.writeValueAsString(mapOf(
             "type" to event::class.simpleName,
             "paymentId" to event.paymentId,
-            "occurredAt" to event.occurredAt
+            "occurredAt" to event.occurredAt,
+            // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
+            // (EVENT-sourced) attribution. This publisher builds a HAND-BUILT map (not a
+            // serialised data class), so sourceService must be added to the map explicitly — a
+            // field on SctInstEvent alone would never reach the wire here.
+            "sourceService" to event.sourceService
         )))
 }
