@@ -69,6 +69,27 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `dispute-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's dispute-service fix: DisputeService's hand-built outbox payloads
+        // (dispute.opened / dispute.resolved / dispute.remediation_requested) and
+        // ComplaintService's shared complaintPayload builder now carry "sourceService". Before
+        // this, EventAttribution's `openbank.dispute.events` -> `dispute-service` entry already
+        // resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"dispute.resolved","disputeId":"${UUID.randomUUID()}",""" +
+                """"sourceService":"dispute-service"}""",
+            EventAddress(topic = "openbank.dispute.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("dispute.resolved")
+        assertThat(entry.captured.sourceService).isEqualTo("dispute-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.

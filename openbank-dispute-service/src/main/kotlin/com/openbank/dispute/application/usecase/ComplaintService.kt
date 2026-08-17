@@ -147,7 +147,10 @@ internal fun outboxFor(complaint: Complaint, eventType: String): OutboxMessage =
 )
 
 /**
- * `occurredAt` is [Complaint.updatedAt] (#3914).
+ * `occurredAt` is [Complaint.updatedAt] (#3914). `sourceService` is
+ * [DisputeService.SOURCE_SERVICE] (#3994/#5256) — complaints share dispute-service's own outbox
+ * topic (`openbank.dispute.events`), which audit-service DOES subscribe to today, so this is a
+ * live attribution improvement over `TopicAttribution`'s TOPIC-sourced fallback.
  *
  * One builder serves every complaint event, so the instant has to be one the aggregate carries for
  * ALL of them, and `updatedAt` is exactly that: each transition in [ComplaintService] sets it from
@@ -160,4 +163,5 @@ private fun complaintPayload(complaint: Complaint, eventType: String): String =
         """"reference":"${complaint.reference}","category":"${complaint.category}",""" +
         """"channel":"${complaint.channel}","status":"${complaint.status}",""" +
         """"receivedDate":"${complaint.receivedDate}","dueDate":"${complaint.dueDate}",""" +
-        """"occurredAt":"${complaint.updatedAt.toInstant()}"}"""
+        """"occurredAt":"${complaint.updatedAt.toInstant()}",""" +
+        """"sourceService":"${DisputeService.SOURCE_SERVICE}"}"""
