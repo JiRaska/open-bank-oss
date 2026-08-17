@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.9](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.8...clearing-service-v0.7.9) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.7.8](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.7...clearing-service-v0.7.8) (2026-08-10)
 
 

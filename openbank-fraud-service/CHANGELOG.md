@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.11.1...fraud-service-v0.11.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.11.0...fraud-service-v0.11.1) (2026-08-09)
 
 

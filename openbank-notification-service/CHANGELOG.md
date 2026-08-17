@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.3](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.2...notification-service-v0.23.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.23.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.1...notification-service-v0.23.2) (2026-08-16)
 
 

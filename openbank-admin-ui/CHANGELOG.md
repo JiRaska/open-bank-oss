@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.156.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.6...admin-ui-v0.156.0) (2026-08-17)
+
+
+### Features
+
+* **admin-ui:** explain swarm case stages ([#5254](https://github.com/JiRaska/open-bank-oss/issues/5254)) ([dc42cf8](https://github.com/JiRaska/open-bank-oss/commit/dc42cf8f3ecb62634e4c34f98398a2387a016215))
+
+
+### Bug Fixes
+
+* **security-scanner:** delete the openbank.security.scan.event outbox, which never had a writer ([#4940](https://github.com/JiRaska/open-bank-oss/issues/4940)) ([9d1d095](https://github.com/JiRaska/open-bank-oss/commit/9d1d0954c418722adc1beb712956209d98eb6a0c))
+
 ## [0.155.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.5...admin-ui-v0.155.6) (2026-08-17)
 
 

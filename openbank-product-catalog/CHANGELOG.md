@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.15.0...product-catalog-v0.16.0) (2026-08-17)
+
+
+### Features
+
+* **product-catalog:** loan products in the catalog kernel (ADR-0260 Phase A+B) ([#5139](https://github.com/JiRaska/open-bank-oss/issues/5139)) ([af04613](https://github.com/JiRaska/open-bank-oss/commit/af04613a74c7d2cb27baf1b681448ebd3e3c7c33))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.14.0...product-catalog-v0.15.0) (2026-08-17)
 
 

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/v0.33.1...v0.33.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **campaign:** bind audience approval to version ([#4915](https://github.com/JiRaska/open-bank-oss/issues/4915)) ([b2b6f05](https://github.com/JiRaska/open-bank-oss/commit/b2b6f05e25e9355b88dea836797e2c2d22029861))
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/v0.33.0...v0.33.1) (2026-08-16)
 
 

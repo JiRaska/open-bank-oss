@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.2...agent-service-v1.19.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **agent:** back the PoP nonce replay guard with a shared Redis store ([#5137](https://github.com/JiRaska/open-bank-oss/issues/5137)) ([6931087](https://github.com/JiRaska/open-bank-oss/commit/69310874a5eecf514f6efe0866637c48aa209fb8))
+
 ## [1.19.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.1...agent-service-v1.19.2) (2026-08-16)
 
 
