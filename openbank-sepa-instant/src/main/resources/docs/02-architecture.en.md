@@ -13,9 +13,8 @@ The service follows the hexagonal (ports & adapters) architecture mandated by [A
         │       │                   ├─► SanctionsScreeningPort ─────────►│──► sanctions-service
         │       │                   ├─► AmlCasePort ────────────────────►│──► aml-service
         │       │                   ├─► SctInstPaymentRepository ───────►│──► PostgreSQL
-        │       │                   └─► SctInstEventPublisher / outbox ─►│
-        │       │                                                        │
-        │  OutboxDispatcher (@Scheduled 5s) ──► Kafka emitter ──────────►│──► openbank.sepa.instant.events
+        │       │                   └─► SctInstEventPublisher ──────────►│──► openbank.sepa.instant.events
+        │       │                       (direct Kafka emitter, no outbox)│
         └──────────────────────────────────────────────────────────────┘
 ```
 
