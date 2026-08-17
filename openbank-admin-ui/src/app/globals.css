@@ -144,6 +144,23 @@ main {
   animation: fadeIn 0.4s ease-out;
 }
 
+.ob-skip-link {
+  position: fixed;
+  z-index: 100;
+  top: .75rem;
+  left: .75rem;
+  transform: translateY(-180%);
+  padding: .6rem .8rem;
+  border-radius: .5rem;
+  background: var(--accent);
+  color: #fff;
+  font-size: .875rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform .15s ease-out;
+}
+.ob-skip-link:focus { transform: translateY(0); outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
 /* ── Operator application shell ── */
 .ob-app-shell {
   display: flex;

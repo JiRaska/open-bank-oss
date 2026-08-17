@@ -88,6 +88,12 @@ describe('admin-ui app-shell rule', () => {
     expect(shell).toMatch(/<Header\s*\/>/)
   })
 
+  it('provides a keyboard skip link to the shared main landmark', () => {
+    const shell = readFileSync(path.resolve(__dirname, '../components/layout/AppShell.tsx'), 'utf8')
+    expect(shell).toMatch(/href="#main-content"/)
+    expect(shell).toMatch(/<main id="main-content"[^>]*tabIndex=\{-1\}/)
+  })
+
   it('keeps the reusable operator layout as the only owner of the shell composition', () => {
     const layout = readFileSync(path.resolve(__dirname, '../components/layout/OperatorLayout.tsx'), 'utf8')
     expect(layout).toMatch(/<AppShell>\{children\}<\/AppShell>/)
