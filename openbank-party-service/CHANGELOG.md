@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.16.1...party-service-v0.17.0) (2026-08-17)
+
+
+### Features
+
+* **payees:** server-synced saved payees (TOP-10 [#5](https://github.com/JiRaska/open-bank-oss/issues/5)) ([#5154](https://github.com/JiRaska/open-bank-oss/issues/5154)) ([9c93621](https://github.com/JiRaska/open-bank-oss/commit/9c936211df184df867a6a274ce4cb09b64114f21))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.16.0...party-service-v0.16.1) (2026-08-16)
 
 
