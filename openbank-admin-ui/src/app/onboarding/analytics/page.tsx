@@ -20,6 +20,7 @@ import {
   LineChart, Line, PieChart, Pie, Legend,
 } from 'recharts'
 import type { FunnelAnalytics } from '@/app/api/onboarding/funnel-analytics/route'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Step labels (contract order WELCOME→SIGN) ─────────────────────────────────
 
@@ -112,27 +113,12 @@ export default function OnboardingAnalyticsPage() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <Link href="/onboarding" style={{ color: 'inherit', textDecoration: 'none' }}>
-              {t('Onboarding', 'Onboarding')}
-            </Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Konverze', 'Conversion')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <TrendingUp size={18} style={{ color: 'var(--accent)' }} />
-            {t('Konverze onboardingu', 'Onboarding Conversion')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Historická analýza funnelu — krok po kroku, kde a proč prospekti odpadají',
-               'Historical funnel analysis — where and why prospects drop off, step by step')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
+      <PageHeader
+        icon={<TrendingUp size={18} aria-hidden="true" />}
+        title={t('Konverze onboardingu', 'Onboarding Conversion')}
+        subtitle={t('Historická analýza funnelu — krok po kroku, kde a proč prospekti odpadají', 'Historical funnel analysis — where and why prospects drop off, step by step')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/onboarding" style={{ color: 'inherit', textDecoration: 'none' }}>{t('Onboarding', 'Onboarding')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Konverze', 'Conversion')}</span></div>}
+        actions={<div style={{ display: 'flex', alignItems: 'flex-end', gap: '8px' }}>
           <label style={{ display: 'flex', flexDirection: 'column', gap: '2px', fontSize: '11px', color: 'var(--text-muted)' }}>
             {t('Od', 'From')}
             <input type="date" value={from} max={to} onChange={e => setFrom(e.target.value)}
@@ -144,11 +130,11 @@ export default function OnboardingAnalyticsPage() {
               className="input" style={{ padding: '5px 8px', fontSize: '12px' }} />
           </label>
           <button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       <div style={{ marginBottom: '16px' }}>
         <Link href="/onboarding" className="btn btn-secondary" style={{ textDecoration: 'none', fontSize: '12px' }}>
