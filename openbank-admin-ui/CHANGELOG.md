@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.2...admin-ui-v0.157.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** align card operations with RBAC ([8954f13](https://github.com/JiRaska/open-bank-oss/commit/8954f13556799598ccc942e414a653854a78efa1))
+
 ## [0.157.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.1...admin-ui-v0.157.2) (2026-08-17)
 
 
