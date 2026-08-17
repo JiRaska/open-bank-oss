@@ -107,6 +107,36 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `lending-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's lending fix: the six remaining LendingService event types
+        // (loan.disbursed, loan.interest_accrued, loan.written_off, loan.rescheduled,
+        // loan.stage_changed, loan.provisioned — all hand-built payload strings, serialised
+        // verbatim via KafkaLendingOutboxEventPublisher onto the single "lending-events-out"
+        // channel / "openbank.lending.events" topic) now carry "sourceService", joining the three
+        // event types (credit.application.transition, credit.decision.evaluated,
+        // credit.loan.transition) that already had it. Before this, EventAttribution's
+        // `openbank.lending.events` -> `lending-service` entry already resolved these six event
+        // types' rows correctly, but as TOPIC-sourced — and this topic IS in audit-service's
+        // consumed-topics list today, so this is a live attribution upgrade, not a forward-looking
+        // one. lending-service is a money-path service (rules.yaml: money_path_services).
+        //
+        // Note the value is "lending", not "lending-service" — matching the literal the three
+        // already-fixed event types use (a pre-existing choice this PR preserves for
+        // self-consistency across every lending-service event, rather than introducing a second,
+        // different self-reported string). That is deliberately NOT what the topic-fallback table
+        // would say, which is exactly what this test demonstrates: the producer's own claim wins.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"loanId":"${UUID.randomUUID()}","eventType":"loan.disbursed","sourceService":"lending"}""",
+            EventAddress(topic = "openbank.lending.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("lending")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the producer's own claim wins over the topic, and is marked as the producer's`(): Unit = runBlocking {
         // Body-first ordering: this change can only turn a sentinel into a value. It must never
         // re-attribute a row that is already attributed, or customer-edge's 421 correct rows move.
