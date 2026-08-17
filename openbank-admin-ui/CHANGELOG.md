@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.3...admin-ui-v0.158.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** name operator search controls ([9463a41](https://github.com/JiRaska/open-bank-oss/commit/9463a4122348ae8e6a6aa93247232ed10246436e))
+
 ## [0.158.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.2...admin-ui-v0.158.3) (2026-08-17)
 
 
