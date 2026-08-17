@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.15.0
+  version: 1.17.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -252,6 +252,62 @@ paths:
           description: Updated
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/v1/parties/{id}/payees:
+    get:
+      tags: [Parties]
+      summary: List a party's saved payees, newest first (TOP-10 #5)
+      operationId: listPayees
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Saved payees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Payee'
+    put:
+      tags: [Parties]
+      summary: Save (or update) a payee — upsert by IBAN
+      operationId: savePayee
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SavePayeeRequest'
+      responses:
+        '200':
+          description: Saved payee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Payee'
+        '400':
+          description: Missing name or iban
+        '422':
+          description: Party already has the maximum of 30 saved payees
+
+  /api/v1/parties/{id}/payees/{iban}:
+    delete:
+      tags: [Parties]
+      summary: Remove a saved payee by IBAN. Idempotent — a missing IBAN is not an error.
+      operationId: deletePayee
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+        - name: iban
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Removed (or already absent)
 
   /api/v1/parties/directory/lookup:
     post:
@@ -715,6 +771,34 @@ components:
             Live, revocable marketing-communications preference (mobile app Profile screen).
             Not the onboarding-time consentGdpr snapshot — that isn't Art 6(1)(a) consent and
             has no update path.
+
+    Payee:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        iban:
+          type: string
+        bic:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+    SavePayeeRequest:
+      type: object
+      required: [name, iban]
+      properties:
+        name:
+          type: string
+        iban:
+          type: string
+        bic:
+          type: string
+          nullable: true
 
     AddDocumentRequest:
       type: object

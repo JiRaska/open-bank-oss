@@ -183,14 +183,33 @@ STUB
            SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
+    # Both failure branches print what the run ACTUALLY produced, not only what was wanted.
+    # Everything needed to explain a failure exists in $out at this moment and nowhere after it:
+    # an assertion that records its expectation and discards the observation leaves the next
+    # reader with a re-run as their only move, which is how an intermittent gate stays
+    # undiagnosed (#4918).
+    fixture_diagnostics() {
+      local actual
+      actual="$(printf '%s' "$out" | grep -F '==> Fleet summary:' || true)"
+      if [ -n "$actual" ]; then
+        printf '        actual summary: %s\n' "${actual#*==> Fleet summary: }"
+      else
+        # No summary at all is a different fault from a wrong one — the script exited before it
+        # counted anything — so say which of the two happened rather than printing nothing.
+        printf '        no summary line was produced; last 20 lines of output:\n'
+        printf '%s\n' "$out" | tail -20 | sed 's/^/          | /'
+      fi
+    }
     if [ "$code" != "$expected_exit" ]; then
       printf '  FAIL: %s — expected exit %s, got %s\n' "$name" "$expected_exit" "$code"
+      fixture_diagnostics
       failures=$((failures + 1))
       return
     fi
     if ! printf '%s' "$out" | grep -qF "$expected_summary"; then
-      printf '  FAIL: %s — exit %s correct, but summary missing: %s\n' \
-        "$name" "$code" "$expected_summary"
+      printf '  FAIL: %s — exit %s correct, but summary missing\n' "$name" "$code"
+      printf '        expected summary: %s\n' "$expected_summary"
+      fixture_diagnostics
       failures=$((failures + 1))
       return
     fi

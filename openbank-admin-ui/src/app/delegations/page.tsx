@@ -25,6 +25,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { PageHeader } from '@/components/ui/PageHeader'
 import {
   DelegationStatusBadge,
   capabilityLabels,
@@ -120,26 +121,17 @@ export default function DelegationsPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
-        <div>
-          <h1 className="page-title">
-            <Share2 size={18} color="var(--accent)" />
-            {t('Delegovaný přístup', 'Delegated Access')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
-              'Kdo komu udělil práva k účtu, kartě nebo spoření (ADR-0232). Konzole je pouze pro čtení.',
-              'Who granted whom rights over an account, card or savings goal (ADR-0232). This console is read-only.',
-            )}
-          </p>
-        </div>
-        {party && (
+      <PageHeader
+        icon={<Share2 size={18} aria-hidden="true" />}
+        title={t('Delegovaný přístup', 'Delegated Access')}
+        subtitle={t('Kdo komu udělil práva k účtu, kartě nebo spoření (ADR-0232). Konzole je pouze pro čtení.', 'Who granted whom rights over an account, card or savings goal (ADR-0232). This console is read-only.')}
+        actions={party && (
           <button className="btn btn-secondary" onClick={() => loadGrants(party)} disabled={loading}>
             <RefreshCw size={14} />
             {t('Obnovit', 'Refresh')}
           </button>
         )}
-      </div>
+      />
 
       {/* ---- party lookup (ADR-0228 facade, never a raw UUID field) ---- */}
       <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>

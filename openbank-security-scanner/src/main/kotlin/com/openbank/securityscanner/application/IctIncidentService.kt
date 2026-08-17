@@ -5,15 +5,18 @@
 package com.openbank.securityscanner.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.securityscanner.domain.*
+import com.openbank.security.application.port.out.IctIncidentRepository
+import com.openbank.securityscanner.domain.IctIncident
+import com.openbank.securityscanner.domain.IncidentCategory
+import com.openbank.securityscanner.domain.IncidentSeverity
+import com.openbank.securityscanner.domain.IncidentStatus
+import io.smallrye.reactive.messaging.kafka.Record
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Emitter
-import io.smallrye.reactive.messaging.kafka.Record
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 data class ReportIncidentCommand(
     val title: String,
@@ -27,15 +30,25 @@ data class ReportIncidentCommand(
 
 class IctIncidentNotFoundException(id: UUID) : RuntimeException("ICT incident not found: $id")
 
+/**
+ * The DORA ICT incident register.
+ *
+ * State lives in `ict_incidents` (issue #4728). It used to live in a per-pod `ConcurrentHashMap`,
+ * which lost the whole register on every pod restart — not a staleness nuisance but data loss, and
+ * one that needed no second replica to happen: a restart answered `GET /api/v1/ict-incidents` with
+ * `[]` as though nothing had ever been reported, including incidents already flagged as reported to
+ * the regulator. Unlike the compliance-pack registry of #3467 there was no row to converge onto, so
+ * the fix had to be the row itself rather than a refresher.
+ */
 @ApplicationScoped
 class IctIncidentService(
     @Channel("ict-incident-events-out") private val emitter: Emitter<Record<String, String>>,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val repository: IctIncidentRepository,
 ) {
-    private val store = ConcurrentHashMap<UUID, IctIncident>()
 
-    fun reportIncident(cmd: ReportIncidentCommand): IctIncident {
+    suspend fun reportIncident(cmd: ReportIncidentCommand): IctIncident {
         val now = Instant.now(clock)
         val incident = IctIncident(
             id = UUID.randomUUID(),
@@ -57,12 +70,12 @@ class IctIncidentService(
             createdAt = now,
             updatedAt = now,
         )
-        store[incident.id] = incident
-        publishEvent("ICT_INCIDENT_REPORTED", incident)
-        return incident
+        val saved = repository.save(incident)
+        publishEvent("ICT_INCIDENT_REPORTED", saved)
+        return saved
     }
 
-    fun updateStatus(
+    suspend fun updateStatus(
         id: UUID,
         status: IncidentStatus,
         containedAt: Instant?,
@@ -70,42 +83,40 @@ class IctIncidentService(
         rtoMinutes: Int?,
         rpoMinutes: Int?,
     ): IctIncident {
-        val existing = store[id] ?: throw IctIncidentNotFoundException(id)
-        val updated = existing.copy(
-            status = status,
-            containedAt = containedAt ?: existing.containedAt,
-            resolvedAt = resolvedAt ?: existing.resolvedAt,
-            rtoMinutes = rtoMinutes ?: existing.rtoMinutes,
-            rpoMinutes = rpoMinutes ?: existing.rpoMinutes,
-            updatedAt = Instant.now(clock),
+        val existing = repository.findIncident(id) ?: throw IctIncidentNotFoundException(id)
+        val updated = repository.save(
+            existing.copy(
+                status = status,
+                containedAt = containedAt ?: existing.containedAt,
+                resolvedAt = resolvedAt ?: existing.resolvedAt,
+                rtoMinutes = rtoMinutes ?: existing.rtoMinutes,
+                rpoMinutes = rpoMinutes ?: existing.rpoMinutes,
+                updatedAt = Instant.now(clock),
+            ),
         )
-        store[id] = updated
         publishEvent("ICT_INCIDENT_STATUS_CHANGED", updated)
         return updated
     }
 
-    fun getIncident(id: UUID): IctIncident = store[id] ?: throw IctIncidentNotFoundException(id)
+    suspend fun getIncident(id: UUID): IctIncident =
+        repository.findIncident(id) ?: throw IctIncidentNotFoundException(id)
 
-    fun listIncidents(
+    suspend fun listIncidents(
         status: IncidentStatus?,
         severity: IncidentSeverity?,
         limit: Int,
         offset: Int,
-    ): List<IctIncident> = store.values
-        .filter { status == null || it.status == status }
-        .filter { severity == null || it.severity == severity }
-        .sortedByDescending { it.createdAt }
-        .drop(offset)
-        .take(limit.coerceIn(1, 200))
+    ): List<IctIncident> = repository.list(status, severity, limit, offset)
 
-    fun markReportedToRegulator(id: UUID, regulatoryReportId: String): IctIncident {
-        val existing = store[id] ?: throw IctIncidentNotFoundException(id)
-        val updated = existing.copy(
-            reportedToRegulator = true,
-            regulatoryReportId = regulatoryReportId,
-            updatedAt = Instant.now(clock),
+    suspend fun markReportedToRegulator(id: UUID, regulatoryReportId: String): IctIncident {
+        val existing = repository.findIncident(id) ?: throw IctIncidentNotFoundException(id)
+        val updated = repository.save(
+            existing.copy(
+                reportedToRegulator = true,
+                regulatoryReportId = regulatoryReportId,
+                updatedAt = Instant.now(clock),
+            ),
         )
-        store[id] = updated
         publishEvent("ICT_INCIDENT_REPORTED_TO_REGULATOR", updated)
         return updated
     }

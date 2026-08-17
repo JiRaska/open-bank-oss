@@ -58,6 +58,9 @@ spec:
   startingDeadlineSeconds: 600
   jobTemplate:
     spec:
+      # 48h self-delete so a failed Job cannot become a permanent KubeJobFailed tombstone;
+      # rationale in openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml.
+      ttlSecondsAfterFinished: 172800
       # The wait loop is 60 × 5s; allow one pass plus registration headroom.
       activeDeadlineSeconds: 600
       # No retry: a second attempt would find the namespaces this one just created and

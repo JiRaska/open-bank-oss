@@ -82,6 +82,10 @@ class AccountEntity : PanacheEntityBase {
     @Column(name = "goal_target_date")
     var goalTargetDate: LocalDate? = null
 
+    /** Customer-chosen display label (V20). Null means "use the account-type default name". */
+    @Column(name = "nickname", length = 60)
+    var nickname: String? = null
+
     /** Stamped from the injected [java.time.Clock] in the repository layer (ADR-0100 — no wall-clock reads here). */
     @Column(name = "created_at", nullable = false, updatable = false)
     var createdAt: Instant = Instant.EPOCH

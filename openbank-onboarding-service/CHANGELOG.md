@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.2...onboarding-service-v0.7.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **observability:** track gauge refresh liveness ([#5087](https://github.com/JiRaska/open-bank-oss/issues/5087)) ([86904fa](https://github.com/JiRaska/open-bank-oss/commit/86904faa8ae0fdfd7e085b4c4f175691ae07c865))
+
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.1...onboarding-service-v0.7.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **infra:** give six services an OIDC client they can actually mint from ([#4990](https://github.com/JiRaska/open-bank-oss/issues/4990)) ([f43f88c](https://github.com/JiRaska/open-bank-oss/commit/f43f88c815fd50c32ef797147c6cbc57f060cab0))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.0...onboarding-service-v0.7.1) (2026-08-14)
 
 

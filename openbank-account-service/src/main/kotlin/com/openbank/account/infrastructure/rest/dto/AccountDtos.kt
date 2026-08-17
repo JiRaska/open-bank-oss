@@ -41,12 +41,17 @@ data class AccountResponse(
     val goalName: String? = null,
     val goalTargetMinorUnits: Long? = null,
     val goalTargetDate: LocalDate? = null,
+    /** Customer-chosen display label. Null means "use the account-type default name". */
+    val nickname: String? = null,
 )
 
 data class AddPocketRequest(val currencyCode: String)
 
 /** PUT /{accountId}/goal body (ADR-0153). */
 data class SavingsGoalRequest(val name: String, val targetMinorUnits: Long, val targetDate: LocalDate? = null)
+
+/** PATCH /{accountId}/nickname body. Null/blank clears it. */
+data class RenameAccountRequest(val nickname: String?)
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 data class PocketResponse(

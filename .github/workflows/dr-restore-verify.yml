@@ -71,22 +71,32 @@ jobs:
           kubectl create namespace "$NS"
           RESTORE_START=$(date -u +%s)
 
-          # WIRING: apply the CNPG recovery Cluster (bootstrap.recovery from the ledger-db
-          # barman S3 store) + an ephemeral ledger-service Deployment (OUTBOX_DISPATCH_ENABLED
-          # =false, OIDC off) into $NS. Templates tracked in the design doc's remaining wiring.
-          echo "::error::WIRING INCOMPLETE: CNPG recovery Cluster + ledger-service manifests for \$NS are not yet in-repo (docs/bcp/automated-dr-restore.md). Failing rather than reporting a hollow PASS."
-          exit 1
+          # Manifest templates: openbank-infra/gitops/dr-restore-templates/ (#4757). The
+          # remaining wiring item is the runner label above (`runs-on: ubuntu-latest`
+          # never reaches this far — the gate step exits first), which is an
+          # infrastructure-provisioning decision, not something this step can supply.
+          TEMPLATES="openbank-infra/gitops/dr-restore-templates"
+          IMAGE="$(kubectl get rollout ledger-service -n ledger \
+            -o jsonpath='{.spec.template.spec.containers[0].image}')"
+          [ -n "$IMAGE" ] || { echo "::error::could not read the live ledger-service image — refusing to restore an unspecified build."; exit 1; }
 
-          # --- The verification below is the intended shape once the manifests land: ---
-          # kubectl -n "$NS" wait --for=condition=Ready cluster/ledger-db-restored --timeout=30m
-          # kubectl -n "$NS" rollout status deploy/ledger-service --timeout=10m
-          # kubectl -n "$NS" port-forward svc/ledger-service 18101:8101 &
-          # PF=$!; sleep 5
-          # BODY="$(curl -sf "http://localhost:18101/api/v1/ledger/close/trial-balance?fiscalYear=${FY}")"
-          # kill "$PF" || true
-          # RESTORE_END=$(date -u +%s); RTO=$(( RESTORE_END - RESTORE_START ))
-          # BALANCED="$(printf '%s' "$BODY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["balanced"])')"
-          # if [ "$BALANCED" != "True" ]; then
-          #   echo "::error::restored ledger is UNBALANCED — backup integrity FAILED"; exit 1
+          sed "s#\${NS}#${NS}#g" "$TEMPLATES/cnpg-recovery-cluster.yaml.tmpl" | kubectl apply -f -
+          sed "s#\${NS}#${NS}#g; s#\${IMAGE}#${IMAGE}#g" "$TEMPLATES/ledger-service-dr-check.yaml.tmpl" | kubectl apply -f -
+
+          kubectl -n "$NS" wait --for=condition=Ready cluster/ledger-db-restored --timeout=30m
+          kubectl -n "$NS" rollout status deploy/ledger-service-dr-check --timeout=10m
+          kubectl -n "$NS" port-forward svc/ledger-service-dr-check 18101:8101 &
+          PF=$!; sleep 5
+          BODY="$(curl -sf "http://localhost:18101/api/v1/ledger/close/trial-balance?fiscalYear=${FY}")"
+          kill "$PF" || true
+          RESTORE_END=$(date -u +%s); RTO=$(( RESTORE_END - RESTORE_START ))
+          BALANCED="$(printf '%s' "$BODY" | python3 -c 'import sys,json;print(json.load(sys.stdin)["balanced"])')"
+          if [ "$BALANCED" != "True" ]; then
+            echo "::error::restored ledger is UNBALANCED — backup integrity FAILED"; exit 1
+          fi
+
+          echo "RTO_SECONDS=${RTO}" >> "$GITHUB_STEP_SUMMARY"
+          echo "RPO: measured from the backup's WAL target, not computed here (bare RTO only)." >> "$GITHUB_STEP_SUMMARY"
+          echo "restore verified: balanced=true, RTO=${RTO}s"
           # fi
           # echo "::notice::DR restore verified: balanced=true, RTO=${RTO}s (append to docs/bcp/dr-test-log.md)"

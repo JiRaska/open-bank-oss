@@ -5,6 +5,7 @@
 package com.openbank.sepa.application.workflow
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
 import com.openbank.sepa.application.port.out.FraudScoreOutcome
 import com.openbank.sepa.application.port.out.FraudScoringPort
@@ -32,6 +33,7 @@ import io.mockk.coJustRun
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
@@ -50,6 +52,7 @@ class SepaPaymentActivitiesImplTest {
     private lateinit var fraudScoringPort: FraudScoringPort
     private lateinit var schemeGatewayPort: SchemeGatewayPort
     private lateinit var settlementPort: SettlementPort
+    private lateinit var metrics: DomainMetrics
     private lateinit var activities: SepaPaymentActivitiesImpl
 
     private val clock = Clock.systemUTC()
@@ -86,6 +89,7 @@ class SepaPaymentActivitiesImplTest {
         fraudScoringPort = mockk()
         schemeGatewayPort = mockk()
         settlementPort = mockk()
+        metrics = mockk(relaxed = true)
         activities = TestableActivities(
             paymentRepository,
             screeningPort,
@@ -94,6 +98,7 @@ class SepaPaymentActivitiesImplTest {
             schemeGatewayPort,
             settlementPort,
             clock = clock,
+            metrics = metrics,
             schemeSubmissionEnabled = true,
         )
         coJustRun { amlCasePort.openCase(any()) }
@@ -126,6 +131,53 @@ class SepaPaymentActivitiesImplTest {
 
         assertThat(result).isEqualTo(ScreeningDecision.BLOCK)
         coVerify { amlCasePort.openCase(any()) }
+    }
+
+    // Issue #5049: openbank_sanctions_screenings_total / openbank_sanctions_hits_total had NO
+    // call site anywhere in this class -- sanctions-service itself has no "role" concept of its
+    // own, so these can only be recorded here, by the caller that knows which side of the
+    // payment each screened name is.
+    @Test
+    fun `screenPayment records sanctionsScreening for both roles and no hit when both are clear`() {
+        coEvery { paymentRepository.findById(paymentId) } returns payment
+        coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns
+            ScreeningResult("Alice", ScreeningRole.DEBTOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+        coEvery { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } returns
+            ScreeningResult("Bob", ScreeningRole.CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+
+        activities.screenPayment(paymentId)
+
+        verify(exactly = 1) { metrics.sanctionsScreening("debtor") }
+        verify(exactly = 1) { metrics.sanctionsScreening("creditor") }
+        verify(exactly = 0) { metrics.sanctionsHit(any(), any()) }
+    }
+
+    @Test
+    fun `screenPayment records a block-severity hit only for the debtor that HIT`() {
+        coEvery { paymentRepository.findById(paymentId) } returns payment
+        coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns
+            ScreeningResult("Alice", ScreeningRole.DEBTOR, ScreeningMatchStatus.HIT, 0.99, "SanctionedEntity")
+        coEvery { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } returns
+            ScreeningResult("Bob", ScreeningRole.CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+
+        activities.screenPayment(paymentId)
+
+        verify(exactly = 1) { metrics.sanctionsHit("debtor", "block") }
+        verify(exactly = 0) { metrics.sanctionsHit("creditor", any()) }
+    }
+
+    @Test
+    fun `screenPayment records review-severity for a POTENTIAL_HIT, not block`() {
+        coEvery { paymentRepository.findById(paymentId) } returns payment
+        coEvery { screeningPort.screen(any(), ScreeningRole.DEBTOR, any()) } returns
+            ScreeningResult("Alice", ScreeningRole.DEBTOR, ScreeningMatchStatus.POTENTIAL_HIT, 0.7, "MaybeMatch")
+        coEvery { screeningPort.screen(any(), ScreeningRole.CREDITOR, any()) } returns
+            ScreeningResult("Bob", ScreeningRole.CREDITOR, ScreeningMatchStatus.CLEAR, 0.0, null)
+
+        activities.screenPayment(paymentId)
+
+        verify(exactly = 1) { metrics.sanctionsHit("debtor", "review") }
+        verify(exactly = 0) { metrics.sanctionsHit("debtor", "block") }
     }
 
     @Test
@@ -253,6 +305,7 @@ class SepaPaymentActivitiesImplTest {
             schemeGatewayPort,
             settlementPort,
             clock = clock,
+            metrics = metrics,
             schemeSubmissionEnabled = false,
         )
         coEvery { paymentRepository.findById(paymentId) } returns validated
@@ -282,6 +335,7 @@ class SepaPaymentActivitiesImplTest {
         schemeGatewayPort,
         settlementPort,
         clock = Clock.fixed(fixedInstant, ZoneOffset.UTC),
+        metrics = metrics,
         schemeSubmissionEnabled = true,
     )
 
@@ -350,6 +404,7 @@ private class TestableActivities(
     schemeGatewayPort: SchemeGatewayPort,
     settlementPort: SettlementPort,
     clock: Clock,
+    metrics: DomainMetrics,
     schemeSubmissionEnabled: Boolean,
 ) : SepaPaymentActivitiesImpl(
     paymentRepository,
@@ -359,6 +414,7 @@ private class TestableActivities(
     schemeGatewayPort,
     settlementPort,
     clock,
+    metrics,
     schemeSubmissionEnabled,
 ) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }

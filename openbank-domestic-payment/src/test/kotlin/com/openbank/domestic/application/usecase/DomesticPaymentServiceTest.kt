@@ -18,6 +18,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -102,6 +103,68 @@ class DomesticPaymentServiceTest {
 
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
     }
+
+    // Issue #5049: paymentCompleted()/paymentProcessingDuration() had NO call site anywhere in this
+    // class -- only paymentSubmitted() (in createPayment) was ever wired -- so
+    // openbank_payments_completed_total{type="domestic",...} and
+    // openbank_payment_processing_duration_seconds{type="domestic",...} could never have a sample
+    // no matter how much real domestic-payment traffic occurred. Nothing in this file asserted the
+    // metrics call before, which is exactly how the gap went unnoticed; these two cases are the
+    // falsifying pair -- a terminal transition must record, a non-terminal one must not.
+    @Test
+    fun `settling a payment records paymentCompleted and paymentProcessingDuration as settled`(): Unit = runBlocking {
+        val existing = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        coEvery { paymentRepository.findById(existing.id) } returns existing
+
+        service.transitionStatus(
+            TransitionDomesticPaymentStatusCommand(
+                paymentId = existing.id,
+                targetStatus = DomesticPaymentStatus.SETTLED,
+                rejectReason = null,
+                rejectDetail = null,
+            ),
+        )
+
+        verify(exactly = 1) { metrics.paymentCompleted("domestic", existing.currency, "settled") }
+        verify(exactly = 1) { metrics.paymentProcessingDuration("domestic", "settled", any()) }
+    }
+
+    @Test
+    fun `rejecting a payment records paymentCompleted as rejected, not settled`(): Unit = runBlocking {
+        val existing = payment(status = DomesticPaymentStatus.RECEIVED)
+        coEvery { paymentRepository.findById(existing.id) } returns existing
+
+        service.transitionStatus(
+            TransitionDomesticPaymentStatusCommand(
+                paymentId = existing.id,
+                targetStatus = DomesticPaymentStatus.REJECTED,
+                rejectReason = com.openbank.domestic.domain.model.DomesticRejectReason.INVALID_ACCOUNT_NUMBER,
+                rejectDetail = "Account not found",
+            ),
+        )
+
+        verify(exactly = 1) { metrics.paymentCompleted("domestic", existing.currency, "rejected") }
+        verify(exactly = 0) { metrics.paymentCompleted("domestic", existing.currency, "settled") }
+    }
+
+    @Test
+    fun `a non-terminal transition records neither paymentCompleted nor paymentProcessingDuration`(): Unit =
+        runBlocking {
+            val existing = payment(status = DomesticPaymentStatus.RECEIVED)
+            coEvery { paymentRepository.findById(existing.id) } returns existing
+
+            service.transitionStatus(
+                TransitionDomesticPaymentStatusCommand(
+                    paymentId = existing.id,
+                    targetStatus = DomesticPaymentStatus.VALIDATED,
+                    rejectReason = null,
+                    rejectDetail = null,
+                ),
+            )
+
+            verify(exactly = 0) { metrics.paymentCompleted(any(), any(), any()) }
+            verify(exactly = 0) { metrics.paymentProcessingDuration(any(), any(), any()) }
+        }
 
     private fun createCommand(
         idempotencyKey: String = "dom-idem-1",

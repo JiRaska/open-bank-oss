@@ -4,6 +4,7 @@
 
 package com.openbank.account.infrastructure.rest
 
+import com.openbank.account.application.usecase.AccountNotEmptyException
 import com.openbank.account.application.usecase.AccountNotFoundException
 import com.openbank.account.application.usecase.AccountUpdateConflictException
 import com.openbank.libs.api.error.ApiError
@@ -52,6 +53,25 @@ class AccountUpdateConflictExceptionMapper : ExceptionMapper<AccountUpdateConfli
             .build()
 }
 
+// 422 — closing an account that still holds money is a well-formed request against the wrong
+// state, not a conflict with another writer (409) or a bad request shape (400).
+@Provider
+class AccountNotEmptyExceptionMapper : ExceptionMapper<AccountNotEmptyException> {
+    override fun toResponse(exception: AccountNotEmptyException): Response = Response.status(UNPROCESSABLE_ENTITY)
+        .entity(
+            ApiError(
+                traceId = Ids.randomId().toString(),
+                status = UNPROCESSABLE_ENTITY,
+                code = "ACCOUNT_NOT_EMPTY",
+                message = exception.message ?: "Account still holds money",
+                timestamp = Instant.now(),
+            ),
+        )
+        .build()
+}
+
 // SelfApprovalNotAllowedMapper / InvalidApprovalStateMapper (403/409) moved to
 // openbank-libs-runtime's CommonExceptionMappers (issue #1394) — a service-local copy of the
 // same exact type would collide non-deterministically with the shared one (issue #526).
+
+private const val UNPROCESSABLE_ENTITY = 422

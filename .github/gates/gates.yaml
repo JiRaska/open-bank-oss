@@ -556,6 +556,52 @@ gates:
     run: |
       python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
+  # The sibling of the gate above, for the case that gate CANNOT see.
+  #
+  # `check-db-backup-associations` scans for clusters that declare a `barmanObjectStore` and
+  # skips the rest — `if not dest: continue`. So its subject set is "databases that asked to be
+  # backed up", and a database that never asked is not a mismatched pair, so it is skipped. The
+  # gate built to make an unrecoverable database visible is structurally blind to the most
+  # unrecoverable kind.
+  #
+  # Measured against the sandbox on 2026-08-16, both directions agreeing: 59 live CNPG clusters,
+  # 57 with a recovery point, 0 declared-but-unrecoverable, and 2 with no backup declared at all.
+  # The enforced sibling reported clean across all of it, correctly and uselessly. The two are
+  # `engagement-db` and `glitchtip-pg`; a gitops scan finds only the first, because the second is
+  # deployed by a third-party chart and is outside this tree entirely — which is a real limit of
+  # any gitops-scoped check and is written into the script header rather than left to be
+  # discovered.
+  #
+  # ADVISORY, not enforced, and the reason is specific rather than caution: enforcing it today
+  # would fail every PR on one open question — whether engagement-db should be backed up or is
+  # genuinely disposable — that is an owner's decision and not a contributor's to unblock. The
+  # exemption is an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`), deliberately
+  # not a list kept beside the manifests: a separate list drifts from what it describes and
+  # nothing notices, which is the defect this repo keeps re-finding.
+  - id: cnpg-backup-declared-gate
+    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (advisory)"
+    group: gitops
+    mode: advisory
+    rationale: >-
+      db-backup-association-gate only inspects clusters that already declare a
+      barmanObjectStore, so a database that never asked to be backed up is invisible to it.
+      This covers that case: no recovery point at all, which is the worse one.
+    review_after: "2026-09-15"
+    verified: >-
+      2026-08-16 — measured against the sandbox with two independent probes that agree:
+      59 live CNPG clusters, 57 with a recovery point, 0 declared-but-unrecoverable, and 2
+      with no backup declared at all, while the enforced sibling reported clean across all
+      of it. A gitops scan of this tree finds 58 subjects and exactly 1 of those 2
+      (engagement-db); glitchtip-pg is deployed by a third-party chart and is out of reach
+      of any gitops-scoped check. Self-test falsified in both directions — it fires on a
+      cluster with no backup and on an empty exemption reason, and stays silent on a
+      declared backup, a reasoned exemption and a non-CNPG kind: Cluster.
+    min_subjects: 50
+    selftest: python3 openbank-infra/scripts/check-cnpg-backup-declared.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/scripts/check-cnpg-backup-declared.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
@@ -2268,24 +2314,24 @@ gates:
     run: |
       bash .github/scripts/check-dotted-mp-messaging-keys.sh .
 
-  # ADVISORY until rules.yaml change_classes.db_change flips to enforced
-  # (target 2026-08-15, ADR-0144) — add --enforce to the invocation to flip.
+  # ENFORCED after the 2026-08-15 ADR-0144 graduation target: a migration must
+  # carry a rollback note and never edit an applied checksum.
   # Covers BOTH halves of db_change.require: an added migration carries a
   # `-- Rollback:` note, and an already-committed migration is not edited
   # (Flyway checksums the whole file — an edit to an applied migration fails
   # startup with `checksum mismatch`). PR-only and diff-scoped against the
   # resolved PR diff base, same as api-contract above.
   - id: db-migration-gate
-    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, advisory)"
+    name: "db-migration gate — rollback note + forward-only (rules.yaml db_change, enforced)"
     group: data
-    mode: advisory
-    verified: "2026-08-09 — on track for ADR-0144's 2026-08-15 enforce target"
+    mode: enforced
+    verified: "2026-08-16 — producer self-test and enforced PR-diff mode pass"
     when: pull_request
     needs_base: required
     selftest: python3 openbank-infra/scripts/check-db-migration.py --self-test
     selftest_expect: pass
     run: |
-      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}"
+      python3 openbank-infra/scripts/check-db-migration.py --base "${PR_DIFF_BASE}" --enforce
 
   # contract is the set of Kotlin data classes extending DomainEvent (JSON on
   # Kafka via the outbox; no .avsc files exist yet — the script covers those
@@ -2355,6 +2401,45 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-event-contract-code-agreement.py
+
+  # The PUBLISHED fleet-wide event document (#4761). `docs/asyncapi/openbank-events.yaml` is linked
+  # from the admin-ui developer-docs page, and until this gate NOTHING under `.github/` read it —
+  # the two ADR-0006 gates above scope to `openbank-contracts/`, so this file had never been
+  # validated against a producer in its life. It had drifted accordingly: 18 of 21 payload schemas
+  # asserted `eventType` as a BODY field, which is false for the 27-of-29 outbox-relayed producers
+  # (the dispatcher moves it to the `ce-type` Kafka header), and 15 of its 23 channel addresses
+  # named topics no service produces or consumes at all.
+  #
+  # That is not a cosmetic drift. A consumer author who follows the published schema writes
+  # `node.path("eventType")`, gets "", takes a quiet `?: return`, and discards 100% of messages with
+  # no error and no log — the failure state is indistinguishable from success at every layer. It
+  # blocked #1035 for four weeks on the sanctions channel.
+  #
+  # Checks: (A) every channel address is a topic some service actually speaks, derived from
+  # `mp.messaging.outgoing|incoming.*.topic` (and the `topics:` fan-in idiom audit-service uses);
+  # (B) every channel says where its discriminator lives — `ce-type` or `direct emitter`; (C) a
+  # channel claiming the header must not also declare a body `eventType`, resolved through
+  # `allOf`/`$ref` so inheriting EventEnvelope counts.
+  #
+  # It deliberately does NOT check the payload field set, and that is a limitation of the source,
+  # not of the effort: an outbox-relayed producer serialises the AGGREGATE, so there is no
+  # constructor at the call site and no literal JSON key anywhere in the tree — the same blind spot
+  # that makes event-contract-code-agreement structurally unable to cover these producers. The true
+  # field set needs a captured message or a registered wire schema (#1916; Apicurio is deployed,
+  # healthy, and holds zero artifacts). Retire this gate together with the document when #1916
+  # supersedes it with `openbank-contracts/`.
+  - id: asyncapi-doc-discriminator
+    name: "published AsyncAPI doc — discriminator + address reality (#4761, enforced)"
+    group: data
+    mode: enforced
+    rationale: "The published event document told consumers to read eventType from the body; it is a Kafka header for 27 of 29 producers, so a correct-looking consumer silently discards every message."
+    review_after: "2027-02-15"
+    min_subjects: 20
+    selftest: |
+      python3 .github/scripts/check-asyncapi-doc-discriminator.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-asyncapi-doc-discriminator.py
 
   - id: schema-compat-gate
     name: "schema-compat gate — event backward-compatibility (event_change, advisory)"
@@ -2638,6 +2723,28 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-roles-allowed-realm.py
+  # The sibling of the gate above, one layer earlier: that one asks whether the role a caller
+  # NEEDS can exist, this one whether the caller can present a token at all. An outbound client
+  # annotated @RegisterProvider(OidcClientRequest*Filter) mints from `quarkus.oidc-client`, a
+  # different extension from `quarkus.oidc` (inbound) that shares its three field names and
+  # differs by one hyphen. Missing it, or leaving its auth-server-url on the localhost default
+  # in a pod (where localhost is the service itself), sends every outbound call out bare and the
+  # callee answers 401 — not 403, so the natural first hypothesis sends you to Keycloak instead.
+  # Found by observability sweep 2026-08-16: ledger's daily FX revaluation had failed on every
+  # run it ever made and only an absent() alert noticed; settlement (money-path) had no block.
+  # The gate resolves the interpolation rather than matching an env NAME — the fleet spells the
+  # deployed override three ways and a name-match draft failed 16 correct services.
+  - id: oidc-client-configured
+    name: "outbound OIDC filter ⇒ a client it can actually mint from (enforced)"
+    group: security
+    mode: enforced
+    rationale: "An unmintable outbound token fails as a 401 from the CALLEE, which reads as an authorization problem and sends the reader to Keycloak; no test can catch it because a mock port, a @QuarkusTest security context and a pact mock server all supply the very token the real client cannot obtain (#3921: ledger's daily FX revaluation had never once succeeded, and settlement, money-path, had no client block at all)."
+    review_after: "2027-02-16"
+    min_subjects: 25   # 30 modules register the filter today (2026-08-16)
+    selftest: python3 .github/scripts/check-oidc-client-configured.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-oidc-client-configured.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
@@ -2664,6 +2771,32 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # Keycloak docker-dev / CI realm JSONs vs the deployed gitops template (issue #2540 gate-scope
+  # follow-up). The four checks above — this one included until now — all glob only
+  # `*realm-template*.json`. Two other tracked realm JSONs grant roles to the shared M2M service
+  # account and neither was read by anything: openbank-infra/docker/keycloak/realm/openbank-realm.json
+  # and .github/workflows/keycloak/openbank-realm.json. Measured 2026-08-16: both grant
+  # `service-account-openbank-services` ROLE_OPERATOR beyond the template's ROLE_API, and the CI
+  # realm additionally grants it ROLE_COMPLIANCE (15 `role_action_matrix` actions) — a third,
+  # unreviewed answer to "what does the shared client hold" that no existing check watched.
+  # ADVISORY, not enforced: whether the docker/CI realms should track the template, and the
+  # #3246 Vault reconcile that would make the template authoritative in practice, are both open
+  # policy calls this script does not make (see its header). This only makes the divergence
+  # visible at PR time — static, no cluster read, same shape as realm-template-importable above.
+  - id: realm-devci-artifact-parity
+    name: "Keycloak docker/CI realm JSONs vs gitops template (issue #2540, advisory)"
+    group: security
+    mode: advisory
+    rationale: "The docker-dev and CI realm JSONs grant the shared M2M service account roles the deployed gitops template does not (CI additionally grants ROLE_COMPLIANCE, 15 role_action_matrix actions); until this gate nothing read either file, so the divergence had no dedicated finding anywhere."
+    review_after: "2027-02-16"
+    verified: "2026-08-16 — self-test falsified against a constructed over-grant case and a matching clean case; real run confirms the docker/CI ROLE_OPERATOR + CI ROLE_COMPLIANCE grants measured on issue #2540"
+    min_subjects: 2
+    selftest: python3 .github/scripts/check-realm-devci-artifact-parity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-realm-devci-artifact-parity.py
+
   - id: opa-bundle-parses
     name: "OPA bundle must be loadable by OPA (generated artifact, not its sources)"
     group: gitops
@@ -3022,6 +3155,28 @@ gates:
     min_subjects: 3   # 5 required contexts today (2026-08-09)
     run: |
       python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
+
+  # #4716 (Refs #4533). An advisory written as a single `< X` interval misclassifies every
+  # dependency with parallel release lines: hibernate-reactive 3.4.2.Final sorts below `< 4.2.1`
+  # and CARRIES the fix (3.4.0 branched five months AFTER 4.2.1 shipped). 47 VEX statements sat
+  # at `affected` with an exit criterion no Quarkus platform can satisfy, and the "obvious"
+  # remediation would have crashed every service at boot. Version arithmetic cannot settle a
+  # cross-line case; a disassembly of the pinned jar can. This gate does not check the
+  # disassembly — it checks the one machine-checkable trace it leaves, that the verdict is
+  # anchored to a sha256 the build actually resolves rather than to sorting two strings.
+  # Falsified against the real pre-fix tree (3356426^): 47 of 47 red, exit 1.
+  - id: vex-range-reasoning
+    name: "a VEX verdict reasoned across release lines is anchored to a pinned artifact (#4716, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "Without it a VEX verdict can rest on version arithmetic alone, which is provably wrong for parallel release lines in both directions — it produced 47 false `affected` statements and an impossible remediation whose 'fix' would have failed every service at boot (#4533)."
+    review_after: "2027-02-16"
+    selftest: python3 .github/scripts/check-vex-range-reasoning.py --self-test
+    selftest_expect: pass
+    min_subjects: 400   # 824 verdict statements across 52 overlays today (2026-08-16)
+    budget_seconds: 20  # ~0.3s locally over the 52 overlays
+    run: |
+      python3 .github/scripts/check-vex-range-reasoning.py --enforce
 
   # ADR-0254. incluster-hostname-resolution shipped advisory with a "these six findings are
   # all benign" note; three were live (settlement-service and onboarding-service dialling

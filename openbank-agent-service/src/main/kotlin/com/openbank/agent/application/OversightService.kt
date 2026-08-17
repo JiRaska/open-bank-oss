@@ -9,12 +9,16 @@ import com.openbank.agent.application.port.`in`.ProposalQueries
 import com.openbank.agent.domain.model.ChatMessage
 import com.openbank.agent.domain.model.ChatRole
 import com.openbank.agent.domain.policy.AgentIdentity
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
-import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /**
  * The first autonomous control-plane agent (ADR-0031 D9 phase 2): a scheduled oversight sweep
@@ -41,17 +45,23 @@ class OversightService {
 
     @Inject lateinit var injectionGuard: PromptInjectionGuard
 
+    @Inject lateinit var domainMetrics: DomainMetrics
+
     @ConfigProperty(name = "agent.oversight.enabled", defaultValue = "false")
     var enabled: Boolean = false
 
     private val log = Logger.getLogger(OversightService::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    fun registerLiveness(@Observes @Suppress("UNUSED_PARAMETER") event: StartupEvent) {
+        if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     @Scheduled(cron = "{agent.oversight.cron}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
-    fun scheduledSweep() {
+    suspend fun scheduledSweep() {
         if (!enabled) return
-        // Worker thread (Quarkus scheduler), same bridge as ChatEndpoint: keeps the blocking
-        // OPA/MCP clients legal and the audit context on this thread.
-        runBlocking { sweep(trigger = "scheduled") }
+        sweep(trigger = "scheduled")
+        liveness?.recordSuccess()
     }
 
     suspend fun sweep(trigger: String): AgentChatService.ChatOutcome {
@@ -82,6 +92,8 @@ class OversightService {
         RegisteredPromptTemplates.oversightPrompt(pendingTitles)
 
     companion object {
+        private const val WORKFLOW_NAME = "agent-oversight-sweep"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
         val OVERSIGHT_IDENTITY = AgentIdentity(agentId = "compliance-officer", plane = "control")
         const val SWEEP_REQUEST =
             "Run the compliance oversight sweep now. Check sanctions screenings pending review, " +

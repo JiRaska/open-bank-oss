@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.21.0...account-service-v0.21.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **accounts:** refuse to close an account that still holds money ([#5072](https://github.com/JiRaska/open-bank-oss/issues/5072)) ([d7be3a3](https://github.com/JiRaska/open-bank-oss/commit/d7be3a3f82f29b190160e8cd6ebaa3dddcfc96ca))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.3...account-service-v0.21.0) (2026-08-16)
+
+
+### Features
+
+* **accounts:** let a customer rename an account (TOP-10 [#10](https://github.com/JiRaska/open-bank-oss/issues/10), part 1) ([#5002](https://github.com/JiRaska/open-bank-oss/issues/5002)) ([b9b3fc6](https://github.com/JiRaska/open-bank-oss/commit/b9b3fc675da7c5920d1d8fd4562fb001eb04635d))
+
 ## [0.20.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.2...account-service-v0.20.3) (2026-08-14)
 
 

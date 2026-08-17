@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.36.0
+  version: 1.38.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -324,6 +324,31 @@ paths:
         '403':
           description: Not the owner
 
+  /accounts/{accountId}/nickname:
+    patch:
+      tags: [Accounts]
+      summary: Set or clear the account's customer-chosen display label
+      operationId: renameAccount
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: {type: string, nullable: true}
+      responses:
+        '200':
+          description: Account with updated nickname
+        '400':
+          description: Malformed request body
+        '403':
+          description: Not the owner
+
   /balances/{accountId}:
     get:
       tags: [Balances]
@@ -523,6 +548,56 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Profile'
+
+  /payees:
+    get:
+      tags: [Payees]
+      summary: List the authenticated customer's saved payees, newest first
+      operationId: listPayees
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Saved payees
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Payee'}
+    put:
+      tags: [Payees]
+      summary: Save (or update) a payee — upsert by IBAN
+      operationId: savePayee
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/SavePayeeRequest'}
+      responses:
+        '200':
+          description: Saved payee
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Payee'}
+        '400':
+          description: Missing name or iban
+        '422':
+          description: Party already has the maximum of 30 saved payees
+
+  /payees/{iban}:
+    delete:
+      tags: [Payees]
+      summary: Remove a saved payee by IBAN. Idempotent — a missing IBAN is not an error.
+      operationId: deletePayee
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: iban, in: path, required: true, schema: {type: string}}
+      responses:
+        '204':
+          description: Removed (or already absent)
 
   /fx/rates:
     get:
@@ -1985,6 +2060,9 @@ components:
           type: string
           format: date
           nullable: true
+        nickname:
+          type: string
+          nullable: true
 
     # Mirrors openbank-account-service AccountPage (GET /api/v1/accounts is cursor-paginated,
     # not a bare array).
@@ -2204,6 +2282,36 @@ components:
         closedAt:
           type: string
           format: date-time
+
+    # Mirrors com.openbank.party.infrastructure.rest.Payee.toResponse() (openbank-party-service).
+    Payee:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        iban:
+          type: string
+        bic:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+
+    SavePayeeRequest:
+      type: object
+      required: [name, iban]
+      properties:
+        name:
+          type: string
+        iban:
+          type: string
+        bic:
+          type: string
+          nullable: true
 
     # Mirrors the projection returned by openbank-party-service GET /api/v1/parties/{id}
     # (PartyResource.Party.toResponse()). party-service does not declare a response schema for

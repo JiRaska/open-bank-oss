@@ -28,6 +28,7 @@ import {
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { hasPermission } from '@/lib/auth/roles'
 import { useCheckLog, type CheckLogEntry } from '@/lib/services/useCheckLog'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 
 const POLL = 30_000
@@ -65,21 +66,7 @@ function ClosingsContent() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span>{t('Účetnictví', 'Accounting')}</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Závěrky', 'Closings')}</span>
-          </div>
-          <h1 className="page-title">{t('Závěrky', 'Closings')}</h1>
-          <p className="page-subtitle">
-            {t('Denní tie-out (EoD) a měsíční uzávěrka výpisů (EoM)', 'Daily tie-out (EoD) and monthly statement close (EoM)')}
-          </p>
-        </div>
-      </div>
+      <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span>{t('Účetnictví', 'Accounting')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Závěrky', 'Closings')}</span></div>} icon={<CalendarClock size={20} aria-hidden="true" />} title={t('Závěrky', 'Closings')} subtitle={t('Denní tie-out (EoD) a měsíční uzávěrka výpisů (EoM)', 'Daily tie-out (EoD) and monthly statement close (EoM)')} />
 
       {/* Tab nav — same pattern as /payments */}
       <div style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.64.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.2...customer-edge-v0.64.0) (2026-08-17)
+
+
+### Features
+
+* **payees:** server-synced saved payees (TOP-10 [#5](https://github.com/JiRaska/open-bank-oss/issues/5)) ([#5154](https://github.com/JiRaska/open-bank-oss/issues/5154)) ([9c93621](https://github.com/JiRaska/open-bank-oss/commit/9c936211df184df867a6a274ce4cb09b64114f21))
+
+## [0.63.2](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.1...customer-edge-v0.63.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **accounts:** refuse to close an account that still holds money ([#5072](https://github.com/JiRaska/open-bank-oss/issues/5072)) ([d7be3a3](https://github.com/JiRaska/open-bank-oss/commit/d7be3a3f82f29b190160e8cd6ebaa3dddcfc96ca))
+
+## [0.63.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.0...customer-edge-v0.63.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **customer-edge:** announce the single-replica assumption behind PaymentSessionStore ([#5101](https://github.com/JiRaska/open-bank-oss/issues/5101)) ([0e48bd7](https://github.com/JiRaska/open-bank-oss/commit/0e48bd794b7db6aefe9047d60b83da183a776607)), closes [#4728](https://github.com/JiRaska/open-bank-oss/issues/4728)
+
+## [0.63.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.62.0...customer-edge-v0.63.0) (2026-08-16)
+
+
+### Features
+
+* **accounts:** let a customer rename an account (TOP-10 [#10](https://github.com/JiRaska/open-bank-oss/issues/10), part 1) ([#5002](https://github.com/JiRaska/open-bank-oss/issues/5002)) ([b9b3fc6](https://github.com/JiRaska/open-bank-oss/commit/b9b3fc675da7c5920d1d8fd4562fb001eb04635d))
+
 ## [0.62.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.61.0...customer-edge-v0.62.0) (2026-08-13)
 
 

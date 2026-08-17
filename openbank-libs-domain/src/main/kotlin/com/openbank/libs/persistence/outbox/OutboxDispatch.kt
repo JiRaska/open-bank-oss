@@ -20,6 +20,41 @@ package com.openbank.libs.persistence.outbox
  * from selecting and publishing the same rows (#1201). On a repository still using the
  * `claimProcessable` default, this is behaviourally identical to the old unclaimed peek.
  */
+/**
+ * Outcome of one claimed row's publish attempt (#5049): distinguishes a delivered event from a
+ * real-but-retryable failure from a terminal DEAD row, so a runtime-layer caller (see
+ * `AbstractOutboxDispatcher.dispatchScheduledBatch`) can attribute
+ * `DomainMetrics.outboxDispatched`/`.outboxDead` correctly without duplicating
+ * [OutboxFailurePolicy]'s terminal-vs-retry decision. [Failed.terminal] mirrors exactly what the
+ * row's own `markFailed` independently computes — both read the SAME
+ * [OutboxFailurePolicy.statusAfterFailure] over the entry's pre-failure `attemptCount + 1`, so
+ * this can never disagree with the status a repository implementation actually persists (see
+ * every `<Service>OutboxRepositoryImpl.applyFailure`, which does the identical computation).
+ */
+sealed class OutboxDispatchOutcome {
+    abstract val entry: OutboxEntry
+
+    /** The row published successfully and was marked SENT. */
+    data class Dispatched(override val entry: OutboxEntry) : OutboxDispatchOutcome()
+
+    /** The row failed to publish. [terminal] is true when this failure parked it DEAD (N5). */
+    data class Failed(override val entry: OutboxEntry, val terminal: Boolean) : OutboxDispatchOutcome()
+}
+
+/**
+ * Result of one [OutboxDispatch.dispatchOnce] batch: the per-row outcome for every entry this
+ * call actually attempted to publish. A row left untouched by a batch abandoned mid-way (see
+ * [OutboxDispatch.isTransportUnavailable]) is simply absent — not a synthetic `Failed`, since no
+ * attempt was made against it.
+ */
+data class OutboxDispatchResult(val outcomes: List<OutboxDispatchOutcome> = emptyList()) {
+    /** Count of rows this batch delivered successfully. */
+    val dispatchedCount: Int get() = outcomes.count { it is OutboxDispatchOutcome.Dispatched }
+
+    /** Count of rows this batch parked as terminal DEAD (ADR-0050 N5). */
+    val deadCount: Int get() = outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }
+}
+
 object OutboxDispatch {
     // JDK System.Logger, not org.jboss.logging.Logger — this module must stay framework-free
     // (ADR-0002/ADR-0122, #3670). Same category, same destination: under Quarkus the JDK
@@ -91,15 +126,17 @@ object OutboxDispatch {
         repository: OutboxRepository,
         batchSize: Int = DEFAULT_BATCH_SIZE,
         publish: suspend (entry: OutboxEntry) -> Unit,
-    ) {
+    ): OutboxDispatchResult {
         val claimed = runCatching { repository.claimProcessable(batchSize) }
             .onFailure { ex -> log.log(System.Logger.Level.WARNING, "outbox.claimProcessable failed", ex) }
-            .getOrNull() ?: return
+            .getOrNull() ?: return OutboxDispatchResult()
 
+        val outcomes = mutableListOf<OutboxDispatchOutcome>()
         for ((index, entry) in claimed.withIndex()) {
             try {
                 publish(entry)
                 repository.markSent(entry.eventId)
+                outcomes += OutboxDispatchOutcome.Dispatched(entry)
             } catch (ex: Exception) {
                 if (isTransportUnavailable(ex)) {
                     log.log(
@@ -108,10 +145,16 @@ object OutboxDispatch {
                             "${claimed.size - index} row(s) left for the next tick — no attempt consumed",
                         ex,
                     )
-                    return
+                    return OutboxDispatchResult(outcomes)
                 }
                 repository.markFailed(entry.eventId, ex.message ?: ex.javaClass.simpleName)
+                // Same computation `markFailed` applies internally (see the class doc on
+                // OutboxDispatchOutcome) — attemptCount BEFORE this failure was recorded, so the
+                // post-failure count is entry.attemptCount + 1.
+                val terminal = OutboxFailurePolicy.statusAfterFailure(entry.attemptCount + 1) == OutboxStatus.DEAD
+                outcomes += OutboxDispatchOutcome.Failed(entry, terminal)
             }
         }
+        return OutboxDispatchResult(outcomes)
     }
 }

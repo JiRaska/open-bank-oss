@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.1...consent-service-v0.17.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **consent:** record expiration sweep liveness ([#5030](https://github.com/JiRaska/open-bank-oss/issues/5030)) ([a9a141b](https://github.com/JiRaska/open-bank-oss/commit/a9a141bea2d6860dff016f2c09ffad0b4b97ecb9))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.0...consent-service-v0.17.1) (2026-08-09)
 
 

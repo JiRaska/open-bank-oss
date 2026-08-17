@@ -150,7 +150,7 @@ export default function DashboardPage() {
   const groups = ['core', 'payments', 'compliance', 'identity', 'open-banking', 'platform']
 
   return (
-    <main className={styles.dashboard}>
+    <div className={styles.dashboard}>
       <PageHeader
         title={t('Můj pracovní prostor', 'My workspace')}
         subtitle={`${personaLabel(persona, personaLanguage)} · ${t('Prioritní pracovní fronty a aktuální stav platformy.', 'Priority work queues and the current platform state.')}`}
@@ -308,6 +308,6 @@ export default function DashboardPage() {
           ))}
         </div>
       </section>
-    </main>
+    </div>
   )
 }

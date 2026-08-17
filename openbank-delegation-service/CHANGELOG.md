@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.6.0...delegation-service-v0.6.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **delegation:** record expiration sweep liveness ([#5034](https://github.com/JiRaska/open-bank-oss/issues/5034)) ([db6e903](https://github.com/JiRaska/open-bank-oss/commit/db6e9039e6ffdd0512dafd806b9ae53400570d3f))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.5.2...delegation-service-v0.6.0) (2026-08-09)
 
 

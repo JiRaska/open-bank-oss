@@ -8,6 +8,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check } from 'lucide-react'
 
 const SVC = 'pid-service'
@@ -241,34 +242,14 @@ export default function IdentityCasesPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span>
-              <span className="breadcrumb-sep">/</span>
-              <span>{t('Klienti', 'Customers')}</span>
-              <span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">{t('Ověření identity', 'Identity Verification')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Fingerprint size={18} style={{ color: 'var(--accent)' }} />
-              {t('Ověření identity — čtyři oči', 'Identity Verification — Four-Eyes')}
-            </h1>
-            <p className="page-subtitle">
-              {t(
-                'Nejednoznačné identity z onboardingu (kolize RČ nebo jmenovci). Rozhodnutí vyžaduje dva různé schvalovatele (ADR-0072 / ADR-0030).',
-                'Ambiguous onboarding identities (RČ collisions or namesakes). A decision requires two distinct approvers (ADR-0072 / ADR-0030).',
-              )}
-            </p>
-          </div>
-          <button className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
-            <RefreshCw size={14} style={{ marginRight: '4px' }} />
-            {t('Obnovit', 'Refresh')}
-          </button>
-        </div>
-      </div>
-
+      <PageHeader
+        icon={<Fingerprint size={20} aria-hidden="true" />}
+        title={t('Ověření identity — čtyři oči', 'Identity Verification — Four-Eyes')}
+        subtitle={t('Nejednoznačné identity z onboardingu (kolize RČ nebo jmenovci). Rozhodnutí vyžaduje dva různé schvalovatele (ADR-0072 / ADR-0030).', 'Ambiguous onboarding identities (RČ collisions or namesakes). A decision requires two distinct approvers (ADR-0072 / ADR-0030).')}
+        actions={<button className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
+          <RefreshCw size={14} style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
+        </button>}
+      />
       {unavail ? (
         <DataUnavailable kind={unavail} service="pid-service" feature={t('ověření identity', 'identity verification')} lang={language} />
       ) : cases.length === 0 && !loading ? (

@@ -14,6 +14,7 @@ import com.openbank.libs.contact.ContactPolicyGate
 import com.openbank.libs.contact.MarketingCallSite
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.notification.application.port.out.EmailMetricsPort
 import com.openbank.notification.application.port.out.NotificationOutboxRepository
 import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
@@ -21,6 +22,7 @@ import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
+import com.openbank.notification.domain.model.EmailSendOutcome
 import com.openbank.notification.domain.model.MobileDeepLink
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
@@ -34,6 +36,7 @@ import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
+import com.openbank.notification.infrastructure.client.PartyMergeResolver
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -51,6 +54,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
@@ -61,7 +65,11 @@ import java.util.concurrent.Executor
 
 @ApplicationScoped
 @Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
-class NotificationConsumer {
+class NotificationConsumer @Inject constructor(
+    /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
+    @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
+    val mailerMocked: Boolean,
+) {
 
     companion object {
         /**
@@ -100,6 +108,34 @@ class NotificationConsumer {
             else -> NotificationOutcome.FAILED
         }
 
+        /**
+         * Terminal status of one EMAIL send from its three-state [EmailSendOutcome] (issue #4737).
+         *
+         * Visible for tests, and deliberately a pure function of one value: like [pushOutcomeOf],
+         * this mapping *is* the defect. The previous form asked only "did the `Uni` fail?", and a
+         * mocked `ReactiveMailer.send` does not fail — it completes exactly like a real accept —
+         * so an environment with no SMTP recorded `SENT` with `sent_at` for mail that never left
+         * the process, and looked healthy from the status column, the outcome stream and the logs
+         * alike.
+         *
+         * `MOCKED` maps to SUPPRESSED, not FAILED, for the reason [pushOutcomeOf] gives: nothing
+         * was rejected and nothing is retryable, the channel is switched off. It must also never
+         * map to SENT — that is the whole bug, and the sandbox's mock is deliberate (its gitops
+         * manifest says so), so the record's honesty has to hold independently of the config.
+         */
+        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome = when (outcome) {
+            EmailSendOutcome.ACCEPTED -> NotificationOutcome.SENT
+            EmailSendOutcome.MOCKED -> NotificationOutcome.SUPPRESSED
+            EmailSendOutcome.FAILED -> NotificationOutcome.FAILED
+        }
+
+        /** Reason code accompanying [emailOutcomeOf]; null exactly when the mailer accepted. */
+        fun emailReasonOf(outcome: EmailSendOutcome): String? = when (outcome) {
+            EmailSendOutcome.ACCEPTED -> null
+            EmailSendOutcome.MOCKED -> NotificationOutcomeEvent.REASON_MAILER_MOCKED
+            EmailSendOutcome.FAILED -> NotificationOutcomeEvent.REASON_MAILER_REFUSED
+        }
+
         /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
         fun pushReasonOf(accepted: Int, skipped: Int): String? = when {
             accepted > 0 -> null
@@ -133,6 +169,30 @@ class NotificationConsumer {
      */
     @Inject lateinit var pushMetrics: PushMetricsPort
 
+    @Inject lateinit var emailMetrics: EmailMetricsPort
+
+    /**
+     * Whether `ReactiveMailer` is the Quarkus mock (issue #4737).
+     *
+     * Read as configuration rather than inferred from the send result, because there is nothing to
+     * infer from: a mocked send completes exactly like a real accept — same `Uni`, no item, no
+     * failure, no distinguishing signal anywhere in the reactive chain. The configuration is the
+     * only place the difference exists.
+     *
+     * Deliberately **not** the `@ConfigProperty` + `var x: Boolean = false` field shape its
+     * neighbours use (`ApnsPushSender.enabled` and 109 other fleet occurrences, all frozen in
+     * `configproperty-kotlin-defaults-baseline.txt`): a Kotlin default generates a synthetic
+     * constructor, ArC builds the bean through it, and the annotation is never applied — the field
+     * would sit at `false` forever, whatever the environment says. That would have made this
+     * entire fix inert in the one deployment that needs it, and silently so, which is the same
+     * family of defect as the bug being fixed.
+     *
+     * `defaultValue = "false"` matches Quarkus's own production default, so a deployment that says
+     * nothing about the mailer is treated as a real one; the sandbox sets `QUARKUS_MAILER_MOCK`
+     * explicitly.
+     */
+    // Declared on the primary constructor (see KDoc above) — the one shape that actually applies.
+
     @Inject lateinit var clock: Clock
 
     @Inject lateinit var audit: AuditEventPublisher
@@ -143,6 +203,10 @@ class NotificationConsumer {
     @Inject
     @RestClient
     lateinit var partyContactClient: PartyContactClient
+
+    /** Follows the ADR-0179 `merged_into` pointer at dispatch entry (issue #1984) — see [dispatch]. */
+    @Inject
+    lateinit var partyMergeResolver: PartyMergeResolver
 
     private val log = Logger.getLogger(NotificationConsumer::class.java)
 
@@ -226,7 +290,21 @@ class NotificationConsumer {
             }
     }
 
-    private fun dispatch(req: NotificationRequest): Uni<Void> {
+    /**
+     * Resolves `req.partyId` through [PartyMergeResolver] before anything else runs (issue #1984
+     * fleet sweep — ADR-0179 consumer adoption). This is the identity chokepoint: persistence,
+     * the preference check, the device-token fan-out and the EMAIL address lookup all read
+     * `partyId` off the request that reaches [dispatchResolved], so resolving once here means none
+     * of them need their own adoption. A request for a since-merged party is redirected to the
+     * survivor; an unaffected request pays one resolver call that is almost always a cache hit
+     * (see [PartyMergeResolver]).
+     */
+    private fun dispatch(req: NotificationRequest): Uni<Void> =
+        partyMergeResolver.resolve(req.partyId).chain { resolved ->
+            dispatchResolved(if (resolved == req.partyId) req else req.copy(partyId = resolved))
+        }
+
+    private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
         val (subject, body) = renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
@@ -491,6 +569,25 @@ class NotificationConsumer {
                 }
         }
 
+    /**
+     * Hand one rendered mail to the mailer and record what actually happened (issue #4737).
+     *
+     * Terminal status comes from the three-state [EmailSendOutcome], not from "did the `Uni`
+     * fail?":
+     * - **SENT** — the mailer accepted the message. Accepted, not delivered: an SMTP accept is a
+     *   handoff to a relay and a later bounce can still refine it (ADR-0239 D4 `BOUNCED`).
+     * - **SUPPRESSED** / `mailer_mocked` — `quarkus.mailer.mock=true`, so nothing left the
+     *   process. This used to be SENT *with `sent_at` populated*: the mock completes successfully,
+     *   the code asked only whether the call threw, and so a deployment with no SMTP produced
+     *   byte-identical status and telemetry to a working one. Exactly the `PushResult.skipped()`
+     *   defect (ADR-0252 phase 0) on the channel #4363 is considering re-routing *to* — and that
+     *   one was found by a customer, not by any signal.
+     * - **FAILED** / `mailer_refused` — the mailer rejected the message or the call failed.
+     *
+     * The deployed sandbox mocks the mailer deliberately, and that stays true; what changes is
+     * that the record now says so. A configuration choice must not be able to make the database
+     * assert a delivery that never occurred.
+     */
     private fun deliverEmail(
         req: NotificationRequest,
         recipient: String,
@@ -503,9 +600,33 @@ class NotificationConsumer {
         // "the mail never went out" vs "the mail went out but recording it failed" — is kept, and
         // is now visible as two branches instead of two positions in a chain.
         .onItemOrFailure().transformToUni { _, failure ->
-            if (failure != null) {
-                log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
-                markStatus(req, entity, NotificationOutcome.FAILED, NotificationOutcomeEvent.REASON_MAILER_REFUSED)
+            // Three states, not two (issue #4737). A mocked mailer completes with no failure, so
+            // `failure == null` on its own means "the call did not throw", never "the mail left".
+            val sendOutcome = when {
+                failure != null -> EmailSendOutcome.FAILED
+                mailerMocked -> EmailSendOutcome.MOCKED
+                else -> EmailSendOutcome.ACCEPTED
+            }
+            emailMetrics.recordSend(req.template, sendOutcome)
+            if (sendOutcome != EmailSendOutcome.ACCEPTED) {
+                if (failure != null) {
+                    log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
+                } else {
+                    // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
+                    // no-op is greppable, and counted as MOCKED so it is alertable — a log line is
+                    // not a signal anyone watches, which is how the push channel's identical
+                    // no-op went unnoticed until a customer reported it.
+                    log.infof(
+                        "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
+                            "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
+                        req.partyId,
+                        req.template,
+                        NotificationOutcomeEvent.REASON_MAILER_MOCKED,
+                    )
+                }
+                // sent = false, so `sent_at` stays NULL: the column means "when did this leave the
+                // process", and nothing left it.
+                markStatus(req, entity, emailOutcomeOf(sendOutcome), emailReasonOf(sendOutcome))
             } else {
                 markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
                     .onItem().invoke { _ ->

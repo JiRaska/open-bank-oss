@@ -83,24 +83,36 @@ spec:
         # values — nesting cleanupJobs under cleanupController silently no-ops it.
         # Follow-up: bitnamilegacy is a frozen archive; move to a self-hosted
         # kubectl+shell image in ECR for a maintained long-term base.
+        # ttlSecondsAfterFinished (chart value, per cleanup job) — a finished Job object
+        # self-deletes after 48h. failedJobsHistoryLimit alone does NOT clear a tombstone:
+        # it caps how many failed Jobs are kept, so the LAST failure survives forever even
+        # after every later run succeeded, and KubeJobFailed keeps firing on that dead
+        # object. Measured 2026-08-16: 9 of 25 firing alerts were KubeJobFailed and 7 were
+        # stale this way, two of them these kyverno cleanup jobs (which run every 5-10 min,
+        # so the surviving tombstone was hours behind a long line of successes).
         cleanupJobs:
           admissionReports:
+            ttlSecondsAfterFinished: 172800
             image:
               repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           clusterAdmissionReports:
+            ttlSecondsAfterFinished: 172800
             image:
               repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           ephemeralReports:
+            ttlSecondsAfterFinished: 172800
             image:
               repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           clusterEphemeralReports:
+            ttlSecondsAfterFinished: 172800
             image:
               repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5
           updateRequests:
+            ttlSecondsAfterFinished: 172800
             image:
               repository: docker.io/bitnamilegacy/kubectl
               tag: 1.28.5

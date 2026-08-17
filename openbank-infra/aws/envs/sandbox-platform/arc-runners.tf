@@ -673,27 +673,29 @@ data "aws_iam_policy_document" "arc_deploy_ecr" {
       "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"
     ]
   }
-  # A new service's ECR repository is declared nowhere — every one of the ~32 existing repos was
-  # created by hand — so the first build of a new service compiles, runs the whole cold-cache
-  # Gradle build, and dies at the push with `name unknown` (issue #3423, measured on
-  # openbank-delegation-service). Nothing upstream can see it: the drift declaration checks only
-  # the pin's SHAPE, and the attestation gate reports the image as ABSENT, which is the correct
-  # state for a first registration.
+  # CreateRepository REMOVED (#3661, point 2 of #3477): every openbank-* repository this role
+  # could have created is now declared in ecr-service-repositories.tf and, as of that PR's apply,
+  # imported into Terraform state — a build job that can create registry namespaces is exactly
+  # the thing declaring them was meant to remove the need for (#3423's original hole). Verified
+  # before removing, not assumed: `aws ecr describe-repositories` against the live account, diffed
+  # against the file's own for_each derivation (gitops image pins + the CI runner image), showed
+  # zero repositories the declaration does not already cover.
   #
-  # Scoped to openbank-* deliberately. CreateRepository already exists on this role for
-  # repository/docker-hub/* (the pull-through cache); widening it to `*` would let a build create
-  # anything in the registry, and the naming prefix is the whole boundary.
+  # Describe STAYS. It answers a question CreateRepository never did: whether a missing repository
+  # is a real drift (Terraform's declaration and the account have diverged — someone deleted a
+  # repository outside Terraform, or a new service's gitops manifest landed without its
+  # ecr-service-repositories.tf entry in the same PR) versus this role simply lacking permission
+  # to see it. Collapsing that distinction is what made #3444 fail builds for repositories that
+  # already existed (reverted by #3453) — the same failure mode Create's removal must not
+  # reintroduce from the opposite direction. ensure-ecr-repository.sh's fail-open path (#3492)
+  # keeps working unchanged: it can still observe and still fails open, it just never creates.
   #
-  # Describe is here for a reason of its own: without it the caller cannot tell
-  # RepositoryNotFoundException from AccessDenied, and reading the latter as the former is what
-  # made #3444 fail builds for repositories that already existed (reverted by #3453).
-  # ensure-ecr-repository.sh now fails OPEN when it cannot observe the registry, so it is inert
-  # until this statement applies rather than dependent on it.
+  # sid renamed from EcrCreateServiceRepository — the old name asserted a capability this
+  # statement no longer grants.
   statement {
-    sid = "EcrCreateServiceRepository"
+    sid = "EcrDescribeServiceRepository"
     actions = [
       "ecr:DescribeRepositories",
-      "ecr:CreateRepository",
     ]
     resources = [
       "arn:aws:ecr:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:repository/openbank-*"

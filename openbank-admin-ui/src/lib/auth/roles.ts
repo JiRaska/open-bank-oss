@@ -28,7 +28,11 @@ export type Role = typeof ROLES[keyof typeof ROLES]
 // Permission matrix — what each role can access
 export const PERMISSIONS = {
   // Dashboard
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
+  // Every interactive staff persona needs the workspace landing page. Without
+  // the KYC and supervisor entries their role-specific workspace can be
+  // derived, but the role matrix says they may not view the dashboard — a
+  // contradiction ADR-0229 D4 explicitly rules out.
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -57,7 +61,17 @@ export const PERMISSIONS = {
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
-  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // ROLES.DEMO here (and nowhere else in this file) because onboarding-service's own
+  // @RolesAllowed(Roles.VIEWER, ...) is the one backend in this matrix that already accepts
+  // a plain viewer — verified by reading OnboardingResource.kt, not assumed. Every other
+  // *:view permission demo might plausibly want (kyc, audit, delegations, notifications:
+  // checked; compliance/regulatory/technical-accounts/templates/system: not yet checked)
+  // gates a backend or OPA rule with no viewer-equivalent tier, so adding DEMO there would
+  // render a nav link that 403s on click — worse than today's hidden link, and the opposite
+  // of what a demo account is for. Tracked as issue #5020 before widening
+  // further; do not add ROLES.DEMO to another line here without first confirming its
+  // backend accepts VIEWER-tier reads.
+  "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.DEMO],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -110,7 +124,17 @@ export const PERMISSIONS = {
   "opsmessage:compose":       [ROLES.ADMIN, ROLES.OPERATOR],
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
-  "system:view":              [ROLES.ADMIN, ROLES.OPERATOR],
+  // ROLES.DEMO added 2026-08-16 (issue #5020), verified safe two independent ways before
+  // adding: middleware.ts's routeGuards array has a pattern for /system/config (ADMIN only,
+  // the mutation path — untouched) but NONE for the general /system/* view pages, so no
+  // route-level role check exists to conflict with; and every BFF route these pages call
+  // (finops/*, devops/*, security, observability/*, temporal/status) either has no
+  // permission check of its own at all, or (api/iaops/rca) checks this exact
+  // hasPermission(roles, 'system:view') — same source of truth, so widening it here widens
+  // consistently everywhere it is read. Unlike onboarding:view above, there is no backend
+  // @RolesAllowed/rego to have verified against, because these pages proxy telemetry
+  // (Prometheus, Holmes, k8s) rather than calling a service with its own RBAC.
+  "system:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.DEMO],
   "system:config":            [ROLES.ADMIN],
   // Docs
   "docs:view":                [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
@@ -134,6 +158,7 @@ export function hasPermission(roles: string[], permission: Permission): boolean 
  * be stricter than `/system` without an exception in a page component.
  */
 const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = [
+  ['dashboard:view', ['/dashboard']],
   ['system:config', ['/system/config']],
   ['catalog:read', ['/product-studio']],
   ['templates:view', ['/document-templates']],

@@ -39,6 +39,12 @@ data class Account(
     val goalName: String? = null,
     val goalTargetMinorUnits: Long? = null,
     val goalTargetDate: LocalDate? = null,
+    /**
+     * Customer-chosen label for this account ("Dovolená", "Firemní"), shown instead of the
+     * generic account-type name. Purely cosmetic — never used for routing, matching, or any
+     * authorization decision. Null means "use the account-type default name".
+     */
+    val nickname: String? = null,
 ) {
     fun canDebit(amount: Money): Boolean {
         require(amount.currency == currency) { "Currency mismatch" }
@@ -71,6 +77,9 @@ data class Account(
         check(status == AccountStatus.PENDING_ACTIVATION) { "Cannot activate account in status $status" }
         return copy(status = AccountStatus.ACTIVE)
     }
+
+    /** Set or clear the customer-chosen label. Blank is treated as "clear" (revert to default). */
+    fun rename(nickname: String?): Account = copy(nickname = nickname?.trim()?.ifBlank { null })
 }
 
 enum class AccountType {

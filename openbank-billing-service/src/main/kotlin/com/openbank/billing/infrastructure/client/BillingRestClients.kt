@@ -32,9 +32,20 @@ data class FeeDto(
     val waiveCondition: String? = null,
 )
 
-/** The subset of account-service `GET /api/v1/accounts/{id}` the billing read path needs. */
+/**
+ * The subset of account-service `GET /api/v1/accounts/{id}` the billing read path needs.
+ * [partyId] was added for the ADR-0248 annual fee-summary's `partyRef` field — account-service's
+ * `AccountResponse` already returns it (`partyId: UUID`, `AccountDtos.kt`), this DTO simply had
+ * never mapped it before there was a reader.
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class AccountDto(val id: String, val productId: String, val currencyCode: String, val status: String? = null)
+data class AccountDto(
+    val id: String,
+    val productId: String,
+    val currencyCode: String,
+    val status: String? = null,
+    val partyId: String? = null,
+)
 
 /** The subset of balance-service `GET /api/v1/balances/{accountId}/{currency}` we need. */
 @JsonIgnoreProperties(ignoreUnknown = true)

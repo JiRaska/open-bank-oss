@@ -26,12 +26,23 @@ dependencies {
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.oidc)
     implementation(libs.kotlinx.coroutines.core)
+    // Needed once the REST layer has suspend methods over a reactive Panache repository
+    // (the ICT incident register, #4728) — mirrors consent/lending, which have the same shape.
+    implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs"))
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // IctIncidentDurabilityIT drives the real REST endpoints against a real Postgres: the row it
+    // asserts is the whole point of #4728, and a mocked repository cannot show one.
+    testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.junit)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO

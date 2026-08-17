@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.3...billing-service-v0.9.0) (2026-08-16)
+
+
+### Features
+
+* **billing-service:** add annual fee-summary aggregation for PAD Art. 5 statements ([#4129](https://github.com/JiRaska/open-bank-oss/issues/4129)) ([4bd9985](https://github.com/JiRaska/open-bank-oss/commit/4bd99857de524920066b99201c216476d1255408))
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.8.2...billing-service-v0.8.3) (2026-08-02)
 
 

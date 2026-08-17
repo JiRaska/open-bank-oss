@@ -107,36 +107,91 @@ def artifact_set(path: pathlib.Path) -> set[str]:
 
 # `--write-verification-metadata` OOMs at Gradle's default heap: measured, it dies
 # with `Java heap space` even on a single module. This is not optional tuning.
-GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx6g"
+#
+# 6g was not enough either (#4907): `openbank-libs-runtime` — the largest shared dependency graph
+# in the tree — still died with `Java heap space` under
+# `--refresh-dependencies --write-verification-metadata sha256`, twice, including a clean re-run.
+# That blocks a required context on ANY pull request that touches a libs module's build file.
+#
+# Before raising it, the mechanism was verified rather than assumed: `org.gradle.jvmargs` passed as
+# `-D` on the command line is a classic place for a setting to be silently dropped. An init script
+# printing the build JVM's Runtime.maxMemory() reports 6144 MB with this flag and 3072 MB without
+# it (the gradle.properties default), so the value does reach the build JVM. The flag works; the
+# number was too small.
+#
+# 8g is a STEP, not a measured threshold — the local reproduction needed to find the real figure did
+# not complete. `ubuntu-latest` has 16 GB, so 8g leaves headroom for the launcher and the Kotlin
+# daemons. If this recurs, raise the number; do not re-litigate whether the flag applies.
+GRADLE_HEAP = "-Dorg.gradle.jvmargs=-Xmx8g"
+
+# "Failed to notify build model lifecycle listener > Java heap space" (2026-08-16, run 31903136753,
+# AFTER the 8g raise above had already landed on main, regenerating openbank-libs-runtime ALONE --
+# not #4793's batching shape, which #5031 already fixed and this branch already carries).
+#
+# `-Dorg.gradle.jvmargs` on the command line configures the DAEMON/worker JVM Gradle spawns; it does
+# NOT touch the `./gradlew` LAUNCHER process's own heap, which Gradle's wrapper script reads from
+# `GRADLE_OPTS`/`JAVA_OPTS` instead. "Build model lifecycle listener" notification happens in that
+# launcher process during configuration, before the worker JVM's heap is even relevant -- so raising
+# GRADLE_HEAP was raising the wrong pool for this failure. The same distinction is already made
+# fleet-wide: `openbank-product-catalog/Dockerfile.native`'s builder stage sets a bare `GRADLE_OPTS`
+# for exactly this reason, on a comparably large full-repo `settings.gradle.kts` (30+ modules).
+#
+# Passed as `env`, not appended to the command line -- GRADLE_OPTS is read from the environment, a
+# `-D` argument on the invoked `./gradlew` script would just be an inert positional argument to it.
+GRADLE_LAUNCHER_OPTS = "-Xmx1g"
 
 
 def regenerate(modules: list[str]) -> None:
-    """Run the metadata writer for the given modules, in place.
+    """Run the metadata writer for each module IN ITS OWN Gradle invocation, in place.
 
-    Raises RegenerationFailed if Gradle itself failed. That is deliberately NOT the
-    same outcome as "a gap was found": a crashed build proves nothing either way,
-    and reporting it as a gap would send the author chasing entries that are fine.
+    Raises RegenerationFailed if Gradle itself failed on any module. That is
+    deliberately NOT the same outcome as "a gap was found": a crashed build proves
+    nothing either way, and reporting it as a gap would send the author chasing
+    entries that are fine.
+
+    ONE INVOCATION PER MODULE, not one invocation for the whole list (#4793). The
+    periodic sweep passes several modules per shard (`--shard I/N` strides a sorted
+    list, so a shard can land `openbank-libs-runtime` next to two or three others by
+    coincidence of alphabetical distance, not by any weighting). Bundling them into a
+    single `./gradlew ... target1 target2 target3` command line means ONE JVM holds
+    every module's resolved dependency graph in memory AT THE SAME TIME — so even
+    after #4907 raised the heap enough for libs-runtime ALONE, shard 4 still died: it
+    was libs-runtime plus three more modules in one process. Invoking Gradle once per
+    module releases the JVM (and its heap) between modules, so the peak footprint is
+    bounded by the single largest module in the shard, not their sum — the same bound
+    the PR-gate case (always exactly one module) already runs under successfully.
     """
-    targets = [f":{module}:{task}" for module in modules for task in tasks_for(module)]
-    result = subprocess.run(
-        ["./gradlew", "--write-verification-metadata", "sha256",
-         # Without this the check is vacuous on CI. A warm Gradle cache does not
-         # re-resolve metadata artifacts, so nothing gets re-hashed and the run
-         # reports "no gaps" even when an entry is demonstrably missing — measured:
-         # delete a known entry, run without --refresh-dependencies, and it passes.
-         # CI always has a warm cache (`actions/setup-java` with `cache: gradle`).
-         "--refresh-dependencies",
-         *targets, GRADLE_HEAP, "--no-daemon", "--console=plain", "-q"],
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RegenerationFailed(result.returncode)
+    failures: list[tuple[str, int]] = []
+    for module in modules:
+        targets = [f":{module}:{task}" for task in tasks_for(module)]
+        env = dict(os.environ)
+        env["GRADLE_OPTS"] = GRADLE_LAUNCHER_OPTS
+        result = subprocess.run(
+            ["./gradlew", "--write-verification-metadata", "sha256",
+             # Without this the check is vacuous on CI. A warm Gradle cache does not
+             # re-resolve metadata artifacts, so nothing gets re-hashed and the run
+             # reports "no gaps" even when an entry is demonstrably missing — measured:
+             # delete a known entry, run without --refresh-dependencies, and it passes.
+             # CI always has a warm cache (`actions/setup-java` with `cache: gradle`).
+             "--refresh-dependencies",
+             *targets, GRADLE_HEAP, "--no-daemon", "--console=plain", "-q"],
+            check=False,
+            env=env,
+        )
+        if result.returncode != 0:
+            failures.append((module, result.returncode))
+    if failures:
+        raise RegenerationFailed(failures)
 
 
 class RegenerationFailed(RuntimeError):
-    def __init__(self, code: int) -> None:
-        super().__init__(f"gradle exited {code}")
-        self.code = code
+    def __init__(self, failures: list[tuple[str, int]]) -> None:
+        detail = ", ".join(f"{module} (exit {code})" for module, code in failures)
+        super().__init__(f"gradle failed for: {detail}")
+        self.failures = failures
+        # Kept for callers that only cared about "did it fail" before this change —
+        # the first module's code, which is what a single-module (PR-gate) call always was.
+        self.code = failures[0][1]
 
 
 def selftest() -> int:

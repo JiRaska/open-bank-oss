@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface Proposal {
   id: string
@@ -114,27 +115,15 @@ export default function ApprovalsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ClipboardCheck size={18} style={{ color: 'var(--accent)' }} />
-            {t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
-              'Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.',
-              'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.',
-            )}
-          </p>
-        </div>
-        <button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
+        icon={<ClipboardCheck size={18} aria-hidden="true" />}
+        title={t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
+        subtitle={t('Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.', 'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.')}
+        actions={<button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
       {error && (
         <div className="card" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid #dc2626', display: 'flex', gap: 8, alignItems: 'center', color: '#dc2626', fontSize: 13 }}>

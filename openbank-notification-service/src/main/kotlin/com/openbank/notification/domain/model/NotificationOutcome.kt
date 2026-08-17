@@ -70,6 +70,20 @@ data class NotificationOutcomeEvent(
          */
         const val REASON_PUSH_ADAPTER_DISABLED: String = "push_adapter_disabled"
 
+        /**
+         * Issue #4737: the mailer is mocked (`quarkus.mailer.mock=true`), so nothing left the
+         * process. The EMAIL mirror of [REASON_PUSH_ADAPTER_DISABLED], and it was the same bug —
+         * a mocked `ReactiveMailer.send` completes *successfully* without opening an SMTP
+         * connection, so the send took the success branch and committed `SENT` with `sent_at` for
+         * a message that was never transmitted.
+         *
+         * SUPPRESSED rather than FAILED, for the reason the push case is: nothing was rejected and
+         * nothing is retryable — the channel is switched off. Folding a configuration state into
+         * the delivery-failure series would make that series unusable for alerting, which is the
+         * mirror image of the defect being fixed.
+         */
+        const val REASON_MAILER_MOCKED: String = "mailer_mocked"
+
         /** ADR-0219 D4: `ContactPolicyGate` reasons a MARKETING send can now also be denied for. */
         const val REASON_SEND_CAP_REACHED: String = "send_cap_reached"
         const val REASON_QUIET_HOURS: String = "quiet_hours"

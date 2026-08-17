@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.19.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.1...agent-service-v1.19.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **observability:** track gauge refresh liveness ([#5087](https://github.com/JiRaska/open-bank-oss/issues/5087)) ([86904fa](https://github.com/JiRaska/open-bank-oss/commit/86904faa8ae0fdfd7e085b4c4f175691ae07c865))
+
+## [1.19.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.0...agent-service-v1.19.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **agent:** make oversight scheduler live ([#5080](https://github.com/JiRaska/open-bank-oss/issues/5080)) ([3516598](https://github.com/JiRaska/open-bank-oss/commit/35165986663cfb09628ec2396da1e2ed32b46d98))
+
 ## [1.19.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.18.0...agent-service-v1.19.0) (2026-08-14)
 
 

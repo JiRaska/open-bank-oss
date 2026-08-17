@@ -72,6 +72,59 @@ class CatalogPlatformResourceTest {
             expectedValid = false,
             schemaVersion = 2,
         )
+
+        validateDeposit(
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}""",
+            expectedValid = true,
+        )
+        validateDeposit(
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"TIERED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","tiers":[{"fromBalance":"0","toBalance":"100000","annualRate":"0.03"},{"fromBalance":"100000","annualRate":"0.04"}]}}""",
+            expectedValid = true,
+        )
+        validateDeposit(
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"TIERED","dayCount":"ACT_365","payoutFrequency":"MONTHLY"}}""",
+            expectedValid = false,
+        )
+    }
+
+    @Test
+    fun publishesADeclarativeDepositInterestProfile() {
+        val specificationId = createDepositSpecification("SAVINGS_DECLARATIVE_E2E")
+        val offeringId = createOffering(specificationId, "SAVINGS_DECLARATIVE_E2E_CZ")
+        val revisionId = createDepositRevision(offeringId)
+        setMaker(revisionId, "independent-deposit-author")
+
+        Given {
+            contentType("application/json")
+            body("""{"reason":"approved declarative savings profile"}""")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.rateType", equalTo("FIXED"))
+            body("content.attributes.interest.annualRate", equalTo("0.0425"))
+        }
+
+        Given { this } When {
+            get("/api/v2/products/$offeringId")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.dayCount", equalTo("ACT_365"))
+        }
+
+        Given { this } When {
+            get("/api/v2/revisions/$revisionId")
+        } Then {
+            statusCode(200)
+            header("ETag", equalTo("\"1\""))
+            body("id", equalTo(revisionId.toString()))
+            body("offeringId", equalTo(offeringId.toString()))
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.annualRate", equalTo("0.0425"))
+        }
     }
 
     @Test
@@ -185,6 +238,28 @@ class CatalogPlatformResourceTest {
         assertThat(specificationIds).contains(specificationId.toString())
         assertThat(offeringIds).contains(firstOfferingId.toString(), secondOfferingId.toString())
         assertThat(revisionIds).containsExactly(firstRevisionId.toString())
+    }
+
+    @Test
+    fun publishesOnlyBundlesWithPublishedNonCyclicComponents() {
+        val specificationId = createSpecification("INS_BUNDLE_E2E")
+        val componentOfferingId = createOffering(specificationId, "INS_BUNDLE_COMPONENT")
+        val componentRevisionId = createRevision(componentOfferingId, "Bundle component")
+        setMaker(componentRevisionId, "component-author")
+        publish(componentOfferingId, componentRevisionId)
+
+        val bundleOfferingId = createOffering(specificationId, "INS_BUNDLE_STARTER")
+        val bundleRevisionId = createRevision(
+            bundleOfferingId,
+            "Starter bundle",
+            "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$componentOfferingId\"}]",
+        )
+        setMaker(bundleRevisionId, "bundle-author")
+        publish(bundleOfferingId, bundleRevisionId)
+
+        assertSelfRelationshipIsRejected(bundleOfferingId)
+        assertUnpublishedBundleComponentIsRejected(specificationId)
+        assertBroaderBundleAudienceIsRejected(specificationId)
     }
 
     @Test
@@ -420,6 +495,18 @@ class CatalogPlatformResourceTest {
         }
     }
 
+    private fun validateDeposit(attributes: String, expectedValid: Boolean) {
+        Given {
+            contentType("application/json")
+            body("""{"attributes":$attributes}""")
+        } When {
+            post("/api/v2/product-types/org.openbank.banking.deposit/versions/2/validate")
+        } Then {
+            statusCode(200)
+            body("valid", equalTo(expectedValid))
+        }
+    }
+
     private fun createSpecification(code: String, schemaVersion: Int = 2): UUID = UUID.fromString(
         (
             Given {
@@ -436,16 +523,13 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun createOffering(specificationId: UUID, code: String): UUID = UUID.fromString(
+    private fun createDepositSpecification(code: String): UUID = UUID.fromString(
         (
             Given {
                 contentType("application/json")
-                body(
-                    """{"specificationId":"$specificationId","code":"$code","market":""" +
-                        """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}}""",
-                )
+                body("""{"code":"$code","schemaRef":{"id":"org.openbank.banking.deposit","version":2}}""")
             } When {
-                post("/api/v2/offerings")
+                post("/api/v2/specifications")
             } Then {
                 statusCode(201)
                 header("ETag", equalTo("\"0\""))
@@ -453,11 +537,33 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun createRevision(offeringId: UUID, name: String, schemaVersion: Int = 2): UUID = UUID.fromString(
+    private fun createOffering(specificationId: UUID, code: String, market: String = DEFAULT_MARKET): UUID =
+        UUID.fromString(
+            (
+                Given {
+                    contentType("application/json")
+                    body(
+                        """{"specificationId":"$specificationId","code":"$code","market":$market}""",
+                    )
+                } When {
+                    post("/api/v2/offerings")
+                } Then {
+                    statusCode(201)
+                    header("ETag", equalTo("\"0\""))
+                }
+                ).extract().jsonPath().getString("id"),
+        )
+
+    private fun createRevision(
+        offeringId: UUID,
+        name: String,
+        relationships: String = "[]",
+        schemaVersion: Int = 2,
+    ): UUID = UUID.fromString(
         (
             Given {
                 contentType("application/json")
-                body(revisionPayload(name, schemaVersion))
+                body(revisionPayload(name, relationships, schemaVersion))
             } When {
                 post("/api/v2/offerings/$offeringId/revisions")
             } Then {
@@ -468,11 +574,103 @@ class CatalogPlatformResourceTest {
             ).extract().jsonPath().getString("id"),
     )
 
-    private fun revisionPayload(name: String, schemaVersion: Int = 2): String =
+    private fun createDepositRevision(offeringId: UUID): UUID = UUID.fromString(
+        (
+            Given {
+                contentType("application/json")
+                body(
+                    """{"schemaRef":{"id":"org.openbank.banking.deposit","version":2},""" +
+                        """"name":{"en":"Declarative savings"},"attributes":$DEPOSIT_ATTRIBUTES}""",
+                )
+            } When {
+                post("/api/v2/offerings/$offeringId/revisions")
+            } Then {
+                statusCode(201)
+                header("ETag", equalTo("\"0\""))
+                body("state", equalTo("DRAFT"))
+            }
+            ).extract().jsonPath().getString("id"),
+    )
+
+    private fun revisionPayload(name: String, relationships: String = "[]", schemaVersion: Int = 2): String =
         """{"schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion},""" +
             """"name":{"en":"$name"},"attributes":${attributesFor(schemaVersion)},"prices":[{""" +
             """"code":"PREMIUM","kind":"AMOUNT","value":"$EXACT_PRICE","currency":"EUR","unit":"policy",""" +
-            """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}]}"""
+            """"cadence":"MONTHLY","taxTreatment":"EXEMPT"}],"relationships":$relationships}"""
+
+    private fun publish(offeringId: UUID, revisionId: UUID) {
+        Given {
+            contentType("application/json")
+            body("{\"reason\":\"independent bundle component approval\"}")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+        }
+    }
+
+    private fun assertSelfRelationshipIsRejected(bundleOfferingId: UUID) {
+        Given {
+            contentType("application/json")
+            body(
+                revisionPayload(
+                    "Self relationship",
+                    relationships = "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$bundleOfferingId\"}]",
+                ),
+            )
+        } When {
+            post("/api/v2/offerings/$bundleOfferingId/revisions")
+        } Then {
+            statusCode(400)
+        }
+    }
+
+    private fun assertUnpublishedBundleComponentIsRejected(specificationId: UUID) {
+        val unpublishedOfferingId = createOffering(specificationId, "INS_BUNDLE_UNPUBLISHED")
+        createRevision(unpublishedOfferingId, "Unpublished component")
+        val bundleOfferingId = createOffering(specificationId, "INS_BUNDLE_INVALID")
+        val bundleRevisionId = createRevision(
+            bundleOfferingId,
+            "Invalid bundle",
+            "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$unpublishedOfferingId\"}]",
+        )
+        setMaker(bundleRevisionId, "bundle-author")
+        publishExpecting(bundleOfferingId, bundleRevisionId, 409)
+    }
+
+    private fun assertBroaderBundleAudienceIsRejected(specificationId: UUID) {
+        val privateComponentOfferingId = createOffering(
+            specificationId,
+            "INS_BUNDLE_PRIVATE_COMPONENT",
+            """{"countries":["CZ"],"channels":["WEB"],"segments":["employee"],"locales":["cs-CZ"]}""",
+        )
+        val privateComponentRevisionId = createRevision(privateComponentOfferingId, "Employee component")
+        setMaker(privateComponentRevisionId, "private-component-author")
+        publish(privateComponentOfferingId, privateComponentRevisionId)
+        val broadBundleOfferingId = createOffering(specificationId, "INS_BUNDLE_BROAD")
+        val broadBundleRevisionId = createRevision(
+            broadBundleOfferingId,
+            "Broad bundle",
+            "[{\"kind\":\"BUNDLE\",\"targetOfferingId\":\"$privateComponentOfferingId\"}]",
+        )
+        setMaker(broadBundleRevisionId, "broad-bundle-author")
+        publishExpecting(broadBundleOfferingId, broadBundleRevisionId, 400)
+    }
+
+    private fun publishExpecting(offeringId: UUID, revisionId: UUID, status: Int) {
+        Given {
+            contentType("application/json")
+            body("{\"reason\":\"components are ready\"}")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(status)
+            if (status == 409) body("code", equalTo("CATALOG_CONFLICT"))
+        }
+    }
 
     private fun attributesFor(schemaVersion: Int): String =
         if (schemaVersion == 1) LEGACY_INSURANCE_ATTRIBUTES else INSURANCE_ATTRIBUTES
@@ -752,9 +950,12 @@ class CatalogPlatformResourceTest {
     private companion object {
         const val OUTBOX_FAILURE_ACTOR = "outbox-rollback-test-operator"
         const val EXACT_PRICE = "10000000000000000000.10"
+        const val DEFAULT_MARKET = """{"countries":["CZ"],"channels":["WEB"],"locales":["cs-CZ"]}"""
         const val LEGACY_INSURANCE_ATTRIBUTES =
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"CALCULATED"}"""
         const val INSURANCE_ATTRIBUTES =
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"smokerAccepted":true,"premiumModel":"FIXED","premium":{"amount":"12.3400","currency":"EUR","cadence":"MONTHLY"},"perils":[{"code":"DEATH","description":"Death during the insured term"}],"exclusions":[{"code":"FRAUD","description":"Fraud or deliberate misrepresentation"}],"limits":[{"kind":"PER_EVENT","amount":"100000.00","currency":"EUR"}],"deductibles":[{"kind":"PER_CLAIM","amount":"0","currency":"EUR"}],"underwritingQuestions":[{"id":"smoker","question":"Do you use tobacco?","answerType":"BOOLEAN","required":true}]}"""
+        const val DEPOSIT_ATTRIBUTES =
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
     }
 }

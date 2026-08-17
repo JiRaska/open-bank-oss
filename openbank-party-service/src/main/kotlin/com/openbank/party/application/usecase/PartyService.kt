@@ -8,6 +8,7 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.api.search.SearchRequest
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.identity.BlindIndex
 import com.openbank.libs.identity.RodneCislo
 import com.openbank.libs.observability.DomainMetrics
@@ -39,6 +40,8 @@ class PartyService : PartyUseCase {
     @Inject lateinit var documentRepo: PartyDocumentRepository
 
     @Inject lateinit var documentFileRepo: PartyDocumentFileRepository
+
+    @Inject lateinit var payeeRepo: PartyPayeeRepository
 
     @Inject lateinit var gdprAggregation: GdprAggregationPort
 
@@ -474,7 +477,34 @@ class PartyService : PartyUseCase {
         documentFileRepo.findByIdAndPartyId(fileId, partyId)
 
     override suspend fun getPartyKeycloakSub(id: UUID): String? = partyRepo.findById(id)?.keycloakSub
+
+    override suspend fun listPayees(partyId: UUID): List<Payee> = payeeRepo.findByPartyId(partyId)
+
+    override suspend fun savePayee(cmd: SavePayeeCommand): Payee {
+        val normalizedIban = cmd.iban.filterNot { it.isWhitespace() }.uppercase()
+        val existing = payeeRepo.findByPartyId(cmd.partyId)
+        val alreadySaved = existing.any { it.iban == normalizedIban }
+        if (!alreadySaved && existing.size >= MAX_PAYEES) {
+            throw PayeeLimitExceededException(cmd.partyId)
+        }
+        val payee = Payee(
+            id = existing.firstOrNull { it.iban == normalizedIban }?.id ?: Ids.newId(),
+            partyId = cmd.partyId,
+            name = cmd.name.trim(),
+            iban = normalizedIban,
+            bic = cmd.bic?.trim()?.ifBlank { null },
+            createdAt = Instant.now(clock),
+        )
+        return payeeRepo.save(payee)
+    }
+
+    override suspend fun deletePayee(partyId: UUID, iban: String) {
+        payeeRepo.deleteByPartyIdAndIban(partyId, iban.filterNot { it.isWhitespace() }.uppercase())
+    }
 }
+
+/** Mirrors the app's own PayeeStore.MAX_PAYEES. */
+private const val MAX_PAYEES = 30
 
 /** SHA-256 rendered as lowercase hex. */
 private const val SHA256_HEX_LENGTH = 64

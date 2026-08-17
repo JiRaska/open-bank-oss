@@ -66,6 +66,15 @@ describe('workspaceFor / personaLabel', () => {
       }
     }
   })
+
+  it('allows every staff persona to open its workspace landing page', () => {
+    for (const roles of [
+      [ROLES.ADMIN], [ROLES.OPERATOR], [ROLES.VIEWER], [ROLES.COMPLIANCE], [ROLES.PAYMENTS],
+      [ROLES.AUDITOR], [ROLES.SUPERVISOR], [ROLES.KYC], [ROLES.KYC_OPENER], [ROLES.KYC_REVIEWER],
+    ]) {
+      expect(hasPermission(roles, 'dashboard:view'), roles.join(',')).toBe(true)
+    }
+  })
 })
 
 // The Sidebar looks each workspace link up in its nav by href and inherits that entry's

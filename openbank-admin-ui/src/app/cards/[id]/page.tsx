@@ -36,6 +36,7 @@ import { CardLifecycleMap } from '@/components/cards/CardLifecycleMap'
 import { CardTransitionButtons } from '@/components/cards/CardTransitionButtons'
 import { ConfirmTransitionDialog } from '@/components/cards/ConfirmTransitionDialog'
 import { CardOperationFeedback } from '@/components/cards/CardOperationFeedback'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { CardLimitsPanel } from '@/components/cards/CardLimitsPanel'
 import { CardControlsPanel } from '@/components/cards/CardControlsPanel'
 import { useCardOperations } from '@/lib/cards/useCardOperations'
@@ -180,27 +181,18 @@ export default function CardDetailPage() {
           />
         ) : (
           <>
-            {/* ── header ─────────────────────────────────────────────────── */}
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                  <CreditCard size={20} style={{ color: 'var(--accent)' }} />
-                  <h1 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.02em', fontFamily: 'var(--font-mono)' }}>
-                    {card.maskedPan}
-                  </h1>
-                  <CardStatusChip status={card.status} current />
-                </div>
-                <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                  {[card.cardType, card.productCode, card.currency].filter(Boolean).join(' · ')}
-                </p>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <PageHeader
+              icon={<CreditCard size={20} aria-hidden="true" />}
+              title={card.maskedPan}
+              subtitle={[card.cardType, card.productCode, card.currency].filter(Boolean).join(' · ')}
+              actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                <CardStatusChip status={card.status} current />
                 <CardTransitionButtons card={card} busy={ops.busy} onSelect={onSelectTransition} />
                 <button className="btn btn-ghost btn-sm" onClick={reload} disabled={ops.busy !== null}>
-                  <RefreshCw size={12} /> {t('Obnovit', 'Refresh')}
+                  <RefreshCw size={12} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
                 </button>
-              </div>
-            </div>
+              </div>}
+            />
 
             <CardOperationFeedback feedback={ops.feedback} onDismiss={() => ops.setFeedback(null)} />
 
