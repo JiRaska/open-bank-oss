@@ -30,6 +30,19 @@ afterEach(() => {
 })
 
 describe('General Ledger pagination', () => {
+  it('labels the date filters and exposes journal-line disclosure semantics', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(response(firstPage))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+    expect(screen.getByLabelText('From')).toHaveAttribute('id', 'ledger-from-date')
+    expect(screen.getByLabelText('To')).toHaveAttribute('id', 'ledger-to-date')
+    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
+    await screen.findByText('First page')
+    const disclosure = screen.getByRole('button', { name: 'Show journal lines' })
+    expect(disclosure).toHaveAttribute('aria-expanded', 'false')
+    expect(disclosure).toHaveAttribute('aria-controls', 'ledger-entry-entry-1')
+  })
+
   it('forwards the server cursor and appends the next journal page', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(firstPage))
