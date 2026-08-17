@@ -14,7 +14,7 @@
     "amortizationMethod": {
       "type": "string",
       "enum": ["ANNUITY", "EQUAL_PRINCIPAL", "BULLET"],
-      "description": "Must match com.openbank.libs.lending.AmortizationMethod exactly (ADR-0260)."
+      "description": "Must match com.openbank.libs.lending.AmortizationMethod exactly (ADR-0264)."
     },
     "accrualBasis": { "type": "string", "enum": ["ACT_360", "ACT_365", "ACT_ACT", "THIRTY_360"] },
     "allocationOrder": {
@@ -23,7 +23,7 @@
       "maxItems": 4,
       "uniqueItems": true,
       "items": { "type": "string", "enum": ["FEES", "PENALTY", "INTEREST", "PRINCIPAL"] },
-      "description": "Repayment allocation order, most-senior first (ADR-0260 Phase D consumes this)."
+      "description": "Repayment allocation order, most-senior first (ADR-0264 Phase D consumes this)."
     },
     "minPrincipalAmount": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
     "maxPrincipalAmount": { "type": "string", "pattern": "^[1-9][0-9]*(\\.[0-9]+)?$" },

@@ -11,7 +11,7 @@ summary: "Loan products join the ADR-0257/0258 catalog kernel via a banking.loan
 followup: "#668 — phases C (money-path wiring), D (repayment allocation), E (interest resolution), F (restructuring re-pin) are unbuilt; phase C needs its own ADR before any lending-service code changes"
 ---
 
-# ADR-0260 — Loan Products in the Industry-Neutral Catalog Kernel
+# ADR-0264 — Loan Products in the Industry-Neutral Catalog Kernel
 
 ## Context
 

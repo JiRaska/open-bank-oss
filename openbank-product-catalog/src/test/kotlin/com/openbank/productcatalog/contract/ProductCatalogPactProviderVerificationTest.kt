@@ -101,7 +101,7 @@ class ProductCatalogPactProviderVerificationTest {
 
     /**
      * No seeding: `CURRENT_PERSONAL` (prod-003) carries four seeded fees in `ProductSeed` on
-     * every boot (`ProductCatalogFeesPactConsumerTest`, ADR-0260 Phase A). Same rationale as
+     * every boot (`ProductCatalogFeesPactConsumerTest`, ADR-0264 Phase A). Same rationale as
      * [cardEnabledProductIsSeeded] above — seeding again here would fork a second source of truth
      * for a product the service already owns.
      */
@@ -112,7 +112,7 @@ class ProductCatalogPactProviderVerificationTest {
 
     /**
      * No seeding: the pact-pinned id is a random UUID never assigned by `ProductSeed`
-     * (`ProductCatalogLookupPactConsumerTest`, ADR-0260 Phase A).
+     * (`ProductCatalogLookupPactConsumerTest`, ADR-0264 Phase A).
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
     fun unknownProductIdIsAbsent() {

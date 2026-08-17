@@ -20,7 +20,7 @@ import java.util.UUID
 import javax.sql.DataSource
 
 /**
- * ADR-0260 Phase B: proves the `banking.loan-v1` schema pack generalizes the ADR-0257 kernel to
+ * ADR-0264 Phase B: proves the `banking.loan-v1` schema pack generalizes the ADR-0257 kernel to
  * loans the same way `banking.deposit-v1` and `insurance.term-life` already do — draft, publish,
  * pin — through the real `/api/v2` REST surface, not a domain-only unit test.
  *
@@ -29,7 +29,7 @@ import javax.sql.DataSource
  * repeating that gap.
  *
  * No lending-service or interest-service change of any kind — Phase C (money-path wiring) is
- * explicitly out of scope for this pack and needs its own ADR (ADR-0260 References).
+ * explicitly out of scope for this pack and needs its own ADR (ADR-0264 References).
  */
 @QuarkusTest
 @QuarkusTestResource(
@@ -80,7 +80,7 @@ class LoanCatalogPackResourceTest {
         }
 
         // Published-view read: pinned attributes and the BASE_RATE_ANNUAL price component
-        // survive the round trip exactly as authored (ADR-0260's "rate is a PriceComponent,
+        // survive the round trip exactly as authored (ADR-0264's "rate is a PriceComponent,
         // never an attributes field" decision).
         Given { this } When {
             get("/api/v2/products/$offeringId")
