@@ -114,6 +114,17 @@ class CatalogPlatformResourceTest {
             body("state", equalTo("PUBLISHED"))
             body("content.attributes.interest.dayCount", equalTo("ACT_365"))
         }
+
+        Given { this } When {
+            get("/api/v2/revisions/$revisionId")
+        } Then {
+            statusCode(200)
+            header("ETag", equalTo("\"1\""))
+            body("id", equalTo(revisionId.toString()))
+            body("offeringId", equalTo(offeringId.toString()))
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.annualRate", equalTo("0.0425"))
+        }
     }
 
     @Test
