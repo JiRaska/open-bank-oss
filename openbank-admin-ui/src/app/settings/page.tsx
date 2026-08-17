@@ -32,16 +32,16 @@ export default function SettingsPage() {
       subtitle={t('Skutečné předvolby a přístup k účtu', 'Actual account preferences and access')}
     />
     <div style={{ display: 'flex', gap: '20px', alignItems: 'flex-start' }}>
-      <nav aria-label={t('Sekce nastavení', 'Settings sections')} className="card" style={{ width: '200px', flexShrink: 0, padding: '8px' }}>
-        {tabs.map(item => <button key={item.id} type="button" onClick={() => setTab(item.id)} aria-current={tab === item.id ? 'page' : undefined} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px', borderRadius: '6px', border: 'none', borderLeft: tab === item.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === item.id ? 'var(--accent-light)' : 'transparent', color: tab === item.id ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: tab === item.id ? 600 : 400, fontSize: '13px', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>{item.icon}{item.label}</button>)}
-      </nav>
-      <main style={{ flex: 1 }}>
+      <div role="tablist" aria-label={t('Sekce nastavení', 'Settings sections')} className="card" style={{ width: '200px', flexShrink: 0, padding: '8px' }}>
+        {tabs.map(item => <button key={item.id} id={`settings-tab-${item.id}`} role="tab" type="button" onClick={() => setTab(item.id)} aria-selected={tab === item.id} aria-controls={`settings-panel-${item.id}`} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px', borderRadius: '6px', border: 'none', borderLeft: tab === item.id ? '2px solid var(--accent)' : '2px solid transparent', background: tab === item.id ? 'var(--accent-light)' : 'transparent', color: tab === item.id ? 'var(--accent)' : 'var(--text-secondary)', fontWeight: tab === item.id ? 600 : 400, fontSize: '13px', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit' }}>{item.icon}{item.label}</button>)}
+      </div>
+      <div id={`settings-panel-${tab}`} role="tabpanel" aria-labelledby={`settings-tab-${tab}`} style={{ flex: 1 }}>
         {tab === 'profile' && <ProfileTab />}
         {tab === 'notifications' && <UnavailableSettings title={t('Předvolby oznámení', 'Notification preferences')} detail={t('Osobní předvolby zatím nemají podporovaný backendový kontrakt. Konzole proto nezobrazuje falešné přepínače ani neukládá zdánlivé změny.', 'Personal notification preferences do not yet have a supported backend contract. This console therefore does not show fake switches or pretend to save changes.')} />}
         {tab === 'security' && <UnavailableSettings title={t('Zabezpečení a relace', 'Security and sessions')} detail={t('Hesla, relace a odvolání přístupu spravuje Keycloak SSO. Konzole zobrazuje skutečnou přihlášenou identitu a nebude simulovat změnu hesla ani odvolání relace.', 'Passwords, sessions and access revocation are managed by Keycloak SSO. The console shows only the real signed-in identity and does not simulate password changes or session revocation.')} />}
         {tab === 'api' && <UnavailableSettings title={t('API klíče', 'API keys')} detail={t('Správa API klíčů není v tomto admin UI integrována s autoritativním systémem identit. Nezobrazujeme proto vzorové klíče ani akce generovat či odvolat.', 'API-key management is not integrated with the authoritative identity system in this admin UI. Sample keys and generate/revoke actions are therefore not displayed.')} />}
         {tab === 'regional' && <RegionalTab />}
-      </main>
+      </div>
     </div>
   </div></AuthGuard>
 }
