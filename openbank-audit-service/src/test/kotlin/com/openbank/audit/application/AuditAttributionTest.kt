@@ -69,6 +69,26 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `statement-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's statement-service fix: both hand-built JSON payload templates
+        // (period.closed.v1 in StatementService.periodClosedEvent, period.close_failed.v1 in
+        // CloseOrchestrator.emitCloseFailed) now carry a literal "sourceService" key. Before this,
+        // EventAttribution's `openbank.statement.event` -> `statement-service` entry already
+        // resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"account.statement.period.closed.v1",""" +
+                """"accountId":"${UUID.randomUUID()}","sourceService":"statement-service"}""",
+            EventAddress(topic = "openbank.statement.event"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("statement-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
