@@ -47,7 +47,12 @@ class LendingOutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op while dispatch-enabled is false`(): Unit = runBlocking {
-        val dispatcher = LendingOutboxDispatcher(repo, publisher, dispatchEnabled = false)
+        val dispatcher = LendingOutboxDispatcher(
+            repo,
+            publisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         dispatcher.dispatch()
 
@@ -63,7 +68,7 @@ class LendingOutboxDispatcherTest {
         coJustRun { publisher.publish(any()) }
         coJustRun { repo.markSent(any(), any()) }
 
-        LendingOutboxDispatcher(repo, publisher, dispatchEnabled = true).dispatch()
+        LendingOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true)).dispatch()
 
         coVerify(exactly = 1) { publisher.publish(first) }
         coVerify(exactly = 1) { publisher.publish(second) }
@@ -79,7 +84,7 @@ class LendingOutboxDispatcherTest {
         coEvery { publisher.publish(poisoned) } throws IllegalStateException("broker unavailable")
         coJustRun { repo.markFailed(any(), any(), any()) }
 
-        LendingOutboxDispatcher(repo, publisher, dispatchEnabled = true).dispatch()
+        LendingOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true)).dispatch()
 
         coVerify(exactly = 1) { repo.markFailed(poisoned.eventId, "broker unavailable", any()) }
         coVerify(exactly = 0) { repo.markSent(any(), any()) }

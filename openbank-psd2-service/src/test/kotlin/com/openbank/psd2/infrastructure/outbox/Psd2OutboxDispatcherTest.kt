@@ -48,7 +48,7 @@ class Psd2OutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op when dispatch-enabled is false`(): Unit = runBlocking {
-        val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = false)
+        val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = false, metrics = mockk(relaxed = true))
 
         dispatcher.dispatch()
 
@@ -61,7 +61,7 @@ class Psd2OutboxDispatcherTest {
         coEvery { publisher.publish(any()) } returns Unit
         coEvery { repo.markSent(any(), any()) } returns Unit
 
-        val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = true)
+        val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true))
 
         dispatcher.dispatch()
 
@@ -77,7 +77,7 @@ class Psd2OutboxDispatcherTest {
         coEvery { publisher.publish(entry) } throws RuntimeException("kafka unavailable")
         coEvery { repo.markFailed(any(), any(), any()) } returns Unit
 
-        val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = true)
+        val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true))
 
         dispatcher.dispatch()
 

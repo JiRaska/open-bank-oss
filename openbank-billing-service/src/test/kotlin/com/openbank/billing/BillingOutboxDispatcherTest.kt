@@ -54,7 +54,12 @@ class BillingOutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op while dispatch-enabled is false`(): Unit = runBlocking {
-        val dispatcher = BillingOutboxDispatcher(repo, publisher, dispatchEnabled = false)
+        val dispatcher = BillingOutboxDispatcher(
+            repo,
+            publisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         dispatcher.dispatch()
 
@@ -70,7 +75,7 @@ class BillingOutboxDispatcherTest {
         coJustRun { publisher.publish(any()) }
         coJustRun { repo.markSent(any(), any()) }
 
-        BillingOutboxDispatcher(repo, publisher, dispatchEnabled = true).dispatch()
+        BillingOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true)).dispatch()
 
         coVerify(exactly = 1) { publisher.publish(first) }
         coVerify(exactly = 1) { publisher.publish(second) }
@@ -86,7 +91,7 @@ class BillingOutboxDispatcherTest {
         coEvery { publisher.publish(poisoned) } throws IllegalStateException("ledger unavailable")
         coJustRun { repo.markFailed(any(), any(), any()) }
 
-        BillingOutboxDispatcher(repo, publisher, dispatchEnabled = true).dispatch()
+        BillingOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true)).dispatch()
 
         coVerify(exactly = 1) { repo.markFailed(poisoned.eventId, "ledger unavailable", any()) }
         coVerify(exactly = 0) { repo.markSent(any(), any()) }
@@ -100,7 +105,12 @@ class BillingOutboxDispatcherTest {
             coJustRun { publisher.publish(any()) }
             coJustRun { repo.markSent(any(), any()) }
 
-            BillingOutboxDispatcher(repo, publisher, dispatchEnabled = true).dispatchScheduledBatch()
+            BillingOutboxDispatcher(
+                repo,
+                publisher,
+                dispatchEnabled = true,
+                metrics = mockk(relaxed = true),
+            ).dispatchScheduledBatch()
 
             coVerify(exactly = 1) { publisher.publish(entryRow) }
             coVerify(exactly = 1) { repo.markSent(entryRow.eventId, any()) }

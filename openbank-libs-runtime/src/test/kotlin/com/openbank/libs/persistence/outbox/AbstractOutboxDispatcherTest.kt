@@ -41,21 +41,20 @@ class AbstractOutboxDispatcherTest {
 
     /** Concrete dispatcher for testing (no @Scheduled, @Bulkhead, etc. — those belong on real subclasses).
      * Exposes [dispatchScheduledBatch] as a testable entry point — protected in the base class,
-     * accessible here because TestOutboxDispatcher is a subclass. */
+     * accessible here because TestOutboxDispatcher is a subclass.
+     *
+     * `metrics` is now constructor-injected, matching every real subclass after #5128 finding 2 —
+     * no plain unit test can leave it unset the way field injection previously allowed (a compile
+     * error, not a runtime maybe). Defaults to a relaxed mock so tests that don't care about
+     * metrics calls don't have to supply one. */
     private class TestOutboxDispatcher(
         override val outboxRepository: OutboxRepository,
         override val outboxEventPublisher: OutboxEventPublisher,
         service: String? = null,
-    ) : AbstractOutboxDispatcher() {
+        metrics: DomainMetrics = mockk(relaxed = true),
+    ) : AbstractOutboxDispatcher(metrics) {
         override val service: String = service ?: super.service
         suspend fun runBatch() = dispatchScheduledBatch()
-
-        /** No CDI container in a plain unit test — set the field [AbstractOutboxDispatcher]
-         * normally receives via `@Inject` (#5049). Only reachable from this subclass because
-         * `metrics` is `protected`. */
-        fun useMetrics(m: DomainMetrics) {
-            metrics = m
-        }
     }
 
     private fun entry(type: String, attemptCount: Int = 0) = OutboxEntry(
@@ -121,7 +120,7 @@ class AbstractOutboxDispatcherTest {
         class CustomDispatcher(
             override val outboxRepository: OutboxRepository,
             override val outboxEventPublisher: OutboxEventPublisher,
-        ) : AbstractOutboxDispatcher() {
+        ) : AbstractOutboxDispatcher(mockk(relaxed = true)) {
             override suspend fun publishWithResilience(entry: OutboxEntry) {
                 publishCalls += entry
                 super.publishWithResilience(entry)
@@ -145,11 +144,12 @@ class AbstractOutboxDispatcherTest {
     // ── #5049: outboxDispatched/outboxDead must actually fire, the right number of times ──
 
     @Test
-    fun `with no metrics wired (plain unit-test construction), dispatch does not crash`() {
-        // Every per-service *OutboxDispatcherTest in the fleet constructs its dispatcher exactly
-        // this way — directly, with no CDI container, so `metrics` is never field-injected. This
-        // is the regression this test exists to catch: a naive `metrics!!.outboxDispatched(...)`
-        // would NPE every one of those ~34 tests the moment this class is touched.
+    fun `with the default relaxed-mock metrics (plain unit-test construction), dispatch does not crash`() {
+        // Every per-service *OutboxDispatcherTest in the fleet constructs its dispatcher directly,
+        // with no CDI container. Before #5128 finding 2, `metrics` was field-injected and stayed
+        // null in that path; after switching to constructor injection, a plain unit test MUST pass
+        // a `metrics` value (there is no null path any more) — TestOutboxDispatcher defaults it to
+        // a relaxed mock precisely so those ~34 fleet tests keep compiling and passing unchanged.
         val row = entry("a.created")
         val repo = FakeRepo(listOf(row))
         val publisher = FakePublisher()
@@ -165,15 +165,15 @@ class AbstractOutboxDispatcherTest {
         val rows = listOf(entry("account.created"), entry("payment.sent"))
         val repo = FakeRepo(rows)
         val publisher = FakePublisher()
-        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget")
         val metrics = mockk<DomainMetrics>(relaxed = true)
-        dispatcher.useMetrics(metrics)
+        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget", metrics = metrics)
 
         runBlocking { dispatcher.runBatch() }
 
         // Falsifying assertion: a no-op wiring (metrics never called) or a wiring that fires once
         // per BATCH instead of once per ROW both fail this — it must be exactly 2, tagged with
-        // each row's own eventType as the topic label, not a shared/hardcoded one.
+        // each row's own eventType as the event_type label (#5128 finding 1), not a
+        // shared/hardcoded one.
         verify(exactly = 1) { metrics.outboxDispatched("widget", "account.created") }
         verify(exactly = 1) { metrics.outboxDispatched("widget", "payment.sent") }
         verify(exactly = 0) { metrics.outboxDead(any()) }
@@ -187,9 +187,8 @@ class AbstractOutboxDispatcherTest {
         val publisher = FakePublisher()
         publisher.publishErrors[retrying.eventId] = IllegalStateException("still failing")
         publisher.publishErrors[dying.eventId] = IllegalStateException("still failing")
-        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget")
         val metrics = mockk<DomainMetrics>(relaxed = true)
-        dispatcher.useMetrics(metrics)
+        val dispatcher = TestOutboxDispatcher(repo, publisher, service = "widget", metrics = metrics)
 
         runBlocking { dispatcher.runBatch() }
 
