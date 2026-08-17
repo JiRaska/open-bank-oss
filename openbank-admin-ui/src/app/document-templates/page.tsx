@@ -32,6 +32,7 @@ const PREVIEW_PATH = `${TEMPLATES_PATH}/preview`
 const DOCUMENTS_PATH = '/api/v1/documents'
 
 const PAGE_SIZE = 25
+const CONTENT_TABS = ['templates', 'documents'] as const
 
 type TemplateStatus = 'DRAFT' | 'PUBLISHED' | 'RETIRED'
 
@@ -203,6 +204,19 @@ export default function DocumentTemplatesPage() {
   const canEdit = hasPermission(roles, 'templates:edit')
 
   const [tab, setTab] = useState<'templates' | 'documents'>('templates')
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([])
+
+  const moveTabFocus = (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | null = null
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % CONTENT_TABS.length
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + CONTENT_TABS.length) % CONTENT_TABS.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = CONTENT_TABS.length - 1
+    if (nextIndex === null) return
+    event.preventDefault()
+    setTab(CONTENT_TABS[nextIndex])
+    requestAnimationFrame(() => tabRefs.current[nextIndex]?.focus())
+  }
 
   // ── Templates list ──────────────────────────────────────────────────────────
   const [templates, setTemplates] = useState<DocumentTemplate[]>([])
@@ -444,24 +458,23 @@ export default function DocumentTemplatesPage() {
             </button>
           </div>} />
 
-        <div style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
+        <div role="tablist" aria-label={t('Obsah šablon dokumentů', 'Document template content')} style={{ display: 'flex', gap: '4px', marginBottom: '18px', borderBottom: '1px solid var(--border)' }}>
           {([
             { id: 'templates' as const, label: t('Šablony', 'Templates'), icon: <FileSignature size={13} /> },
             { id: 'documents' as const, label: t('Dokumenty', 'Documents'), icon: <FileText size={13} /> },
-          ]).map(tb => (
-            <button key={tb.id} onClick={() => setTab(tb.id)}
+          ]).map((tb, index) => (
+            <button key={tb.id} ref={element => { tabRefs.current[index] = element }} id={`document-${tb.id}-tab`} role="tab" tabIndex={tab === tb.id ? 0 : -1} aria-selected={tab === tb.id} aria-controls={`document-${tb.id}-panel`} onKeyDown={event => moveTabFocus(event, index)} onClick={() => setTab(tb.id)}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', fontSize: '13px', fontWeight: 600,
                 border: 'none', borderBottom: tab === tb.id ? '2px solid var(--accent)' : '2px solid transparent',
                 background: 'none', cursor: 'pointer', color: tab === tb.id ? 'var(--accent)' : 'var(--text-secondary)',
               }}>
-              {tb.icon}{tb.label}
+              <span aria-hidden="true">{tb.icon}</span>{tb.label}
             </button>
           ))}
         </div>
 
-        {tab === 'templates' && (
-          <>
+        <section id="document-templates-panel" role="tabpanel" aria-labelledby="document-templates-tab" hidden={tab !== 'templates'}>
             {unavailable && (
               <div className="card" style={{ padding: 0, marginBottom: '16px' }}>
                 <DataUnavailable kind={unavailable.kind} service={t('Document-service', 'Document-service')} feature={t('Šablony dokumentů', 'Document templates')} lang={language} dense />
@@ -490,12 +503,12 @@ export default function DocumentTemplatesPage() {
 
             <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div style={{ position: 'relative', flex: 1, minWidth: '220px', maxWidth: '300px' }}>
-                <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód nebo název…', 'Code or name…')} value={search} onChange={e => setSearch(e.target.value)} />
+                <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+                <input id="template-search" aria-label={t('Vyhledat šablonu podle kódu nebo názvu', 'Search templates by code or name')} className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód nebo název…', 'Code or name…')} value={search} onChange={e => setSearch(e.target.value)} />
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Status', 'Status')}:</span>
-                <select className="input" style={{ width: 'auto', padding: '5px 10px', fontSize: '12px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                <label htmlFor="template-status-filter" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Status', 'Status')}:</label>
+                <select id="template-status-filter" className="input" style={{ width: 'auto', padding: '5px 10px', fontSize: '12px' }} value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                   <option value="ALL">{t('Všechny', 'All')}</option>
                   <option value="DRAFT">{t('Návrh', 'Draft')}</option>
                   <option value="PUBLISHED">{t('Publikováno', 'Published')}</option>
@@ -565,58 +578,57 @@ export default function DocumentTemplatesPage() {
                 </div>
               )}
             </div>
-          </>
-        )}
+          </section>
 
-        {tab === 'documents' && <DocumentsLookup t={t} language={language} />}
+        <section id="document-documents-panel" role="tabpanel" aria-labelledby="document-documents-tab" hidden={tab !== 'documents'}><DocumentsLookup t={t} language={language} /></section>
       </div>
 
       {/* Create / edit modal — split-pane HTML editor + live sandboxed preview */}
       {modalOpen && (
         <div style={{ position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(15,23,42,0.65)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
-          <div className="card" style={{ width: '920px', maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
+          <div className="card" role="dialog" aria-modal="true" aria-labelledby="template-editor-title" style={{ width: '920px', maxWidth: '100%', maxHeight: '92vh', overflowY: 'auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-              <h2 style={{ fontSize: '15px', fontWeight: 700 }}>
+              <h2 id="template-editor-title" style={{ fontSize: '15px', fontWeight: 700 }}>
                 {!canEdit
                   ? t('Zobrazit šablonu', 'View Template')
                   : editingTemplate ? t('Upravit šablonu', 'Edit Template') : t('Nová šablona', 'New Template')}
               </h2>
-              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} /></button>
+              <button type="button" aria-label={t('Zavřít editor šablony', 'Close template editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <fieldset disabled={!canEdit} style={{ border: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div className="grid-3">
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Kód *', 'Code *')}</label>
-                    <input className="input" required disabled={!canEdit || !!editingTemplate} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="LOAN_AGREEMENT" />
+                    <label htmlFor="template-code" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Kód *', 'Code *')}</label>
+                    <input id="template-code" className="input" required disabled={!canEdit || !!editingTemplate} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="LOAN_AGREEMENT" />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze *', 'Version *')}</label>
-                    <input className="input" required value={formData.version ?? ''} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
+                    <label htmlFor="template-version" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze *', 'Version *')}</label>
+                    <input id="template-version" className="input" required value={formData.version ?? ''} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Jazyk', 'Locale')}</label>
-                    <input className="input" value={formData.locale ?? ''} onChange={e => setFormData(p => ({ ...p, locale: e.target.value }))} placeholder="cs" />
+                    <label htmlFor="template-locale" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Jazyk', 'Locale')}</label>
+                    <input id="template-locale" className="input" value={formData.locale ?? ''} onChange={e => setFormData(p => ({ ...p, locale: e.target.value }))} placeholder="cs" />
                   </div>
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
-                  <input className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Smlouva o úvěru', 'Loan agreement')} />
+                  <label htmlFor="template-name" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
+                  <input id="template-name" className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Smlouva o úvěru', 'Loan agreement')} />
                 </div>
                 <div className="grid-2">
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Odkaz na produkt', 'Product ref')}</label>
-                    <input className="input" value={formData.productRef ?? ''} onChange={e => setFormData(p => ({ ...p, productRef: e.target.value }))} placeholder={t('volitelné', 'optional')} />
+                    <label htmlFor="template-product-ref" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Odkaz na produkt', 'Product ref')}</label>
+                    <input id="template-product-ref" className="input" value={formData.productRef ?? ''} onChange={e => setFormData(p => ({ ...p, productRef: e.target.value }))} placeholder={t('volitelné', 'optional')} />
                   </div>
                   <div>
-                    <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Klasifikace', 'Classification')}</label>
-                    <input className="input" value={formData.classification ?? ''} onChange={e => setFormData(p => ({ ...p, classification: e.target.value }))} placeholder="restricted" />
+                    <label htmlFor="template-classification" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Klasifikace', 'Classification')}</label>
+                    <input id="template-classification" className="input" value={formData.classification ?? ''} onChange={e => setFormData(p => ({ ...p, classification: e.target.value }))} placeholder="restricted" />
                   </div>
                 </div>
 
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Tělo šablony (HTML)', 'Template body (HTML)')}</label>
+                    <label htmlFor="template-body-html" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Tělo šablony (HTML)', 'Template body (HTML)')}</label>
                     <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
                       <FileCode2 size={11} /> {t('Handlebars zástupné symboly', 'Handlebars placeholders')}
                     </span>
@@ -632,7 +644,7 @@ export default function DocumentTemplatesPage() {
 
                   <div style={{ marginBottom: '10px' }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                      <label htmlFor="template-sample-data" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
                         {t('Ukázková data pro náhled (JSON)', 'Sample data for preview (JSON)')}
                       </label>
                       {sampleDataInvalid && (
@@ -642,6 +654,7 @@ export default function DocumentTemplatesPage() {
                       )}
                     </div>
                     <textarea
+                      id="template-sample-data"
                       value={sampleDataText}
                       onChange={e => setSampleDataText(e.target.value)}
                       spellCheck={false}
@@ -712,7 +725,7 @@ export default function DocumentTemplatesPage() {
                           }
                         }}
                         spellCheck={false}
-                        aria-label={t('Tělo šablony (HTML)', 'Template body (HTML)')}
+                        id="template-body-html"
                         style={{
                           position: 'relative', width: '100%', height: '100%', resize: 'none', margin: 0,
                           fontFamily: 'var(--font-mono)', fontSize: '12px', lineHeight: 1.5, padding: '10px',
@@ -753,7 +766,7 @@ export default function DocumentTemplatesPage() {
                 </div>
 
                 {actionError && (
-                  <div style={{ padding: '10px 12px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
+                  <div role="alert" style={{ padding: '10px 12px', background: 'var(--danger-bg)', color: 'var(--danger-text)', borderRadius: '6px', fontSize: '12px', border: '1px solid var(--danger-border)' }}>
                     {actionError}
                   </div>
                 )}
@@ -843,8 +856,10 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
     <div>
       <div className="card" style={{ padding: '16px 20px', marginBottom: '16px', display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: '260px' }}>
-          <Hash size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+          <Hash size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
           <input
+            id="document-id"
+            aria-label={t('ID dokumentu', 'Document ID')}
             className="input"
             style={{ paddingLeft: '30px', width: '100%', fontFamily: 'var(--font-mono)' }}
             placeholder={t('ID dokumentu (UUID)…', 'Document ID (UUID)…')}
