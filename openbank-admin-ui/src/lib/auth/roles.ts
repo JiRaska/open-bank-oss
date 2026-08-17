@@ -49,6 +49,15 @@ export const PERMISSIONS = {
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Card-issuance deliberately has a narrower read role than the wider payments
+  // workspace: its GET endpoints accept only VIEWER/OPERATOR/ADMIN, and every
+  // lifecycle writes except block/cancel accept only OPERATOR/ADMIN. Compliance
+  // retains the service-authorized emergency block/cancel pair, not limit or
+  // channel-control changes. Keep the console's controls aligned with that split.
+  "cards:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER],
+  "cards:issue":           [ROLES.ADMIN, ROLES.OPERATOR],
+  "cards:manage":          [ROLES.ADMIN, ROLES.OPERATOR],
+  "cards:block":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Generic Product Studio. Scope-derived roles make the same UI usable with a provider-neutral
   // standalone OIDC issuer; OpenBank OPERATOR/ADMIN remain compatible personas.
   "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
@@ -176,9 +185,10 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['transactions:view', ['/transactions']],
   ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
+  ['cards:view', ['/cards']],
   ['payments:view', [
     '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
-    '/fx', '/swift', '/cards', '/interest', '/pid', '/fees', '/lending',
+    '/fx', '/swift', '/interest', '/pid', '/fees', '/lending',
   ]],
   ['compliance:view', [
     '/aml', '/fraud', '/sanctions', '/disputes', '/consents', '/customer-360', '/campaigns',
