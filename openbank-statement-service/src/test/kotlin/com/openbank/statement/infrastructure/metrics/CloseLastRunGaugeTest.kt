@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.infrastructure.metrics
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.statement.application.port.out.CloseRunRepository
 import com.openbank.statement.domain.model.CloseRun
 import com.openbank.statement.domain.model.CloseRunStatus
 import com.openbank.statement.domain.model.CloseTrigger
-import com.openbank.libs.observability.DomainMetrics
-import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk

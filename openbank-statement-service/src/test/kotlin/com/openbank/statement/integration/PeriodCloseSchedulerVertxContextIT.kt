@@ -7,20 +7,20 @@ import com.openbank.statement.application.port.`in`.RunCloseUseCase
 import com.openbank.statement.domain.model.CloseRun
 import com.openbank.statement.domain.model.CloseTrigger
 import com.openbank.statement.it.PostgresTestResource
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
-import io.mockk.mockk
 import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import java.util.concurrent.atomic.AtomicInteger
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Regression coverage for ADR-0237's statement close adoption: the defect is in scheduler
@@ -42,8 +42,7 @@ class PeriodCloseSchedulerVertxContextIT {
             "openbank.outbox.dispatch-enabled" to "false",
         )
 
-        override fun getEnabledAlternatives(): MutableSet<Class<*>> =
-            mutableSetOf(RecordingRunCloseUseCase::class.java)
+        override fun getEnabledAlternatives(): MutableSet<Class<*>> = mutableSetOf(RecordingRunCloseUseCase::class.java)
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
