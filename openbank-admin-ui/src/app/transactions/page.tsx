@@ -164,53 +164,53 @@ export default function TransactionsPage() {
           <div id="transaction-search-filters" style={{ padding: '16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '10px' }}>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Referenční číslo', 'Reference number')}</label>
-                <input className="input" style={{ width: '100%' }} placeholder={t('TXN202506…', 'TXN202506…')} value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} />
+                <label htmlFor="transaction-reference" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Referenční číslo', 'Reference number')}</label>
+                <input id="transaction-reference" className="input" style={{ width: '100%' }} placeholder={t('TXN202506…', 'TXN202506…')} value={referenceNumber} onChange={e => setReferenceNumber(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('End-to-End ID', 'End-to-End ID')}</label>
-                <input className="input" style={{ width: '100%' }} placeholder={t('E2E-ID…', 'E2E-ID…')} value={endToEndId} onChange={e => setEndToEndId(e.target.value)} />
+                <label htmlFor="transaction-e2e-id" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('End-to-End ID', 'End-to-End ID')}</label>
+                <input id="transaction-e2e-id" className="input" style={{ width: '100%' }} placeholder={t('E2E-ID…', 'E2E-ID…')} value={endToEndId} onChange={e => setEndToEndId(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Protistrana (název)', 'Counterparty (name)')}</label>
-                <input className="input" style={{ width: '100%' }} placeholder={t('Jan Novák…', 'Jane Smith…')} value={counterparty} onChange={e => setCounterparty(e.target.value)} />
+                <label htmlFor="transaction-counterparty" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Protistrana (název)', 'Counterparty (name)')}</label>
+                <input id="transaction-counterparty" className="input" style={{ width: '100%' }} placeholder={t('Jan Novák…', 'Jane Smith…')} value={counterparty} onChange={e => setCounterparty(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
-                <select className="input" style={{ width: '100%' }} value={status} onChange={e => setStatus(e.target.value)}>
+                <label htmlFor="transaction-status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
+                <select id="transaction-status" className="input" style={{ width: '100%' }} value={status} onChange={e => setStatus(e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
                   {STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Typ transakce', 'Transaction type')}</label>
-                <select className="input" style={{ width: '100%' }} value={type} onChange={e => setType(e.target.value)}>
+                <label htmlFor="transaction-type" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Typ transakce', 'Transaction type')}</label>
+                <select id="transaction-type" className="input" style={{ width: '100%' }} value={type} onChange={e => setType(e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
                   {TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Kanál', 'Channel')}</label>
-                <select className="input" style={{ width: '100%' }} value={channel} onChange={e => setChannel(e.target.value)}>
+                <label htmlFor="transaction-channel" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Kanál', 'Channel')}</label>
+                <select id="transaction-channel" className="input" style={{ width: '100%' }} value={channel} onChange={e => setChannel(e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
                   {CHANNELS.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum od', 'Date from')}</label>
-                <input className="input" type="date" style={{ width: '100%' }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+                <label htmlFor="transaction-date-from" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum od', 'Date from')}</label>
+                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum do', 'Date to')}</label>
-                <input className="input" type="date" style={{ width: '100%' }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+                <label htmlFor="transaction-date-to" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum do', 'Date to')}</label>
+                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} value={dateTo} onChange={e => setDateTo(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka od (CZK)', 'Amount from (CZK)')}</label>
-                <input className="input" type="number" style={{ width: '100%' }} placeholder={t('0,00', '0.00')} value={amountMin} onChange={e => setAmountMin(e.target.value)} />
+                <label htmlFor="transaction-amount-min" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka od (CZK)', 'Amount from (CZK)')}</label>
+                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} placeholder="0.00" value={amountMin} onChange={e => setAmountMin(e.target.value)} />
               </div>
               <div>
-                <label style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka do (CZK)', 'Amount to (CZK)')}</label>
-                <input className="input" type="number" style={{ width: '100%' }} placeholder={t('999999,00', '999999.00')} value={amountMax} onChange={e => setAmountMax(e.target.value)} />
+                <label htmlFor="transaction-amount-max" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka do (CZK)', 'Amount to (CZK)')}</label>
+                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} placeholder="999999.00" value={amountMax} onChange={e => setAmountMax(e.target.value)} />
               </div>
             </div>
             {hasFilters && (

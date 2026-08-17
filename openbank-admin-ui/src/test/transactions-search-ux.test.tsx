@@ -23,5 +23,7 @@ describe('Transaction search UX', () => {
     fireEvent.click(filters)
     expect(filters).toHaveAttribute('aria-expanded', 'true')
     expect(document.getElementById('transaction-search-filters')).toBeTruthy()
+    expect(screen.getByLabelText('Reference number')).toHaveAttribute('id', 'transaction-reference')
+    expect(screen.getByLabelText('Amount from (CZK)')).toHaveAttribute('placeholder', '0.00')
   })
 })
