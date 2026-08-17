@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.11...admin-ui-v0.158.0) (2026-08-17)
+
+
+### Features
+
+* **admin-ui:** migrate lending compliance pack header to shared PageHeader ([#5324](https://github.com/JiRaska/open-bank-oss/issues/5324)) ([d0ad763](https://github.com/JiRaska/open-bank-oss/commit/d0ad76377342bd287b2dcfb97b39be42b77a8435))
+
 ## [0.157.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.10...admin-ui-v0.157.11) (2026-08-17)
 
 
