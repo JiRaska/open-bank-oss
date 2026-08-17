@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { Network, RefreshCw, Play, Pause, ArrowRight, ArrowLeft, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
@@ -130,23 +131,17 @@ export default function LineageFlowPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Datová lineage', 'Data Lineage')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Network size={18} style={{ color: 'var(--accent)' }} />
-            {t('Tok datové lineage', 'Data Lineage Flow')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Kdo produkuje data pro koho — deklarovaná governance lineage (ADR-0071), odvozená z governance.yaml každé služby, animovaná jako tok producent → konzument.',
+          </>}
+        title={t('Tok datové lineage', 'Data Lineage Flow')}
+        subtitle={t('Kdo produkuje data pro koho — deklarovaná governance lineage (ADR-0071), odvozená z governance.yaml každé služby, animovaná jako tok producent → konzument.',
                'Who produces data for whom — the declared data-governance lineage (ADR-0071), derived from each service’s governance.yaml, animated as producer → consumer flow.')}
-          </p>
-        </div>
-      </div>
+        icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {unavailable ? (
         <DataUnavailable kind={unavailable.kind} service="governance" feature={t('datová lineage', 'data lineage')} dense />

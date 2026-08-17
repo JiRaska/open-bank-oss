@@ -1,5 +1,47 @@
 # Changelog
 
+## [0.157.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.9...admin-ui-v0.157.10) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label sanctions review controls ([8b275e9](https://github.com/JiRaska/open-bank-oss/commit/8b275e994b38d20f96b69d6a41489e0ec2357050))
+
+## [0.157.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.8...admin-ui-v0.157.9) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label PID quick-create fields ([3dd90e7](https://github.com/JiRaska/open-bank-oss/commit/3dd90e7d0b855138405de4e3c30d99cd43221bf1))
+
+## [0.157.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.7...admin-ui-v0.157.8) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** unify party detail headers ([c86ebc6](https://github.com/JiRaska/open-bank-oss/commit/c86ebc6e8b85802bde07e5e8c40765d73a22e996))
+
+## [0.157.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.6...admin-ui-v0.157.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** unify documentation page headers ([6dd010c](https://github.com/JiRaska/open-bank-oss/commit/6dd010c4d2c379d6593311011db177938d50d4cd))
+
+## [0.157.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.5...admin-ui-v0.157.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** modernize compliance pack header ([57d9b3f](https://github.com/JiRaska/open-bank-oss/commit/57d9b3f760705b230831cd252ed89c354e68d5aa))
+
+## [0.157.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.4...admin-ui-v0.157.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** modernize system operation headers ([2ffef36](https://github.com/JiRaska/open-bank-oss/commit/2ffef3636453792988d6b4639d320b7179ea188e))
+
 ## [0.157.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.3...admin-ui-v0.157.4) (2026-08-17)
 
 

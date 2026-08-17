@@ -139,6 +139,13 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-08-17** — Recorded here only because #3931's threat-model-diff gate maps the whole
+  `openbank-infra/gitops/components/payments/network-policies.yaml` file to every money-path
+  service that lives in this directory, not to the specific block that changed. **No trust
+  boundary of this service's own changed**: the diff adds a `lending` ingress peer to
+  `transaction-service`'s block in that shared file only — this service's own ingress/egress
+  rules are byte-identical before and after. See
+  `docs/threat-models/openbank-transaction-service.md` §6 for the edge that actually changed.
 - **2026-08-09** — Fraud shadow scoring's fallback is now observable (#4221). **No new trust
   boundary and no new caller**: the outbound edge to fraud-service (OIDC client-credentials + mTLS,
   cluster-internal, shadow) is the same edge, and the verdict is still *observed, never enforced* —

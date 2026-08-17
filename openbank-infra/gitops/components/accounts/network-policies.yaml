@@ -65,6 +65,9 @@ spec:
               kubernetes.io/metadata.name: interest
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: lending
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: party
         - namespaceSelector:
             matchLabels:

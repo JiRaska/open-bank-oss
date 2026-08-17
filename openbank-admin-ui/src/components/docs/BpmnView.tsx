@@ -22,6 +22,7 @@
 import { useState } from 'react'
 import { GitBranch, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import type { BpmnProcess, BpmnStep } from '@/lib/docs/bpmn/schema'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 const LANE_BG: Record<string, string> = {
   compliance: '#fef2f2', core: '#eff6ff', psd2: '#fffbeb', payment: '#faf5ff',
@@ -287,20 +288,16 @@ export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>Docs</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">Business Processes</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <GitBranch size={18} style={{ color: 'var(--accent)' }} />
-            Business Process Diagrams (BPMN 2.0)
-          </h1>
-          <p className="page-subtitle">Klíčové bankovní procesy vizualizované pro business, compliance a IT týmy</p>
-        </div>
-      </div>
+          </>}
+        title="Business Process Diagrams (BPMN 2.0)"
+        subtitle="Klíčové bankovní procesy vizualizované pro business, compliance a IT týmy"
+        icon={<GitBranch aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Process tabs */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>

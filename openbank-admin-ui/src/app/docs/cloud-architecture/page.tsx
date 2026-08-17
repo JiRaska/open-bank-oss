@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
 import type { InfraStatusResult } from '@/lib/infra/probes'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
@@ -238,22 +239,16 @@ export default function CloudArchitecturePage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Cloud architektura', 'Cloud Architecture')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Cloud size={18} style={{ color: 'var(--accent)' }} />
-            {t('Cloud architektura (AWS)', 'Cloud Architecture (AWS)')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Cílový stav dle ADR-0027 se status overlay z živého clusteru openbank-sandbox · klikni na prvek pro detail', 'Target state per ADR-0027 with a status overlay from the live openbank-sandbox cluster · click an element for detail')}
-          </p>
-        </div>
-      </div>
+          </>}
+        title={t('Cloud architektura (AWS)', 'Cloud Architecture (AWS)')}
+        subtitle={t('Cílový stav dle ADR-0027 se status overlay z živého clusteru openbank-sandbox · klikni na prvek pro detail', 'Target state per ADR-0027 with a status overlay from the live openbank-sandbox cluster · click an element for detail')}
+        icon={<Cloud aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Legend + honesty note */}
       <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
