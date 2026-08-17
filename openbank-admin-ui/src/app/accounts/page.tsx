@@ -44,6 +44,7 @@ function classifyQuery(raw: string): QueryKind {
 
 export default function AccountsPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [query, setQuery]               = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter]     = useState('')
@@ -136,6 +137,7 @@ export default function AccountsPage() {
 
   const visible = filtered.slice(0, visibleCount)
   const hasMore = filtered.length > visibleCount
+  const queryHelpVisible = !ibanHint && !result && !unavailable
 
   return (
     <div>
@@ -160,10 +162,14 @@ export default function AccountsPage() {
         }}>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: '1', minWidth: '260px' }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input
+                id="accounts-query"
                 className="input"
                 style={{ paddingLeft: '30px', width: '100%', ...(ibanHint ? { borderColor: 'var(--danger)' } : {}) }}
+                aria-label={t('Vyhledat účet podle čísla, IBANu nebo Party ID', 'Search accounts by number, IBAN, or Party ID')}
+                aria-describedby={ibanHint ? 'accounts-query-error' : queryHelpVisible ? 'accounts-query-help' : undefined}
+                aria-invalid={Boolean(ibanHint)}
                 placeholder={t('Fragment čísla účtu, IBAN nebo Party ID (UUID)…', 'Account-number fragment, IBAN, or Party ID (UUID)…')}
                 value={query}
                 onChange={e => { setQuery(e.target.value); if (ibanHint) setIbanHint(null) }}
@@ -171,6 +177,7 @@ export default function AccountsPage() {
               />
             </div>
             <select
+              aria-label={t('Filtrovat podle stavu účtu', 'Filter by account status')}
               className="input"
               style={{ width: '150px' }}
               value={statusFilter}
@@ -183,6 +190,7 @@ export default function AccountsPage() {
               <option value="CLOSED">{t('Uzavřený', 'Closed')}</option>
             </select>
             <select
+              aria-label={t('Filtrovat podle typu účtu', 'Filter by account type')}
               className="input"
               style={{ width: '140px' }}
               value={typeFilter}
@@ -197,7 +205,7 @@ export default function AccountsPage() {
               onClick={search}
               disabled={loading || !canSearch}
             >
-              <Search size={13} />
+              <Search size={13} aria-hidden="true" />
               {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
             </button>
             <button
@@ -209,17 +217,17 @@ export default function AccountsPage() {
             </button>
             {result && (
               <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                <Filter size={11} style={{ display: 'inline', marginRight: '4px' }} />
+                <Filter size={11} aria-hidden="true" style={{ display: 'inline', marginRight: '4px' }} />
                 {t(`${filtered.length} výsledků`, `${filtered.length} result${filtered.length !== 1 ? 's' : ''}`)}
               </span>
             )}
           </div>
           {/* Inline hints — never a raw backend error. */}
           {ibanHint && (
-            <span style={{ fontSize: '11px', color: 'var(--danger)' }}>{ibanHint}</span>
+            <span id="accounts-query-error" role="alert" style={{ fontSize: '11px', color: 'var(--danger)' }}>{ibanHint}</span>
           )}
-          {!ibanHint && !result && !unavailable && (
-            <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+          {queryHelpVisible && (
+            <span id="accounts-query-help" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
               {t(
                 'Hledejte podle fragmentu čísla účtu (trigram, ≥2 znaky), přesného IBANu nebo Party ID (UUID). Vyhledávání podle jména/příjmení/rodného čísla vyžaduje party-service (v přípravě, #66–68).',
                 'Search by an account-number fragment (trigram, ≥2 chars), an exact IBAN, or a Party ID (UUID). Search by name / surname / birth number needs party-service (coming soon, #66–68).',
@@ -294,7 +302,7 @@ export default function AccountsPage() {
                     <td><span className="tag">{a.currencyCode}</span></td>
                     <td><StatusBadge status={a.status} /></td>
                     <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{a.partyId}</span></td>
-                    <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(a.openedAt).toLocaleDateString('en-GB')}</span></td>
+                    <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(a.openedAt).toLocaleDateString(numberLocale)}</span></td>
                     <td style={{ textAlign: 'right' }}>
                       <Link href={`/accounts/${a.id}`} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '12px' }}>
                         {t('Detail', 'View')} →
