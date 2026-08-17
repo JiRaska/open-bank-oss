@@ -69,6 +69,30 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `domestic-payment's own eventType and sourceService win, no longer falling to the sentinels`(): Unit =
+        runBlocking {
+            // Issue #3994's own fix on the producer side: DomesticPaymentCreatedEvent /
+            // DomesticPaymentStatusChangedEvent now serialise "eventType" and "sourceService"
+            // themselves (openbank-domestic-payment/.../DomesticPaymentEvents.kt), so this no
+            // longer needs the ce-type header or the topic table to attribute correctly — the
+            // shape below is the real wire payload KafkaDomesticPaymentEventPublisher emits.
+            // RED before that producer change: with no such keys in the body this fell through to
+            // ce-type/topic (still correct, per the other tests here) but as TOPIC-sourced, not
+            // the producer's own EVENT-sourced claim.
+            val entry = capturingSave()
+
+            consumer.consume(
+                """{"paymentId":"${UUID.randomUUID()}","status":"SETTLED",""" +
+                    """"eventType":"DOMESTIC_PAYMENT_STATUS_CHANGED","sourceService":"domestic-payment"}""",
+                EventAddress(topic = "openbank.domestic.payment.events", ceType = "domestic.payment.status-changed"),
+            )
+
+            assertThat(entry.captured.eventType).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
+            assertThat(entry.captured.sourceService).isEqualTo("domestic-payment")
+            assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+        }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
