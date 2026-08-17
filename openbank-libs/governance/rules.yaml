@@ -330,7 +330,18 @@ change_requirements:
     # CI producer is LIVE (advisory): .github/scripts/check-event-schema-compat.py runs in
     # the "Validate manifests" job on every PR — diff-scoped over DomainEvent data classes
     # (removed/renamed props, type changes, non-nullable-no-default additions = replay break,
-    # eventType renames) and *.avsc files (field default rules). Flip to enforced = --enforce.
+    # eventType renames), *.avsc files (field default rules), and — since ADR-0260 picked
+    # JSON Schema as the fleet's event-schema format, not Avro — */schema/*.schema.json files
+    # (compare_json_schema: removed properties, type changes, a property becoming required, all
+    # compared per-`oneOf`-branch so a header-discriminated topic's several message shapes are
+    # each checked). The JSON Schema path is the ONLY compatibility check reachable for a
+    # producer whose event class does not extend DomainEvent — e.g.
+    # openbank-document-service's DocumentGenerated/SignatureCeremonyCompleted, structurally
+    # invisible to the DomainEvent comparator the same way SepaPaymentCreatedEvent is on the
+    # money-path side. Still no rules.yaml gate registration change: this is the SAME `gate:
+    # schema-compat` / `event_change` rule extended to a new input shape, not a new gate — a
+    # second advisory entry for the identical detect scope would be the #3009 duplicate-gate
+    # mistake. Flip to enforced = --enforce.
     ci_producer: ".github/scripts/check-event-schema-compat.py"
   event_consumer_liveness:
     # ADR-0160 mechanism 1. standing-order-service published standing-order.due.v1 every day
