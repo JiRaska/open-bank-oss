@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.156.1...admin-ui-v0.157.0) (2026-08-17)
+
+
+### Features
+
+* **admin-ui:** make swarm maturity evidence-based ([#5262](https://github.com/JiRaska/open-bank-oss/issues/5262)) ([5b05bc2](https://github.com/JiRaska/open-bank-oss/commit/5b05bc2902da97f6280c0798fa167ce472ba524f))
+
 ## [0.156.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.156.0...admin-ui-v0.156.1) (2026-08-17)
 
 
