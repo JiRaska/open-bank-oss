@@ -26,6 +26,7 @@ interface AmlCase {
 
 export default function AmlPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [scanning, setScanning] = useState(false)
   const [search, setSearch] = useState('')
   const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
@@ -113,8 +114,9 @@ export default function AmlPage() {
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno klienta, status, úroveň rizika…', 'Search customer name, status, risk level…')}
+                aria-label={t('Hledat AML případy', 'Search AML cases')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
@@ -171,7 +173,7 @@ export default function AmlPage() {
                     <td style={{ padding: '12px 16px' }}>
                       <StatusBadge status={c.status} label={c.status.replace('_', ' ')} />
                     </td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.timestamp ? new Date(c.timestamp).toLocaleString('cs-CZ') : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.timestamp ? new Date(c.timestamp).toLocaleString(numberLocale) : '—'}</td>
                   </tr>
                 )
               })}</tbody>

@@ -22,6 +22,7 @@ interface ClearingBatch {
 
 export default function ClearingPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
   const { data, loading, unavailable, waking } = useServiceResource<ClearingBatch[]>(
     svcUrl('clearing-service', '/api/v1/clearing/batches'),
@@ -62,18 +63,19 @@ export default function ClearingPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} /> },
-            { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} />, tone: 'success' as const },
-            { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} />, tone: 'warning' as const },
-            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }), icon: <Banknote size={16} /> },
+            { label: t('Dávky celkem', 'Total batches'), value: batches.length, icon: <Layers size={16} aria-hidden="true" /> },
+            { label: t('Vypořádáno', 'Settled'), value: settled.length, icon: <CheckCircle2 size={16} aria-hidden="true" />, tone: 'success' as const },
+            { label: t('Čeká / Zpracovává', 'Pending / Processing'), value: pending.length, icon: <Clock size={16} aria-hidden="true" />, tone: 'warning' as const },
+            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Banknote size={16} aria-hidden="true" /> },
           ].map(k => <StatCard key={k.label} label={k.label} value={k.value} icon={k.icon} tone={k.tone} />)}
         </div>
 
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat referenci, rail, status…', 'Search reference, rail, status…')}
+                aria-label={t('Hledat clearing dávky', 'Search clearing batches')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
@@ -104,10 +106,10 @@ export default function ClearingPage() {
                     <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{b.batchReference}</td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.paymentRail}</td>
                     <td style={{ padding: '12px 16px', fontSize: '13px', color: 'var(--text-primary)' }}>{b.itemCount}</td>
-                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(b.totalAmount ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(b.totalAmount ?? 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</td>
                     <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{b.currency}</td>
                     <td style={{ padding: '12px 16px' }}><StatusBadge status={b.status} tone={b.status === 'FAILED' ? 'danger' : b.status === 'SETTLED' ? 'success' : 'warning'} /></td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{b.createdAt ? new Date(b.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{b.createdAt ? new Date(b.createdAt).toLocaleString(numberLocale) : '—'}</td>
                   </tr>
                 )
               })}</tbody>
