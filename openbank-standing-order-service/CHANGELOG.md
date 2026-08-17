@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.7](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.6...standing-order-service-v0.14.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **standing-order:** route DOMESTIC/INTERNAL orders, don't complete before they run ([#889](https://github.com/JiRaska/open-bank-oss/issues/889)) ([#5250](https://github.com/JiRaska/open-bank-oss/issues/5250)) ([2330eee](https://github.com/JiRaska/open-bank-oss/commit/2330eeea0716ffa2beb5176e786bd9f483d5250f))
+
 ## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.5...standing-order-service-v0.14.6) (2026-08-17)
 
 
