@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.1...admin-ui-v0.155.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove misleading settings controls ([#5178](https://github.com/JiRaska/open-bank-oss/issues/5178)) ([b7228ba](https://github.com/JiRaska/open-bank-oss/commit/b7228ba15a5732f56a6f094b98bca4d9c8fb4309))
+
 ## [0.155.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.0...admin-ui-v0.155.1) (2026-08-17)
 
 
