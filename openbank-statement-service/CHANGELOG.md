@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.5...statement-service-v0.8.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **statement:** track scheduled close liveness ([#5357](https://github.com/JiRaska/open-bank-oss/issues/5357)) ([78adec3](https://github.com/JiRaska/open-bank-oss/commit/78adec3f5ab86d8e912a510592e772f8b90b8964))
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.4...statement-service-v0.8.5) (2026-08-17)
 
 
