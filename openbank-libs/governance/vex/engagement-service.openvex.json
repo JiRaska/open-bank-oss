@@ -1,0 +1,17 @@
+{
+    "@context": "https://openvex.dev/ns/v0.2.0",
+    "@id": "https://open-bank.tech/vex/engagement-service",
+    "author": "OpenBank Security",
+    "version": 1,
+    "statements": [
+        {
+            "vulnerability": {
+                "name": "CVE-2025-14969"
+            },
+            "status": "not_affected",
+            "justification": "vulnerable_code_not_present",
+            "impact_statement": "The advisory expresses its affected range as a single interval (< 4.2.1), which under Maven version ordering sweeps in the entire hibernate-reactive 3.x line. That expression misclassifies this fleet. Hibernate Reactive maintains two parallel release lines, and 3.4.x was branched and released AFTER the fix, not before it: 4.2.1.Final was released 2025-12-21, while 3.4.0.Final was released 2026-05-27 and 3.4.2.Final on 2026-06-16 (Maven Central publication dates). engagement-service depends on org.hibernate.reactive:hibernate-reactive-core transitively via io.quarkus:quarkus-hibernate-reactive-panache-kotlin, resolved through the fleet-shared version catalog's quarkus-bom 3.38.0 (openbank-libs/gradle/libs.versions.toml) -- the same platform version already verified for this CVE on ledger-service and vop-service, and no per-service dependency force overrides it (build-logic/src/main/kotlin/openbank.dependency-vulnerability-pins.gradle.kts deliberately does not force hibernate-reactive-core, for the same reason given here). The upstream fix commit cd7f104e10de918004707ca0e26e3840976f780a ('[#2926] Roll back open transactions on close', 2025-12-18), the only code change the advisory references, is PRESENT in the 3.4.2.Final artifact this fleet resolves. Independently verified for this statement (not merely copied from the ledger-service overlay): the jar at ~/.gradle/caches/modules-2/files-2.1/org.hibernate.reactive/hibernate-reactive-core/3.4.2.Final/.../hibernate-reactive-core-3.4.2.Final.jar hashes to sha256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, matching the value already pinned for this artifact in gradle/verification-metadata.xml (same fleet-wide pin engagement-service resolves against, since there is only one dependency-verification file for the whole monorepo). Disassembling that exact jar (javap -p -c org/hibernate/reactive/pool/impl/SqlClientConnection.class) shows close() invoking the post-fix validateNoTransactionInProgressOnClose(); the class carries the post-fix 'private boolean closed' field in place of the pre-fix 'private io.vertx.sqlclient.Transaction transaction'; and Log declares the fix's new liveTransactionDetectedOnClose() message -- the identical evidence already recorded for ledger-service and vop-service, re-derived here rather than assumed to transfer. No Quarkus platform ships hibernate-reactive-core >= 4.2.1 (quarkus-bom 3.38.0, 3.38.1, 3.38.2 and 3.39.0.CR1 all resolve 3.4.2.Final), and none is needed: the vulnerable code is not present in the resolved artifact. Ref: issue #4533, PR #4707.",
+            "timestamp": "2026-08-17T09:36:03Z"
+        }
+    ]
+}
