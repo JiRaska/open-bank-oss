@@ -499,8 +499,8 @@ function FinOpsContent() {
           <AgentInsightsPanel
             title={t('FinOps náhledy (AI)', 'FinOps Insights (AI)')}
             subtitle={t(
-              'Aktivní cost anomálie z finops-agenta (D1–D5 detektory z Alertmanageru — ADR-0112). Agent navrhuje, schvaluje člověk (HITL, ADR-0112 P4).',
-              'Active cost anomalies from the finops-agent (D1–D5 detectors via Alertmanager — ADR-0112). The agent proposes; a human approves (HITL, ADR-0112 P4).',
+              'Aktivní cost anomálie z finops-agenta (D1–D5 detektory z Alertmanageru — ADR-0112). Tento přehled je pouze pro čtení: alerty zatím nevytvářejí návrhy ve schvalovací frontě.',
+              'Active cost anomalies from the finops-agent (D1–D5 detectors via Alertmanager — ADR-0112). This view is read-only: alerts do not yet create proposals in the approval queue.',
             )}
             findings={anomalies.map(a => toAgentFinding(a, t))}
             emptyMessage={t(

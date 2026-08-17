@@ -595,17 +595,14 @@ function IAOpsContent() {
             icon={<AlertOctagon size={16} />}
             title={t('Cost anomálie', 'Cost Anomalies')}
             subtitle={t(
-              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Agent navrhuje, schvaluje člověk — HITL backend přijde v P4 (tlačítka zatím logují do konzole).',
-              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). The agent proposes; a human approves — HITL backend arrives in P4 (buttons currently log to console).',
+              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Tento přehled je pouze pro čtení: anomálie zatím nevytvářejí návrhy ve schvalovací frontě.',
+              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). This view is read-only: anomalies do not yet create proposals in the approval queue.',
             )}
             findings={costAnomalies.map(a => toAgentFinding(a, t))}
             emptyMessage={t(
               'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
               'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
             )}
-            onApprove={id => console.log('HITL approve', id)}
-            onReject={id => console.log('HITL dismiss', id)}
-            decideLabels={{ approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Dismiss') }}
           />
 
           {/* ── D. AI audit trail ── */}
