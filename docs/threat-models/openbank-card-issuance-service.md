@@ -115,6 +115,45 @@ the processor is configured, a SINGLE_USE card is a virtual card with a validity
 machine is ready, the guarantee is not. Anything that presents it to customers as "authorises once"
 before the processor side lands would be claiming a control the bank does not yet have.
 
+## 4c. Envelope encryption for the PAN vault (ADR-0262) — STRIDE supplement
+
+Replaces the flat AES-256-GCM key `AesGcmCardSecretCipher` read from a Kubernetes Secret with
+envelope encryption: a locally-held data-encryption key (DEK) does the actual PAN/CVV
+encrypt/decrypt exactly as before, but the DEK itself is wrapped by an OpenBao Transit
+key-encryption key (KEK, `transit/keys/card-pan`) and never leaves OpenBao unencrypted
+(`OpenBaoEnvelopeCardSecretCipher`, opt-in via `openbank.card.key-source=openbao-transit`;
+unconfigured deployments keep the flat key unchanged). Two follow-ups land in the same slice:
+`OpenBaoTransitDekUnwrapper` (the shared login/retry client) and `CardPanKeyReencrypt` (the batch
+job that migrates existing rows off a rotated-out DEK).
+
+**The pre-existing defect this closes.** The flat key had no rotation path at all — the wire
+format (`base64(IV ‖ ciphertext ‖ tag)`) carries no key identifier, so replacing the configured key
+made every previously-written row permanently undecryptable. And the key itself sat in a
+Kubernetes Secret with no split-knowledge or dual-control boundary: anyone who could read the
+`payments` namespace's secrets could read the raw AES key and, offline, decrypt every stored PAN.
+Both are structural gaps PCI DSS 3.5/3.6/3.6.4 expect closed even though this service's PAN data is
+synthetic today (see §1) — closed now, before that stops being true, rather than as a migration on
+live data later.
+
+| STRIDE | Threat | Mitigation |
+|---|---|---|
+| **I**nfo disclosure | Reading the raw encryption key from a compromised pod/namespace and decrypting the vault offline | The KEK never leaves OpenBao; the service only ever holds an unwrapped DEK in memory (never persisted, never logged) after a Transit `decrypt` call. Compromising the pod exposes the same blast radius as before (the in-memory DEK) but no longer exposes a key an operator can read directly from a Secret — access to unwrap now requires OpenBao's own Kubernetes-auth role + ACL policy, a boundary this service does not itself control |
+| **T**ampering | A rotated-out key can never be retired, so a leaked historical key stays valid forever | `vault write -f transit/keys/card-pan/rotate` versions the KEK; `CardPanKeyReencrypt` re-encrypts existing rows onto the new DEK (compare-and-swap on the old ciphertext, so a concurrent write is skipped, never clobbered — same idempotent shape as `CardPanVaultBackfill`, §4). Once every row has migrated, the old KEK version can be disabled in Transit |
+| **R**epudiation | No record of when a key rotation happened or who triggered it | Not closed by this change — see Residual risks below |
+| **I**nfo disclosure | The re-encrypt job's logs leak a PAN/CVV or a ciphertext while explaining why a row could not be migrated | `CardPanKeyReencrypt` logs counts and card ids only, never a decrypted value or a ciphertext — same discipline as `CardPanVaultBackfill` |
+| **D**oS | A card-issuance pod cannot start because OpenBao is briefly unavailable at boot | `OpenBaoTransitDekUnwrapper` retries the whole (login, decrypt) pair with exponential backoff (4 attempts, ~3.5s worst case), well inside the Deployment's `startupProbe` budget. Does not help a sustained OpenBao outage — see Residual risks |
+| **S**poofing | A workload other than card-issuance obtains a token for the `card-issuance-pan-dek` OpenBao role | Kubernetes-auth login binds the role to this service's ServiceAccount; OpenBao issues no token to a pod that cannot present that SA's projected JWT |
+
+**DFD update:** adds `[card-issuance-service] --Kubernetes-auth + Transit decrypt--> [OpenBao]`
+(`openbank.card.envelope.bao-addr`, declared in the gitops Deployment env so
+`gen-network-policies.py`/`check-network-policy-code-edges.py` can see the egress — ADR-0262's own
+delivery caught this as a code-only edge before the gitops declaration landed). No change to the
+Postgres or Kafka trust boundaries.
+**Risk class:** confidentiality and integrity of the PAN/CVV vault's encryption key material.
+**Rollback:** revert to `flat-key` mode (the default) — existing rows encrypted under an unwrapped
+DEK stay decryptable only as long as that DEK is still derivable, so a rollback must happen before
+retiring the corresponding KEK version in Transit, not after.
+
 ## 5. Residual risks / assumptions
 
 - **No optimistic locking today.** `Card` lacks a `version` column; two concurrent lifecycle
@@ -132,8 +171,27 @@ before the processor side lands would be claiming a control the bank does not ye
 - **GDPR erasure.** `cardholderName` and `embossedName` are PII. The PARTY_ERASED event
   (ADR-0117) must trigger erasure of these fields from the `cards` table; until that subscriber
   is implemented, erasure is manual.
+- **OpenBao runs as a single replica (ADR-0262).** No raft HA on the OpenBao side today. A
+  sustained OpenBao outage blocks every NEW card-issuance pod start when `key-source=openbao-transit`
+  (retry/backoff covers a brief blip, not a real outage) and blocks any in-flight key rotation or
+  re-encrypt pass. Already-running pods are unaffected — the DEK is unwrapped once at boot and kept
+  in memory. Fixing this is HA on OpenBao itself, out of scope for this service.
+- **No audit trail for a KEK rotation.** `vault write -f transit/keys/card-pan/rotate` and setting
+  `openbank.card.envelope.previous-wrapped-dek` are both manual operator actions today, and neither
+  is logged anywhere queryable — `CardPanKeyReencrypt`'s own log line reports migration counts, not
+  that a rotation was initiated or by whom. Acceptable while PAN data is synthetic; a real rotation
+  process would need this before card data does.
 
 ## 6. Change log
+
+- **2026-08-17** — Envelope encryption for the PAN vault (ADR-0262). Adds
+  `OpenBaoEnvelopeCardSecretCipher` (opt-in via `openbank.card.key-source=openbao-transit`),
+  `OpenBaoTransitDekUnwrapper`, and the `CardPanKeyReencrypt` post-rotation batch job. STRIDE
+  supplement in §4c. Closes the flat key's two structural gaps — no rotation path, no
+  split-knowledge/dual-control boundary — before this service's PAN data stops being synthetic.
+  New residual risks: OpenBao's own single-replica deployment, and no audit trail for a rotation
+  (§5). Rollback: revert to `flat-key` mode, but only before retiring the KEK version a rollback
+  would need.
 
 - **2026-08-07** — Single-use card lifecycle (D1 server preparation). New terminal status `CONSUMED`, `CardClosedReason` (`SINGLE_USE_CONSUMED | VALIDITY_EXPIRED | LOST_OR_STOLEN | CUSTOMER_CANCEL`), and `expiresAt`; `consume()` and `expireUnused()` transitions; migration V9. STRIDE supplement in §4b. `CONSUMED` joins `TERMINAL_STATUSES`, which excludes a card from PAN-vault backfill — the pinned assertion on that set failed on this change, which is the change-detector working, and was updated deliberately rather than relaxed. **The authorize-once guarantee is NOT in this change:** it lives at the card processor, and until it is configured a SINGLE_USE card is a virtual card with a validity window. Do not present it to customers as "authorises once" before then. Rollback: revert; a card sitting in CONSUMED must be remapped to CANCELLED first, or it becomes a status no older build understands.
 
