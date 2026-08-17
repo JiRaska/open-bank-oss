@@ -69,6 +69,27 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `card-issuance-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's card-issuance-service fix: CardEvent (CardIssued/CardStatusChanged/
+        // CardLimitsChanged/CardControlsChanged, serialised via ObjectMapper.writeValueAsString in
+        // CardService.outboxMessage) now carries "sourceService" on the base sealed class. Before
+        // this, EventAttribution's `openbank.cards.events` -> `card-issuance-service` entry already
+        // resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"card.status_changed.v1","cardId":"${UUID.randomUUID()}",""" +
+                """"sourceService":"card-issuance-service"}""",
+            EventAddress(topic = "openbank.cards.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("card.status_changed.v1")
+        assertThat(entry.captured.sourceService).isEqualTo("card-issuance-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
