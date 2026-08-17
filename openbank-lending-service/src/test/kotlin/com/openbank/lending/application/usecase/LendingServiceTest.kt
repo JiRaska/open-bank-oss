@@ -4,6 +4,8 @@
 
 package com.openbank.lending.application.usecase
 
+import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -78,6 +80,8 @@ class LendingServiceTest {
     }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
+    private val borrowerAccounts = mockk<BorrowerAccountLookupPort>()
+    private val borrowerCredit = mockk<BorrowerCreditPort>()
 
     private val service = LendingService(
         applications,
@@ -99,6 +103,8 @@ class LendingServiceTest {
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             clock,
         ),
+        borrowerAccounts,
+        borrowerCredit,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -278,6 +284,8 @@ class LendingServiceTest {
                 CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
                 clock,
             ),
+            borrowerAccounts,
+            borrowerCredit,
         )
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
@@ -348,6 +356,15 @@ class LendingServiceTest {
         verifyClaims(1)
     }
 
+    private val borrowerAccountId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+
+    /** The disbursement's happy-path customer-credit leg: an EUR CURRENT account is found and paid. */
+    private fun stubBorrowerCreditSucceeds() {
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
+            Uni.createFrom().item(borrowerAccountId)
+        every { borrowerCredit.credit(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+    }
+
     @Test
     fun `disburse books the loan, persists a 12-row schedule and posts the disbursement`() {
         val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
@@ -360,6 +377,7 @@ class LendingServiceTest {
         stubClaim()
         every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
 
         val loan = service.disburse(app.id, "dave").await().indefinitely()
 
@@ -368,10 +386,68 @@ class LendingServiceTest {
         // The whole contractual schedule is persisted and closes to zero.
         assertThat(rowsSlot.captured).hasSize(12)
         assertThat(rowsSlot.captured.last().closingBalance).isEqualTo(eur("0.00"))
-        // Cash leaves the bank exactly once, for the full principal.
+        // Cash leaves the bank exactly once, for the full principal — booked to the loan's own
+        // internal GL accounts.
         assertThat(postingSlot.captured.amount).isEqualTo(eur("12000.00"))
         verify(exactly = 1) { ledger.post(any()) }
+        // ...and separately, the borrower is actually paid: this is the fix for #3931, where the
+        // ledger journal above used to be the ONLY booking a disbursement made — an asset for the
+        // bank, and nothing for the customer, who ended up owing a loan they never received.
+        verify(exactly = 1) { borrowerAccounts.findCurrentAccount(partyId, "EUR") }
+        verify(exactly = 1) { borrowerCredit.credit(any(), borrowerAccountId, eur("12000.00")) }
         verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
+    }
+
+    /**
+     * The ledger books the loan asset (money never mutates via `ledger.post`, so this half cannot
+     * be "undone" by this fix — #3850 already tracks making the origination claim and the money
+     * movement atomic together), but if the borrower has nowhere to receive the money, disbursement
+     * must fail loud rather than quietly leave a loan booked with the customer unpaid.
+     */
+    @Test
+    fun `disburse fails when the borrower has no CURRENT account to credit`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no active")
+            .hasMessageContaining("was not paid")
+
+        verify(exactly = 0) { borrowerCredit.credit(any(), any(), any()) }
+        // Exactly one emit, not zero: the origination-transition event ("disbursement booked")
+        // already committed before the ledger post/credit even run. Only the SECOND event —
+        // "loan.disbursed" — is conditional on the borrower actually getting paid.
+        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+    }
+
+    /** The transaction-service credit call itself failing must surface, not be swallowed. */
+    @Test
+    fun `disburse fails when the customer-credit call itself fails`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
+            Uni.createFrom().item(borrowerAccountId)
+        every { borrowerCredit.credit(any(), any(), any()) } returns
+            Uni.createFrom().failure(IllegalStateException("transaction-service unavailable"))
+
+        assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        // Same shape as the no-account case above: one emit (the transition already committed),
+        // and specifically no "loan.disbursed" — that event is the promise the money moved.
+        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
     }
 
     @Test
@@ -1688,6 +1764,7 @@ class LendingServiceTest {
         stubClaim()
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
 
         val loan = service.disburse(app.id, "dave").await().indefinitely()
 

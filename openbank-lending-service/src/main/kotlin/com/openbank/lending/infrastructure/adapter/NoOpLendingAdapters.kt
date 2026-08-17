@@ -4,6 +4,8 @@
 
 package com.openbank.lending.infrastructure.adapter
 
+import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.CreditAssessment
 import com.openbank.lending.application.port.out.CreditBureauPort
@@ -78,6 +80,33 @@ class LoggingLoanEventEmitter : LoanEventEmitter {
     /** Real adapter writes to `lending_outbox` in the state-change transaction (ADR-0003). */
     override fun emit(message: LendingOutboxMessage): Uni<Unit> {
         log.debugf("no-op outbox emit: %s for %s", message.eventType, message.aggregateId)
+        return Uni.createFrom().item(Unit)
+    }
+}
+
+/**
+ * The offline defaults for the disbursement's customer-facing leg (#3931) — gated together under
+ * `lending.borrower-credit.backend`, same as the rest of this file. A no-op lookup that always
+ * returns null makes [com.openbank.lending.application.usecase.LendingService] take the fail-loud
+ * "no account" branch rather than the credit silently claiming success for a payment that never
+ * happened: an offline/local build cannot pay a customer, so it must say so, not pretend to.
+ */
+@ApplicationScoped
+@Default
+class NoOpBorrowerAccountLookupPort : BorrowerAccountLookupPort {
+    override fun findCurrentAccount(partyId: UUID, currency: String): Uni<UUID?> = Uni.createFrom().nullItem()
+}
+
+@ApplicationScoped
+@Default
+class NoOpBorrowerCreditPort : BorrowerCreditPort {
+    private val log = Logger.getLogger(NoOpBorrowerCreditPort::class.java)
+    override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+        log.debugf("no-op borrower credit: %s ref=%s (unreachable: lookup already returns null)", amount, reference)
+        return Uni.createFrom().item(Unit)
+    }
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+        log.debugf("no-op borrower debit: %s ref=%s", amount, reference)
         return Uni.createFrom().item(Unit)
     }
 }
