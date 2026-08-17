@@ -86,18 +86,23 @@ class Psd2OutboxRepositoryImpl(private val clock: Clock) :
         }.awaitSuspending()
     }
 
-    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
+    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
         Panache.withTransaction {
-            find("eventId", eventId).firstResult().invoke { e ->
+            find("eventId", eventId).firstResult().map { e ->
                 if (e != null) {
                     e.attemptCount += 1
                     e.status = OutboxFailurePolicy.statusAfterFailure(e.attemptCount).name
                     e.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
                     e.updatedAt = failedAt
+                    OutboxStatus.valueOf(e.status)
+                } else {
+                    // Row not found -- unreachable in practice (the dispatcher only calls
+                    // markFailed on a row it just claimed), but degrade gracefully rather than
+                    // throw out of a batch that is otherwise mid-flight (#5128 finding 3).
+                    OutboxStatus.FAILED
                 }
-            }.replaceWith(Unit)
+            }
         }.awaitSuspending()
-    }
 
     private fun OutboxMessage.toEntity() = Psd2OutboxEntity().also {
         it.eventId = eventId

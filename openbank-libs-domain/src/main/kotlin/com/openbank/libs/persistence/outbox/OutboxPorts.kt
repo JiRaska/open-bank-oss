@@ -63,8 +63,15 @@ interface OutboxRepository {
      * passes none, and it lands in `updated_at` — which the dead-letter janitor prunes on
      * (`status = DEAD and updatedAt < threshold`). At 1970 every DEAD row is instantly older than
      * any retention window (#3272).
+     *
+     * @return the status this row was actually persisted with ([OutboxStatus.FAILED] or
+     * [OutboxStatus.DEAD]) — the caller (see `OutboxDispatch.dispatchOnce`) uses this to attribute
+     * `DomainMetrics.outboxDead` correctly instead of independently recomputing
+     * [OutboxFailurePolicy.statusAfterFailure] and hoping it agrees with what this call actually
+     * wrote (#5128 finding 3). Every implementation must return the status it persisted, not a
+     * value predicted before the write.
      */
-    suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant = Instant.now())
+    suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant = Instant.now()): OutboxStatus
 }
 
 interface OutboxEventPublisher {

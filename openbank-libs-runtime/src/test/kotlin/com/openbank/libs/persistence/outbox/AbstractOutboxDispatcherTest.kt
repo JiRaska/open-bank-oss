@@ -23,8 +23,10 @@ class AbstractOutboxDispatcherTest {
         override suspend fun markSent(eventId: UUID, sentAt: Instant) {
             sent += eventId
         }
-        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
+        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus {
             failed += eventId to error
+            val entry = rows.first { it.eventId == eventId }
+            return OutboxFailurePolicy.statusAfterFailure(entry.attemptCount + 1)
         }
     }
 
