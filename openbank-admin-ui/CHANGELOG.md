@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.4...admin-ui-v0.155.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** make ledger controls accessible ([#5208](https://github.com/JiRaska/open-bank-oss/issues/5208)) ([e758e58](https://github.com/JiRaska/open-bank-oss/commit/e758e582074aabf98f6b5abf8428f3d20b8f4fc6))
+
 ## [0.155.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.3...admin-ui-v0.155.4) (2026-08-17)
 
 
