@@ -93,7 +93,7 @@ from the *release* single-source invariant.
 |---|---|---|---|---|
 | **Release / artifact SemVer** | the deployable build of a service | `version.txt` → `quarkus.application.version` | `/api/v1/info` `version`; `X-Service-Version` header; git tag; image tag; SBOM; evidence bundle | Conventional Commit type (`feat`→minor, `fix`/`perf`→patch, `BREAKING CHANGE`→major) — unchanged from ADR-0029 |
 | **API contract SemVer** | the public REST contract | `openapi.yaml:info.version` | URL `/api/v{MAJOR}`; `X-API-Version` header; `/info` `apiVersion` | classified from the OpenAPI diff: breaking→MAJOR, additive→MINOR, editorial→PATCH |
-| **Event schema version** | Kafka message schemas | Apicurio registry subject + schema `version` field | topic name (`-vN` on a break); registry compatibility check | breaking schema change (ADR-0006) — restated here for completeness |
+| **Event schema version** | Kafka message schemas | **Resolved by ADR-0260 (2026-08-16):** the committed `openbank-contracts/<service>/schema/<event>.schema.json` file — the Apicurio-assigned registry version is a *derived* artifact CI applies from it, not the source (same relationship `openapi.yaml` has to the API axis above) | topic name (`-vN` on a break); registry compatibility check (BACKWARD_TRANSITIVE fleet floor, FULL_TRANSITIVE on money-path, ADR-0260 D1) | breaking schema change (ADR-0006/ADR-0260) — restated here for completeness |
 
 The three move on independent cadences. A service may sit at release `3.4.1` while serving API `v1`
 (contract `1.2.0`) and producing `account.created` schema `v1`. That is the correct, expected state — not
@@ -217,6 +217,8 @@ released.
 
 - ADR-0005 — OpenAPI design-first (API contract is the source for the contract axis).
 - ADR-0006 — AsyncAPI for Kafka (the event-schema axis, third version axis here).
+- ADR-0260 — Event schema format and compatibility: JSON Schema over Avro (resolves the D1
+  event-schema row above; amends ADR-0006).
 - ADR-0029 — Versioning, release and governance as code (this ADR amends its D2 single-source invariant
   and D5 audit chain framing; D1/D3/D4/D6 of 0029 are unchanged).
 - ADR-0014 — `openbank-libs` as service-infrastructure layer (home of the runtime plumbing changed here).

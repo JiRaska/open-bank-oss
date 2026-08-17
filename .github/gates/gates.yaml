@@ -2340,6 +2340,10 @@ gates:
   # removed/renamed props, type changes, non-nullable-no-default additions
   # (replay break) and eventType renames. A breaking change ships as a NEW
   # versioned event (-vN topic, ADR-0006), never an in-place edit.
+  # ADR-0260 (2026-08-16) adds a third input: */schema/*.schema.json files, JSON Schema being
+  # the format ADR-0260 picked over Avro. This is the ONLY path that can evaluate a producer
+  # whose event class does not extend DomainEvent — openbank-document-service's
+  # DocumentGenerated/SignatureCeremonyCompleted, the ADR-0260 pilot, are exactly that case.
   # ADVISORY until the rules.yaml schema-compat gate graduates
   # (target 2026-09-15, ADR-0144) — flip = --enforce. stdlib-only.
   # ADR-0006 ratchet (#1916). Measured at introduction: 36 producer topics, 71 eventType literals,

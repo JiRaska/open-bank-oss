@@ -25,6 +25,24 @@ Also covers *.avsc files if/when they appear (ADR-0006 target state):
 added fields must carry a "default", removed fields must have had one,
 in-place type changes are flagged.
 
+Also covers */schema/*.schema.json files (ADR-0260: JSON Schema is the fleet's
+chosen event-schema format, not Avro). Each file may be a single object schema
+or a `oneOf` list of branches distinguished by an `x-openbank-event-type`
+keyword (or `title`, for a topic whose branches carry no explicit event-type
+tag) -- the shape a topic needs when its events are discriminated only by the
+Kafka `ce-type` header (ADR-0260 D4), which this comparator does not itself
+verify against real header literals (see check-event-contract-code-agreement.py
+and check-asyncapi-doc-discriminator.py for that half). Within each branch,
+`properties`/`required` are compared the same way as a DomainEvent's
+constructor: a removed property, a type change, or a property that becomes
+required is breaking; a new optional property is compatible. THIS PATH IS THE
+ONLY compatibility check for a producer whose event class does not extend
+DomainEvent -- e.g. openbank-document-service's DocumentGenerated and
+SignatureCeremonyCompleted, which the DomainEvent-scoped comparator above has
+never once evaluated (the same structural gap SepaPaymentCreatedEvent has on
+the money-path side). A JSON-Schema-covered topic closes that gap; an
+uncovered one does not, which is exactly why ADR-0260's pilot registers one.
+
 stdlib-only. Advisory by default (::warning, exit 0); --enforce exits 1.
 
 Usage:
@@ -209,6 +227,75 @@ def compare_avsc(path: str, old_text: str, new_text: str) -> list[str]:
     return findings
 
 
+def json_schema_branches(schema: dict) -> dict[str, dict]:
+    """Map an event-type key -> its JSON Schema branch.
+
+    A single-shape topic is one implicit branch (the whole document). A topic whose events are
+    discriminated by the `ce-type` Kafka header (ADR-0260 D4) -- so the body carries no field
+    that tells them apart -- expresses that as a top-level `oneOf`, keyed here by each branch's
+    `x-openbank-event-type` (falling back to `title`, then a positional key so a malformed branch
+    still participates instead of vanishing silently).
+    """
+    raw = schema.get("oneOf")
+    branches = raw if isinstance(raw, list) else [schema]
+    out: dict[str, dict] = {}
+    for i, b in enumerate(branches):
+        if not isinstance(b, dict):
+            continue
+        key = b.get("x-openbank-event-type") or b.get("title") or f"branch[{i}]"
+        out[key] = b
+    return out
+
+
+def compare_json_schema(path: str, old_text: str, new_text: str) -> list[str]:
+    try:
+        old, new = json.loads(old_text), json.loads(new_text)
+    except json.JSONDecodeError as e:
+        return [f"{path}: unparseable JSON Schema ({e})"]
+    findings: list[str] = []
+    old_branches, new_branches = json_schema_branches(old), json_schema_branches(new)
+    for key, ob in old_branches.items():
+        nb = new_branches.get(key)
+        if nb is None:
+            findings.append(
+                f"{path}: event type {key!r} removed from the schema — breaking for consumers; "
+                f"ship a new versioned event, don't delete a oneOf branch in place (ADR-0006/ADR-0260)"
+            )
+            continue
+        oprops = ob.get("properties") if isinstance(ob.get("properties"), dict) else {}
+        nprops = nb.get("properties") if isinstance(nb.get("properties"), dict) else {}
+        oreq = set(ob.get("required")) if isinstance(ob.get("required"), list) else set()
+        nreq = set(nb.get("required")) if isinstance(nb.get("required"), list) else set()
+        for prop, ospec in oprops.items():
+            if prop not in nprops:
+                findings.append(
+                    f"{path}: {key}.{prop} removed — breaking (consumers reading it get nothing); "
+                    f"a breaking change must be a NEW versioned event, not an in-place edit"
+                )
+                continue
+            otype = ospec.get("type") if isinstance(ospec, dict) else None
+            nspec = nprops[prop]
+            ntype = nspec.get("type") if isinstance(nspec, dict) else None
+            if json.dumps(otype, sort_keys=True) != json.dumps(ntype, sort_keys=True):
+                findings.append(
+                    f"{path}: {key}.{prop} type changed {otype!r} -> {ntype!r} — breaking for "
+                    f"deserialization of historical payloads"
+                )
+        for prop in nprops:
+            if prop in nreq and prop not in oprops:
+                findings.append(
+                    f"{path}: {key}.{prop} added as a REQUIRED property — breaking on REPLAY "
+                    f"(historical events lack the field); make it optional or version the event"
+                )
+        for prop in nreq - oreq:
+            if prop in oprops:
+                findings.append(
+                    f"{path}: {key}.{prop} changed from optional to required — breaking on "
+                    f"REPLAY (historical events may lack the field)"
+                )
+    return findings
+
+
 def self_test() -> int:
     """Falsify the Kotlin event parser and both compatibility comparators.
 
@@ -285,12 +372,100 @@ def self_test() -> int:
     if parse_events('data class NotAnEvent(val x: String)\n'):
         fails.append("a plain data class was parsed as a DomainEvent")
 
+    # --- JSON Schema, the ADR-0260 format, and the gap it closes ---------------------------
+    # DocumentGenerated (openbank-document-service) is a plain data class with NO DomainEvent
+    # supertype — parse_events must not see it at all, exactly like SepaPaymentCreatedEvent on
+    # the money-path side. That is the case for compare_json_schema to prove it closes.
+    doc_generated_kt = (
+        'data class DocumentGenerated(\n'
+        '    val documentId: UUID,\n'
+        '    val templateCode: String,\n'
+        '    val templateVersion: String,\n'
+        '    val sha256: String,\n'
+        '    val occurredAt: Instant,\n'
+        ')\n'
+    )
+    if parse_events(doc_generated_kt):
+        fails.append(
+            "DocumentGenerated (no DomainEvent supertype) was parsed as an event — the "
+            "DomainEvent-scoped comparator should be structurally blind to it"
+        )
+    dg_findings = compare_events(
+        "DocumentEvents.kt", parse_events(doc_generated_kt),
+        parse_events(doc_generated_kt.replace("val sha256: String,\n", "")),
+    )
+    if dg_findings:
+        fails.append(
+            f"the DomainEvent comparator found something in a class it should never parse: {dg_findings}"
+        )
+
+    doc_schema_old = _json.dumps({
+        "oneOf": [{
+            "x-openbank-event-type": "document.generated.v1",
+            "properties": {
+                "documentId": {"type": "string", "format": "uuid"},
+                "templateCode": {"type": "string"},
+                "templateVersion": {"type": "string"},
+                "sha256": {"type": "string"},
+                "occurredAt": {"type": "string", "format": "date-time"},
+            },
+            "required": ["documentId", "templateCode", "templateVersion", "sha256", "occurredAt"],
+        }],
+    })
+    case("an unchanged JSON Schema oneOf branch is compatible",
+         compare_json_schema("s.schema.json", doc_schema_old, doc_schema_old), False)
+
+    # THE case this self-test exists for: removing `sha256` from document-event.schema.json is
+    # exactly the same defect class as removing it from DocumentGenerated's constructor — and
+    # the DomainEvent comparator (proven above) can never see it, because the class carries no
+    # DomainEvent supertype. Only compare_json_schema can catch this breaking change.
+    doc_schema_sha_removed = _json.dumps({
+        "oneOf": [{
+            "x-openbank-event-type": "document.generated.v1",
+            "properties": {
+                "documentId": {"type": "string", "format": "uuid"},
+                "templateCode": {"type": "string"},
+                "templateVersion": {"type": "string"},
+                "occurredAt": {"type": "string", "format": "date-time"},
+            },
+            "required": ["documentId", "templateCode", "templateVersion", "occurredAt"],
+        }],
+    })
+    case("removing sha256 from document-event.schema.json is breaking — the gap the "
+         "DomainEvent comparator has for this exact class (no DomainEvent supertype)",
+         compare_json_schema("s.schema.json", doc_schema_old, doc_schema_sha_removed),
+         True, "sha256 removed")
+
+    doc_schema_type_changed = json.loads(doc_schema_old)
+    doc_schema_type_changed["oneOf"][0]["properties"]["sha256"] = {"type": "integer"}
+    case("a JSON Schema property type change is breaking",
+         compare_json_schema("s.schema.json", doc_schema_old, _json.dumps(doc_schema_type_changed)),
+         True, "type changed")
+
+    doc_schema_new_required = json.loads(doc_schema_old)
+    doc_schema_new_required["oneOf"][0]["properties"]["signerCount"] = {"type": "integer"}
+    doc_schema_new_required["oneOf"][0]["required"].append("signerCount")
+    case("a new REQUIRED JSON Schema property is breaking on replay",
+         compare_json_schema("s.schema.json", doc_schema_old, _json.dumps(doc_schema_new_required)),
+         True, "REQUIRED")
+
+    doc_schema_new_optional = json.loads(doc_schema_old)
+    doc_schema_new_optional["oneOf"][0]["properties"]["signerCount"] = {"type": "integer"}
+    case("a new OPTIONAL JSON Schema property is compatible",
+         compare_json_schema("s.schema.json", doc_schema_old, _json.dumps(doc_schema_new_optional)),
+         False)
+
+    doc_schema_branch_removed = _json.dumps({"oneOf": []})
+    case("a removed oneOf branch (event type deleted) is breaking",
+         compare_json_schema("s.schema.json", doc_schema_old, doc_schema_branch_removed),
+         True, "removed from the schema")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: event schema compatibility is falsifiable (14 cases)")
+    print("self-test ok: event schema compatibility is falsifiable (17 cases)")
     return 0
 
 
@@ -313,6 +488,15 @@ def main() -> int:
                 continue  # deleted schema — reviewed as a service/event removal
             if old_text is not None:
                 findings.extend(compare_avsc(path, old_text, new_text))
+            continue
+        if path.endswith(".schema.json") and "/schema/" in path:
+            old_text = git_show(args.base, path)
+            try:
+                new_text = open(path, encoding="utf-8").read()
+            except OSError:
+                continue  # deleted schema — reviewed as a service/event removal
+            if old_text is not None:
+                findings.extend(compare_json_schema(path, old_text, new_text))
             continue
         if not (path.endswith(".kt") and "/src/main/" in path):
             continue
