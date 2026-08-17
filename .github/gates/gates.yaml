@@ -1815,9 +1815,10 @@ gates:
   # a service whose OutboxDispatcher actually gates on this flag silently
   # never dispatches if it's left at its false default — no error,
   # attempt_count stays 0). Scoped to dispatchers that reference the flag
-  # at all; openbank-sepa-instant and openbank-security-scanner ship an
-  # older unconditional @Scheduled dispatcher that never reads it and are
-  # correctly out of scope, not exempted violations. 0 violations on
+  # at all; openbank-sepa-instant ships an older unconditional @Scheduled
+  # dispatcher that never reads it and is correctly out of scope, not an
+  # exempted violation. (openbank-security-scanner was the other such case
+  # until #4709 deleted its writer-less outbox entirely.) 0 violations on
   # origin/main at introduction — this is a regression guard. ENFORCED.
   - id: outbox-dispatch-enabled-guard
     name: "outbox dispatch-enabled guard (footgun check, enforced)"

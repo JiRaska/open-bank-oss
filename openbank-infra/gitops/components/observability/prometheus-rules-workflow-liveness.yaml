@@ -86,8 +86,26 @@ spec:
               has not recorded a success for more than twice its expected interval.
               Either the job stopped running (HR000068 class — check the pod log
               for "should exclusively be invoked from a Vert.x EventLoop thread"),
-              or it runs but fails every time (an external feed returning 404 —
-              check for fetch/parse ERRORs), or the pod is being restarted faster
-              than the job's cadence (check availability alerts). A workflow tag
-              prefixed feed- is the external-feed freshness signal: "job ran" and
-              "feed delivered" alert independently (ADR-0237 point 2).
+              or it runs but fails every time (an external feed returning 404),
+              or the pod is being restarted faster than the job's cadence (check
+              availability alerts). A workflow tag prefixed feed- is the
+              external-feed freshness signal: "job ran" and "feed delivered"
+              alert independently (ADR-0237 point 2).
+
+              For a feed- workflow the reason is a metric, not a log grep
+              (#4743): openbank_feed_fetch_total{feed="<name>"} breaks the same
+              period down by outcome — fetched / empty / http_error /
+              parse_error / unreachable. empty is the one worth reading first:
+              it means the feed answered, parsed cleanly, and carried none of
+              the rows this consumer asked for, which raises no error anywhere
+              and is why this gauge, not an error rate, is the alert. unreachable
+              is not a verdict about the feed but the absence of one — check this
+              cluster's egress before reporting an upstream as dead. All five
+              series exist from pod start at 0, so an absent one means the feed
+              is not instrumented rather than never having failed.
+
+              That counter is deliberately not itself an alert expression:
+              Prometheus retention here is 12h with no long-term store, so an
+              increase() lookback wide enough to cover a daily feed truncates
+              silently. The gauge carries its state forward with no lookback at
+              all; the counter is read at triage time.

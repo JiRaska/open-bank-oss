@@ -46,13 +46,6 @@ spec:
   authorization:
     type: simple
     acls:
-      # mp.messaging.outgoing.security-events-out.topic — periodic scan verdicts.
-      - resource:
-          type: topic
-          name: openbank.security.scan.event
-          patternType: literal
-        operations: [Write, Describe]
-        host: "*"
       # mp.messaging.outgoing.ict-incident-events-out.topic — DORA ICT incidents.
       - resource:
           type: topic

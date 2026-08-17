@@ -57,8 +57,10 @@ lives in an OpenBao Transit key (`transit/keys/card-pan`) and never leaves OpenB
   `AesGcmCardSecretCipher` logic — no per-value network call, no new hot-path dependency on
   OpenBao availability.
 - The `CardSecretCipher` port (`encrypt(String): String`, `decrypt(String): String`) is unchanged;
-  only the key-sourcing adapter changes, from reading `openbank.card.pan-encryption-key` directly
-  to unwrapping a DEK via a new `OpenBaoTransitKeyProvider`.
+  a new adapter, `OpenBaoEnvelopeCardSecretCipher`, unwraps the DEK via OpenBao Transit at
+  `@Startup` and delegates the actual encrypt/decrypt to an `AesGcmCardSecretCipher` instance built
+  from it. `openbank.card.key-source` (build-time property) selects between it and today's flat-key
+  adapter, so an unconfigured deployment is unaffected.
 - **Rotation** happens at the KEK layer: `vault write -f transit/keys/card-pan/rotate` creates a
   new Transit key version. The service then generates a new DEK, wraps it with the now-current
   Transit key version, and switches to it for new writes. Rows encrypted under the previous DEK
@@ -126,6 +128,44 @@ lives in an OpenBao Transit key (`transit/keys/card-pan`) and never leaves OpenB
   encrypted, for real cardholder data) is out of scope for this ADR — it is a data-model question,
   not a key-management one, and applies identically before and after this change. Tracked
   separately.
+
+## Future work — multi-cluster / multi-region
+
+Not built now; recorded here so the direction is decided once rather than re-litigated per
+deployment. Two facts about *today's* infrastructure bound this:
+
+- OpenBao runs as a **single replica** (`openbank-infra/gitops/apps/openbao.yaml`) — no raft HA
+  within the one cluster it already serves. This is buildable today with OSS OpenBao alone (raft
+  integrated storage, 3+ replicas across the cluster's AZs, no license/feature gate involved) and
+  should happen before any of the below — it closes the more immediate single-point-of-failure gap
+  regardless of whether the platform ever goes multi-region.
+- The platform runs in one AWS region (`eu-north-1`), one cluster, no multi-region or multi-cloud
+  topology exists anywhere in `openbank-infra` today. The questions below are about a future state,
+  not a gap in the current one.
+
+**If the platform ever does go multi-region or multi-cloud, the recommended shape is per-region
+OpenBao, not a shared/replicated one:**
+
+- Each region (or cloud) runs its own OpenBao cluster (itself HA via raft, per the bullet above)
+  with its own `transit/keys/card-pan` KEK. `card-issuance-service` in a given region only ever
+  talks to that region's OpenBao — zero cross-region Vault traffic, so no WAN-latency-sensitive
+  raft quorum and no dependency on a cross-cluster replication feature.
+- Consequence, not a cost: a DEK wrapped by region A's KEK cannot be unwrapped in region B. For a
+  bank this is usually the *desired* property anyway — card data typically carries data-residency
+  constraints, so per-region PAN vaults (and per-region-issued cards) is the standard shape, not an
+  extra one imposed by this design.
+- Rotation and the re-encrypt batch job (see Negative, above) run independently per region; nothing
+  about them needs to coordinate across regions.
+
+**Rejected direction: a single OpenBao (or Vault/OpenBao replication) stretched across
+regions/clouds.** Raft consensus is latency-sensitive — stretching quorum across cloud regions adds
+WAN round-trips to every write and risks losing quorum on a region partition, for the exact control
+plane that gates every card-issuance pod's boot. Cross-cluster replication has historically been an
+Enterprise-only Vault feature; whether OpenBao's OSS line ships an equivalent has not been verified
+here and must not be assumed — this ADR does not depend on it either way, because the per-region
+shape above needs no replication feature at all. Only reconsider this path if a genuine requirement
+for one shared KEK across regions appears (e.g. true active-active failover of the same workload),
+which the platform does not have today.
 
 ## Compliance impact
 
