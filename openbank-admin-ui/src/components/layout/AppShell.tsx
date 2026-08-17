@@ -5,6 +5,7 @@
 import type { ReactNode } from 'react'
 import { Header } from '@/components/layout/Header'
 import { Sidebar } from '@/components/layout/Sidebar'
+import { SkipLink } from '@/components/layout/SkipLink'
 
 /**
  * The single authenticated operator shell.
@@ -16,7 +17,7 @@ import { Sidebar } from '@/components/layout/Sidebar'
 export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="ob-app-shell">
-      <a className="ob-skip-link" href="#main-content">Skip to main content</a>
+      <SkipLink />
       <Sidebar />
       <div className="ob-app-frame">
         <Header />

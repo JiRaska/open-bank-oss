@@ -159,7 +159,7 @@ main {
   text-decoration: none;
   transition: transform .15s ease-out;
 }
-.ob-skip-link:focus { transform: translateY(0); outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+.ob-skip-link:focus { transform: translateY(0); outline: 3px solid rgba(255, 255, 255, .9); outline-offset: 2px; }
 
 /* ── Operator application shell ── */
 .ob-app-shell {

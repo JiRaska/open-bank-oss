@@ -193,7 +193,7 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
         )}
       </aside>
 
-      <main style={{
+      <div style={{
         background: 'var(--surface)',
         border: '1px solid var(--border)',
         borderRadius: 'var(--r-lg)',
@@ -253,7 +253,7 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
             <MarkdownView markdown={doc.markdown} serviceName={name} />
           </MermaidEnhancer>
         )}
-      </main>
+      </div>
     </div>
   )
 }

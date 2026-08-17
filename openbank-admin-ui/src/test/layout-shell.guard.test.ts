@@ -90,7 +90,9 @@ describe('admin-ui app-shell rule', () => {
 
   it('provides a keyboard skip link to the shared main landmark', () => {
     const shell = readFileSync(path.resolve(__dirname, '../components/layout/AppShell.tsx'), 'utf8')
-    expect(shell).toMatch(/href="#main-content"/)
+    const skipLink = readFileSync(path.resolve(__dirname, '../components/layout/SkipLink.tsx'), 'utf8')
+    expect(shell).toMatch(/<SkipLink\s*\/>/)
+    expect(skipLink).toMatch(/href="#main-content"/)
     expect(shell).toMatch(/<main id="main-content"[^>]*tabIndex=\{-1\}/)
   })
 
@@ -111,6 +113,14 @@ describe('admin-ui app-shell rule', () => {
 
   it('discovers page files', () => {
     expect(pages.length).toBeGreaterThan(10)
+  })
+
+  it('keeps the shared shell as the only main landmark on operator pages', () => {
+    for (const file of pages) {
+      const rel = path.relative(APP_DIR, file).split(path.sep).join('/')
+      if (EXEMPT.has(rel) || !hasShellLayoutInChain(file)) continue
+      expect(readFileSync(file, 'utf8'), rel).not.toMatch(/<main\b/)
+    }
   })
 
   for (const file of pages) {
