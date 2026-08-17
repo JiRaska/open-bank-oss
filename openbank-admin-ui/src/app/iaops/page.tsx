@@ -688,6 +688,7 @@ function IAOpsContent() {
             </SectionTitle>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <textarea
+                aria-label={t('Popis alertu pro RCA', 'Alert description for RCA')}
                 value={rcaAsk}
                 onChange={e => setRcaAsk(e.target.value)}
                 disabled={rcaLoading}

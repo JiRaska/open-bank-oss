@@ -215,6 +215,7 @@ function OperatorMessageApprovals() {
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
+            aria-label={t('ID schválení notifikace', 'Notification approval ID')}
             className="input"
             style={{ flex: 1, minWidth: '240px', fontFamily: 'var(--font-mono)' }}
             value={approvalId}

@@ -221,6 +221,7 @@ export default function ApprovalsPage() {
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
+                  aria-label={t('Důvod rozhodnutí návrhu', 'Proposal decision reason')}
                   placeholder={t('Důvod rozhodnutí (volitelné)', 'Decision reason (optional)')}
                   value={reasons[p.id] || ''}
                   onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}

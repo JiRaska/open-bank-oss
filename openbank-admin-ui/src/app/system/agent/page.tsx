@@ -379,6 +379,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
                     <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— {prop.description}</span>
                   </label>
                   <input
+                    aria-label={t(`${name} parametr`, `${name} parameter`)}
                     className="input"
                     type="text"
                     value={args[name] ?? ''}
