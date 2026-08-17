@@ -253,6 +253,8 @@ class AccountServiceTest {
             .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
 
         coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        // #4348 hazard: a blocked open must never share the accountCreated count with a real one.
+        verify(exactly = 0) { metrics.accountCreated(any(), any()) }
     }
 
     @Test
@@ -267,6 +269,7 @@ class AccountServiceTest {
             .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
 
         coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        verify(exactly = 0) { metrics.accountCreated(any(), any()) }
     }
 
     @Test
@@ -281,6 +284,7 @@ class AccountServiceTest {
             .isInstanceOf(AccountScreeningUnavailableException::class.java)
 
         coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any()) }
+        verify(exactly = 0) { metrics.accountCreated(any(), any()) }
     }
 
     @Test
@@ -410,6 +414,7 @@ class AccountServiceTest {
         coEvery { accountRepository.findById(acc.id) } returns acc
         coEvery { accountRepository.update(any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+        coEvery { balancePort.getByAccount(acc.id) } returns emptyList()
 
         service.closeAccount(
             CloseAccountCommand(

@@ -7,8 +7,8 @@
 - **Probes all 27 fleet services** every 30 minutes via HTTP, checking reachability through `/q/health`, security headers on the API port, and actuator exposure.
 - **Runs 6 OWASP Top 10 checks** on each service: security headers (A05), sensitive data in health endpoint (A02), OpenAPI exposure (A05 info-disclosure), unauthenticated actuator endpoints (A01), CORS wildcard misconfiguration (A05), and service reachability (A05).
 - **Scores each service** 0–100 and assigns a letter grade (A+ → F), computing a `PlatformSecurityReport` covering all services.
-- **Manages ICT incidents** — compliance officers can report, track, and update the lifecycle of DORA-grade ICT incidents through the `IctIncidentResource` API.
-- **Publishes events** to Kafka via the transactional outbox so audit-service records every scan and incident.
+- **Manages ICT incidents** — compliance officers can report, track, and update the lifecycle of DORA-grade ICT incidents through the `IctIncidentResource` API. Incidents are held in an in-memory map, not a database.
+- **Emits ICT incident events** directly to the Kafka topic `openbank.security.ict.incident`. There is no outbox and no transactional guarantee; scan results are not published as events at all.
 
 ## What the service does NOT do
 
@@ -17,6 +17,7 @@
 - Does not scan infrastructure or network layer — application-layer HTTP checks only.
 - Does not enforce remediation — it reports findings; humans and processes own the response.
 - Does not store full HTTP response bodies — only metadata, findings, headers presence map, and scores.
+- Does not persist anything. Scan results and ICT incidents are in-memory only and are lost on pod restart (see [04 — Data](./04-data.md)).
 
 ## Position in the domain
 
@@ -27,9 +28,8 @@
    │     security-scanner         │ ──────────────────►  │   admin-ui      │
    │     (this service)           │                      │ (security page) │
    └──────────────┬───────────────┘                      └─────────────────┘
-                  │ outbox → Kafka
+                  │ direct Kafka emitter (ICT incidents only)
                   ▼
-         openbank.security.scan.event
          openbank.security.ict.incident
                   │
          ┌────────▼────────┐
@@ -43,7 +43,7 @@
 
 | Use case | API | Event |
 |---|---|---|
-| Trigger an on-demand full scan | `POST /api/v1/security/scan` | `SecurityScanCompleted` |
+| Trigger an on-demand full scan | `POST /api/v1/security/scan` | — (no event; report is REST-only) |
 | Get the latest platform report | `GET /api/v1/security/report` | — |
 | Get results for a specific service | `GET /api/v1/security/services/{name}` | — |
 | Report a new ICT incident | `POST /api/v1/ict-incidents` | `IctIncidentReported` |
@@ -91,7 +91,7 @@ Grades:
 
 ## Dependencies
 
-- **PostgreSQL** (`openbank-postgres`, schema `openbank_security`)
-- **Kafka** (`openbank-kafka`, topics `openbank.security.scan.event`, `openbank.security.ict.incident`)
+- **PostgreSQL** (`openbank-postgres`, schema `openbank_security`) — Flyway schema history only, no business tables
+- **Kafka** (`openbank-kafka`, topic `openbank.security.ict.incident`)
 - **All 27 fleet services** — probed via HTTP (read-only, no auth required for `/q/health`)
-- **openbank-libs** ≥ 0.1.0 — outbox base, BuildInfo, DocsResource
+- **openbank-libs** ≥ 0.1.0 — BuildInfo, DocsResource

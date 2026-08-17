@@ -93,6 +93,29 @@ summary: "A new openbank-fraud-service scores payments in real time, returning A
 > (sepa-payment, sepa-instant, fx) remain shadow-only — extending enforcement to them is a follow-up,
 > not bundled with this increment.
 
+> **Correction 2026-08-09 — the §4.2 enforcement mode above no longer exists (issue #4221).**
+> `DomesticPaymentService.applyFraudGate` and the `fraudEnforcementEnabled` service flag were
+> **deleted** by the Temporal migration (ADR-0120 Phase 6, issue #1917) when the in-service
+> orchestration was retired; only the shadow `shadowFraudScore` activity was carried over into
+> `DomesticPaymentWorkflow`. Nothing replaced the gate, and nothing noticed: the
+> `openbank.domestic.fraud.enforcement-enabled` key stayed in `application.yaml` with **zero**
+> readers in `src/main/kotlin`, so the runbook flip described above would have changed nothing and
+> reported nothing, and the threat model went on crediting a mitigation that was not there. The key
+> has now been removed rather than left as a lever that does not move.
+>
+> Restoring enforcement is not a config change. The verdict now arrives inside a Temporal activity
+> that returns `Unit`, so acting on it needs a decision returned to the workflow and a hold state
+> for the payment — a separately-reviewed increment on a money-path rail, tracked in #4403.
+> Read the §4.2 block above as history, not as current behaviour: **all four scored surfaces
+> (domestic-payment, sepa-payment, sepa-instant, fx) are shadow-only today.**
+>
+> What #4221 did land is the observability the original §4.2 assumed away. The line above —
+> "an unreachable fraud-service still scores ALLOW, so this gate can only ever add friction, never
+> remove availability" — is true and was the whole problem: that ALLOW was indistinguishable from a
+> real one, so a scorer that had never run once looked exactly like a clean payment stream.
+> `FraudScoreOutcome.synthetic`, the `openbank_fraud_scoring_degraded` gauge and the
+> `openbank_fraud_scoring_outcomes_total` counters now separate the two, on every rail.
+
 ## Context
 
 The platform has a **regulatory screening gate** (ADR-0032: synchronous sanctions/AML screening

@@ -59,7 +59,8 @@ Pro přidání nové služby do seznamu skenování přidej záznam do `openbank
 - **Liveness:** `/q/health/live` — JVM + ArC running. Restart podu při selhání.
 - **Readiness:** `/q/health/ready` — DB connection pool + Kafka producer.
 
-Poznámka: Redis NENÍ závislostí této služby (nepoužívá IdempotencyStore).
+Poznámka: Redis NENÍ závislostí této služby (nepoužívá IdempotencyStore). Spojení do DB se sice
+kontroluje, ale žádná byznysová data neobsahuje — viz [04 — Data](./04-data.md).
 
 ## SLO
 
@@ -71,8 +72,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 | Dostupnost | 99,5% (nižší než money-path — není zákaznická) | `up{service="security-scanner"}` |
 | Dokončení naplánovaného skenu | < 90 s pro 27 služeb | `security_scan_duration_seconds` |
 | Latence p95 GET /report | < 50 ms | in-memory cache |
-| ICT incident API p95 | < 200 ms | zápis do DB + outbox insert |
-| Zpoždění outboxu | < 2 s | `security_outbox_pending_age_seconds` |
+| ICT incident API p95 | < 200 ms | in-memory zápis + přímý Kafka emit |
 
 ## Runbooky
 
@@ -100,11 +100,21 @@ Pravděpodobně problém s network policy nebo DNS.
 2. Ověř DNS z podu skeneru: `kubectl exec -it <scanner-pod> -- nslookup account-service`
 3. Ověř, že egress policy povoluje skeneru dosáhnout clusterové služby.
 
-### Zpoždění outboxu
+### Event ICT incidentu chybí downstream
 
-1. Zkontroluj: `SELECT count(*) FROM openbank_security.security_outbox WHERE status='PENDING'`
-2. Zkontroluj Kafka: `kcat -L -b kafka:9092`
-3. Zkontroluj dispatcher: `kubectl logs -l app=security-scanner | grep SecurityOutboxDispatcher`
+Incidenty se vysílají přímo do Kafky bez outboxu, takže selhané publikování nezanechá žádný lokální
+záznam, ze kterého by šlo opakovat (#4709).
+
+1. Zkontroluj chyby emitteru: `kubectl logs -l app=security-scanner | grep ict-incident-events-out`
+2. Zkontroluj broker: `kcat -L -b kafka:9092`
+3. Ověř, že topic event přijal: přečti konec `openbank.security.ict.incident`.
+4. Pokud se publikování ztratilo, nahlas incident znovu přes `POST /api/v1/ict-incidents`.
+
+### Výsledky skenů jsou po restartu prázdné
+
+Očekávané chování, ne závada: stav skenů je pouze in-memory. Restartovaný pod vrací prázdný report,
+dokud neproběhne první naplánovaný sken (2 minuty po startu, pak každých 30 minut). Okamžitě jej
+naplníš přes `POST /api/v1/security/scan`. Rozpracované ICT incidenty se NEVRÁTÍ.
 
 ### P1_CRITICAL ICT incident — regulatorní reportování
 

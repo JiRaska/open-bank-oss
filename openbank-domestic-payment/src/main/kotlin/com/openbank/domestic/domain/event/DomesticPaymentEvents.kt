@@ -26,6 +26,14 @@ data class DomesticPaymentCreatedEvent(
     val priority: DomesticPaymentPriority,
     val endToEndId: String,
     val occurredAt: Instant,
+    /**
+     * The authenticated caller who submitted this payment, or `null` when there was none (issue
+     * #3994). Named `initiatedByPartyId`, not `actorId`: it is the same spelling
+     * `transaction.initiated` already uses (ADR-0021) and that `AuditConsumer.resolveActor` already
+     * reads as its third-priority actor key, so this recovers actor attribution for domestic
+     * payments with no consumer-side change.
+     */
+    val initiatedByPartyId: UUID?,
 )
 
 data class DomesticPaymentStatusChangedEvent(
@@ -51,4 +59,5 @@ fun DomesticPayment.toCreatedEvent(clock: Clock) = DomesticPaymentCreatedEvent(
     priority = priority,
     endToEndId = endToEndId,
     occurredAt = Instant.now(clock),
+    initiatedByPartyId = initiatedByPartyId,
 )

@@ -38,6 +38,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -288,6 +289,7 @@ class AccountServiceLifecycleTest {
         runBlocking {
             val acc = account(status = AccountStatus.ACTIVE)
             coEvery { accountRepository.findById(acc.id) } returns acc
+            coEvery { balancePort.getByAccount(acc.id) } returns emptyList()
             val updated = slot<Account>()
             coEvery { accountRepository.update(capture(updated)) } answers { firstArg() }
             val event = slot<Any>()
@@ -330,6 +332,40 @@ class AccountServiceLifecycleTest {
             .hasMessageContaining("Cannot close")
 
         coVerify(exactly = 0) { accountRepository.update(any()) }
+    }
+
+    @Test
+    fun `closeAccount refuses to close an account that still holds money`() {
+        val acc = account(status = AccountStatus.ACTIVE)
+        coEvery { accountRepository.findById(acc.id) } returns acc
+        coEvery { balancePort.getByAccount(acc.id) } returns listOf(
+            BalanceView(
+                accountId = acc.id,
+                currency = "CZK",
+                booked = BigDecimal("1250.00"),
+                available = BigDecimal("1250.00"),
+                reserved = BigDecimal.ZERO,
+                pending = BigDecimal.ZERO,
+                arrangedOverdraftLimit = BigDecimal.ZERO,
+                updatedAt = fixedInstant,
+            ),
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                service.closeAccount(
+                    CloseAccountCommand(
+                        accountId = acc.id,
+                        reason = "customer request",
+                        requestedBy = UUID.randomUUID(),
+                    ),
+                )
+            }
+        }.isInstanceOf(AccountNotEmptyException::class.java)
+
+        coVerify(exactly = 0) { accountRepository.update(any()) }
+        // #4348 hazard: a refused close must never share the accountClosed count with a real one.
+        verify(exactly = 0) { metrics.accountClosed(any(), any()) }
     }
 
     @Test

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.21.0...account-service-v0.21.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **accounts:** refuse to close an account that still holds money ([#5072](https://github.com/JiRaska/open-bank-oss/issues/5072)) ([d7be3a3](https://github.com/JiRaska/open-bank-oss/commit/d7be3a3f82f29b190160e8cd6ebaa3dddcfc96ca))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.20.3...account-service-v0.21.0) (2026-08-16)
 
 

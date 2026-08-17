@@ -16,7 +16,9 @@ import com.openbank.party.application.port.`in`.CreatePartyCommand
 import com.openbank.party.application.port.`in`.ErasePartyCommand
 import com.openbank.party.application.port.`in`.MergePartyCommand
 import com.openbank.party.application.port.`in`.PartyUseCase
+import com.openbank.party.application.port.`in`.PayeeLimitExceededException
 import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
+import com.openbank.party.application.port.`in`.SavePayeeCommand
 import com.openbank.party.application.port.`in`.SearchPartiesQuery
 import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
 import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
@@ -29,6 +31,7 @@ import com.openbank.party.domain.model.Party
 import com.openbank.party.domain.model.PartyGdprExport
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
+import com.openbank.party.domain.model.Payee
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
@@ -468,6 +471,48 @@ class PartyResource {
         ).build()
     }
 
+    // ─── Saved payees (TOP-10 #5) ──────────────────────────────────────────────
+    // Server side of the mobile app's device-local PayeeStore. Same trust boundary as
+    // /{id}/consent above: the caller is ALWAYS the customer-edge's M2M service identity, which
+    // has already resolved [id] from the customer's own JWT before calling — never a
+    // client-supplied id the customer chose. No separate ownership check needed here for the
+    // same reason updateConsent doesn't have one: the edge is the trust boundary, not this path.
+
+    @GET
+    @Path("/{id}/payees")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
+    @Authorize(action = "party.payees.read", resource = "#id")
+    @Operation(summary = "List a party's saved payees, newest first (mobile)")
+    suspend fun listPayees(@PathParam("id") id: UUID): Response =
+        Response.ok(partyUseCase.listPayees(id).map { it.toResponse() }).build()
+
+    @PUT
+    @Path("/{id}/payees")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.payees.write", resource = "#id")
+    @Operation(summary = "Save (or update) a payee — upsert by IBAN (mobile)")
+    suspend fun savePayee(@PathParam("id") id: UUID, req: SavePayeeRequest): Response {
+        if (req.name.isBlank() || req.iban.isBlank()) {
+            return Response.status(HTTP_BAD_REQUEST).entity(mapOf("code" to "MISSING_FIELD")).build()
+        }
+        val payee = try {
+            partyUseCase.savePayee(SavePayeeCommand(partyId = id, name = req.name, iban = req.iban, bic = req.bic))
+        } catch (_: PayeeLimitExceededException) {
+            return Response.status(HTTP_UNPROCESSABLE_ENTITY).entity(mapOf("code" to "PAYEE_LIMIT_EXCEEDED")).build()
+        }
+        return Response.ok(payee.toResponse()).build()
+    }
+
+    @DELETE
+    @Path("/{id}/payees/{iban}")
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.payees.write", resource = "#id")
+    @Operation(summary = "Remove a saved payee by IBAN (mobile). Idempotent.")
+    suspend fun deletePayee(@PathParam("id") id: UUID, @PathParam("iban") iban: String): Response {
+        partyUseCase.deletePayee(id, iban)
+        return Response.noContent().build()
+    }
+
     @GET
     @Path("/{id}/documents/{fileId}/content")
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC")
@@ -620,6 +665,15 @@ data class AddDocumentRequest(
     val expiryDate: String?,
 )
 data class KycStatusRequest(val kycStatus: String)
+data class SavePayeeRequest(val name: String, val iban: String, val bic: String? = null)
+
+fun Payee.toResponse() = mapOf(
+    "id" to id,
+    "name" to name,
+    "iban" to iban,
+    "bic" to bic,
+    "createdAt" to createdAt,
+)
 data class AddressRequest(
     val line1: String,
     val line2: String?,
@@ -705,3 +759,6 @@ private const val GDPR_EXPORT_SCOPE =
 data class DirectoryLookupRequest(val phoneHashes: List<String> = emptyList())
 
 data class DiscoverableRequest(val discoverable: Boolean = false)
+
+private const val HTTP_BAD_REQUEST = 400
+private const val HTTP_UNPROCESSABLE_ENTITY = 422

@@ -147,6 +147,13 @@ class SctInstPaymentServiceTest {
         assertThat(result.status).isEqualTo(SctInstStatus.SETTLED)
         verify(exactly = 1) { schemeGatewayPort.submit(any()) }
         verify(exactly = 1) { settlementPort.settle(any()) }
+        // Issue #5049 follow-up: paymentCompleted() was already wired (correctly, per PR #5068's
+        // investigation) but paymentProcessingDuration() had no call site anywhere in this class —
+        // sepa-payment, domestic-payment and fx-service all record it at their terminal
+        // transitions, sepa-instant never did.
+        verify(exactly = 1) { metrics.paymentCompleted("sepa_instant", result.currency, "settled") }
+        verify(exactly = 1) { metrics.paymentProcessingDuration("sepa_instant", "settled", any()) }
+        verify(exactly = 0) { metrics.paymentCompleted("sepa_instant", result.currency, "rejected") }
     }
 
     @Test
@@ -176,6 +183,9 @@ class SctInstPaymentServiceTest {
 
         assertThat(result.status).isEqualTo(SctInstStatus.REJECTED)
         assertThat(result.rejectReason).isEqualTo("AC04")
+        verify(exactly = 1) { metrics.paymentCompleted("sepa_instant", result.currency, "rejected") }
+        verify(exactly = 1) { metrics.paymentProcessingDuration("sepa_instant", "rejected", any()) }
+        verify(exactly = 0) { metrics.paymentCompleted("sepa_instant", result.currency, "settled") }
     }
 
     @Test
@@ -257,6 +267,8 @@ class SctInstPaymentServiceTest {
         }
         verify(exactly = 1) { publisher.publish(match<SctInstPaymentRejected> { it.paymentId == result.paymentId }) }
         verify(exactly = 0) { publisher.publish(match<SctInstPaymentSubmitted> { true }) }
+        verify(exactly = 1) { metrics.paymentCompleted("sepa_instant", result.currency, "rejected") }
+        verify(exactly = 1) { metrics.paymentProcessingDuration("sepa_instant", "rejected", any()) }
     }
 
     @Test
@@ -290,6 +302,9 @@ class SctInstPaymentServiceTest {
             )
         }
         verify(exactly = 0) { publisher.publish(any()) }
+        // PENDING is not terminal — neither completion metric should fire.
+        verify(exactly = 0) { metrics.paymentCompleted(any(), any(), any()) }
+        verify(exactly = 0) { metrics.paymentProcessingDuration(any(), any(), any()) }
     }
 
     @Test

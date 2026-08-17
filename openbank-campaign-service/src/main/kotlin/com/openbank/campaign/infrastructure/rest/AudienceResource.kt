@@ -46,7 +46,7 @@ class AudienceResource(private val service: AudienceService, private val jwt: Js
 
     @POST
     @Path("/{name}/{version}/approve")
-    @Authorize(action = "campaign.activate", resource = "#name")
+    @Authorize(action = "campaign.activate", resource = "#name@#version")
     suspend fun approve(@PathParam("name") name: String, @PathParam("version") version: Int): Response =
         lifecycle { service.summary(service.approve(name, version, jwt.audiencePrincipal())) }
 

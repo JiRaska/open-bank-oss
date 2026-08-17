@@ -83,8 +83,56 @@ not change any existing request's outcome until explicitly flipped.
 - Relies on Keycloak realm integrity and OPA policy correctness.
 - Freeze now has the four-eyes *mechanism* wired (§4a) but not enforced (`authz.four-eyes.enforce=false`);
   close remains single-actor — a candidate for a follow-up rollout under issue #413.
+- **`closeAccount`'s balance guard (2026-08-16 entry below) is best-effort, not a guarantee:**
+  (a) the balance check and the close persist are not atomic, so money settling in that window
+  still lands on a closed account; (b) it only sees currently-booked/reserved balance, not money
+  already in flight (a future-dated transfer reads as zero and still executes later). Closing (a)
+  needs a lock spanning balance-service and this service, or a saga; closing (b) needs a check
+  against every service that can schedule a future credit (standing-order-service, sepa-instant,
+  domestic-payment). Neither exists yet — tracked as a follow-up, not blocking this change since
+  it is a strict improvement over the prior state of no guard at all.
 
 ## 6. Change log
+
+- **2026-08-16** — Account close (TOP-10 #10, part 2): `POST /{accountId}/close` gains a balance
+  guard (`AccountNotEmptyException`, mapped to 422) and threads `customerPartyId` +
+  `denyIfNotOwner` through the endpoint the same way the goal/nickname endpoints already do, so
+  `requestedBy` on `AccountClosedEvent` reflects the real caller instead of always being stamped
+  as the operator. **No new trust boundary and no new edge route** — this endpoint stays
+  operator/admin-only (`@RolesAllowed(OPERATOR, ADMIN)`); customer-edge deliberately does NOT
+  gain a close proxy in this change (see the 2026-08-05 entry below — `account.close` is
+  explicitly `prohibited` for the edge's M2M principal after #3734, and reopening that needs its
+  own explicit decision, not a side effect of this PR).
+  - **S (Spoofing):** unchanged — same OIDC bearer + role gate as before; the new
+    `customerPartyId` header path only narrows who a call can act as (via `denyIfNotOwner`), it
+    does not widen who can call the endpoint.
+  - **T (Tampering):** the new guard is itself the tampering-relevant change — it prevents a
+    close from silently discarding a nonzero balance. **Known limitation, not a full fix:**
+    the balance read and the close persist are not atomic (no lock spans balance-service and this
+    service's own row), so a credit settling in that window still lands on the now-CLOSED
+    account; and the guard only sees *currently booked/reserved* balance, not money already in
+    flight (a future-dated standing order or a transfer on its documented value-date delay reads
+    as zero today and still executes later against a closed account). Closing either gap needs
+    cross-service coordination (balance-service locking, or a standing-order-service/sepa-instant
+    check) that does not exist yet — flagged as a residual risk in §5, not silently absorbed into
+    this entry's risk class.
+  - **R (Repudiation):** `AccountClosedEvent.reason` and (now) the real `requestedBy` give a
+    better audit trail than before, not a worse one — this is a strict improvement on the
+    pre-existing gap where every close was attributed to a generic operator id.
+  - **I (Information disclosure):** the 422 error message echoes the account's currency + booked
+    amount back to the caller (`"still holds money in CZK 1250.00"`). Only reachable by an
+    OPERATOR/ADMIN-role caller today (endpoint is not edge-exposed), so no new exposure to an
+    unauthenticated or customer-scoped principal.
+  - **D (Denial of service):** one additional synchronous `balancePort.getByAccount` call per
+    close attempt — bounded, same trust boundary as the existing balance reads this service
+    already makes.
+  - **E (Elevation of privilege):** none — `@RolesAllowed`/`@Authorize(action = "account.close")`
+    unchanged; `account.close` remains in the `prohibited` set for the edge M2M principal.
+  **Risk class = low-to-medium** (prevents a real money-stranding gap, but the fix is best-effort
+  — see §5 residual risk). Money-path service (`rules.yaml: money_path_services`) — this entry
+  satisfies the threat-model requirement for the 2-approval gate (CLAUDE.md rule 7 / rule #8
+  above); PR review confirmed the two limitations above before this entry was written, they are
+  not something a later audit had to discover.
 
 - **2026-08-16** — Account rename (TOP-10 #10, part 1): `PATCH /api/v1/accounts/{accountId}/nickname`
   (`nickname` — nullable, VARCHAR(60)). No new trust boundary, no new service, no money movement —

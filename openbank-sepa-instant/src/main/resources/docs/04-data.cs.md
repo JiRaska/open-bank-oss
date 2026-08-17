@@ -41,36 +41,24 @@ Platební agregát. Jeden řádek na SCT Inst příkaz.
 
 Indexy: `idx_sct_inst_status(status)`, `idx_sct_inst_debtor(debtor_account_id)`, `idx_sct_inst_created(created_at DESC)` a parciální `idx_sct_inst_timeout(execution_timeout_at) WHERE status = 'PROCESSING'` (pohání watchdog provedení / `findTimedOut`).
 
-### `sct_inst_outbox` (V2)
+### `sct_inst_outbox` — ODSTRANĚNO (V2 vytvořeno, V4 zrušeno)
 
-Transakční outbox pro at-least-once publikování událostí.
-
-| Sloupec | Typ | Poznámka |
-|---|---|---|
-| `id` | BIGSERIAL PK | |
-| `event_id` | UUID UNIQUE | dedup klíč |
-| `aggregate_id` | UUID | `payment_id` |
-| `event_type` | VARCHAR(128) | např. `SctInstPaymentSubmitted` |
-| `payload` | TEXT | serializovaný JSON události |
-| `status` | VARCHAR(16) | NEW / SENT / FAILED |
-| `attempt_count` | INTEGER | čítač retry |
-| `sent_at` | TIMESTAMPTZ | nullable |
-| `last_error` | TEXT | nullable |
-| `created_at` / `updated_at` | TIMESTAMPTZ | výchozí `NOW()` |
-
-Indexy: `idx_sct_inst_outbox_status_created_at(status, created_at ASC)` (pořadí odeslání), `idx_sct_inst_outbox_aggregate_id(aggregate_id)`.
-
-### Sekvence (V3)
-
-`CREATE SEQUENCE IF NOT EXISTS sct_inst_outbox_seq INCREMENT BY 50` — Hibernate Reactive + Panache alokují id ze sekvence `<table>_seq` (allocationSize 50), kterou samotný BIGSERIAL neposkytuje. Bez ní inserty selžou za běhu s `relation "sct_inst_outbox_seq" does not exist`. Konvence repa: bez uvozovek, lowercase, `INCREMENT BY 50`.
+Transakční outbox pro at-least-once publikování událostí byl vytvořen ve V2, ale nikdy nebyl
+napojen na žádné reálné volání — publikace událostí vždy šla přímo přes synchronní
+`KafkaSctInstEventPublisher` (issue #1034). PR #1364 odstranil mrtvý kód
+`SctInstOutboxPort`/`SctInstOutboxDispatcher`; samotná tabulka (0 řádků) a její sekvence
+`sct_inst_outbox_seq` (přidaná ve V3 kvůli konvenci alokace id Hibernate Reactive/Panache) byly
+zrušeny ve V4 (issue #5127). Ponecháno zde jen jako poznámka k historii schématu — na této službě
+už žádná živá outbox tabulka není.
 
 ## Flyway migrace
 
 | Verze | Soubor | Účel | Poznámka k rollbacku |
 |---|---|---|---|
 | V1 | `V1__create_sct_inst_payments.sql` | tabulka plateb + 4 indexy | `DROP TABLE sct_inst_payments;` |
-| V2 | `V2__create_sct_inst_outbox.sql` | tabulka outbox + 2 indexy | `DROP TABLE sct_inst_outbox;` |
-| V3 | `V3__hibernate_sequences.sql` | `sct_inst_outbox_seq` | `DROP SEQUENCE sct_inst_outbox_seq;` (uvedeno v migraci) |
+| V2 | `V2__create_sct_inst_outbox.sql` | tabulka outbox + 2 indexy (odstraněno, viz V4) | `DROP TABLE sct_inst_outbox;` |
+| V3 | `V3__hibernate_sequences.sql` | `sct_inst_outbox_seq` (odstraněno, viz V4) | `DROP SEQUENCE sct_inst_outbox_seq;` (uvedeno v migraci) |
+| V4 | `V4__drop_sct_inst_outbox.sql` | zrušení vestigiální tabulky `sct_inst_outbox` + sekvence `sct_inst_outbox_seq` ponechané po PR #1364 | znovuvytvoří tabulku + sekvenci z V2/V3 (uvedeno v migraci) |
 
 `flyway.migrate-at-start = true` s 10 connect retries (interval 2 s). **Nikdy nepřepisuj migraci poté, co byla aplikována na živou DB** (checksum mismatch → pád startu; gotcha repa).
 

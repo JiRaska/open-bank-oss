@@ -25,28 +25,52 @@ export default function LedgerPage() {
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
   const [result, setResult]     = useState<CursorPage<JournalEntry> | null>(null)
   const [loading, setLoading]   = useState(false)
+  const [loadingMore, setLoadingMore] = useState(false)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
   // of a raw "HTTP 500" leak (admin-ui graceful-state rule).
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [moreError, setMoreError] = useState<string | null>(null)
 
-  async function search() {
-    setLoading(true); setUnavailable(null)
+  async function loadPage(cursor?: string) {
     try {
-      const res = await fetch(svcUrl('ledger-service', '/api/v1/journals', { fromDate, toDate }), {
+      const res = await fetch(svcUrl('ledger-service', '/api/v1/journals', { fromDate, toDate, limit: '20', ...(cursor ? { cursor } : {}) }), {
         signal: AbortSignal.timeout(8000),
       })
       if (!res.ok) {
-        setResult(null)
-        setUnavailable({ kind: await classifyBffFailure(res) })
-        return
+        throw new Error(await classifyBffFailure(res))
       }
-      setResult(await res.json() as CursorPage<JournalEntry>)
-    } catch {
+      return await res.json() as CursorPage<JournalEntry>
+    } catch (error) {
+      throw error instanceof Error ? error : new Error('unreachable')
+    }
+  }
+
+  async function search() {
+    setLoading(true); setUnavailable(null); setMoreError(null); setExpanded(null)
+    try {
+      setResult(await loadPage())
+    } catch (error) {
       // Timeout / abort / network — the BFF or ledger-service didn't answer.
       setResult(null)
-      setUnavailable({ kind: 'unreachable' })
+      setUnavailable({ kind: (error as Error).message as UnavailableKind || 'unreachable' })
     } finally { setLoading(false) }
+  }
+
+  async function loadMore() {
+    const cursor = result?.pagination.nextCursor
+    if (!cursor) return
+    setLoadingMore(true); setMoreError(null)
+    try {
+      const next = await loadPage(cursor)
+      setResult(previous => previous ? {
+        data: [...previous.data, ...next.data],
+        pagination: next.pagination,
+      } : next)
+    } catch {
+      // Keep already-read ledger records visible; a failed next page must not erase evidence.
+      setMoreError(t('Další stránku se nepodařilo načíst. Zkuste to znovu.', 'The next page could not be loaded. Try again.'))
+    } finally { setLoadingMore(false) }
   }
 
   return (
@@ -61,10 +85,10 @@ export default function LedgerPage() {
           borderRadius: '8px 8px 0 0',
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
         }}>
-          <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
-          <input type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-          <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
-          <input type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
+          <label htmlFor="ledger-from-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
+          <input id="ledger-from-date" type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <label htmlFor="ledger-to-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
+          <input id="ledger-to-date" type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
           <button className="btn btn-primary" onClick={search} disabled={loading}>
             <Search size={13} />
             {loading ? t('Načítání…', 'Loading…') : t('Načíst záznamy', 'Load Entries')}
@@ -116,13 +140,11 @@ export default function LedgerPage() {
                 const isOpen = expanded === entry.id
                 return (
                   <>
-                    <tr
-                      key={entry.id}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setExpanded(isOpen ? null : entry.id)}
-                    >
+                    <tr key={entry.id}>
                       <td style={{ color: 'var(--text-tertiary)', paddingLeft: '14px' }}>
-                        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        <button type="button" className="btn btn-ghost" style={{ padding: '3px' }} aria-label={isOpen ? t('Skrýt řádky deníku', 'Hide journal lines') : t('Zobrazit řádky deníku', 'Show journal lines')} aria-expanded={isOpen} aria-controls={`ledger-entry-${entry.id}`} onClick={() => setExpanded(isOpen ? null : entry.id)}>
+                          {isOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+                        </button>
                       </td>
                       <td><span className="mono" style={{ fontSize: '12px', fontWeight: 500 }}>{entry.entryNumber ?? '—'}</span></td>
                       <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
@@ -148,7 +170,7 @@ export default function LedgerPage() {
                     {isOpen && (
                       <tr key={`${entry.id}-exp`}>
                         <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
-                          <div style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
+                          <div id={`ledger-entry-${entry.id}`} style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
                             <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
                               {t('Řádky deníku', 'Journal Lines')}
                             </div>
@@ -203,7 +225,10 @@ export default function LedgerPage() {
 
         {result?.pagination.hasNextPage && (
           <div style={{ padding: '12px 16px', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-            <button className="btn btn-secondary" style={{ fontSize: '12px' }}>{t('Načíst další', 'Load more')}</button>
+            {moreError && <p role="alert" style={{ margin: '0 0 8px', fontSize: '12px', color: 'var(--danger-text)' }}>{moreError}</p>}
+            <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={loadMore} disabled={loadingMore}>
+              {loadingMore ? t('Načítám…', 'Loading…') : t('Načíst další', 'Load more')}
+            </button>
           </div>
         )}
       </div>

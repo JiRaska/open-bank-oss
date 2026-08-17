@@ -213,6 +213,12 @@ openbank:
     # OPENBANK_CARD_PAN_ENCRYPTION_KEY, which Quarkus maps onto this property natively — an
     # explicit `${...}` indirection here would expand to an empty string when unset, and SmallRye
     # rejects that as "failed to load config value" instead of falling back to the default.
+    #
+    # key-source: "flat-key" (default, unset) keeps the above. "openbao-transit" (ADR-0262) switches
+    # to AesGcmCardSecretCipher/OpenBaoEnvelopeCardSecretCipher, envelope encryption — the local DEK
+    # is unwrapped once at boot from openbank.card.envelope.wrapped-dek via an OpenBao Transit key.
+    # Deliberately not set here for the same reason pan-encryption-key is absent: this is a
+    # per-environment opt-in, not a repo default.
   outbox:
     dispatch-enabled: true
   rate-limit:

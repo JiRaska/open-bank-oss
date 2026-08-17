@@ -293,6 +293,19 @@ jobs:
           # Services for default datasource as it has explicit configuration"). Kafka is lazy
           # behind the outbox, so no broker is needed to serve a request. What was left was an
           # observability stack and a Kafka image, pulled on every one of 18 jobs, for nothing.
+          #
+          # REDIS HOST IS PASSED EXPLICITLY, not left to each service's own application.yaml
+          # (#3039). 24 of the 25 services that inject a ReactiveRedisDataSource hardcode
+          # `quarkus.redis.hosts: redis://localhost:6379` in their own application.yaml, which
+          # happens to already match this harness's fuzz-redis container — so passing nothing
+          # here looked equivalent to passing the right value. fraud-service is the one
+          # exception: it has no redis config at all (relies on `QUARKUS_REDIS_HOSTS` being
+          # injected in every real environment), and with Dev Services off it has nothing to
+          # fall back to — `FeatureStoreConfig.onlineFeatureStore` needs a
+          # ReactiveRedisDataSource CDI bean that never activates, and boot fails with
+          # `InactiveBeanException: Bean is not active`. Same shape as the datasource/OIDC args
+          # above: state what the harness actually provisions, don't depend on it happening to
+          # agree with whatever each service's own config says.
           echo "==> [${svc}] starting quarkusDev with OIDC on"
           ./gradlew ":${svc}:quarkusDev" \
             -Dquarkus.console.basic=true --console=plain --quiet \
@@ -303,6 +316,7 @@ jobs:
             -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
             -Dquarkus.oidc.client-id=openbank-services \
             -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
+            -Dquarkus.redis.hosts=redis://localhost:6379 \
             -Dquarkus.devservices.enabled=false \
             ${TEMPORAL_ARGS} \
             > "fuzz-reports/${svc}-boot.log" 2>&1 &

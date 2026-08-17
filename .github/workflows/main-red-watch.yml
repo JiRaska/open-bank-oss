@@ -67,6 +67,7 @@ on:
       - "AI governance snapshot"
       - "API contract post-merge guard"
       - "EU AI Act registry"
+      - "Evals - fraud review"
       - "Fleet lint"
       - "Label sync"
       - "Pact drift check"

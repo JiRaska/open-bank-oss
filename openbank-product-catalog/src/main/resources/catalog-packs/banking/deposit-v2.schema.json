@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:catalog-schema:org.openbank.banking.deposit:2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["currency", "productType", "interest"],
+  "properties": {
+    "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+    "productType": { "type": "string", "enum": ["SAVINGS", "CURRENT", "TERM_DEPOSIT"] },
+    "minimumBalance": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+    "interest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rateType", "dayCount", "payoutFrequency"],
+      "properties": {
+        "rateType": { "type": "string", "enum": ["FIXED", "TIERED"] },
+        "dayCount": { "type": "string", "enum": ["ACT_365", "ACT_360", "ACT_ACT", "THIRTY_360"] },
+        "payoutFrequency": { "type": "string", "enum": ["MONTHLY", "QUARTERLY", "ANNUALLY", "AT_MATURITY"] },
+        "annualRate": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+        "tiers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["fromBalance", "annualRate"],
+            "properties": {
+              "fromBalance": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+              "toBalance": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" },
+              "annualRate": { "type": "string", "pattern": "^(0|[1-9][0-9]*)(\\.[0-9]+)?$" }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "rateType": { "const": "FIXED" } } },
+          "then": { "required": ["annualRate"] }
+        },
+        {
+          "if": { "properties": { "rateType": { "const": "TIERED" } } },
+          "then": { "required": ["tiers"] }
+        }
+      ]
+    }
+  }
+}

@@ -338,3 +338,156 @@ jobs:
             gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP:-/tmp}/issue-body.md" \
               --label tech-debt --label "severity:high"
           fi
+
+  # ── Flake recording (issue #4878) ────────────────────────────────────────────
+  # Why this lives HERE, in the workflow that already re-runs things, and not in a new listener:
+  # the flake evidence exists exactly once, at the moment a re-run's FINAL attempt concludes --
+  # after that, a query over run conclusions sees only `success` and the fact that attempt 1 was
+  # genuinely red is gone. This job is the second `workflow_run` listener on the same three
+  # workflows (`retry` above is the first), triggered independently by the SAME event.
+  #
+  # NOT every re-run is a flake. `retry` re-runs a run for one of two reasons -- a whole-run
+  # spot-kill (`cancelled`, at least one job's steps show it was running when reclaimed) or a
+  # partial spot-kill (`failure`, at least one job has a `cancelled` step and no `failure` step).
+  # Neither of those is "the test disagreed with itself" -- it's a runner reclaim, explained by
+  # infrastructure. What #4878 asks to record is the OTHER shape: a job that failed for a real
+  # reason (a `failure` step, not merely a `cancelled` one) and later, on a subsequent attempt of
+  # the SAME run, went green with no source change in between. `record-rerun-flake.py` carries
+  # the exact predicate (`has_spot_kill_signature`) so the two workflows never drift apart on
+  # what counts as "explained by infra" vs "genuinely flaky".
+  #
+  # This does NOT depend on `retry` and does not require `retry` to have fired -- a run can also
+  # be re-run by a human (`gh run rerun --failed`), and that re-run is just as much evidence of a
+  # flake as an automatic one. Gating only on `run_attempt > 1` and the FINAL conclusion being
+  # `success` catches both.
+  record-flake:
+    name: Record a flake if a re-run turned a genuine failure green
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.run_attempt > 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5 # API + a handful of small artifact downloads
+    permissions:
+      contents: read
+      actions: read   # read prior-attempt jobs and download the JUnit XML artifact from #4983
+      issues: write   # the flake-tracking issue
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      FINAL_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+      WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: |
+            .github/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Find genuinely-failed jobs from the attempt this run just recovered from
+        id: classify
+        run: |
+          set -euo pipefail
+          PREV_ATTEMPT=$((FINAL_ATTEMPT - 1))
+          echo "prev-attempt=${PREV_ATTEMPT}" >> "${GITHUB_OUTPUT}"
+
+          gh api "repos/${GH_REPO}/actions/runs/${RUN_ID}/attempts/${PREV_ATTEMPT}/jobs?per_page=100" \
+            --jq '.jobs' > "${RUNNER_TEMP}/prev-jobs.json"
+
+          python3 .github/scripts/record-rerun-flake.py classify \
+            --jobs-file "${RUNNER_TEMP}/prev-jobs.json" > "${RUNNER_TEMP}/candidates.json"
+
+          count=$(python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))))" \
+            "${RUNNER_TEMP}/candidates.json")
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          if [ "${count}" -eq 0 ]; then
+            echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: every failed job carried the spot-kill "
+            echo "signature (or none failed) -- explained by infrastructure, nothing to record."
+          else
+            echo "Attempt ${PREV_ATTEMPT} of ${RUN_URL}: ${count} job(s) failed for a real reason "
+            echo "and the run is now green at attempt ${FINAL_ATTEMPT} -- recording as flake(s)."
+          fi
+
+      - name: "Build one record per flake candidate, with JUnit XML if #4983's artifact exists"
+        if: steps.classify.outputs.count != '0'
+        id: build
+        run: |
+          set -euo pipefail
+          PREV_ATTEMPT="${{ steps.classify.outputs.prev-attempt }}"
+          DETECTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          cat > "${RUNNER_TEMP}/context.json" <<JSON
+          {
+            "workflow": "${WORKFLOW_NAME}",
+            "run_id": ${RUN_ID},
+            "run_url": "${RUN_URL}",
+            "prev_attempt": ${PREV_ATTEMPT},
+            "final_attempt": ${FINAL_ATTEMPT},
+            "head_sha": "${HEAD_SHA}",
+            "head_branch": "${HEAD_BRANCH}"
+          }
+          JSON
+
+          python3 .github/scripts/record-rerun-flake.py build-records \
+            --candidates "${RUNNER_TEMP}/candidates.json" \
+            --context "${RUNNER_TEMP}/context.json" \
+            --detected-at "${DETECTED_AT}" > "${RUNNER_TEMP}/records.json"
+
+          mkdir -p "${RUNNER_TEMP}/comments"
+          i=0
+          jq -c '.[]' "${RUNNER_TEMP}/records.json" | while read -r record; do
+            i=$((i + 1))
+            echo "${record}" > "${RUNNER_TEMP}/record-${i}.json"
+            service=$(echo "${record}" | jq -r '.service // empty')
+
+            # `-a<PREV_ATTEMPT>` matches the naming #4983 gave the JUnit-XML-only upload; only
+            # Services CI job names resolve to a service (see `extract_service`'s docstring), so
+            # a Security-scan or Dependency-submission job legitimately has no such artifact --
+            # `continue-on-error` there is expected, not a failure of this step.
+            tests_file="${RUNNER_TEMP}/tests-${i}.json"
+            echo "[]" > "${tests_file}"
+            if [ -n "${service}" ]; then
+              artifact_dir="${RUNNER_TEMP}/junit-${i}"
+              if gh run download "${RUN_ID}" -n "junit-xml-${service}-a${PREV_ATTEMPT}" \
+                   -D "${artifact_dir}" 2>"${RUNNER_TEMP}/download-${i}.log"; then
+                python3 .github/scripts/record-rerun-flake.py parse-junit \
+                  --path "${artifact_dir}" > "${tests_file}"
+              else
+                echo "No junit-xml-${service}-a${PREV_ATTEMPT} artifact on ${RUN_URL} (may have expired, or the job failed before producing test output); recording at job level only."
+              fi
+            fi
+
+            merged=$(python3 .github/scripts/record-rerun-flake.py merge-tests \
+              --record "${RUNNER_TEMP}/record-${i}.json" --tests "${tests_file}")
+            echo "${merged}" > "${RUNNER_TEMP}/comments/record-${i}.json"
+          done
+
+      - name: Open or refresh the flake-tracking issue, one comment per recorded flake
+        if: steps.classify.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          TITLE="Flaky test observations (recorded from CI re-run evidence)"
+          existing=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' || true)
+          if [ -z "${existing}" ]; then
+            printf '%s\n' \
+              "This issue is a running log, not something to action directly (#4878)." \
+              "" \
+              "Each comment below is one job that failed for a real reason (not a runner reclaim -- see auto-retry-cancelled.yml's \`record-flake\` job) and went green on a later attempt of the SAME run, with no source change in between. That is the definition of a flake this repo can act on." \
+              "" \
+              "Read it back with \`.github/scripts/list-recorded-flakes.py --issue <this-issue-number>\`." \
+              "" \
+              "Deciding what to DO with this data (thresholds, alerts, the 29-copy \`*OutboxClaimIT\` construction) is explicitly out of scope for #4878 -- this issue exists so that decision has evidence to work from." \
+              > "${RUNNER_TEMP}/issue-body.md"
+            existing=$(gh issue create --title "$TITLE" --body-file "${RUNNER_TEMP}/issue-body.md" \
+              --label flaky-test --label tech-debt | grep -oE '[0-9]+$')
+          fi
+
+          for f in "${RUNNER_TEMP}"/comments/record-*.json; do
+            [ -e "$f" ] || continue
+            python3 .github/scripts/record-rerun-flake.py render --record "$f" \
+              > "${RUNNER_TEMP}/comment-body.md"
+            gh issue comment "${existing}" --body-file "${RUNNER_TEMP}/comment-body.md"
+          done

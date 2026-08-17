@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.1...notification-service-v0.23.2) (2026-08-16)
+
+
+### Bug Fixes
+
+* **notification:** follow the ADR-0179 merged_into pointer at dispatch ([#5112](https://github.com/JiRaska/open-bank-oss/issues/5112)) ([ff55163](https://github.com/JiRaska/open-bank-oss/commit/ff551638aea391365621e5f3d1722dba5ca309df)), closes [#1984](https://github.com/JiRaska/open-bank-oss/issues/1984)
+
 ## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.0...notification-service-v0.23.1) (2026-08-15)
 
 

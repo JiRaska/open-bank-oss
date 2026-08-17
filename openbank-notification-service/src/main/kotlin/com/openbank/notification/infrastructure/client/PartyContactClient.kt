@@ -39,6 +39,17 @@ interface PartyContactClient {
     @GET
     @Path("/{id}")
     fun getParty(@PathParam("id") id: UUID): Uni<PartyContactResponse>
+
+    /**
+     * Same read, bound to a narrower response — see [PartyIdentityResponse]. A second method
+     * rather than widening [PartyContactResponse]: the two callers ([PartyMergeResolver] and
+     * [com.openbank.notification.application.NotificationConsumer.resolveEmailRecipient]) want
+     * different, non-overlapping slices of the same record, and keeping them apart means neither
+     * accidentally starts depending on a field the other added.
+     */
+    @GET
+    @Path("/{id}")
+    fun getPartyIdentity(@PathParam("id") id: UUID): Uni<PartyIdentityResponse>
 }
 
 /**
@@ -48,3 +59,12 @@ interface PartyContactClient {
  */
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class PartyContactResponse(val email: String? = null)
+
+/**
+ * The two fields [PartyMergeResolver] needs to follow an ADR-0179 `merged_into` pointer: whether
+ * the party is retired, and if so, which party to follow instead. `@JsonIgnoreProperties` for the
+ * same reason as [PartyContactResponse] — this service has no business holding the rest of the
+ * record, which for a MERGED party still carries the retired customer's legalName/email/phone.
+ */
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class PartyIdentityResponse(val status: String? = null, val mergedIntoPartyId: UUID? = null)

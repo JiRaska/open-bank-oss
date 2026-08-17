@@ -38,6 +38,10 @@ class TppOutboxDispatcher(
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
 
+    // Matches TppOutboxBacklogGauge's `service = "tpp-registry"` — the class-name-derived
+    // default ("tpp") would disagree with the sibling gauge's label (#5049).
+    override val service: String = "tpp-registry"
+
     @Scheduled(
         every = "\${openbank.outbox.poll-interval:5s}",
         delayed = "\${openbank.outbox.initial-delay:5s}",

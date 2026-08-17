@@ -8,6 +8,7 @@ import com.openbank.sepainstant.application.port.out.FraudScoreCommand
 import com.openbank.sepainstant.application.port.out.FraudScoreOutcome
 import com.openbank.sepainstant.application.port.out.FraudScoringPort
 import com.openbank.sepainstant.application.port.out.FraudVerdict
+import com.openbank.sepainstant.infrastructure.observability.FraudScoringMetrics
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -23,21 +24,41 @@ import org.jboss.logging.Logger
  * Uni<>-native to match the sepa-instant reactive contract (no coroutines). No @Retry by design.
  */
 @ApplicationScoped
-class FraudScoringAdapter(@RestClient private val client: FraudScoreClient) : FraudScoringPort {
+class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, private val metrics: FraudScoringMetrics) :
+    FraudScoringPort {
 
     @Inject
     lateinit var self: FraudScoringAdapter
 
     private val log = Logger.getLogger(FraudScoringAdapter::class.java)
 
-    private val allowOnFault =
-        FraudScoreOutcome(FraudVerdict.ALLOW, 0, "unavailable", listOf("fraud-service-unavailable"))
-
-    override fun score(command: FraudScoreCommand): Uni<FraudScoreOutcome> = self.scoreWithResilience(command)
-        .onFailure().invoke { ex ->
-            log.warnf(ex, "Fraud scoring unavailable (rail=%s); shadow ALLOW", command.rail)
-        }
-        .onFailure().recoverWithItem(allowOnFault)
+    /**
+     * Fail-OPEN by decision, not by accident (#4221). The verdict is **observed, never enforced**
+     * (`SctInstPaymentService.scoreFraudShadow` logs a non-ALLOW verdict and proceeds identically
+     * either way), so failing closed would stop payments to protect a value nothing acts on. What
+     * was wrong was not the fallback but that it was invisible: it is now flagged on the outcome
+     * ([FraudScoreOutcome.synthetic]), counted, and reflected in the
+     * `openbank_fraud_scoring_degraded` gauge.
+     *
+     * Mutiny's `onFailure()` spans `Throwable`, so an `Error` is covered by the recovery itself —
+     * provided the Uni is assembled lazily; see the comment on `deferred` below.
+     */
+    override fun score(command: FraudScoreCommand): Uni<FraudScoreOutcome> =
+        // `deferred`, not a bare call: assembling the Uni runs `client.score(...)` synchronously, so
+        // a throw there (an `Error` from a classloading or fault-tolerance fault) would escape past
+        // every `onFailure()` below and reach the payment path. Deferring turns it into a failure
+        // the recovery can see — the Mutiny equivalent of the coroutine siblings' catch(Throwable).
+        Uni.createFrom().deferred { self.scoreWithResilience(command) }
+            .invoke { _ -> metrics.recordReal() }
+            .onFailure().invoke { ex ->
+                metrics.recordSynthetic()
+                log.warnf(
+                    ex,
+                    "Fraud scoring unavailable (rail=%s); returning SYNTHETIC ALLOW — this payment was NOT scored",
+                    command.rail,
+                )
+            }
+            .onFailure().recoverWithItem(SYNTHETIC_ALLOW)
 
     @Suppress("MagicNumber")
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
@@ -65,5 +86,20 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient) : Fr
         "REVIEW" -> FraudVerdict.REVIEW
         "DECLINE" -> FraudVerdict.DECLINE
         else -> FraudVerdict.ALLOW
+    }
+
+    companion object {
+        /**
+         * The verdict returned when fraud-service could not be reached. `synthetic = true` is the
+         * load-bearing field: `ruleVersion = "unavailable"` conveys the same thing but is a magic
+         * string, and every caller compared only `verdict`.
+         */
+        val SYNTHETIC_ALLOW = FraudScoreOutcome(
+            verdict = FraudVerdict.ALLOW,
+            score = 0,
+            ruleVersion = "unavailable",
+            reasons = listOf("fraud-service-unavailable"),
+            synthetic = true,
+        )
     }
 }

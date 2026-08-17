@@ -28,6 +28,10 @@ dependencies {
     implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.smallrye.kafka)
+    // Cross-replica PoP nonce replay guard (issue #4728) — same shared TTL-cache mechanism
+    // already deployed for ~30 services fleet-wide (RedisIdempotencyStore/RedisApprovalStore
+    // in openbank-libs-runtime are the closest siblings). See RedisNonceStore.
+    implementation(libs.quarkus.redis.client)
 
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
