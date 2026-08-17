@@ -69,6 +69,48 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `account-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's account-service fix: AccountCreatedEvent /
+        // AccountStatusChangedEvent / AccountClosedEvent / SavingsWithdrawalApproved now serialise
+        // "sourceService" themselves (openbank-account-service/.../AccountEvents.kt). Before this,
+        // TopicAttribution's "openbank.accounts.account.created" -> "account-service" entry already
+        // resolved this row correctly, but as TOPIC-sourced — a derived claim, not the producer's
+        // own. This is unlike #5255's domestic-payment fix: AccountCreatedEvent's "eventType"
+        // ("AccountCreated") already existed on the wire via DomainEvent and is read verbatim by
+        // balance-/document-/statement-/campaign-service, so it is unchanged here.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"aggregateId":"${UUID.randomUUID()}","eventType":"AccountCreated",""" +
+                """"sourceService":"account-service"}""",
+            EventAddress(topic = "openbank.accounts.account.created"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("AccountCreated")
+        assertThat(entry.captured.sourceService).isEqualTo("account-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `party-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's party-service fix: PartyEvents' flat envelope now carries
+        // "sourceService" (openbank-party-service/.../PartyEvent.kt) alongside the "eventType" key
+        // it already wrote (PARTY_CREATED etc. — already SCREAMING_SNAKE_CASE, unchanged here).
+        // Before this, TopicAttribution's "openbank.party.events" -> "party-service" entry already
+        // resolved this row correctly, but as TOPIC-sourced.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"partyId":"${UUID.randomUUID()}","eventType":"PARTY_CREATED","sourceService":"party-service"}""",
+            EventAddress(topic = "openbank.party.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("PARTY_CREATED")
+        assertThat(entry.captured.sourceService).isEqualTo("party-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
