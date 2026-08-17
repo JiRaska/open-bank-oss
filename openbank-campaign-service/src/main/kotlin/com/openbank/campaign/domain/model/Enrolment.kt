@@ -40,7 +40,7 @@ data class DecisionPathSelection(
     val decidedAt: Instant,
     /**
      * The raw [DeliveryStatus] the decision was evaluated from, snapshotted at write time
-     * (ADR-0260 Phase A). [selected] is already derivable from this plus the predicate, but
+     * (ADR-0263 Phase A). [selected] is already derivable from this plus the predicate, but
      * without it a reviewer reconstructing "why did this path fire" has to join back to the
      * send-log row by `(campaignId, partyId, sourceStepOrder)` — sound only because
      * `DeliveryStatus` transitions are monotonic (ADR-0239 D4), and one avoidable hop regardless.

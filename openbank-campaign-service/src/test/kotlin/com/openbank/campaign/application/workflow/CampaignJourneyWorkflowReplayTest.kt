@@ -24,7 +24,7 @@ import java.time.Duration
 import java.util.UUID
 
 /**
- * ADR-0260 Phase A(a): the concrete proof `runLinear`'s own doc comment claims but never
+ * ADR-0263 Phase A(a): the concrete proof `runLinear`'s own doc comment claims but never
  * demonstrated — "existing workflow histories ... remain replayable by an older worker", read in
  * the direction that matters here: the CURRENT binary must still replay a history that PREDATES
  * every `Workflow.getVersion` gate and every decision-graph field.
@@ -129,7 +129,7 @@ class CampaignJourneyWorkflowReplayTest {
 
 /**
  * A faithful stand-in for `CampaignJourneyWorkflowImpl` as it behaved before #3585's three
- * `Workflow.getVersion` gates and #4781's decision graph existed (ADR-0260 Phase A(a)): the same
+ * `Workflow.getVersion` gates and #4781's decision graph existed (ADR-0263 Phase A(a)): the same
  * activity call sequence `runLinear` still produces today once every version gate resolves to its
  * pre-existing default, with none of the machinery that introduced them. Test-only — this type is
  * never registered against a production task queue.

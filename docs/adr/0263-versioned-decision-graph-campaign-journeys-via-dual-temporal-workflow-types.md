@@ -10,7 +10,7 @@ tags: [notifications, testing, architecture, compliance]
 summary: "An explicit decision-graph journey runs as a second Temporal workflow type and task queue, not a Workflow.getVersion gate in the linear workflow, so its reshaped command sequence never breaks or burdens the frozen legacy binary."
 ---
 
-# ADR-0260 — Versioned Decision-Graph Campaign Journeys via Dual Temporal Workflow Types
+# ADR-0263 — Versioned Decision-Graph Campaign Journeys via Dual Temporal Workflow Types
 
 ## Context
 
