@@ -20,7 +20,7 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 - **Tech stack:** Kotlin 2.3.20 / Quarkus 3.33.2 LTS / JDK 25 / PostgreSQL 16 / Hibernate Reactive (Panache)
 - **Port:** 8108 (aplikace), 8085 (management — `/q`)
 - **Perzistence:** PostgreSQL databáze `openbank_tpp_registry`, Flyway migrace V1/V3/V4
-- **Outbox:** `tpp_outbox` → Kafka topic `openbank.tpp.registry.event` (kanál `tpp-events-out`); dispatcher je přítomen, use case zatím žádné doménové události nevypouští (viz [02](./02-architecture.md))
+- **Outbox:** `tpp_outbox` → Kafka topic `openbank.tpp.registry.event` (kanál `tpp-events-out`); `TPP_REGISTERED` / `TPP_BLACKLISTED` se zapisují v transakci se změnou stavu (issue #4007, viz [02](./02-architecture.md))
 - **Idempotence:** hlavička `Idempotency-Key` → Redis (přes `openbank-libs` `IdempotencyStore`)
 - **Auth:** Keycloak OIDC, OPA sidecar autorizace (ADR-0034) v advisory režimu (`AUTHZ_ENFORCE=false` defaultně); `@Authorize` na mutaci blacklist
 - **Schopnost:** Open Banking (PSD2) — **není** money-path služba

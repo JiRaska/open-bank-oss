@@ -27,6 +27,7 @@ import com.openbank.domestic.domain.screening.ScreeningMatchStatus
 import com.openbank.domestic.domain.screening.ScreeningPolicy
 import com.openbank.domestic.domain.screening.ScreeningResult
 import com.openbank.domestic.domain.screening.ScreeningRole
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
@@ -55,6 +56,7 @@ open class DomesticPaymentActivitiesImpl(
     private val schemeGatewayPort: SchemeGatewayPort,
     private val settlementPort: SettlementPort,
     private val clock: Clock,
+    private val metrics: DomainMetrics,
     @ConfigProperty(name = "openbank.domestic.scheme-submission.enabled", defaultValue = "false")
     private val schemeSubmissionEnabled: Boolean,
 ) : DomesticPaymentActivities {
@@ -85,6 +87,19 @@ open class DomesticPaymentActivitiesImpl(
             log.warnf(ex, "Sanctions screening unavailable for payment %s; returning REVIEW", paymentId)
             openCaseQuietly(payment, AmlCaseRiskLevel.MEDIUM, ALERT_SCREENING_UNAVAILABLE, ex.message, null)
             return@vtx ScreeningDecision.REVIEW
+        }
+
+        // Issue #5049: openbank_sanctions_screenings_total / openbank_sanctions_hits_total had NO
+        // call site anywhere in this class -- see SepaPaymentActivitiesImpl.screenPayment for why
+        // sanctions-service itself cannot record these (no "role" concept of its own).
+        for (result in results) {
+            metrics.sanctionsScreening(result.role.name.lowercase())
+            val severity = when (result.status) {
+                ScreeningMatchStatus.HIT, ScreeningMatchStatus.ESCALATED -> "block"
+                ScreeningMatchStatus.POTENTIAL_HIT -> "review"
+                ScreeningMatchStatus.CLEAR, ScreeningMatchStatus.WHITELISTED -> null
+            }
+            if (severity != null) metrics.sanctionsHit(result.role.name.lowercase(), severity)
         }
 
         val decision = applySddPolicy(payment, ScreeningPolicy.decide(results), paymentId)

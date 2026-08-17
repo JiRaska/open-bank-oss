@@ -272,6 +272,36 @@ change_requirements:
     # cannot key a for_each; a tofu plan of that design read "0 to add, 35 to destroy"), and
     # yamldecode cannot parse the 30-of-42 multi-doc manifests. Same lesson as the OPA generator
     # gate (#1184): the list must be checked mechanically, not remembered.
+  cnpg_backup_declared:
+    applies_to: "every CNPG Cluster manifest under openbank-infra/gitops"
+    requires:
+      - "spec.backup.barmanObjectStore.destinationPath is set, OR the cluster carries
+         openbank.io/backup-exempt-reason with a non-empty reason"
+    gate: cnpg-backup-declared
+    enforced: advisory
+    target_enforce_date: "2026-09-15"
+    ci_producer: "openbank-infra/scripts/check-cnpg-backup-declared.py"
+    # The sibling of db_backup_association, for the case that rule CANNOT see. Its producer
+    # scans for clusters that DECLARE a barmanObjectStore and skips the rest (`if not dest:
+    # continue`), so a database that never asked to be backed up is not a mismatched pair and
+    # is passed over. The rule that exists to make an unrecoverable database visible is
+    # therefore blind to the most unrecoverable kind.
+    #
+    # Measured against the sandbox 2026-08-16, two independent probes agreeing: 59 live CNPG
+    # clusters, 57 with a recovery point, 0 declared-but-unrecoverable, 2 with no backup
+    # declared at all -- while db_backup_association reported clean across all of it.
+    #
+    # The exemption is an ANNOTATION ON THE CLUSTER, not an entry in a list kept beside the
+    # manifests: a separate list is free to drift from what it describes with nothing to
+    # notice, and an annotation cannot outlive the cluster it excuses.
+    #
+    # Advisory until 2026-09-15 for one specific reason, not caution: exactly one cluster is
+    # in scope and unresolved -- engagement-db -- and whether it should be backed up or is
+    # genuinely disposable is an owner's decision, not something a contributor should settle
+    # to unblock a gate. Enforcing before that answer would fail every PR on an open question.
+    # glitchtip-pg is live and also unbacked, but is deployed by a third-party chart and is
+    # outside the gitops tree, so no gitops-scoped rule can reach it; that gap needs a runtime
+    # control and is not silently counted as covered here.
   db_change:
     detect: ["src/main/resources/db/migration/*.sql", "Flyway/Liquibase changeset"]
     require:
@@ -1478,12 +1508,6 @@ scheduled_methods:
   # idiom as the ktlint/detekt baselines and event_consumer_liveness.allowlist. A stale entry
   # is itself a violation.
   runblocking_allowlist:
-    - method: "openbank-agent-service/src/main/kotlin/com/openbank/agent/application/OversightService.kt#scheduledSweep"
-      reason: >-
-        agent-service has NO Hibernate Reactive on its classpath (build.gradle.kts: the
-        proposals store is plain Agroal JDBC, deliberately not the reactive stack). The sweep
-        drives blocking OPA/MCP/LLM clients and needs to stay on a worker thread — the same
-        bridge ChatEndpoint uses. `suspend` here would move blocking I/O onto an event loop.
     - method: "openbank-analytics-sink/src/main/kotlin/com/openbank/analytics/infrastructure/reconcile/ReconciliationJob.kt#scheduled"
       reason: >-
         analytics-sink deliberately DROPS hibernate-reactive-panache, reactive-pg-client and

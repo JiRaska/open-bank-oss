@@ -61,12 +61,12 @@ Pure Kotlin, no framework imports:
 
 The transactional-outbox pattern is wired end-to-end at the infrastructure level:
 
-1. A domain event row would be written into `tpp_outbox` (status `PENDING`) in the same transaction as the aggregate change.
+1. `TppRepositoryImpl.save`/`update` write the event row into `tpp_outbox` (status `PENDING`) in the SAME `Panache.withTransaction` as the `tpp_entries` change, so the state change and the event commit together or not at all.
 2. `TppOutboxDispatcher.dispatchScheduledBatch()` runs every 5 s (batch size 25, `concurrentExecution = SKIP`), reads processable rows and calls `publishWithResilience`.
 3. `KafkaTppOutboxEventPublisher` sends a `Record<String,String>` (random key, payload) to topic `openbank.tpp.registry.event`.
 4. On success the row is marked `SENT`; on failure `markFailed` records the error and increments `attempt_count`.
 
-> **Accurate caveat:** the current `TppRegistryService` writes to `TppRepository` only — it does **not** yet insert outbox rows on register/blacklist. The outbox transport (table, dispatcher, publisher, Kafka channel) is fully present and the topic is configured, but **no domain events are emitted yet**. This is the first follow-up to wire (e.g. `TppRegistered`, `TppBlacklisted`).
+> **History (issue #4007):** for most of this service's life the outbox transport was fully present — table, dispatcher, publisher, Kafka channel, write ACL, `dispatch-enabled: true` — and **nothing ever wrote a row**, so `openbank.tpp.registry.event` had no producer at all. `TppRegistryService` now emits `TPP_REGISTERED` and `TPP_BLACKLISTED` (`TppEvents`), handed to `TppRepository.save`/`update` as a REQUIRED parameter so there is no eventless overload to bypass. `TppOutboxWriteIT` proves the row lands in the state-change transaction against a real database — a mocked repository cannot tell whether an outbox row was written, which is why the gap survived a green suite.
 
 ## Key ports summary
 

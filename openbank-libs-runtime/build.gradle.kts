@@ -103,6 +103,20 @@ tasks.test {
     inputs.file(rootProject.file("openbank-infra/gitops/components/payments/prometheus-rules.yaml"))
         .withPropertyName("alertRulesUnderTest")
         .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"))
+        .withPropertyName("billingAlertRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // `every dead-letter gauge binding is covered here` derives its scope by walking the service
+    // modules for `*OutboxDeadLetterGauge.kt`. Without these as declared inputs the task is
+    // UP-TO-DATE when a NEW binding appears — measured: adding an uncovered gauge left the suite
+    // green, so the scope guard was blind to the one event it exists to catch.
+    inputs.files(
+        rootProject.fileTree(rootProject.projectDir) {
+            include("openbank-*/src/main/kotlin/**/*OutboxDeadLetterGauge.kt")
+        },
+    ).withPropertyName("deadLetterGaugeBindings")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 kover {

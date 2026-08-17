@@ -10,6 +10,7 @@ import { Search, ChevronDown, ChevronRight } from 'lucide-react'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import type { JournalEntry, CursorPage } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const STATUS_PILL: Record<string, string> = {
   POSTED:   'pill pill-success',
@@ -50,17 +51,7 @@ export default function LedgerPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Hlavní kniha', 'General Ledger')}</span>
-          </div>
-          <h1 className="page-title">{t('Hlavní kniha', 'General Ledger')}</h1>
-          <p className="page-subtitle">{t('Zápisy v podvojném účetnictví', 'Double-entry journal entries')}</p>
-        </div>
-      </div>
+      <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Hlavní kniha', 'General Ledger')}</span></div>} title={t('Hlavní kniha', 'General Ledger')} subtitle={t('Zápisy v podvojném účetnictví', 'Double-entry journal entries')} />
 
       <div className="card">
         <div style={{

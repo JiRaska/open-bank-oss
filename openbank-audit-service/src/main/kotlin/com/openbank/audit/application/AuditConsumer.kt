@@ -11,6 +11,7 @@ import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.audit.infrastructure.persistence.PartyMergeIndexRepository
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
@@ -29,6 +30,12 @@ import java.util.UUID
 class AuditConsumer {
 
     @Inject lateinit var repo: AuditRepository
+
+    // ADR-0179 / issue #1984: the write side of `merged_into` adoption. Optional in tests the
+    // same way meterRegistry is below — a unit test that never sets it just skips the index
+    // write, it does not crash (most tests never send a PARTY_MERGED payload, but at least one,
+    // AuditAttributionTest, deliberately does — for its own unrelated attribution assertion).
+    @Inject lateinit var mergeIndex: PartyMergeIndexRepository
 
     @Inject lateinit var objectMapper: ObjectMapper
 
@@ -167,6 +174,9 @@ class AuditConsumer {
                 countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
             }
             repo.save(entry)
+            if (entry.eventType == "PARTY_MERGED" && ::mergeIndex.isInitialized) {
+                recordPartyMergeIndex(mergeIndex, log, node, entry.occurredAt)
+            }
         } catch (e: Exception) {
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         }
@@ -481,3 +491,39 @@ internal fun actorProvenance(actorId: String?, actorType: String?): ActorProvena
  */
 private fun JsonNode.textOrNull(field: String): String? =
     this[field]?.takeIf { !it.isNull }?.asText()?.takeIf { it.isNotBlank() }
+
+/**
+ * ADR-0179 / issue #1984: records the `retired -> survivor` edge from a `PARTY_MERGED` event
+ * (`PartyEvents.merged`'s exact field names: `partyId` is the retired duplicate,
+ * `mergedIntoPartyId` the survivor) so [AuditRepository.findByAggregateId] can follow it at read
+ * time — `audit_entries` itself cannot be rewritten (V2's append-only RULEs; see V15's migration
+ * comment for why this is a read-time fix and not a write-time one).
+ *
+ * Free-standing, not a member, for the same reason as [resolveActor]/[resolveChannel]:
+ * [AuditConsumer] is already at detekt's function-count threshold, which fires AT the threshold.
+ *
+ * Its own try/catch, deliberately separate from the one around [AuditConsumer.consume]'s call
+ * site: by the time this runs, the audit row FOR the `PARTY_MERGED` event itself is already
+ * saved. A failure here must not be logged as "failed to record audit entry" (untrue — it did)
+ * and must not stop the message ack; it only means one history query stays retired-id-only until
+ * the next `PARTY_MERGED` delivery is processed, not that the merge went unrecorded as an event.
+ */
+// Deliberately broad: a DB hiccup here must never propagate to consume()'s own catch and be
+// misreported as "failed to record audit entry" — the audit row is already safely saved by then.
+@Suppress("TooGenericExceptionCaught")
+private suspend fun recordPartyMergeIndex(
+    mergeIndex: PartyMergeIndexRepository,
+    log: Logger,
+    node: JsonNode,
+    occurredAt: Instant,
+) {
+    val retired = node.textOrNull("partyId")?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return
+    val survivor = node.textOrNull("mergedIntoPartyId")
+        ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+        ?: return
+    try {
+        mergeIndex.recordMerge(retired, survivor, occurredAt)
+    } catch (e: Exception) {
+        log.errorf(e, "Failed to record party-merge index entry for %s -> %s", retired, survivor)
+    }
+}

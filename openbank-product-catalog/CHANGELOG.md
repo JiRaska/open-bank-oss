@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.2...product-catalog-v0.13.3) (2026-08-16)
+
+
+### Bug Fixes
+
+* **product-catalog:** round-trip insurance profiles ([#5086](https://github.com/JiRaska/open-bank-oss/issues/5086)) ([2c3726b](https://github.com/JiRaska/open-bank-oss/commit/2c3726bbba0f3121bb7306a91056046069ddbc27))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.1...product-catalog-v0.13.2) (2026-08-16)
 
 

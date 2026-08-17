@@ -556,6 +556,52 @@ gates:
     run: |
       python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
 
+  # The sibling of the gate above, for the case that gate CANNOT see.
+  #
+  # `check-db-backup-associations` scans for clusters that declare a `barmanObjectStore` and
+  # skips the rest — `if not dest: continue`. So its subject set is "databases that asked to be
+  # backed up", and a database that never asked is not a mismatched pair, so it is skipped. The
+  # gate built to make an unrecoverable database visible is structurally blind to the most
+  # unrecoverable kind.
+  #
+  # Measured against the sandbox on 2026-08-16, both directions agreeing: 59 live CNPG clusters,
+  # 57 with a recovery point, 0 declared-but-unrecoverable, and 2 with no backup declared at all.
+  # The enforced sibling reported clean across all of it, correctly and uselessly. The two are
+  # `engagement-db` and `glitchtip-pg`; a gitops scan finds only the first, because the second is
+  # deployed by a third-party chart and is outside this tree entirely — which is a real limit of
+  # any gitops-scoped check and is written into the script header rather than left to be
+  # discovered.
+  #
+  # ADVISORY, not enforced, and the reason is specific rather than caution: enforcing it today
+  # would fail every PR on one open question — whether engagement-db should be backed up or is
+  # genuinely disposable — that is an owner's decision and not a contributor's to unblock. The
+  # exemption is an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`), deliberately
+  # not a list kept beside the manifests: a separate list drifts from what it describes and
+  # nothing notices, which is the defect this repo keeps re-finding.
+  - id: cnpg-backup-declared-gate
+    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (advisory)"
+    group: gitops
+    mode: advisory
+    rationale: >-
+      db-backup-association-gate only inspects clusters that already declare a
+      barmanObjectStore, so a database that never asked to be backed up is invisible to it.
+      This covers that case: no recovery point at all, which is the worse one.
+    review_after: "2026-09-15"
+    verified: >-
+      2026-08-16 — measured against the sandbox with two independent probes that agree:
+      59 live CNPG clusters, 57 with a recovery point, 0 declared-but-unrecoverable, and 2
+      with no backup declared at all, while the enforced sibling reported clean across all
+      of it. A gitops scan of this tree finds 58 subjects and exactly 1 of those 2
+      (engagement-db); glitchtip-pg is deployed by a third-party chart and is out of reach
+      of any gitops-scoped check. Self-test falsified in both directions — it fires on a
+      cluster with no backup and on an empty exemption reason, and stays silent on a
+      declared backup, a reasoned exemption and a non-CNPG kind: Cluster.
+    min_subjects: 50
+    selftest: python3 openbank-infra/scripts/check-cnpg-backup-declared.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/scripts/check-cnpg-backup-declared.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its

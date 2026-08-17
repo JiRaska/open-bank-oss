@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   deriveAgentOutcomes,
+  deriveWeeklyOutcomes,
   formatLatency,
   MIN_DECIDED_FOR_RATE,
   PROPOSAL_PAGE_CAP,
@@ -145,6 +146,74 @@ describe('deriveAgentOutcomes — truncation', () => {
 
     expect(uncapped.truncated).toBe(false)
     expect(capped.truncated).toBe(true)
+  })
+})
+
+describe('deriveWeeklyOutcomes — per-week rate with its own small-sample guard', () => {
+  it('has no decided proposals and returns no weeks, rather than a fabricated empty one', () => {
+    expect(deriveWeeklyOutcomes([])).toEqual([])
+    expect(deriveWeeklyOutcomes([proposal('PROPOSED', '2026-06-10T12:00:00Z')])).toEqual([])
+  })
+
+  it('reports a 100% week only once decided count reaches the threshold — all approved', () => {
+    // Wed 2026-06-10 .. all decided the same week, all approved.
+    const rows = decidedSet(MIN_DECIDED_FOR_RATE, 0)
+
+    const weeks = deriveWeeklyOutcomes(rows)
+
+    expect(weeks).toHaveLength(1)
+    expect(weeks[0]).toMatchObject({ decided: MIN_DECIDED_FOR_RATE, approved: MIN_DECIDED_FOR_RATE, approvalRate: 1, insufficientData: false })
+    // 2026-06-10 is a Wednesday; the ISO week starts Monday 2026-06-08.
+    expect(weeks[0].weekStart).toBe('2026-06-08')
+  })
+
+  it('mixes approvals and rejections within a week and rates only the decided total', () => {
+    const rows = decidedSet(3, 2) // 5 decided, same week, 3 approved
+
+    const weeks = deriveWeeklyOutcomes(rows)
+
+    expect(weeks).toHaveLength(1)
+    expect(weeks[0]).toMatchObject({ decided: 5, approved: 3, approvalRate: 3 / 5, insufficientData: false })
+  })
+
+  it('is insufficient at N-1 decided in a week and crosses to a real rate at exactly N', () => {
+    const thin = deriveWeeklyOutcomes(decidedSet(MIN_DECIDED_FOR_RATE - 1, 0))
+    const enough = deriveWeeklyOutcomes(decidedSet(MIN_DECIDED_FOR_RATE, 0))
+
+    expect(thin).toHaveLength(1)
+    expect(thin[0].insufficientData).toBe(true)
+    expect(thin[0].approvalRate).toBeNull()
+    expect(thin[0].decided).toBe(MIN_DECIDED_FOR_RATE - 1)
+
+    expect(enough).toHaveLength(1)
+    expect(enough[0].insufficientData).toBe(false)
+    expect(enough[0].approvalRate).toBe(1)
+  })
+
+  it('buckets by the week of decidedAt, not proposedAt, and sorts weeks ascending', () => {
+    const rows = [
+      // Proposed in week 1, decided in week 3 — must land in week 3's bucket.
+      proposal('APPROVED', '2026-06-01T09:00:00Z', '2026-06-22T09:00:00Z'),
+      ...decidedSet(MIN_DECIDED_FOR_RATE, 0), // week of 2026-06-08
+    ]
+
+    const weeks = deriveWeeklyOutcomes(rows)
+
+    expect(weeks.map(w => w.weekStart)).toEqual(['2026-06-08', '2026-06-22'])
+    expect(weeks[1]).toMatchObject({ decided: 1, insufficientData: true })
+  })
+
+  it('excludes a decided row with an unparseable or missing decidedAt instead of misdating it', () => {
+    const rows = [
+      ...decidedSet(MIN_DECIDED_FOR_RATE, 0),
+      proposal('REJECTED', '2026-06-10T12:00:00Z', 'not-a-date'),
+      proposal('APPROVED', '2026-06-10T12:00:00Z', null),
+    ]
+
+    const weeks = deriveWeeklyOutcomes(rows)
+
+    expect(weeks).toHaveLength(1)
+    expect(weeks[0].decided).toBe(MIN_DECIDED_FOR_RATE)
   })
 })
 
