@@ -497,14 +497,14 @@ export default function FxPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--success-text)' }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
-                        <input type="number" step="0.1" min="0" max="20" value={marginDraft.buyPct}
+                        <input type="number" aria-label={t('Nákupní marže v procentech', 'Buy margin percent')} step="0.1" min="0" max="20" value={marginDraft.buyPct}
                           onChange={e => setMarginDraft(p => ({ ...p, buyPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--danger-text)' }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
-                        <input type="number" step="0.1" min="0" max="20" value={marginDraft.sellPct}
+                        <input type="number" aria-label={t('Prodejní marže v procentech', 'Sell margin percent')} step="0.1" min="0" max="20" value={marginDraft.sellPct}
                           onChange={e => setMarginDraft(p => ({ ...p, sellPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
@@ -564,7 +564,7 @@ export default function FxPage() {
                         <td style={{ padding: '8px 16px' }}><MidCell mid={r.mid} /></td>
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
-                            <input type="number" step="0.0001" placeholder={r.buyCalc.toFixed(4)} value={overrideDraft.buyOverride ?? ''}
+                            <input type="number" aria-label={t(`Override nákupního kurzu ${r.code}`, `Buy rate override ${r.code}`)} step="0.0001" placeholder={r.buyCalc.toFixed(4)} value={overrideDraft.buyOverride ?? ''}
                               onChange={e => setOverrideDraft(p => ({ ...p, buyOverride: e.target.value ? parseFloat(e.target.value) : null }))}
                               style={{ width: '80px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--success-border)', borderRadius: '4px', color: 'var(--success-text)', fontFamily: 'var(--font-mono)' }} />
                           ) : (
@@ -576,7 +576,7 @@ export default function FxPage() {
                         </td>
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
-                            <input type="number" step="0.0001" placeholder={r.sellCalc.toFixed(4)} value={overrideDraft.sellOverride ?? ''}
+                            <input type="number" aria-label={t(`Override prodejního kurzu ${r.code}`, `Sell rate override ${r.code}`)} step="0.0001" placeholder={r.sellCalc.toFixed(4)} value={overrideDraft.sellOverride ?? ''}
                               onChange={e => setOverrideDraft(p => ({ ...p, sellOverride: e.target.value ? parseFloat(e.target.value) : null }))}
                               style={{ width: '80px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--danger-border)', borderRadius: '4px', color: 'var(--danger-text)', fontFamily: 'var(--font-mono)' }} />
                           ) : (
@@ -682,7 +682,7 @@ export default function FxPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Čas:', 'Time:')}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <select value={scheduleDraft.hour ?? s.hour}
+                        <select aria-label={t(`Hodina plánu ${s.id}`, `Schedule hour ${s.id}`)} value={scheduleDraft.hour ?? s.hour}
                           onChange={e => setScheduleDraft(p => ({ ...p, hour: parseInt(e.target.value) }))}
                           style={{ padding: '4px 8px', fontSize: '13px', fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
                           {Array.from({ length: 24 }, (_, i) => (
@@ -690,7 +690,7 @@ export default function FxPage() {
                           ))}
                         </select>
                         <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)' }}>:</span>
-                        <select value={scheduleDraft.minute ?? s.minute}
+                        <select aria-label={t(`Minuta plánu ${s.id}`, `Schedule minute ${s.id}`)} value={scheduleDraft.minute ?? s.minute}
                           onChange={e => setScheduleDraft(p => ({ ...p, minute: parseInt(e.target.value) }))}
                           style={{ padding: '4px 8px', fontSize: '13px', fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
                           {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
