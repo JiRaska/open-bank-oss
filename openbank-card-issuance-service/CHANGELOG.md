@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.20.0...card-issuance-service-v0.21.0) (2026-08-16)
+
+
+### Features
+
+* **libs-runtime:** wire outboxDispatched/outboxDead metrics into AbstractOutboxDispatcher ([#5071](https://github.com/JiRaska/open-bank-oss/issues/5071)) ([8da83b0](https://github.com/JiRaska/open-bank-oss/commit/8da83b073b07052316c56425290579ff162dcbff)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.19.0...card-issuance-service-v0.20.0) (2026-08-14)
 
 

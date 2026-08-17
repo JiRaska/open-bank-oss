@@ -5,7 +5,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Globe, Send, Search, CheckCircle2, Clock, RefreshCw, AlertTriangle, ChevronRight } from 'lucide-react'
+import { Globe, Search, CheckCircle2, Clock, RefreshCw, AlertTriangle, ChevronRight } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
@@ -68,7 +68,9 @@ export default function SwiftPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button className="btn btn-primary btn-sm"><Send size={13} /> {t('Nová zpráva', 'New Message')}</button>
+            <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>
+              {t('Odeslání zprávy není připojeno', 'Message submission is not connected')}
+            </span>
           </div>
         </div>
 

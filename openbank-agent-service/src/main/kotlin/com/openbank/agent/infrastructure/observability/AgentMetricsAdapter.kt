@@ -5,6 +5,8 @@
 package com.openbank.agent.infrastructure.observability
 
 import com.openbank.agent.application.ProposalService
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -13,6 +15,7 @@ import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -43,8 +46,13 @@ class AgentMetricsAdapter(private val proposalService: ProposalService, private 
 
     private val pending = AtomicLong(0)
 
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+    private var liveness: WorkflowLivenessRecorder? = null
+
     @PostConstruct
     fun register() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
         val r = registry ?: return
         Gauge.builder("openbank.agent.proposals.pending", pending) { it.get().toDouble() }
             .tag("service", SERVICE)
@@ -60,9 +68,12 @@ class AgentMetricsAdapter(private val proposalService: ProposalService, private 
     )
     fun refresh() {
         pending.set(proposalService.listPending().size.toLong())
+        liveness?.recordSuccess()
     }
 
     companion object {
         private const val SERVICE = "agent"
+        private const val WORKFLOW_NAME = "agent-proposal-backlog-refresh"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofSeconds(30)
     }
 }

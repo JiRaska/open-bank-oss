@@ -6,6 +6,7 @@ package com.openbank.analytics.infrastructure.clickhouse
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.analytics.application.port.out.IntegrityAnchor
+import com.openbank.analytics.application.port.out.ProposalDecisionPhase
 import com.openbank.analytics.infrastructure.proposal.ClickHouseProposalStore
 import com.openbank.analytics.infrastructure.reconcile.ClickHouseWarehouseStateReader
 import com.openbank.analytics.infrastructure.worm.ClickHouseWormArchive
@@ -268,5 +269,23 @@ class ClickHouseAdaptersTest {
         assertThat(fetched.id).isEqualTo("prop-1")
         assertThat(fetched.action.aggregateId).isEqualTo("acc-1")
         assertThat(client.lastQuery).contains("FINAL").contains("prop-1")
+    }
+
+    @Test
+    fun `claim wins exactly once per (id, phase) and never touches ClickHouse`() = runBlocking<Unit> {
+        val client = FakeClickHouseClient()
+        val store = ClickHouseProposalStore().apply { clickhouse = client }
+
+        assertThat(store.claim("prop-1", ProposalDecisionPhase.DECIDE)).isTrue()
+        // Same (id, phase) again — the negative case: a second claim on an already-claimed phase
+        // must be refused, not silently accepted.
+        assertThat(store.claim("prop-1", ProposalDecisionPhase.DECIDE)).isFalse()
+        // A different phase on the same proposal is independent.
+        assertThat(store.claim("prop-1", ProposalDecisionPhase.EXECUTE)).isTrue()
+        // A different proposal is independent too.
+        assertThat(store.claim("prop-2", ProposalDecisionPhase.DECIDE)).isTrue()
+
+        assertThat(client.lastInsertTable).isNull()
+        assertThat(client.lastQuery).isNull()
     }
 }

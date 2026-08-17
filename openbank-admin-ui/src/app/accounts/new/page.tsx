@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { ArrowLeft, Save, AlertCircle } from 'lucide-react'
 import { accountApi } from '@/lib/api'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 
 const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
@@ -66,22 +67,12 @@ export default function NewAccountPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <Link href="/accounts" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Účty', 'Accounts')}</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Otevřít účet', 'Open Account')}</span>
-          </div>
-          <h1 className="page-title">{t('Otevřít nový účet', 'Open New Account')}</h1>
-          <p className="page-subtitle">{t('Vytvořte nový bankovní účet pro zákazníka', 'Create a new bank account for a customer party')}</p>
-        </div>
-        <Link href="/accounts" className="btn btn-secondary">
-          <ArrowLeft size={13}/> {t('Zpět', 'Back')}
-        </Link>
-      </div>
+      <PageHeader
+        title={t('Otevřít nový účet', 'Open New Account')}
+        subtitle={t('Vytvořte nový bankovní účet pro zákazníka', 'Create a new bank account for a customer party')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/accounts" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('Účty', 'Accounts')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Otevřít účet', 'Open Account')}</span></div>}
+        actions={<Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true"/> {t('Zpět', 'Back')}</Link>}
+      />
 
       <div style={{ maxWidth: '560px' }}>
         <form onSubmit={submit}>
