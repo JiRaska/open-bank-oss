@@ -8,7 +8,7 @@ const page = (name: string) => readFileSync(path.resolve(__dirname, `../app/${na
 
 describe('oversight form accessibility contract', () => {
   it('names operator decision and investigation inputs', () => {
-    expect(page('notifications')).toContain("aria-label={t('Důvod rozhodnutí notifikace'")
+    expect(page('notifications')).toContain("aria-label={t('ID schválení notifikace'")
     expect(page('approvals')).toContain("aria-label={t('Důvod rozhodnutí návrhu'")
     expect(page('system/agent')).toContain('aria-label={t(`${name} parametr`')
     expect(page('iaops')).toContain("aria-label={t('Popis alertu pro RCA'")
