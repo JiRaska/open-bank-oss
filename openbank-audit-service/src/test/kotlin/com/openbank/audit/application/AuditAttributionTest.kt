@@ -69,6 +69,25 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `fx-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's fx-service fix: FxConversionExecuted (FxService.settle, serialised
+        // via objectMapper.writeValueAsString) now carries "sourceService". Before this,
+        // EventAttribution's `openbank.fx.conversion.completed` -> `fx-service` entry already
+        // resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        // fx-service is a money-path service (rules.yaml: money_path_services).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"conversionId":"${UUID.randomUUID()}","sourceService":"fx-service"}""",
+            EventAddress(topic = "openbank.fx.conversion.completed"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("fx-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
