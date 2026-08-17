@@ -12,6 +12,7 @@ import { ChevronLeft, ScrollText, Calendar, User } from 'lucide-react'
 import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { loadAdr, type AdrStatus } from '@/lib/governance/docs'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,26 +47,22 @@ export default async function AdrDetailPage({ params }: PageProps) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <Link href="/docs/adr" style={{ color: 'inherit', textDecoration: 'none' }}>ADR</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{adr ? adr.numberLabel : slug}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ScrollText size={18} style={{ color: 'var(--accent)' }} />
-            {adr ? `ADR-${adr.numberLabel} — ${adr.title}` : t('Rozhodnutí nenalezeno', 'Decision not found')}
-          </h1>
-        </div>
-        <Link href="/docs/adr" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          </>}
+        title={adr ? `ADR-${adr.numberLabel} — ${adr.title}` : t('Rozhodnutí nenalezeno', 'Decision not found')}
+        icon={<ScrollText aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<Link href="/docs/adr" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />
           {t('Zpět na registr', 'Back to registry')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       <div className="card" style={{ padding: '24px' }}>
         {!adr ? (
