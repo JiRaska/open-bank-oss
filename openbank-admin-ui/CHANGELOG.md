@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.6...admin-ui-v0.157.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** unify documentation page headers ([6dd010c](https://github.com/JiRaska/open-bank-oss/commit/6dd010c4d2c379d6593311011db177938d50d4cd))
+
 ## [0.157.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.5...admin-ui-v0.157.6) (2026-08-17)
 
 
