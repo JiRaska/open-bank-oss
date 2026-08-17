@@ -59,6 +59,14 @@ import java.util.Optional
  * [unwrapDekFn] are bound before [delegate]'s initializer runs, in normal top-to-bottom order
  * within one constructor. CDI never sees these parameters (no matching injectable type for a
  * `() -> String` / `(String, String) -> ByteArray`), so `@Inject`ion is unaffected in production.
+ *
+ * **Retries with backoff around both OpenBao calls.** OpenBao today is a single replica (no raft
+ * HA) — a login/unwrap attempt landing during a brief unavailability window (a restart, a leader
+ * election) must not fail the whole pod boot on the first hiccup. [withRetry] retries only
+ * transient failures (network errors, non-200 responses) with exponential backoff, bounded well
+ * inside the Deployment's `startupProbe` budget (30 attempts × 5s). It does NOT retry the
+ * DEK-length `require()` in [loadDelegate] — that is a configuration/data error, not a transient
+ * one, and retrying it would just repeat the same wrong answer.
  */
 @IfBuildProperty(name = "openbank.card.key-source", stringValue = "openbao-transit")
 @Startup
@@ -135,8 +143,9 @@ class OpenBaoEnvelopeCardSecretCipher(
             )
             return AesGcmCardSecretCipher(Optional.empty(), true)
         }
-        val token = (loginFn ?: ::login)()
-        val dek = (unwrapDekFn ?: ::unwrapDek)(token, wrapped)
+        val token = withRetry("OpenBao kubernetes-auth login", loginFn ?: ::login)
+        val dek =
+            withRetry("OpenBao transit decrypt for key '$kekName'") { (unwrapDekFn ?: ::unwrapDek)(token, wrapped) }
         require(dek.size == DEK_LENGTH_BYTES) {
             "OpenBao transit key '$kekName' unwrapped a DEK of ${dek.size} bytes, expected " +
                 "$DEK_LENGTH_BYTES (AES-256)"
@@ -165,6 +174,35 @@ class OpenBaoEnvelopeCardSecretCipher(
         return objectMapper.readTree(response.body())["auth"]["client_token"].asText()
     }
 
+    /**
+     * Retries [block] on any exception (connection refused/timeout, or the `check()`-thrown
+     * `IllegalStateException` for a non-200 response) with exponential backoff, up to
+     * [MAX_ATTEMPTS] total tries. Blocking `Thread.sleep` is fine here: this only ever runs once,
+     * synchronously, inside `@Startup` bean construction — the same place the eager HTTP call
+     * itself already blocks.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun <T> withRetry(description: String, block: () -> T): T {
+        var delay = INITIAL_BACKOFF
+        var lastError: Exception? = null
+        repeat(MAX_ATTEMPTS) { attempt ->
+            try {
+                return block()
+            } catch (e: Exception) {
+                lastError = e
+                if (attempt < MAX_ATTEMPTS - 1) {
+                    log.warn(
+                        "$description failed (attempt ${attempt + 1}/$MAX_ATTEMPTS: " +
+                            "${e.javaClass.simpleName}), retrying in ${delay.toMillis()}ms",
+                    )
+                    Thread.sleep(delay.toMillis())
+                    delay = delay.multipliedBy(BACKOFF_MULTIPLIER)
+                }
+            }
+        }
+        throw lastError ?: error("$description failed with no recorded exception")
+    }
+
     /** Unwraps [wrapped] (an OpenBao Transit ciphertext, `vault:v<N>:...`) via Transit `decrypt`. */
     private fun unwrapDek(token: String, wrapped: String): ByteArray {
         val body = objectMapper.writeValueAsString(mapOf("ciphertext" to wrapped))
@@ -188,5 +226,8 @@ class OpenBaoEnvelopeCardSecretCipher(
         const val REQUEST_TIMEOUT_SECONDS = 10L
         const val HTTP_OK = 200
         const val DEK_LENGTH_BYTES = 32
+        const val MAX_ATTEMPTS = 4
+        const val BACKOFF_MULTIPLIER = 2L
+        val INITIAL_BACKOFF: Duration = Duration.ofMillis(500)
     }
 }
