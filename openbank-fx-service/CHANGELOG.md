@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.8...fx-service-v0.10.0) (2026-08-17)
+
+
+### Features
+
+* **fx:** distinguish feed fetch outcomes from job liveness ([#4943](https://github.com/JiRaska/open-bank-oss/issues/4943)) ([b48a609](https://github.com/JiRaska/open-bank-oss/commit/b48a60992ade8f6382a096564081c4b8593b90de))
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **fx:** derive feed-name agreement between CI probe and liveness gauge ([#5001](https://github.com/JiRaska/open-bank-oss/issues/5001)) ([83e1adc](https://github.com/JiRaska/open-bank-oss/commit/83e1adcf8690924ef2827442e2f2220640587b3b))
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.8](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.7...fx-service-v0.9.8) (2026-08-13)
 
 

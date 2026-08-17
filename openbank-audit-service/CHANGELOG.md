@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.3...audit-service-v0.15.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **security-scanner:** delete the openbank.security.scan.event outbox, which never had a writer ([#4940](https://github.com/JiRaska/open-bank-oss/issues/4940)) ([9d1d095](https://github.com/JiRaska/open-bank-oss/commit/9d1d0954c418722adc1beb712956209d98eb6a0c))
+
 ## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.2...audit-service-v0.15.3) (2026-08-16)
 
 

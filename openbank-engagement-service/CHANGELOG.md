@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.11.1...engagement-service-v0.12.0) (2026-08-17)
+
+
+### Features
+
+* **engagement:** add gamification engine domain slice (ADR-0261) ([#5138](https://github.com/JiRaska/open-bank-oss/issues/5138)) ([fef7be1](https://github.com/JiRaska/open-bank-oss/commit/fef7be1a53ffc923da8617d0a652732800639632))
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/engagement-service-v0.11.0...engagement-service-v0.11.1) (2026-08-16)
 
 

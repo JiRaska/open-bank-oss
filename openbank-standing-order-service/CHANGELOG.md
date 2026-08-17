@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.6](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.5...standing-order-service-v0.14.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.14.5](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.14.4...standing-order-service-v0.14.5) (2026-08-02)
 
 
