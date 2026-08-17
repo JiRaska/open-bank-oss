@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.157.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.9...admin-ui-v0.157.10) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label sanctions review controls ([8b275e9](https://github.com/JiRaska/open-bank-oss/commit/8b275e994b38d20f96b69d6a41489e0ec2357050))
+
+## [0.157.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.8...admin-ui-v0.157.9) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label PID quick-create fields ([3dd90e7](https://github.com/JiRaska/open-bank-oss/commit/3dd90e7d0b855138405de4e3c30d99cd43221bf1))
+
 ## [0.157.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.7...admin-ui-v0.157.8) (2026-08-17)
 
 
