@@ -69,6 +69,27 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `sepa-payment's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's sepa-payment fix: SepaPaymentCreatedEvent and
+        // SepaPaymentStatusChangedEvent (KafkaSepaPaymentEventPublisher.paymentCreatedPayload /
+        // statusChangedPayload, both objectMapper.writeValueAsString) now carry "sourceService".
+        // Before this, EventAttribution's `openbank.sepa.payment.events` -> `sepa-payment` entry
+        // already resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        // sepa-payment is a money-path service (rules.yaml: money_path_services).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"paymentId":"${UUID.randomUUID()}","status":"SETTLED",""" +
+                """"sourceService":"sepa-payment"}""",
+            EventAddress(topic = "openbank.sepa.payment.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sepa-payment")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
