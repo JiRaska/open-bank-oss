@@ -69,6 +69,29 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `consent-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's consent-service fix: every ConsentEvents.kt class (ConsentGranted,
+        // ConsentRevoked, ConsentExpired, ConsentRejected, SuppressionCreated, SuppressionRevoked)
+        // now carries "sourceService" — a serialised data class (ConsentRepositoryImpl.outboxMessage
+        // calls objectMapper.writeValueAsString(event) directly, no hand-built map). Before this,
+        // EventAttribution's `openbank.consent.events` -> `consent-service` entry already resolved
+        // these rows correctly, but as TOPIC-sourced rather than the producer's own claim — and this
+        // topic IS in audit-service's consumed-topics list today, so this is a live attribution
+        // upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"aggregateId":"${UUID.randomUUID()}","eventType":"ConsentGranted",""" +
+                """"sourceService":"consent-service"}""",
+            EventAddress(topic = "openbank.consent.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("ConsentGranted")
+        assertThat(entry.captured.sourceService).isEqualTo("consent-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
