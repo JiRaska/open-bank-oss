@@ -15,7 +15,7 @@ graph LR
 
   admin -- "GET/POST/PUT /products<br/>GET /fees" --> pc
   acc -. "čte definice produktů" .-> pc
-  intr -. "čte deklarované sazby" .-> pc
+  intr -. "čte připnuté snapshoty sazeb" .-> pc
   fx -. "čte FX marže" .-> pc
   card -. "čte konfig karty" .-> pc
 
@@ -24,7 +24,7 @@ graph LR
   classDef svc fill:#dbeafe,stroke:#2563eb
 ```
 
-Katalog je **poskytovatel referenčních dat**. Nemá downstream volání ani účast na peněžní cestě. Publikační důkazy ukládá do trvalého outboxu, ale zatím nemá brokerový transportní adaptér.
+Katalog je **poskytovatel referenčních dat**. Nemá downstream volání ani účast na peněžní cestě. Publikační důkazy ukládá do trvalého outboxu, ale zatím nemá brokerový transportní adaptér. Úrokové zpracování musí číst připnutý snapshot s dobou účinnosti, ne aktuální katalogovou hodnotu během peněžního výpočtu.
 
 ## C4 — Kontejner (vnitřní struktura)
 
@@ -87,6 +87,12 @@ Kořen agregátu je **`Product`** (identita `id`/`code`, `name`, `type`, `curren
 | `savingsConfig` | SAVINGS | úroková pásma, výpovědní lhůta, počet výběrů zdarma, bonusová sazba |
 
 `versionHistory[]` jsou legacy informativní data, nikoli neměnný auditní důkaz. `termsAndConditions[]` nese reference s dobou účinnosti. Autoritativní neměnné revize zavádí v2 dle ADR-0257.
+
+## Banking deposit pack v2
+
+`org.openbank.banking.deposit:2` je deklarativní profil vkladového produktu. Vyžaduje měnu, typ produktu a objekt `interest` s explicitní konvencí počtu dní a frekvencí výplaty. Sazba je buď kanonický desetinný řetězec pro pevnou roční sazbu, nebo neprázdný seznam pásem. Bankovní slovník tak zůstává mimo průmyslově neutrální jádro a přesný profil je součástí neměnné publikované revize.
+
+Nejde záměrně o živé cenové čtení. Budoucí adaptér interest-service musí z publikovaného profilu vytvořit snapshot sazby s dobou účinnosti ještě před výpočtem úroku; čtení nejnovějšího katalogového dokumentu při úročení by zničilo reprodukovatelnost historie.
 
 ## Zploštění sazebníku
 

@@ -153,6 +153,7 @@ class CatalogPackSeeder(
         const val STARTUP_PRIORITY_OFFSET = 100
         val PACKS = listOf(
             PackSchema("banking", "org.openbank.banking.deposit", 1, "/catalog-packs/banking/deposit-v1.schema.json"),
+            PackSchema("banking", "org.openbank.banking.deposit", 2, "/catalog-packs/banking/deposit-v2.schema.json"),
             PackSchema(
                 "banking",
                 "org.openbank.banking.legacy-product",

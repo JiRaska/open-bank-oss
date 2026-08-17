@@ -33,7 +33,7 @@ import jakarta.ws.rs.Path as JaxrsPath
  * account-open product-existence validation). Until this test, account-service and
  * billing-service ([ProductCatalogFeesPactConsumerTest] in `openbank-billing-service`) were the
  * only two live callers of `openbank-product-catalog` with NO entry in `pacts/` — the same
- * uncontracted-consumer gap class that caused incident #2269 (ADR-0260 Phase A).
+ * uncontracted-consumer gap class that caused incident #2269 (ADR-0264 Phase A).
  *
  * Two interactions, matching the adapter's two live branches:
  *  - 200 with `id`/`code`/`status` — the only path that yields `ProductLookupResult.Found`;

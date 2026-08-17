@@ -10,6 +10,7 @@ import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
 import com.openbank.party.domain.model.PartyStatus
+import com.openbank.party.domain.model.Payee
 import java.time.Instant
 import java.util.UUID
 
@@ -88,6 +89,20 @@ interface PartyDocumentRepository {
     suspend fun save(doc: PartyDocument): PartyDocument
 
     suspend fun findByPartyId(partyId: UUID): List<PartyDocument>
+}
+
+/** Outbound persistence port for saved payees (TOP-10 #5). */
+interface PartyPayeeRepository {
+    /** Upsert by (partyId, normalised iban) — a re-save of an existing IBAN updates that row. */
+    suspend fun save(payee: Payee): Payee
+
+    /** Newest first, matching the app's own display order. */
+    suspend fun findByPartyId(partyId: UUID): List<Payee>
+
+    suspend fun countByPartyId(partyId: UUID): Long
+
+    /** No-op (not an error) if no such payee exists — delete is idempotent. */
+    suspend fun deleteByPartyIdAndIban(partyId: UUID, iban: String)
 }
 
 /** Outbound persistence port for KYC document binary files. */

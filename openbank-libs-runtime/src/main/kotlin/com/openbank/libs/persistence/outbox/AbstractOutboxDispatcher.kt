@@ -4,6 +4,8 @@
 
 package com.openbank.libs.persistence.outbox
 
+import com.openbank.libs.observability.DomainMetrics
+import jakarta.inject.Inject
 import org.jboss.logging.Logger
 
 /**
@@ -55,6 +57,50 @@ abstract class AbstractOutboxDispatcher {
     protected abstract val outboxEventPublisher: OutboxEventPublisher
 
     /**
+     * `service` tag for [DomainMetrics.outboxDispatched] / `.outboxDead` (#5049). Defaults to a
+     * kebab-case derivation of the concrete class's simple name — `PartyOutboxDispatcher`
+     * becomes `party` — which was verified (2026-08-16) to reproduce the `service` string every
+     * one of the 31 sibling [AbstractOutboxBacklogGauge] subclasses already hardcodes, so the
+     * outbox-dispatch and outbox-backlog panels of the same dashboard share one label
+     * vocabulary. Three dispatchers whose derivation would silently disagree with their own
+     * gauge override it explicitly: `CardOutboxDispatcher` (`card-issuance`, not `card`),
+     * `TppOutboxDispatcher` (`tpp-registry`, not `tpp`), `DomesticPaymentOutboxDispatcher`
+     * (`domestic`, not `domestic-payment`). A new dispatcher whose class name does not already
+     * match its own gauge's `service` must override this the same way.
+     *
+     * **`this::class.java.simpleName` is NOT the class you wrote (issue #5143).** This getter is
+     * inherited from the abstract base, so `this` at the call site is Quarkus Arc's generated
+     * bean subclass, not the developer's `LedgerOutboxDispatcher` — `simpleName` came back
+     * `"LedgerOutboxDispatcher_Subclass"` in production, confirmed live: the first real dispatch
+     * on `ledger-service` after this mechanism deployed recorded
+     * `openbank_outbox_dispatched_total{service="ledger-outbox-dispatcher_-subclass",...}` while
+     * the sibling `openbank_outbox_backlog` gauge on the SAME dispatcher, same pod, same moment,
+     * correctly read `service="ledger"` — that gauge's `service` is `abstract`, forcing an
+     * explicit value per subclass, which is exactly why it was never exposed to this bug. Not an
+     * edge case: `@ApplicationScoped` is the standard scope every dispatcher in the fleet uses,
+     * so every one relying on the default derivation was affected, and the 3 overrides above were
+     * immune only by coincidence (they exist for a naming disagreement, not this). See
+     * [deriveServiceName] for the fix.
+     */
+    protected open val service: String get() = deriveServiceName(this::class.java.simpleName)
+
+    /**
+     * Metrics facade, deliberately **field**-injected rather than threaded through the
+     * constructor (contrast [AbstractOutboxBacklogGauge], whose concrete subclasses already
+     * accept a `metrics: DomainMetrics` constructor parameter) so this change touches none of
+     * the ~34 concrete dispatchers' constructors (#5049).
+     *
+     * `null` means either "not CDI-managed" — every dispatcher unit test in the fleet
+     * (`AbstractOutboxDispatcherTest` included) constructs its dispatcher directly with `class
+     * Foo(...) : AbstractOutboxDispatcher()`, bypassing the container entirely — or a
+     * not-yet-resolved bean. [dispatchScheduledBatch] treats either as "skip metrics, never
+     * crash", the same graceful-degradation contract [DomainMetrics.reg] uses for a missing
+     * `MeterRegistry`. Visible to this package's tests via direct field assignment (protected).
+     */
+    @Inject
+    protected var metrics: DomainMetrics? = null
+
+    /**
      * Core dispatch loop. Call this from the concrete subclass's `@Scheduled` method.
      *
      * Resilience annotations (`@Bulkhead`, `@CircuitBreaker`, `@Retry`, `@Timeout`) belong
@@ -63,8 +109,15 @@ abstract class AbstractOutboxDispatcher {
      */
 
     protected open suspend fun dispatchScheduledBatch() {
-        OutboxDispatch.dispatchOnce(outboxRepository) { entry ->
+        val result = OutboxDispatch.dispatchOnce(outboxRepository) { entry ->
             publishWithResilience(entry)
+        }
+        val m = metrics ?: return
+        for (outcome in result.outcomes) {
+            when (outcome) {
+                is OutboxDispatchOutcome.Dispatched -> m.outboxDispatched(service, outcome.entry.eventType)
+                is OutboxDispatchOutcome.Failed -> if (outcome.terminal) m.outboxDead(service)
+            }
         }
     }
 
@@ -81,5 +134,24 @@ abstract class AbstractOutboxDispatcher {
     companion object {
         val log: Logger = Logger.getLogger(AbstractOutboxDispatcher::class.java)
         const val DEFAULT_BATCH_SIZE: Int = OutboxDispatch.DEFAULT_BATCH_SIZE
+
+        /**
+         * `FooBarOutboxDispatcher` -> `foo-bar`. See [service] for why this exists.
+         *
+         * `substringBefore('_')` strips a Quarkus Arc-generated bean subclass suffix
+         * (`_Subclass`, `_ClientProxy`, ...) BEFORE the kebab-case step — required because
+         * [simpleClassName] is read via `this::class.java.simpleName` from a method inherited
+         * from this abstract class, so at runtime `this` is Arc's generated instance, not the
+         * developer's class (issue #5143). Cutting at the first underscore rather than
+         * enumerating Arc's exact suffix vocabulary is deliberate: no dispatcher class name in
+         * the fleet contains one (`git grep '^class.*OutboxDispatcher'` — none do, and this
+         * repo's naming convention is PascalCase throughout), so it is a safe general strip that
+         * does not need updating if a future Quarkus version generates a different marker.
+         */
+        internal fun deriveServiceName(simpleClassName: String): String = simpleClassName
+            .substringBefore('_')
+            .removeSuffix("OutboxDispatcher")
+            .replace(Regex("(?<!^)(?=[A-Z])"), "-")
+            .lowercase()
     }
 }

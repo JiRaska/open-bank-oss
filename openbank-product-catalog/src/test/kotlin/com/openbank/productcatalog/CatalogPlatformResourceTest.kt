@@ -72,6 +72,59 @@ class CatalogPlatformResourceTest {
             expectedValid = false,
             schemaVersion = 2,
         )
+
+        validateDeposit(
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}""",
+            expectedValid = true,
+        )
+        validateDeposit(
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"TIERED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","tiers":[{"fromBalance":"0","toBalance":"100000","annualRate":"0.03"},{"fromBalance":"100000","annualRate":"0.04"}]}}""",
+            expectedValid = true,
+        )
+        validateDeposit(
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"TIERED","dayCount":"ACT_365","payoutFrequency":"MONTHLY"}}""",
+            expectedValid = false,
+        )
+    }
+
+    @Test
+    fun publishesADeclarativeDepositInterestProfile() {
+        val specificationId = createDepositSpecification("SAVINGS_DECLARATIVE_E2E")
+        val offeringId = createOffering(specificationId, "SAVINGS_DECLARATIVE_E2E_CZ")
+        val revisionId = createDepositRevision(offeringId)
+        setMaker(revisionId, "independent-deposit-author")
+
+        Given {
+            contentType("application/json")
+            body("""{"reason":"approved declarative savings profile"}""")
+            header("If-Match", "\"0\"")
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions/$revisionId/publish")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.rateType", equalTo("FIXED"))
+            body("content.attributes.interest.annualRate", equalTo("0.0425"))
+        }
+
+        Given { this } When {
+            get("/api/v2/products/$offeringId")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.dayCount", equalTo("ACT_365"))
+        }
+
+        Given { this } When {
+            get("/api/v2/revisions/$revisionId")
+        } Then {
+            statusCode(200)
+            header("ETag", equalTo("\"1\""))
+            body("id", equalTo(revisionId.toString()))
+            body("offeringId", equalTo(offeringId.toString()))
+            body("state", equalTo("PUBLISHED"))
+            body("content.attributes.interest.annualRate", equalTo("0.0425"))
+        }
     }
 
     @Test
@@ -442,6 +495,18 @@ class CatalogPlatformResourceTest {
         }
     }
 
+    private fun validateDeposit(attributes: String, expectedValid: Boolean) {
+        Given {
+            contentType("application/json")
+            body("""{"attributes":$attributes}""")
+        } When {
+            post("/api/v2/product-types/org.openbank.banking.deposit/versions/2/validate")
+        } Then {
+            statusCode(200)
+            body("valid", equalTo(expectedValid))
+        }
+    }
+
     private fun createSpecification(code: String, schemaVersion: Int = 2): UUID = UUID.fromString(
         (
             Given {
@@ -449,6 +514,20 @@ class CatalogPlatformResourceTest {
                 body(
                     """{"code":"$code","schemaRef":{"id":"org.openbank.insurance.term-life","version":$schemaVersion}}""",
                 )
+            } When {
+                post("/api/v2/specifications")
+            } Then {
+                statusCode(201)
+                header("ETag", equalTo("\"0\""))
+            }
+            ).extract().jsonPath().getString("id"),
+    )
+
+    private fun createDepositSpecification(code: String): UUID = UUID.fromString(
+        (
+            Given {
+                contentType("application/json")
+                body("""{"code":"$code","schemaRef":{"id":"org.openbank.banking.deposit","version":2}}""")
             } When {
                 post("/api/v2/specifications")
             } Then {
@@ -485,6 +564,24 @@ class CatalogPlatformResourceTest {
             Given {
                 contentType("application/json")
                 body(revisionPayload(name, relationships, schemaVersion))
+            } When {
+                post("/api/v2/offerings/$offeringId/revisions")
+            } Then {
+                statusCode(201)
+                header("ETag", equalTo("\"0\""))
+                body("state", equalTo("DRAFT"))
+            }
+            ).extract().jsonPath().getString("id"),
+    )
+
+    private fun createDepositRevision(offeringId: UUID): UUID = UUID.fromString(
+        (
+            Given {
+                contentType("application/json")
+                body(
+                    """{"schemaRef":{"id":"org.openbank.banking.deposit","version":2},""" +
+                        """"name":{"en":"Declarative savings"},"attributes":$DEPOSIT_ATTRIBUTES}""",
+                )
             } When {
                 post("/api/v2/offerings/$offeringId/revisions")
             } Then {
@@ -858,5 +955,7 @@ class CatalogPlatformResourceTest {
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"premiumModel":"CALCULATED"}"""
         const val INSURANCE_ATTRIBUTES =
             """{"coverage":{"amount":"100000.00","currency":"EUR"},"termYears":20,"smokerAccepted":true,"premiumModel":"FIXED","premium":{"amount":"12.3400","currency":"EUR","cadence":"MONTHLY"},"perils":[{"code":"DEATH","description":"Death during the insured term"}],"exclusions":[{"code":"FRAUD","description":"Fraud or deliberate misrepresentation"}],"limits":[{"kind":"PER_EVENT","amount":"100000.00","currency":"EUR"}],"deductibles":[{"kind":"PER_CLAIM","amount":"0","currency":"EUR"}],"underwritingQuestions":[{"id":"smoker","question":"Do you use tobacco?","answerType":"BOOLEAN","required":true}]}"""
+        const val DEPOSIT_ATTRIBUTES =
+            """{"currency":"CZK","productType":"SAVINGS","interest":{"rateType":"FIXED","dayCount":"ACT_365","payoutFrequency":"MONTHLY","annualRate":"0.0425"}}"""
     }
 }

@@ -86,6 +86,24 @@ data class PartyDocument(
     val createdAt: Instant,
 )
 
+/**
+ * A saved payee (uložený příjemce) — a transfer recipient the customer chose to remember so a
+ * future payment can start from a tap instead of re-typing the IBAN. Pure convenience data, NOT
+ * an authorisation input: sending money to it still goes through the paying account-service's
+ * full SCA + Verification-of-Payee path exactly as if the IBAN had been typed fresh. Mirrors the
+ * mobile app's own device-local `Payee`/`SavedPayees` shape and rules field-for-field (name/iban/
+ * bic, dedup-by-normalised-IBAN, cap 30, newest-first) — this is the server side of the SAME
+ * feature (TOP-10 #5, server-synced saved payees), not a new one.
+ */
+data class Payee(
+    val id: UUID,
+    val partyId: UUID,
+    val name: String,
+    val iban: String,
+    val bic: String?,
+    val createdAt: Instant,
+)
+
 data class PartyDocumentFile(
     val id: UUID,
     val partyId: UUID,

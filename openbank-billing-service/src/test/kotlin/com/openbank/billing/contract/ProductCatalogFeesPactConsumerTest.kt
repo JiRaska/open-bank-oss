@@ -31,7 +31,7 @@ import jakarta.ws.rs.Path as JaxrsPath
  * [ProductCatalogRestClient.getProductFees] (`FeeAssessmentService`, ADR-0143). Until this test,
  * billing-service and account-service ([ProductCatalogLookupPactConsumerTest]) were the only two
  * live callers of `openbank-product-catalog` with NO entry in `pacts/` — the exact uncontracted-
- * consumer gap that caused incident #2269 (ADR-0260 Phase A closes it for both).
+ * consumer gap that caused incident #2269 (ADR-0264 Phase A closes it for both).
  *
  * The generated pact is committed to `pacts/` (git-pact, ADR-0063) and replayed by
  * `ProductCatalogPactProviderVerificationTest` (`@PactFolder("../pacts")`) in

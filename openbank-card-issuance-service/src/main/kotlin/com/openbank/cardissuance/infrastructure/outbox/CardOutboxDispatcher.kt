@@ -47,6 +47,10 @@ class CardOutboxDispatcher(
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
 
+    // Matches CardOutboxBacklogGauge's `service = "card-issuance"` — the class-name-derived
+    // default ("card") would disagree with the sibling gauge's label (#5049).
+    override val service: String = "card-issuance"
+
     @Scheduled(
         every = "\${openbank.outbox.poll-interval:5s}",
         delayed = "\${openbank.outbox.initial-delay:5s}",
