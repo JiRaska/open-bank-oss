@@ -111,6 +111,12 @@ data class AddDocumentCommand(
 
 data class ErasePartyCommand(val id: UUID)
 
+data class SavePayeeCommand(val partyId: UUID, val name: String, val iban: String, val bic: String?)
+
+/** Mirrors the app's own MAX_PAYEES = 30 hard cap (PayeeStore.kt). */
+class PayeeLimitExceededException(partyId: UUID) :
+    RuntimeException("Party $partyId already has the maximum of 30 saved payees")
+
 /** ADR-0055 bounded name search. `q` is normalised via SearchRequest; a blank/`*`/sub-2-char term returns an empty page. */
 data class SearchPartiesQuery(val q: String?, val limit: Int = 20, val cursor: String? = null)
 
@@ -190,6 +196,19 @@ interface PartyUseCase {
      * Used by the GDPR Art. 15 export endpoint to verify subject-access self-service.
      */
     suspend fun getPartyKeycloakSub(id: UUID): String?
+
+    /** Saved payees (TOP-10 #5), newest first — server side of the mobile app's device-local list. */
+    suspend fun listPayees(partyId: UUID): List<Payee>
+
+    /**
+     * Upsert by (partyId, iban). Throws [PayeeLimitExceededException] when [partyId] would exceed
+     * the 30-payee cap AND [iban] is not already one of its existing payees (a re-save of an
+     * existing IBAN is always allowed — it can never itself push the count over the limit).
+     */
+    suspend fun savePayee(cmd: SavePayeeCommand): Payee
+
+    /** No-op (not an error) if no such payee exists — matches the app's own idempotent remove(). */
+    suspend fun deletePayee(partyId: UUID, iban: String)
 }
 
 /**
