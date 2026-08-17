@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.5...admin-ui-v0.158.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** name oversight inputs ([49cef9b](https://github.com/JiRaska/open-bank-oss/commit/49cef9b1876347da836444959d2dc02d6a654192))
+
 ## [0.158.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.4...admin-ui-v0.158.5) (2026-08-17)
 
 
