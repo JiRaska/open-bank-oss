@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.0...admin-ui-v0.155.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** load next ledger journal page ([#5171](https://github.com/JiRaska/open-bank-oss/issues/5171)) ([fd1db4e](https://github.com/JiRaska/open-bank-oss/commit/fd1db4ed07b4b355bed1d4496eee6a784d089c7a))
+
 ## [0.155.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.154.0...admin-ui-v0.155.0) (2026-08-17)
 
 
