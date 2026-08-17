@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.154.0...admin-ui-v0.155.0) (2026-08-17)
+
+
+### Features
+
+* **admin-ui:** unify card detail workspace ([#5166](https://github.com/JiRaska/open-bank-oss/issues/5166)) ([a0027a4](https://github.com/JiRaska/open-bank-oss/commit/a0027a40933a29f2061ad36038a5555a581d6f64))
+
 ## [0.154.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.153.0...admin-ui-v0.154.0) (2026-08-16)
 
 
