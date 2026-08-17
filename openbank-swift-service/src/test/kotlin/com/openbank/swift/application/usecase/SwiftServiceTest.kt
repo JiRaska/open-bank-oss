@@ -5,6 +5,7 @@
 package com.openbank.swift.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.swift.application.port.`in`.SendSwiftCommand
 import com.openbank.swift.application.port.out.SchemeGatewayPort
 import com.openbank.swift.application.port.out.SchemeGatewayUnavailableException
@@ -20,6 +21,7 @@ import com.openbank.swift.domain.model.SwiftStatus
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -202,6 +204,38 @@ class SwiftServiceTest {
         coVerify(exactly = 1) { settlementPort.settle(any()) }
         coVerify(exactly = 1) { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) }
     }
+
+    @Test
+    fun `send with flag on writes sourceService onto both outbox payloads for AuditConsumer attribution`(): Unit =
+        runBlocking {
+            // #3994/#5256: `sourceService` is the strongest (EVENT-sourced) attribution
+            // `AuditConsumer` reads. Before this field, both the SENT and COMPLETED outbox
+            // writes fell back to `EventAttribution.TopicAttribution`'s
+            // `openbank.payments.swift.event` -> `swift-service` entry — correct, but only
+            // TOPIC-sourced. Audit-service subscribes to that topic today, so this is a live
+            // attribution upgrade for every SWIFT payment leg, not a forward-looking one.
+            val txId = UUID.randomUUID()
+            val sentOutbox = slot<OutboxMessage>()
+            val completedOutbox = slot<OutboxMessage>()
+            coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+            coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+            coEvery { schemeGatewayPort.submit(any()) } returns
+                SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
+            coEvery {
+                repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, capture(sentOutbox))
+            } answers { firstArg() }
+            coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = true, transactionId = txId)
+            coEvery {
+                repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, capture(completedOutbox))
+            } answers { firstArg() }
+
+            serviceWithFlag.send(command())
+
+            val sentNode = objectMapper.readTree(sentOutbox.captured.payload)
+            val completedNode = objectMapper.readTree(completedOutbox.captured.payload)
+            assertThat(sentNode.get("sourceService").asText()).isEqualTo("swift-service")
+            assertThat(completedNode.get("sourceService").asText()).isEqualTo("swift-service")
+        }
 
     @Test
     fun `send with flag on holds MT103 in SENT when transaction-service is unavailable`(): Unit = runBlocking {
