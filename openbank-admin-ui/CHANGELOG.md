@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.1...admin-ui-v0.157.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** guard payment initiation ([39dc551](https://github.com/JiRaska/open-bank-oss/commit/39dc551d891ef7ea9260cce708eecf117c17ec3d))
+
 ## [0.157.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.0...admin-ui-v0.157.1) (2026-08-17)
 
 
