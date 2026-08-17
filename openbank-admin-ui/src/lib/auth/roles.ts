@@ -58,6 +58,9 @@ export const PERMISSIONS = {
   // KYC_REVIEWER may NOT open. The UI mirrors the backend @RolesAllowed split so a
   // holder of only one KYC role gets exactly their half of the workflow.
   "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
+  // must never be offered a customer-creation workflow.
+  "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
@@ -168,6 +171,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['audit:view', ['/audit']],
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding', '/identity-cases']],
+  ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
   ['accounts:create', ['/accounts/new']],
