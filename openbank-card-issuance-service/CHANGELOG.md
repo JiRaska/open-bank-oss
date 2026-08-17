@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.22.0...card-issuance-service-v0.23.0) (2026-08-17)
+
+
+### Features
+
+* **card-issuance:** re-encrypt batch job for a rotated OpenBao DEK ([#5347](https://github.com/JiRaska/open-bank-oss/issues/5347)) ([13fedea](https://github.com/JiRaska/open-bank-oss/commit/13fedea50cfc44aa00b930acbb9bca290a2c72c7))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.21.0...card-issuance-service-v0.22.0) (2026-08-17)
 
 
