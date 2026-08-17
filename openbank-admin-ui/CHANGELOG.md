@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.3...admin-ui-v0.155.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** add shell skip navigation ([#5187](https://github.com/JiRaska/open-bank-oss/issues/5187)) ([d31dc47](https://github.com/JiRaska/open-bank-oss/commit/d31dc477cd2824c9895c9c51ec6fdf0905949da4))
+
 ## [0.155.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.2...admin-ui-v0.155.3) (2026-08-17)
 
 
