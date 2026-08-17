@@ -20,6 +20,7 @@ import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
+import { PageHeader } from '@/components/ui/PageHeader'
 import styles from './IAOps.module.css'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
@@ -235,34 +236,25 @@ function IAOpsContent() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-      {/* Header */}
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">IAOps</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '8px 0 4px', letterSpacing: '-0.03em' }}>
-            {t('IAOps — governance AI', 'IAOps — AI Governance')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            {t(
-              'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
-              'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <PageHeader
+        icon={<Bot size={20} aria-hidden="true" />}
+        title={t('IAOps — governance AI', 'IAOps — AI Governance')}
+        subtitle={t(
+          'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
+          'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
+        )}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">IAOps</span></div>}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString()}</span>}
           <button onClick={load} disabled={loading}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
               fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>

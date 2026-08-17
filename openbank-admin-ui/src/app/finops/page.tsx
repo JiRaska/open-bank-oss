@@ -17,6 +17,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -403,24 +404,15 @@ function FinOpsContent() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-      {/* Header */}
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">FinOps</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '8px 0 4px', letterSpacing: '-0.03em' }}>
-            {t('FinOps přehled', 'FinOps Overview')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            {t(
-              'Správa verzí, licencí a efektivity zdrojů — ADR-0054',
-              'Version lifecycle, cost posture, and resource efficiency — ADR-0054',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <PageHeader
+        icon={<Bot size={20} aria-hidden="true" />}
+        title={t('FinOps přehled', 'FinOps Overview')}
+        subtitle={t(
+          'Správa verzí, licencí a efektivity zdrojů — ADR-0054',
+          'Version lifecycle, cost posture, and resource efficiency — ADR-0054',
+        )}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">FinOps</span></div>}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
               {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
@@ -432,7 +424,7 @@ function FinOpsContent() {
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', textDecoration: 'none' }}
           >
-            <PieChart size={13} />
+            <PieChart size={13} aria-hidden="true" />
             {t('Rozpad nákladů', 'Cost allocation')}
           </Link>
           <button
@@ -442,11 +434,11 @@ function FinOpsContent() {
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
           >
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !lifecycle ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
