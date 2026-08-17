@@ -245,7 +245,7 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className={styles.footer}>
-        <div className={styles.footerVersion}>OpenBank v2.0</div>
+        <div className={styles.footerVersion}>{t('OpenBank Admin portál', 'OpenBank Admin Portal')}</div>
         <div className={styles.footerScope}>EBA · PSD2 · CNB · GDPR</div>
       </div>
     </aside>
