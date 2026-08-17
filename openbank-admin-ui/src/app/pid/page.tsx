@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
@@ -189,24 +190,15 @@ export default function PidPage() {
   return (
     <AuthGuard>
       <div style={{ animation: 'fadeIn 0.2s ease-out', maxWidth: '1400px', margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">PID</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Map size={18} style={{ color: 'var(--accent)' }} />
-              {t('Osobní identifikační údaje (PID)', 'Personal Identification Data (PID)')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Správa identit, dokladů a identifikátorů klientů', 'Management of identities, documents, and client identifiers')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+        <PageHeader
+          icon={<Map size={18} aria-hidden="true" />}
+          title={t('Osobní identifikační údaje (PID)', 'Personal Identification Data (PID)')}
+          subtitle={t('Správa identit, dokladů a identifikátorů klientů', 'Management of identities, documents, and client identifiers')}
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">PID</span></div>}
+          actions={<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-secondary" onClick={load} disabled={loading}>
-                <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+                <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
               <button className="btn btn-secondary" onClick={() => setShowNewForm(true)}>
@@ -219,8 +211,8 @@ export default function PidPage() {
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right' }}>
               {t('Chcete vytvořit záznam rychle?', 'Want to create quickly?')}
             </div>
-          </div>
-        </div>
+          </div>}
+        />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
