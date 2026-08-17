@@ -14,7 +14,11 @@ import java.util.Optional
 private const val WRAPPED_DEK_FIXTURE = "vault:v1:not-a-real-wrapped-value"
 private const val LOGIN_TOKEN_FIXTURE = "stub-token"
 
-private fun randomDek(size: Int = 32): ByteArray = ByteArray(size).also { SecureRandom().nextBytes(it) }
+// Shared, not one per call: these are unrelated test fixtures, not real key material, so reusing
+// one generator is both fine and what CodeQL's "Random object created and used only once" wants.
+private val testRandom = SecureRandom()
+
+private fun randomDek(size: Int = 32): ByteArray = ByteArray(size).also { testRandom.nextBytes(it) }
 
 /** Builds a cipher with the two OpenBao HTTP seams stubbed (see the class doc on why lambdas, not subclassing). */
 private fun cipher(
