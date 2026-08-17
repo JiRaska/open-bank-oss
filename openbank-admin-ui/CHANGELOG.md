@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.157.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.0...admin-ui-v0.157.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** guard party creation workflow ([3b3a101](https://github.com/JiRaska/open-bank-oss/commit/3b3a101f6cdbc156d988aba7a465024137393c6c))
+* **admin-ui:** improve account list usability ([5738692](https://github.com/JiRaska/open-bank-oss/commit/5738692942938f7e95ed59b1c5e7d2bd9fb842ce))
+* **admin-ui:** label account opening form ([457c206](https://github.com/JiRaska/open-bank-oss/commit/457c20658195a8114eb3d09144b736d7381091de))
+
 ## [0.157.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.156.1...admin-ui-v0.157.0) (2026-08-17)
 
 
