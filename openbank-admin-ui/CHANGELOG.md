@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.157.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.10...admin-ui-v0.157.11) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label segment draft fields ([c857bd8](https://github.com/JiRaska/open-bank-oss/commit/c857bd8e10389e9d2b907fa5cbea1165a6de7836))
+
 ## [0.157.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.9...admin-ui-v0.157.10) (2026-08-17)
 
 
