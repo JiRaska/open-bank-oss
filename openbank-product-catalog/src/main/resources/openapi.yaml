@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Product Catalog API
   # API-contract version is independent of version.txt (ADR-0048); newest URL major is /api/v2.
-  version: 2.1.0
+  version: 2.2.0
   description: >-
     Industry-neutral, schema-governed catalog API with immutable four-eyes publication,
     exact decimal pricing, effective-dated reads and transactional audit/outbox. The
