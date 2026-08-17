@@ -10,14 +10,14 @@ graph LR
   fleet[27 fleet services<br/>account / sanctions / payments / ...]
 
   scanner[(security-scanner)]:::svc
-  db[(PostgreSQL<br/>schema: openbank_security)]
-  kafka[(Kafka<br/>security.scan.event<br/>security.ict.incident)]
+  db[(PostgreSQL<br/>schema: openbank_security<br/>Flyway history only)]
+  kafka[(Kafka<br/>security.ict.incident)]
 
   admin -- "GET /report, /services" --> scanner
   ops -- "POST /ict-incidents<br/>PATCH /status" --> scanner
   scanner -- "HTTP probes<br/>/q/health + API port" --> fleet
-  scanner --> db
-  scanner -- "outbox → publish" --> kafka
+  scanner -.-> db
+  scanner -- "direct emitter" --> kafka
   kafka --> audit
 
   classDef svc fill:#dbeafe,stroke:#2563eb
@@ -32,49 +32,44 @@ graph TB
     rest[REST<br/>SecurityScannerResource<br/>IctIncidentResource]
     scanner[Application<br/>SecurityScannerService<br/>IctIncidentService]
     dom[Domain<br/>SecurityScanResult / PlatformSecurityReport<br/>IctIncident / SecurityFinding<br/>Severity / OwaspCategory / IncidentStatus]
-    persist[Persistence<br/>SecurityOutboxRepositoryImpl<br/>JPA / Panache]
-    outbox[Outbox<br/>SecurityOutboxDispatcher]
+    mem[In-memory state<br/>ConcurrentHashMap<br/>lastResults / lastReport / incidents]
+    emit[Kafka emitter<br/>@Channel ict-incident-events-out]
     sched[Scheduler<br/>@Scheduled every 30m]
   end
 
   sched --> scanner
   rest --> scanner
   scanner --> dom
-  scanner --> persist
-  scanner --> outbox
+  scanner --> mem
+  scanner --> emit
   scanner -- "HTTP probes" --> fleet[(fleet services)]
 
-  persist -.-> db[(PostgreSQL)]
-  outbox -.-> kafka[(Kafka)]
+  emit -.-> kafka[(Kafka<br/>security.ict.incident)]
 ```
+
+There is no persistence layer: the service owns no entity, no repository and no business table.
 
 ## Package structure
 
 ```
-com.openbank.security/                 ◄── outbox infrastructure (shared pkg)
-├── application/port/out/              SecurityOutboxPort
-├── infrastructure/
-│   ├── kafka/                         KafkaSecurityOutboxEventPublisher
-│   ├── outbox/                        SecurityOutboxDispatcher
-│   └── persistence/
-│       ├── entity/                    SecurityOutboxEntity
-│       └── repository/                SecurityOutboxRepositoryImpl
-
-com.openbank.securityscanner/          ◄── scanner application
+com.openbank.securityscanner/          ◄── the only package root
 ├── domain/
 │   ├── SecurityScanResult             ServiceScanResult, PlatformSecurityReport,
 │   │                                  SecurityFinding, Severity, OwaspCategory
 │   └── IctIncident                    IctIncident, IncidentSeverity, IncidentStatus, IncidentCategory
 ├── application/
 │   ├── SecurityScannerService         scan pipeline, in-memory result cache
-│   └── IctIncidentService             DORA incident lifecycle
+│   └── IctIncidentService             DORA incident lifecycle, in-memory store,
+│                                      direct @Channel Kafka emitter
 └── infrastructure/
     └── rest/
         ├── SecurityScannerResource    scan + report endpoints, @Scheduled trigger
         └── IctIncidentResource        ICT incident CRUD
 ```
 
-Note: split package roots (`security` vs `securityscanner`) reflect the outbox being in a shared infrastructure package.
+Note: the service previously had a second package root `com.openbank.security` holding outbox
+infrastructure. Nothing ever wrote to that outbox, so it was deleted (#4709) — `com.openbank.securityscanner`
+is now the only package root.
 
 ## Scan pipeline internals
 
@@ -111,32 +106,33 @@ fun scheduledScan() { scanner.scanAll(serviceList()) }
 
 - Runs 2 minutes after service startup (warm-up delay), then every 30 minutes.
 - Service list is loaded from `openbank.security-scanner.services` config (27 entries in production).
-- Results are cached in-memory in `ConcurrentHashMap<String, ServiceScanResult>` — the last result per service is always available without DB query.
+- Results are held in-memory in `ConcurrentHashMap<String, ServiceScanResult>` (`lastResults`) plus `lastReport` — the last result per service is always available, and is lost on pod restart until the next scan runs.
 
-## Outbox flow
+## Event emission
 
 ```
-SecurityScannerService writes PlatformSecurityReport
-    ↓ (SecurityOutboxDispatcher, 500ms poll)
-KafkaSecurityOutboxEventPublisher → openbank.security.scan.event
-
-IctIncidentService writes IctIncident
-    ↓ (same dispatcher)
-KafkaSecurityOutboxEventPublisher → openbank.security.ict.incident
+IctIncidentService (report / status change / regulatory report)
+    ↓ @Channel("ict-incident-events-out") — direct SmallRye emitter
+openbank.security.ict.incident
+    ↓
+audit-service
 ```
+
+Scan results are **not** emitted as events at all — they are served over REST
+(`GET /api/v1/security/report`) and nowhere else. Emission is fire-and-forget: there is no
+outbox, so a Kafka outage loses the incident event with no local record of it (#4709).
 
 ## Components from `openbank-libs`
 
 | Module | Use here |
 |---|---|
-| `libs.persistence.outbox` | OutboxEntity base, OutboxRepository, OutboxDispatcherBase |
 | `libs.web.ServiceInfoResource` | `/api/v1/info` (build metadata) |
 | `libs.docs.DocsResource` | **this documentation** (`/q/openbank/docs`) |
 | `libs.util.BuildInfo` | runtime tech-stack snapshot |
 
 ## Design decisions
 
-1. **In-memory result cache** — last scan per service is in `ConcurrentHashMap`, not in PostgreSQL. Fast reads for the dashboard; survives pod restart via the next scheduled scan.
+1. **No persistence at all** — last scan per service, the last platform report and all ICT incidents live in `ConcurrentHashMap`s. Fast reads for the dashboard; everything is lost on pod restart, and scan state is rebuilt by the next scheduled scan while incidents are not recoverable.
 2. **Synchronous HTTP probes** — blocking `HttpClient` with 5s timeouts. Scans run sequentially per service, parallelised across services by the scheduler thread pool.
 3. **No auth on probed services** — probes use unauthenticated HTTP; `/q/health` is intentionally public. This is itself a finding if management endpoints are exposed on the API port.
 4. **OIDC disabled** — scanner is an internal platform tool; admin-ui calls it directly in-cluster with no token. Future: add ROLE_PLATFORM_INTERNAL.

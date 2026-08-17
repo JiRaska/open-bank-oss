@@ -170,9 +170,11 @@ OPEN → INVESTIGATING → CONTAINED → RESOLVED → CLOSED
 
 ## Eventy
 
+Eventy ICT incidentů vysílá přímo do Kafky SmallRye `@Channel` emitter — žádný outbox ani transakční
+záruka. Skeny nevysílají nic: platformový report je pouze přes REST (#4709).
+
 | Topic | Typ eventu | Spuštění | Klíčová pole |
 |---|---|---|---|
-| `openbank.security.scan.event` | `security.scan.completed.v1` | POST /scan nebo scheduler | reportId, platformScore, platformGrade, criticalFindings, generatedAt |
 | `openbank.security.ict.incident` | `ict.incident.reported.v1` | POST /ict-incidents | id, title, severity, category, affectedServices, detectedAt |
 | `openbank.security.ict.incident` | `ict.incident.updated.v1` | PATCH /status | id, newStatus, containedAt, resolvedAt, rtoMinutes |
 | `openbank.security.ict.incident` | `ict.incident.regulatory.reported.v1` | POST /regulatory-report | id, regulatoryReportId, reportedAt |

@@ -108,13 +108,10 @@ quarkus:
 mp:
   messaging:
     outgoing:
-      security-events-out:
-        connector: smallrye-kafka
-        bootstrap.servers: kafka:9092
-        client.id: security-scanner-${quarkus.uuid}
-        topic: openbank.security.scan.event
-        value.serializer: org.apache.kafka.common.serialization.StringSerializer
-        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # `security-events-out` -> openbank.security.scan.event was removed in #4709. The channel,
+      # its outbox and its topic existed for the whole life of this service with nothing ever
+      # constructing a message: 0 rows in security_outbox and end offset 0 on the topic. Scan
+      # results are served from GET /api/v1/security/report, not published.
       ict-incident-events-out:
         connector: smallrye-kafka
         bootstrap.servers: kafka:9092
@@ -124,12 +121,6 @@ mp:
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
-  outbox:
-    # Every service with an outbox entity must flip this explicitly — it defaults to false, and a
-    # service that forgets ships an outbox that fills forever with no error anywhere.
-    dispatch-enabled: true
-    poll-interval: 5s
-    initial-delay: 5s
   security-scanner:
     scan-interval-minutes: 30
     # URLs use full Kubernetes in-cluster DNS (<name>.<namespace>.svc:<port>)

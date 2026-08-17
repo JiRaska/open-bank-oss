@@ -42,8 +42,10 @@ import sys
 SCHEDULED_RE = re.compile(r"^\s*@Scheduled\b", re.M)
 LIVENESS_RE = re.compile(r"registerWorkflowLiveness")
 # Outbox infra is exempt by ROLE (own openbank.outbox.backlog freshness signal,
-# ADR-0237 point 1): the shared base classes cover most, but security-scanner's
-# hand-rolled dispatcher predates the abstraction — name the role, not the base.
+# ADR-0237 point 1): the shared base classes cover most, but some hand-rolled
+# dispatchers predate the abstraction — name the role, not the base. (The example
+# this comment used to cite, security-scanner's, was deleted in #4709: the whole
+# outbox existed with nothing ever writing to it.)
 OUTBOX_INFRA_RE = re.compile(
     r"AbstractOutboxDispatcher|AbstractOutboxBacklogGauge"
     r"|class\s+\w*(OutboxDispatcher|OutboxBacklogGauge)\b")
