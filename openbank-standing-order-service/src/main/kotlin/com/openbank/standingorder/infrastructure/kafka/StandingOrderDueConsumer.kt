@@ -35,11 +35,13 @@ import java.util.UUID
  *    non-2xx ⇒ [StandingOrderUseCase.recordFailure].
  *  - `DOMESTIC` / `INTERNAL` → the app only ever sends these two, so this used to mean "every real
  *    standing order fails on every due date" (#3931-class defect: accepted, shown ACTIVE, silently
- *    dead). Resolves `creditorIban` via account-service; a hit means the payee never leaves the
- *    bank, so it books straight through transaction-service as a same-day `TRANSFER`
- *    ([SettlementScope], #5225). A miss is a genuinely external CZ payment, which still needs the
- *    BBAN-based `domestic-payment` rail this change does not build — recorded as a clear failure,
- *    same as before, not a silent one.
+ *    dead). Resolves `creditorIban` via account-service; when it resolves to an account **of the
+ *    same party** as the order, that is an own-account move — the one case `domestic-payment`
+ *    itself skips AML/sanctions screening for — so it books straight through transaction-service
+ *    as a same-day `TRANSFER` ([SettlementScope], #5225). A creditor belonging to a DIFFERENT
+ *    party, or an IBAN that resolves to no account at all (genuinely external CZ payment), both
+ *    still need `domestic-payment`'s screened / BBAN-clearing paths this change does not build —
+ *    recorded as a clear failure, same as before, never a silently unscreened success.
  *
  * Idempotency: the payment call reuses the event's deterministic `so-exec-{orderId}-{executionDate}`
  * key, so a Kafka redelivery replays the same payment (sepa-payment returns the cached 201) instead of
@@ -139,14 +141,20 @@ class StandingOrderDueConsumer(
      * types; `SEPA_CREDIT` is unreachable from it) was accepted, shown ACTIVE, and silently failed
      * on every due date until it auto-suspended (#3931-class defect).
      *
-     * The fix routes the case this consumer CAN handle correctly without inventing new CZ-clearing
-     * plumbing: if the creditor IBAN resolves to an account of ours, this is an own-account or
-     * same-bank move and transaction-service can book it directly as a `TRANSFER` — same-day, no
-     * rail, no clearing calendar (`SettlementScope`, #5225). A creditor IBAN that does NOT resolve
-     * is a genuinely external CZ payment (a different bank's BBAN) that needs the CERTIS-clearing
-     * `domestic-payment` rail; that integration needs an IBAN→BBAN conversion this change does not
-     * attempt, and is a tracked follow-up — it still records a clear failure, same as today, rather
-     * than a wrong one.
+     * The fix routes only the case this consumer can handle both correctly AND safely: an
+     * **own-account** move, where the resolved creditor belongs to the SAME party as the order.
+     * That is exactly `domestic-payment`'s own `OWN_ACCOUNTS` scope — the one case its own
+     * screening logic already skips AML/sanctions checks for — so booking it as a bare
+     * transaction-service `TRANSFER` (same-day, no rail, no clearing calendar; `SettlementScope`,
+     * #5225) carries no screening gap. transaction-service itself has NO screening client of its
+     * own, so routing a payment to a DIFFERENT party this way would silently skip the check
+     * `domestic-payment` runs for its `INTERNAL_CLIENT` scope — that case still needs the real
+     * screened path and is deliberately left recording a failure, not wrongly auto-booked.
+     *
+     * A creditor IBAN that resolves to no account at all is a genuinely external CZ payment (a
+     * different bank's BBAN) needing the CERTIS-clearing `domestic-payment` rail; that needs an
+     * IBAN→BBAN conversion this change does not attempt. Both gaps record a clear failure, same as
+     * before this fix, rather than a wrong success.
      */
     private suspend fun executeDomesticOrInternal(orderId: UUID, node: com.fasterxml.jackson.databind.JsonNode) {
         val creditorIban = node.path("creditorIban").asText(null)?.takeIf { it.isNotBlank() }
@@ -155,22 +163,8 @@ class StandingOrderDueConsumer(
             recordFailureSafely(orderId)
             return
         }
-        val lookup = runCatching { accountClient.getByIban(creditorIban).awaitSuspending() }
-        val response = lookup.getOrNull()
-        if (response == null || response.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
-            log.infof(
-                "[standing-order-exec] order %s creditor IBAN does not resolve to an internal account " +
-                    "— external CZ clearing rail is not wired yet (#889 follow-up), recording failure",
-                orderId,
-            )
-            recordFailureSafely(orderId)
-            return
-        }
-        val targetAccountId = runCatching {
-            objectMapper.readTree(response.readEntity(String::class.java)).path("id").asText().let(UUID::fromString)
-        }.getOrNull()
+        val targetAccountId = resolveOwnAccountCreditor(orderId, node, creditorIban)
         if (targetAccountId == null) {
-            log.warnf("[standing-order-exec] order %s: could not parse account lookup response", orderId)
             recordFailureSafely(orderId)
             return
         }
@@ -200,6 +194,49 @@ class StandingOrderDueConsumer(
             )
             recordFailureSafely(orderId)
         }
+    }
+
+    /**
+     * Resolves [creditorIban] and returns its accountId ONLY when it belongs to the same party as
+     * the order — the safety boundary [executeDomesticOrInternal]'s KDoc explains. Returns null
+     * (and logs why) for every other outcome: no account, an unparseable response, or a different
+     * party's account. The caller records failure uniformly on null; only the reason differs.
+     */
+    private suspend fun resolveOwnAccountCreditor(
+        orderId: UUID,
+        node: com.fasterxml.jackson.databind.JsonNode,
+        creditorIban: String,
+    ): UUID? {
+        val lookup = runCatching { accountClient.getByIban(creditorIban).awaitSuspending() }
+        val response = lookup.getOrNull()
+        if (response == null || response.statusInfo.family != Response.Status.Family.SUCCESSFUL) {
+            log.infof(
+                "[standing-order-exec] order %s creditor IBAN does not resolve to an internal account " +
+                    "— external CZ clearing rail is not wired yet (#889 follow-up), recording failure",
+                orderId,
+            )
+            return null
+        }
+        val lookupJson = runCatching { objectMapper.readTree(response.readEntity(String::class.java)) }.getOrNull()
+        val targetAccountId = lookupJson?.path("id")?.asText(null)?.let {
+            runCatching { UUID.fromString(it) }.getOrNull()
+        }
+        val creditorPartyId = lookupJson?.path("partyId")?.asText(null)
+        if (targetAccountId == null || creditorPartyId == null) {
+            log.warnf("[standing-order-exec] order %s: could not parse account lookup response", orderId)
+            return null
+        }
+        val orderPartyId = node.path("partyId").asText(null)
+        if (orderPartyId == null || creditorPartyId != orderPartyId) {
+            log.infof(
+                "[standing-order-exec] order %s pays a different party's account — that needs " +
+                    "domestic-payment's screened INTERNAL_CLIENT path, not a bare transaction-service " +
+                    "TRANSFER (which carries no AML/sanctions check of its own); recording failure",
+                orderId,
+            )
+            return null
+        }
+        return targetAccountId
     }
 
     // Minor units (e.g. 220000 "cents") → major units (2200.00) using the currency's fraction digits.

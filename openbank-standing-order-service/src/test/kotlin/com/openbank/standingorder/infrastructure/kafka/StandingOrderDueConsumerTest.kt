@@ -38,6 +38,7 @@ class StandingOrderDueConsumerTest {
         StandingOrderDueConsumer(useCase, mapper, sepaClient, accountClient, transactionClient, clock)
 
     private val orderId = UUID.fromString("00000000-0000-0000-0000-0000000000d1")
+    private val partyId = UUID.fromString("00000000-0000-0000-0000-0000000000d9")
 
     private fun dueEvent(
         paymentType: String = "SEPA_CREDIT",
@@ -45,9 +46,11 @@ class StandingOrderDueConsumerTest {
         debtorName: String? = "Debtor",
         amountMinorUnits: Long = 220000L,
         currency: String = "CZK",
+        orderPartyId: UUID? = partyId,
     ): String {
         val payload = mutableMapOf<String, Any?>(
             "orderId" to orderId,
+            "partyId" to orderPartyId,
             "paymentType" to paymentType,
             "debitAccountId" to UUID.fromString("00000000-0000-0000-0000-0000000000d2"),
             "debtorIban" to debtorIban,
@@ -112,28 +115,33 @@ class StandingOrderDueConsumerTest {
      * every real standing order failed on every due date, forever.
      */
     @Test
-    fun `DOMESTIC order whose creditor resolves to an internal account is booked as a TRANSFER`(): Unit = runBlocking {
-        val targetAccountId = UUID.fromString("00000000-0000-0000-0000-0000000000d3")
-        val lookupBody = mapper.writeValueAsString(mapOf("id" to targetAccountId, "partyId" to UUID.randomUUID()))
-        every { accountClient.getByIban("DE89370400440532013000") } returns
-            Uni.createFrom().item(Response.ok(lookupBody).build())
-        val req = slot<InitiateTransactionRequest>()
-        every { transactionClient.initiate(capture(req)) } returns
-            Uni.createFrom().item(Response.status(201).build())
-        coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
+    fun `DOMESTIC order whose creditor resolves to the SAME party's account is booked as a TRANSFER`(): Unit =
+        runBlocking {
+            val targetAccountId = UUID.fromString("00000000-0000-0000-0000-0000000000d3")
+            // Same partyId as the order — an own-account move, the one case domestic-payment itself
+            // skips AML/sanctions screening for. A different party's account must NOT auto-route this
+            // way (see the two tests below) — a bare transaction-service TRANSFER carries no screening
+            // of its own.
+            val lookupBody = mapper.writeValueAsString(mapOf("id" to targetAccountId, "partyId" to partyId))
+            every { accountClient.getByIban("DE89370400440532013000") } returns
+                Uni.createFrom().item(Response.ok(lookupBody).build())
+            val req = slot<InitiateTransactionRequest>()
+            every { transactionClient.initiate(capture(req)) } returns
+                Uni.createFrom().item(Response.status(201).build())
+            coEvery { useCase.confirmExecution(orderId) } returns mockk(relaxed = true)
 
-        consumer.consume(dueEvent(paymentType = "DOMESTIC"))
+            consumer.consume(dueEvent(paymentType = "DOMESTIC"))
 
-        assertThat(req.captured.type).isEqualTo("TRANSFER")
-        assertThat(req.captured.targetAccountId).isEqualTo(targetAccountId)
-        assertThat(req.captured.sourceAccountId)
-            .isEqualTo(UUID.fromString("00000000-0000-0000-0000-0000000000d2"))
-        assertThat(req.captured.amount).isEqualByComparingTo("2200.00")
-        assertThat(req.captured.idempotencyKey).isEqualTo("so-exec-$orderId-2026-07-13")
-        coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
-        coVerify(exactly = 0) { useCase.recordFailure(any()) }
-        coVerify(exactly = 0) { sepaClient.createPayment(any(), any()) }
-    }
+            assertThat(req.captured.type).isEqualTo("TRANSFER")
+            assertThat(req.captured.targetAccountId).isEqualTo(targetAccountId)
+            assertThat(req.captured.sourceAccountId)
+                .isEqualTo(UUID.fromString("00000000-0000-0000-0000-0000000000d2"))
+            assertThat(req.captured.amount).isEqualByComparingTo("2200.00")
+            assertThat(req.captured.idempotencyKey).isEqualTo("so-exec-$orderId-2026-07-13")
+            coVerify(exactly = 1) { useCase.confirmExecution(orderId) }
+            coVerify(exactly = 0) { useCase.recordFailure(any()) }
+            coVerify(exactly = 0) { sepaClient.createPayment(any(), any()) }
+        }
 
     @Test
     fun `INTERNAL order whose creditor does NOT resolve to an internal account records a failure`(): Unit =
@@ -148,10 +156,50 @@ class StandingOrderDueConsumerTest {
             coVerify(exactly = 0) { transactionClient.initiate(any()) }
         }
 
+    /**
+     * The security-relevant boundary: resolving to SOME internal account is not enough. Paying a
+     * different party's account this way would silently skip the AML/sanctions screening
+     * `domestic-payment` runs for its `INTERNAL_CLIENT` scope — transaction-service's raw TRANSFER
+     * has no screening client of its own.
+     */
+    @Test
+    fun `INTERNAL order whose creditor resolves to a DIFFERENT party's account records a failure`(): Unit =
+        runBlocking {
+            val lookupBody = mapper.writeValueAsString(
+                mapOf(
+                    "id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"),
+                    "partyId" to UUID.fromString("00000000-0000-0000-0000-0000000000dd"),
+                ),
+            )
+            every { accountClient.getByIban("DE89370400440532013000") } returns
+                Uni.createFrom().item(Response.ok(lookupBody).build())
+            coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
+
+            consumer.consume(dueEvent(paymentType = "INTERNAL"))
+
+            coVerify(exactly = 1) { useCase.recordFailure(orderId) }
+            coVerify(exactly = 0) { transactionClient.initiate(any()) }
+        }
+
+    @Test
+    fun `an order with no partyId on the event never auto-routes, even to a resolvable account`(): Unit = runBlocking {
+        val lookupBody = mapper.writeValueAsString(
+            mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
+        )
+        every { accountClient.getByIban("DE89370400440532013000") } returns
+            Uni.createFrom().item(Response.ok(lookupBody).build())
+        coEvery { useCase.recordFailure(orderId) } returns mockk(relaxed = true)
+
+        consumer.consume(dueEvent(paymentType = "INTERNAL", orderPartyId = null))
+
+        coVerify(exactly = 1) { useCase.recordFailure(orderId) }
+        coVerify(exactly = 0) { transactionClient.initiate(any()) }
+    }
+
     @Test
     fun `a rejected internal transfer records a failure, not a confirmed execution`(): Unit = runBlocking {
         val lookupBody = mapper.writeValueAsString(
-            mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to UUID.randomUUID()),
+            mapOf("id" to UUID.fromString("00000000-0000-0000-0000-0000000000d3"), "partyId" to partyId),
         )
         every { accountClient.getByIban(any()) } returns Uni.createFrom().item(Response.ok(lookupBody).build())
         every { transactionClient.initiate(any()) } returns Uni.createFrom().item(Response.status(422).build())
