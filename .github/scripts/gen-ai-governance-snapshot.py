@@ -42,6 +42,7 @@ EVALS_BASELINES = ROOT / "openbank-libs" / "governance" / "evals" / "baselines.j
 OUT = ROOT / "openbank-admin-ui" / "ai-governance-snapshot.json"
 
 ALLOWED_D_STATUSES = {"built", "partial", "planned"}
+ALLOWED_PHASE_STATUSES = {"complete", "active", "blocked", "planned"}
 EXPECTED_DECISION_IDS = [f"D{i}" for i in range(1, 10)]
 
 
@@ -84,9 +85,36 @@ def validate_curated(curated: dict) -> None:
     phase = curated["phase"]
     if not isinstance(phase, dict):
         fail("phase must be a mapping")
-    for key in ["current", "total", "label", "agentsActing"]:
+    for key in ["current", "total", "label", "agentsActing", "roadmap"]:
         if key not in phase:
             fail(f"phase missing required key: {key}")
+    current = phase["current"]
+    total = phase["total"]
+    if type(current) is not int or type(total) is not int or not 1 <= current <= total:
+        fail("phase.current must be an integer between 1 and phase.total")
+    roadmap = phase["roadmap"]
+    if not isinstance(roadmap, list) or len(roadmap) != total:
+        fail("phase.roadmap must contain exactly phase.total entries")
+    numbers = [item.get("number") for item in roadmap if isinstance(item, dict)]
+    if numbers != list(range(1, total + 1)):
+        fail("phase.roadmap numbers must be consecutive and start at 1")
+    for item in roadmap:
+        if not isinstance(item, dict):
+            fail("each phase.roadmap entry must be a mapping")
+        if type(item.get("number")) is not int:
+            fail("phase.roadmap entry missing or invalid number")
+        for key in ["status", "title", "outcome"]:
+            if not isinstance(item.get(key), str) or not item[key].strip():
+                fail(f"phase.roadmap entry missing or invalid {key}")
+        if item["status"] not in ALLOWED_PHASE_STATUSES:
+            fail(f"phase.roadmap entry {item['number']} has invalid status {item['status']!r}")
+    active = [item["number"] for item in roadmap if item["status"] == "active"]
+    if active != [current]:
+        fail("phase.roadmap must have exactly the current phase marked active")
+    if any(item["status"] != "complete" for item in roadmap if item["number"] < current):
+        fail("all phases before phase.current must be complete")
+    if any(item["status"] == "complete" for item in roadmap if item["number"] > current):
+        fail("no phase after phase.current may be marked complete")
 
     decisions = curated["decisions"]
     if not isinstance(decisions, list):
@@ -268,7 +296,6 @@ def build_snapshot() -> dict:
     curated = cast(dict[str, Any] | None, load_yaml(CURATED))
     if curated is None:
         fail("ai-rollout.yaml is empty")
-    validate_curated(curated)
 
     agents_doc = cast(dict[str, Any] | None, load_yaml(AGENTS))
     registry_doc = cast(dict[str, Any] | None, load_yaml(PROMPT_REGISTRY))
@@ -278,6 +305,7 @@ def build_snapshot() -> dict:
         fail("prompts/registry.yaml is empty")
 
     agent_facts, agent_ids, enforced, policy_default = collect_agent_facts(agents_doc)
+    validate_curated(curated)
     prompt_facts = collect_prompt_registry_facts(registry_doc, agent_ids)
     evals_facts = collect_evals_facts()
     loader_facts = collect_registry_loader_facts(prompt_facts["idsByStatus"]["registered"])
@@ -297,6 +325,7 @@ def build_snapshot() -> dict:
         "totalPhases": curated["phase"]["total"],
         "phaseLabel": curated["phase"]["label"],
         "agentsActing": curated["phase"]["agentsActing"],
+        "phaseRoadmap": curated["phase"]["roadmap"],
         "decisions": decisions,
         "decisionSummary": decision_summary,
         "compliance": curated["compliance"],
@@ -347,7 +376,16 @@ def self_test() -> int:
     good = {
         "adrRef": "ADR-0031",
         "adrStatus": "accepted",
-        "phase": {"current": 2, "total": 5, "label": "phase two", "agentsActing": 3},
+        "phase": {
+            "current": 2, "total": 5, "label": "phase two", "agentsActing": 3,
+            "roadmap": [
+                {"number": 1, "status": "complete", "title": "one", "outcome": "done"},
+                {"number": 2, "status": "active", "title": "two", "outcome": "now"},
+                {"number": 3, "status": "blocked", "title": "three", "outcome": "needs proof"},
+                {"number": 4, "status": "blocked", "title": "four", "outcome": "needs proof"},
+                {"number": 5, "status": "planned", "title": "five", "outcome": "later"},
+            ],
+        },
         "decisions": [
             {"id": f"D{i}", "title": f"t{i}", "status": "built", "detail": f"d{i}"}
             for i in range(1, 10)
@@ -382,9 +420,14 @@ def self_test() -> int:
         rejects(f"a missing top-level {key!r}", lambda d, k=key: d.pop(k))
 
     # The phase block drives the headline number on the page.
-    for key in ("current", "total", "label", "agentsActing"):
+    for key in ("current", "total", "label", "agentsActing", "roadmap"):
         rejects(f"a missing phase.{key}", lambda d, k=key: d["phase"].pop(k))
     rejects("a non-mapping phase", lambda d: d.update(phase=["not", "a", "map"]))
+    rejects("a phase above total", lambda d: d["phase"].update(current=6))
+    rejects("a dropped roadmap entry", lambda d: d["phase"]["roadmap"].pop())
+    rejects("an inactive current phase", lambda d: d["phase"]["roadmap"][1].update(status="blocked"))
+    rejects("an incomplete prior phase", lambda d: d["phase"]["roadmap"][0].update(status="blocked"))
+    rejects("a complete phase after current", lambda d: d["phase"]["roadmap"][2].update(status="complete"))
 
     # D1-D9 must appear EXACTLY, in order. A dropped decision is the failure that matters most
     # here: the page renders eight rows and reads as complete, because a row that is not there
