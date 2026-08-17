@@ -75,6 +75,15 @@ spec:
               value: https://api.github.com
             - name: GITHUB_REPO
               value: JiRaska/open-bank-oss
+            # Optional fine-grained token: until OpenBao is seeded, the phase-3 writer fails closed
+            # and no pull request is opened. It is deliberately separate from every other agent's
+            # credential, so revoking this one stops only this bounded development capability.
+            - name: FLAKY_TEST_HUNTER_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: flaky-test-hunter-secrets
+                  key: FLAKY_TEST_HUNTER_GITHUB_TOKEN
+                  optional: true
             - name: LLM_GATEWAY_URL
               value: http://litellm.ai-platform.svc:4000
             - name: TEMPORAL_NAMESPACE

@@ -24,9 +24,11 @@ import jakarta.inject.Inject
  *    runtime prompt equals the registered content byte-for-byte — the `prompt_hash` in an
  *    AI-attributed AuditEvent now resolves.
  *
- * `proposeFixDiff` stays unimplemented for all check types in v1 (ADR-0168 Decision: every finding is
- * ticket-only because a wrong auto-fix on a test's coroutine builder, Pact provider target, or gating
- * annotation could silently mask a real bug). The wiring and registry entry are the scope of this change.
+ * `proposeFixDiff` is intentionally not a free-form model edit. Its sole phase-3 path is the
+ * deterministic marker for one mechanically safe repair in this non-money-path service: adding an
+ * explicit `: Unit` return type to exactly one locally detected expression-body `runBlocking` test.
+ * The GitHub adapter fetches and validates that one file before changing it; every other finding is
+ * ticket-only. This keeps the model out of the write decision (ADR-0031 D9).
  */
 @ApplicationScoped
 class LlmDiagnosisAdapter : LlmDiagnosisPort {
@@ -63,9 +65,17 @@ class LlmDiagnosisAdapter : LlmDiagnosisPort {
                 )
     }
 
-    override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? = null
+    override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? = if (
+        finding.checkType == com.openbank.flakytest.domain.model.FlakyTestCheckType.RUNBLOCKING_UNIT_MISSING &&
+        finding.filePath.startsWith("openbank-flaky-test-hunter/src/test/kotlin/")
+    ) {
+        ADD_EXPLICIT_UNIT_RETURN_TYPE
+    } else {
+        null
+    }
 
     private companion object {
+        const val ADD_EXPLICIT_UNIT_RETURN_TYPE = "add-explicit-unit-return-type"
         val SYSTEM_PROMPT = loadRegisteredPrompt()
 
         /**
