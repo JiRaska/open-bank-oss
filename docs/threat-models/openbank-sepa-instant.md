@@ -19,7 +19,7 @@ above batch SEPA.
 ```
 [Channels/Operators] --> (REST /api/v1/sepa-instant) --> [sepa-instant-service] --> [(Postgres: sct_inst payments)]
                                                                 |
-                                                                +--> [(sct_inst_outbox)] --> [Kafka events] --> clearing/scheme
+                                                                +--> [Kafka events] (direct emit via KafkaSctInstEventPublisher) --> clearing/scheme
                                                                 |
                                                                 +--> [fraud-service] (shadow, OIDC CC / mTLS, fail-open)
    recall <-- (POST /{paymentId}/recall)
@@ -42,7 +42,6 @@ above batch SEPA.
 | **T**ampering | Amount/beneficiary change before send | Server-validated, immutable once accepted; audit |
 | **R**epudiation | Deny initiating an instant payment | AuditEvent + SCA evidence + correlation id |
 | **I**nfo disclosure | Debtor payment history (`/debtor/{id}`) leak | AuthZ scoping to owner/role |
-| **I**nfo disclosure | Domain metrics leak PII / enable per-payment inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077 / ADR-0079): the outbox-backlog gauge `openbank.outbox.backlog` is tagged **only** by `service="sepa-instant"` — never a payment id, end-to-end id, debtor/creditor IBAN, amount, or any PII. The gauge value is a read-only `COUNT(*)` of PENDING+FAILED outbox rows, refreshed off a scheduled tick (not on the Prometheus scrape thread); `/q/metrics` is cluster-internal |
 | **D**oS | Flood to exhaust instant-rail capacity | Rate limit; idempotency |
 | **E**oP | Unauthorized recall to claw back funds | Recall gated by distinct authority; audit; reason required |
 
@@ -96,6 +95,9 @@ not change any existing request's outcome until explicitly flipped.
   payment id, IBAN, amount, or PII (low-cardinality contract). **Risk class = confidentiality / metric
   cardinality** (bounded to a single per-service series). Mitigated by `SctInstOutboxBacklogGaugeTest`
   (supplier tracks the refreshed cache). No DB change; rollback = revert the commit.
+  **Superseded — see the 2026-08-17 entry below**: this gauge, `countProcessable()`, and the outbox
+  pipeline it measured were removed as dead code (PR #1364); the corresponding STRIDE row above no
+  longer applies and has been removed from §4.
 - **2026-06-17** — ADR-0084 fraud shadow scoring (observe-only). New outbound trust boundary:
   `sepa-instant → fraud-service (POST /api/v1/fraud/score, OIDC client-credentials)`.
   **Shadow = fail-open and never-enforce**: `SctInstPaymentService.scoreFraudShadow()` wraps the call
@@ -119,3 +121,16 @@ not change any existing request's outcome until explicitly flipped.
   defaults `false` — no behavior change to any existing request in this PR; flipping it is a
   tracked follow-up. No DB schema change (Redis, TTL-bounded); rollback = revert the commit (or
   leave `authz.four-eyes.enforce=false`, its default).
+- **2026-08-17** — Doc correction (issue #5127), no behavior change. PR #1364 (2026-07-17) had
+  already removed the dead transactional-outbox pipeline —
+  `SctInstOutboxPort`/`SctInstOutboxDispatcher`/`KafkaSctInstOutboxEventPublisher`/the
+  outbox-backlog gauge — after confirming nothing ever wrote to it: `KafkaSctInstEventPublisher`
+  (a direct, synchronous emitter) was always the pipeline actually in use (issue #1034). This
+  entry corrects §2's DFD (the `sct_inst_outbox` node is replaced with the direct
+  `KafkaSctInstEventPublisher` edge that was always the real path) and removes the now-void
+  metric-cardinality row from §4 STRIDE, and lands alongside a Flyway migration
+  (`V4__drop_sct_inst_outbox.sql`) dropping the vestigial `sct_inst_outbox` table and
+  `sct_inst_outbox_seq` sequence that PR #1364 left behind (0 rows, unused since #1034).
+  **Risk class = none** — this is a documentation and dead-schema cleanup only; the live pipeline
+  (direct Kafka emitter) and every trust boundary above are unchanged. Rollback: revert this doc
+  commit; the migration's own rollback is stated in `V4__drop_sct_inst_outbox.sql`.
