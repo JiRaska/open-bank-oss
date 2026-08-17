@@ -15,6 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const STATUS_COLOR: Record<string, { bg: string; text: string; border: string }> = {
   ACTIVE:     { bg: 'var(--success-bg)',  text: 'var(--success-text)',  border: 'var(--success-border)' },
@@ -556,28 +557,21 @@ export default function ProductCatalogPage() {
       <div style={{ display: 'flex', height: '100%' }}>
         <div style={{ flex: 1, minWidth: 0, padding: '28px 32px', overflowY: 'auto' }}>
 
-          <div className="page-header">
-            <div>
-              <div className="breadcrumb">
-                <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-                <span className="breadcrumb-current">{t('Katalog produktů', 'Product Catalog')}</span>
-              </div>
-              <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Package size={18} style={{ color: 'var(--accent)' }} />
-                {t('Katalog produktů', 'Product Catalog')}
-              </h1>
-              <p className="page-subtitle">{t('Správa bankovních produktů, sazeb, poplatků a obchodních podmínek', 'Manage banking products, rates, fees and terms')}</p>
-            </div>
-            <div style={{ display: 'flex', gap: '8px' }}>
+          <PageHeader
+            icon={<Package size={18} aria-hidden="true" />}
+            title={t('Katalog produktů', 'Product Catalog')}
+            subtitle={t('Správa bankovních produktů, sazeb, poplatků a obchodních podmínek', 'Manage banking products, rates, fees and terms')}
+            breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Katalog produktů', 'Product Catalog')}</span></div>}
+            actions={<div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-primary" onClick={openCreateModal} disabled={loading}>
-                <Plus size={14} /> {t('Nový produkt', 'New Product')}
+                <Plus size={14} aria-hidden="true" /> {t('Nový produkt', 'New Product')}
               </button>
               <button className="btn btn-secondary" onClick={load} disabled={loading}>
-                <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+                <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
-            </div>
-          </div>
+            </div>}
+          />
 
           {unavailable && (
             <div className="card" style={{ padding: 0, marginBottom: '16px' }}>

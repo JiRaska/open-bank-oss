@@ -327,11 +327,16 @@ class DomainMetrics {
     /**
      * Increment each time the outbox dispatcher successfully publishes an event.
      *
-     * @param service  service name (e.g. `sepa-payment`, `ledger`)
-     * @param topic    Kafka topic
+     * @param service   service name (e.g. `sepa-payment`, `ledger`)
+     * @param eventType the outbox entry's domain event type (e.g. `PARTY_ERASED`), **not** the
+     *                  Kafka topic — every publisher in this fleet sends to one fixed topic per
+     *                  service, so a `topic` tag would be constant per `service` and add nothing;
+     *                  `eventType` is the actual per-row granularity this counter measures
+     *                  (issue #5128 finding 1). If a service ever fans out to more than one topic,
+     *                  add a separate `topic` parameter rather than overloading this one.
      */
-    fun outboxDispatched(service: String, topic: String) {
-        counter("openbank.outbox.dispatched", "service", service, "topic", topic)
+    fun outboxDispatched(service: String, eventType: String) {
+        counter("openbank.outbox.dispatched", "service", service, "event_type", eventType)
     }
 
     /**

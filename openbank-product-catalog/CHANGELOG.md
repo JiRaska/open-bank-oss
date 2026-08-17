@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.14.0...product-catalog-v0.15.0) (2026-08-17)
+
+
+### Features
+
+* **product-catalog:** expose immutable revision lookup ([#5201](https://github.com/JiRaska/open-bank-oss/issues/5201)) ([78d4efe](https://github.com/JiRaska/open-bank-oss/commit/78d4efe5beec8f42d379bb9efd1ba350a6bee2a9))
+
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.3...product-catalog-v0.14.0) (2026-08-16)
+
+
+### Features
+
+* **product-catalog:** add declarative deposit profiles ([#5152](https://github.com/JiRaska/open-bank-oss/issues/5152)) ([17e5ec5](https://github.com/JiRaska/open-bank-oss/commit/17e5ec52a9fdf80993c16f38ef3b0590a059d6ae))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.13.2...product-catalog-v0.13.3) (2026-08-16)
 
 

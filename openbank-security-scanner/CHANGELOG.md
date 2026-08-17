@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.1...security-scanner-v0.7.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** wire outboxDispatched into SecurityOutboxDispatcher ([#5195](https://github.com/JiRaska/open-bank-oss/issues/5195)) ([779cc0f](https://github.com/JiRaska/open-bank-oss/commit/779cc0f2033ebcec35428f1401734e819efeca34))
+
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.0...security-scanner-v0.7.1) (2026-08-16)
+
+
+### Bug Fixes
+
+* **security-scanner:** give the DORA ICT incident register a durable row ([#4939](https://github.com/JiRaska/open-bank-oss/issues/4939)) ([0bf9812](https://github.com/JiRaska/open-bank-oss/commit/0bf9812af427eef52ab07bcdd3527e2e8a5ee5b2))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.6.1...security-scanner-v0.7.0) (2026-08-08)
 
 

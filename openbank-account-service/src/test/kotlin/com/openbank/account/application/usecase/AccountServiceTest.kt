@@ -410,6 +410,7 @@ class AccountServiceTest {
         coEvery { accountRepository.findById(acc.id) } returns acc
         coEvery { accountRepository.update(any()) } answers { firstArg() }
         coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+        coEvery { balancePort.getByAccount(acc.id) } returns emptyList()
 
         service.closeAccount(
             CloseAccountCommand(
