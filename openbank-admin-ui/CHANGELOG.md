@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.1...admin-ui-v0.158.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label product studio controls ([a18b3e1](https://github.com/JiRaska/open-bank-oss/commit/a18b3e1b766c32cab92d4ddbb364c9b371313b0d))
+
 ## [0.158.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.0...admin-ui-v0.158.1) (2026-08-17)
 
 
