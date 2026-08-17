@@ -7,9 +7,12 @@ import com.openbank.statement.application.port.out.CloseRunRepository
 import com.openbank.statement.domain.model.CloseRun
 import com.openbank.statement.domain.model.CloseRunStatus
 import com.openbank.statement.domain.model.CloseTrigger
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -27,6 +30,16 @@ class CloseLastRunGaugeTest {
 
     private val runs = mockk<CloseRunRepository>()
 
+    private fun gauge(
+        registry: SimpleMeterRegistry?,
+        liveness: WorkflowLivenessRecorder = mockk(relaxed = true),
+    ): CloseLastRunGauge {
+        val metrics = mockk<DomainMetrics> {
+            every { registerWorkflowLiveness(any(), any()) } returns liveness
+        }
+        return CloseLastRunGauge(runs, registry).apply { domainMetrics = metrics }
+    }
+
     private fun finishedRun(finishedAt: Instant?, status: CloseRunStatus): CloseRun = CloseRun(
         id = UUID.randomUUID(), trigger = CloseTrigger.SCHEDULED, status = status,
         periodFrom = LocalDate.parse("2026-05-01"), periodTo = LocalDate.parse("2026-05-31"),
@@ -37,7 +50,7 @@ class CloseLastRunGaugeTest {
     @Test
     fun `gauge is registered at zero before any refresh`() {
         val registry = SimpleMeterRegistry()
-        CloseLastRunGauge(runs, registry).register()
+        gauge(registry).register()
 
         assertThat(registry.find(CloseLastRunGauge.GAUGE_NAME).gauge()?.value()).isZero()
     }
@@ -48,11 +61,13 @@ class CloseLastRunGaugeTest {
         val finishedAt = Instant.parse("2026-06-20T10:00:00Z")
         every { runs.latestRun() } returns Uni.createFrom().item(finishedRun(finishedAt, CloseRunStatus.COMPLETED))
 
-        val gauge = CloseLastRunGauge(runs, registry).apply { register() }
+        val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        val gauge = gauge(registry, liveness).apply { register() }
         gauge.refresh().await().indefinitely()
 
         assertThat(registry.get(CloseLastRunGauge.GAUGE_NAME).gauge().value().toLong())
             .isEqualTo(finishedAt.epochSecond)
+        verify { liveness.recordSuccess() }
     }
 
     @Test
@@ -60,7 +75,7 @@ class CloseLastRunGaugeTest {
         val registry = SimpleMeterRegistry()
         every { runs.latestRun() } returns Uni.createFrom().nullItem()
 
-        val gauge = CloseLastRunGauge(runs, registry).apply { register() }
+        val gauge = gauge(registry).apply { register() }
         gauge.refresh().await().indefinitely()
 
         assertThat(registry.get(CloseLastRunGauge.GAUGE_NAME).gauge().value()).isZero()
@@ -70,7 +85,7 @@ class CloseLastRunGaugeTest {
     fun `an in-flight RUNNING latest run never regresses the gauge`() {
         val registry = SimpleMeterRegistry()
         val finishedAt = Instant.parse("2026-06-20T10:00:00Z")
-        val gauge = CloseLastRunGauge(runs, registry).apply { register() }
+        val gauge = gauge(registry).apply { register() }
 
         every { runs.latestRun() } returns Uni.createFrom().item(finishedRun(finishedAt, CloseRunStatus.COMPLETED))
         gauge.refresh().await().indefinitely()
@@ -86,6 +101,6 @@ class CloseLastRunGaugeTest {
     @Test
     fun `register is a no-op when no meter registry is present`() {
         // Slim slices without a Prometheus registry must not crash the @Startup hook.
-        CloseLastRunGauge(runs, null).register()
+        gauge(null).register()
     }
 }

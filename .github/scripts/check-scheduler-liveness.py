@@ -59,9 +59,6 @@ ALLOWLIST = {
     # The sentinel's own scheduler — its liveness is the absence of its findings,
     # watched by the deploy-drift watchdog and its own run evidence.
     "openbank-control-liveness-sentinel/src/main/kotlin/com/openbank/liveness/infrastructure/schedule/LivenessCheckScheduler.kt",
-    # A cache-refresher only: StatementCloseCadenceStalled reads the persisted close-run timestamp
-    # directly. A workflow heartbeat here could say healthy while the actual monthly close is stale.
-    "openbank-statement-service/src/main/kotlin/com/openbank/statement/infrastructure/metrics/CloseLastRunGauge.kt",
 }
 
 # Today's non-compliant set (first scan 2026-08-03, 37 files; 27 at the 2026-08-07
@@ -73,8 +70,6 @@ ALLOWLIST = {
 # `mode: enforced`. Their being left here after healing is what kept the gate at
 # exit 1, which `mode: advisory` then converted to a warning; nothing else noticed.
 BASELINE = [
-    # non-money-path
-    "openbank-statement-service/src/main/kotlin/com/openbank/statement/infrastructure/scheduler/PeriodCloseScheduler.kt",
 ]
 
 

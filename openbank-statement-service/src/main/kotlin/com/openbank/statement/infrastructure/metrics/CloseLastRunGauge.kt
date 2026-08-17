@@ -4,6 +4,8 @@
 package com.openbank.statement.infrastructure.metrics
 
 import com.openbank.statement.application.port.out.CloseRunRepository
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -13,6 +15,7 @@ import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
+import java.time.Duration
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -51,9 +54,13 @@ class CloseLastRunGauge(private val runs: CloseRunRepository, private val regist
 
     /** Epoch seconds of the last finished close; 0 until the first refresh observes a finished run. */
     private val lastRunEpochSeconds = AtomicLong(0)
+    @Inject
+    lateinit var domainMetrics: DomainMetrics
+    private var liveness: WorkflowLivenessRecorder? = null
 
     @PostConstruct
     fun register() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
         val r = registry ?: return
         Gauge.builder(GAUGE_NAME, lastRunEpochSeconds) { it.get().toDouble() }
             .strongReference(true)
@@ -62,7 +69,10 @@ class CloseLastRunGauge(private val runs: CloseRunRepository, private val regist
 
     @Scheduled(every = "60s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     fun refresh(): Uni<Void> = runs.latestRun()
-        .onItem().invoke { run -> run?.finishedAt?.let { stamp(it.epochSecond) } }
+        .onItem().invoke { run ->
+            run?.finishedAt?.let { stamp(it.epochSecond) }
+            liveness?.recordSuccess()
+        }
         .replaceWithVoid()
 
     /** Advance the gauge monotonically; an in-flight RUNNING run (no finishedAt) is simply skipped. */
@@ -72,5 +82,7 @@ class CloseLastRunGauge(private val runs: CloseRunRepository, private val regist
 
     companion object {
         const val GAUGE_NAME = "openbank_statement_close_last_run_timestamp_seconds"
+        private const val WORKFLOW_NAME = "statement-close-last-run-gauge-refresh"
+        private val EXPECTED_INTERVAL: Duration = Duration.ofMinutes(1)
     }
 }
