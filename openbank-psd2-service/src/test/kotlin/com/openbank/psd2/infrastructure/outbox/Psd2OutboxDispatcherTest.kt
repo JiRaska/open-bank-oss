@@ -75,7 +75,7 @@ class Psd2OutboxDispatcherTest {
         val entry = sampleEntry()
         coEvery { repo.claimProcessable(any(), any()) } returns listOf(entry)
         coEvery { publisher.publish(entry) } throws RuntimeException("kafka unavailable")
-        coEvery { repo.markFailed(any(), any(), any()) } returns Unit
+        coEvery { repo.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
 
         val dispatcher = Psd2OutboxDispatcher(repo, publisher, dispatchEnabled = true)
 
