@@ -722,48 +722,48 @@ export default function ProductCatalogPage() {
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="grid-2">
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Kód *</label>
-                  <input className="input" required disabled={!!editingProduct} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="SAVINGS_STANDARD" />
+                  <label htmlFor="catalog-code" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Kód *</label>
+                  <input id="catalog-code" className="input" required disabled={!!editingProduct} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="SAVINGS_STANDARD" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Typ *</label>
-                  <select className="input" required value={formData.type ?? ''} onChange={e => setFormData(p => ({ ...p, type: e.target.value }))}>
+                  <label htmlFor="catalog-type" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Typ *</label>
+                  <select id="catalog-type" className="input" required value={formData.type ?? ''} onChange={e => setFormData(p => ({ ...p, type: e.target.value }))}>
                     {['SAVINGS', 'CURRENT', 'LOAN', 'MORTGAGE', 'CREDIT_CARD', 'TERM_DEPOSIT', 'OVERDRAFT', 'INVESTMENT'].map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
-                <input className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Název produktu', 'Product name')} />
+                <label htmlFor="catalog-name" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
+                <input id="catalog-name" className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Název produktu', 'Product name')} />
               </div>
               <div>
-                <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Krátký popis', 'Short description')}</label>
-                <input className="input" value={formData.shortDescription ?? ''} onChange={e => setFormData(p => ({ ...p, shortDescription: e.target.value }))} placeholder={t('Zobrazí se v přehledu', 'Shown in the overview')} />
+                <label htmlFor="catalog-description" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Krátký popis', 'Short description')}</label>
+                <input id="catalog-description" className="input" value={formData.shortDescription ?? ''} onChange={e => setFormData(p => ({ ...p, shortDescription: e.target.value }))} placeholder={t('Zobrazí se v přehledu', 'Shown in the overview')} />
               </div>
               <div className="grid-3">
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Měna *', 'Currency *')}</label>
-                  <input className="input" required value={formData.currency ?? 'EUR'} onChange={e => setFormData(p => ({ ...p, currency: e.target.value }))} placeholder="EUR" />
+                  <label htmlFor="catalog-currency" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Měna *', 'Currency *')}</label>
+                  <input id="catalog-currency" className="input" required value={formData.currency ?? 'EUR'} onChange={e => setFormData(p => ({ ...p, currency: e.target.value }))} placeholder="EUR" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Status', 'Status')}</label>
-                  <select className="input" disabled value={formData.status ?? 'DRAFT'} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
+                  <label htmlFor="catalog-status" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Status', 'Status')}</label>
+                  <select id="catalog-status" className="input" disabled value={formData.status ?? 'DRAFT'} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
                     {['DRAFT', 'ACTIVE', 'INACTIVE', 'DEPRECATED', 'ARCHIVED'].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze', 'Version')}</label>
-                  <input className="input" value={formData.version ?? '1.0.0'} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
+                  <label htmlFor="catalog-version" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze', 'Version')}</label>
+                  <input id="catalog-version" className="input" value={formData.version ?? '1.0.0'} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
                 </div>
               </div>
               <div className="grid-2">
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Základní sazba (desetinné číslo)', 'Base rate (decimal)')}</label>
-                  <input type="number" step="0.0001" className="input" value={formData.baseRate ?? 0} onChange={e => setFormData(p => ({ ...p, baseRate: parseFloat(e.target.value) || 0 }))} />
+                  <label htmlFor="catalog-base-rate" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Základní sazba (desetinné číslo)', 'Base rate (decimal)')}</label>
+                  <input id="catalog-base-rate" type="number" step="0.0001" className="input" value={formData.baseRate ?? 0} onChange={e => setFormData(p => ({ ...p, baseRate: parseFloat(e.target.value) || 0 }))} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Platnost od', 'Valid from')}</label>
-                  <input type="date" className="input" value={formData.validFrom ?? ''} onChange={e => setFormData(p => ({ ...p, validFrom: e.target.value }))} />
+                  <label htmlFor="catalog-valid-from" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Platnost od', 'Valid from')}</label>
+                  <input id="catalog-valid-from" type="date" className="input" value={formData.validFrom ?? ''} onChange={e => setFormData(p => ({ ...p, validFrom: e.target.value }))} />
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
