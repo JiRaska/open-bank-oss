@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.security.infrastructure.outbox
 
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.security.application.port.out.SecurityOutboxEntry
 import com.openbank.security.application.port.out.SecurityOutboxStatus
 import com.openbank.security.infrastructure.persistence.repository.SecurityOutboxRepositoryImpl
@@ -54,10 +55,11 @@ class SecurityOutboxDispatcherTest {
     private fun dispatcherFor(
         repo: SecurityOutboxRepositoryImpl,
         sendResult: CompletionStage<Void>,
+        metrics: DomainMetrics = mockk(relaxed = true),
     ): SecurityOutboxDispatcher {
         val emitter = mockk<Emitter<Record<String, String>>>()
         every { emitter.send(any<Record<String, String>>()) } returns sendResult
-        return SecurityOutboxDispatcher(repo, emitter)
+        return SecurityOutboxDispatcher(repo, emitter, metrics)
     }
 
     @Test
@@ -67,16 +69,19 @@ class SecurityOutboxDispatcherTest {
         every { repo.listProcessableUni(any()) } returns Uni.createFrom().item(listOf(row))
         every { repo.markSentUni(any(), any()) } returns Uni.createFrom().voidItem()
         every { repo.markFailedUni(any(), any(), any()) } returns Uni.createFrom().voidItem()
+        val metrics = mockk<DomainMetrics>(relaxed = true)
 
         val refused = CompletableFuture<Void>().apply {
             completeExceptionally(IllegalStateException("Not authorized to access topics"))
         }
 
-        dispatcherFor(repo, refused).dispatchScheduledBatch().await().indefinitely()
+        dispatcherFor(repo, refused, metrics).dispatchScheduledBatch().await().indefinitely()
 
         // The assertion that would have caught #3393's silent loss.
         verify(exactly = 0) { repo.markSentUni(row.eventId, any()) }
         verify(exactly = 1) { repo.markFailedUni(row.eventId, any(), any()) }
+        // #5128 finding 4: a rejected publish must never be counted as dispatched.
+        verify(exactly = 0) { metrics.outboxDispatched(any(), any()) }
     }
 
     @Test
@@ -86,11 +91,14 @@ class SecurityOutboxDispatcherTest {
         every { repo.listProcessableUni(any()) } returns Uni.createFrom().item(listOf(row))
         every { repo.markSentUni(any(), any()) } returns Uni.createFrom().voidItem()
         every { repo.markFailedUni(any(), any(), any()) } returns Uni.createFrom().voidItem()
+        val metrics = mockk<DomainMetrics>(relaxed = true)
 
-        dispatcherFor(repo, CompletableFuture.completedFuture(null)).dispatchScheduledBatch()
+        dispatcherFor(repo, CompletableFuture.completedFuture(null), metrics).dispatchScheduledBatch()
             .await().indefinitely()
 
         verify(exactly = 1) { repo.markSentUni(row.eventId, any()) }
         verify(exactly = 0) { repo.markFailedUni(row.eventId, any(), any()) }
+        // #5128 finding 4: dispatched metric fires once, tagged with this row's own eventType.
+        verify(exactly = 1) { metrics.outboxDispatched("security-scanner", row.eventType) }
     }
 }
