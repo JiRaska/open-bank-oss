@@ -173,7 +173,8 @@ class AbstractOutboxDispatcherTest {
 
         // Falsifying assertion: a no-op wiring (metrics never called) or a wiring that fires once
         // per BATCH instead of once per ROW both fail this — it must be exactly 2, tagged with
-        // each row's own eventType as the topic label, not a shared/hardcoded one.
+        // each row's own eventType as the event_type label (#5128 finding 1), not a
+        // shared/hardcoded one.
         verify(exactly = 1) { metrics.outboxDispatched("widget", "account.created") }
         verify(exactly = 1) { metrics.outboxDispatched("widget", "payment.sent") }
         verify(exactly = 0) { metrics.outboxDead(any()) }
