@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { Users, ArrowLeft, Save } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const PARTY_SERVICE = '/api/svc/party-service'
 
@@ -66,24 +67,13 @@ export default function NewPartyPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>Parties</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Nový subjekt', 'New Party')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={18} style={{ color: 'var(--accent)' }} />
-            {t('Registrovat nový subjekt', 'Register New Party')}
-          </h1>
-          <p className="page-subtitle">{t('Vytvořte nového zákazníka nebo společnost v platformě', 'Create a new customer or company in the platform')}</p>
-        </div>
-        <Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ArrowLeft size={13} /> {t('Zpět', 'Back')}
-        </Link>
-      </div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={t('Registrovat nový subjekt', 'Register New Party')}
+        subtitle={t('Vytvořte nového zákazníka nebo společnost v platformě', 'Create a new customer or company in the platform')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Nový subjekt', 'New Party')}</span></div>}
+        actions={<Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>}
+      />
 
       <form onSubmit={submit}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>

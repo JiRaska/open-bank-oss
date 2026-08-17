@@ -4,6 +4,7 @@
 
 package com.openbank.analytics.infrastructure.proposal
 
+import com.openbank.analytics.application.port.out.ProposalDecisionPhase
 import com.openbank.analytics.application.port.out.ProposalStore
 import com.openbank.libs.analytics.BackfillRequest
 import com.openbank.libs.analytics.Proposal
@@ -21,6 +22,11 @@ class InMemoryProposalStore : ProposalStore {
 
     private val store = ConcurrentHashMap<String, Proposal<BackfillRequest>>()
 
+    // A concurrent set, not a per-proposal flag on the stored Proposal: Set.add() is the atomic
+    // primitive (JDK-guaranteed, no external locking) that turns "claim (id, phase)" into a true
+    // compare-and-set — exactly one caller for a given key ever gets `true` back.
+    private val claims = ConcurrentHashMap.newKeySet<String>()
+
     override suspend fun save(proposal: Proposal<BackfillRequest>) {
         store[proposal.id] = proposal
     }
@@ -28,4 +34,6 @@ class InMemoryProposalStore : ProposalStore {
     override suspend fun get(id: String): Proposal<BackfillRequest>? = store[id]
 
     override suspend fun list(): List<Proposal<BackfillRequest>> = store.values.sortedBy { it.proposedAt }
+
+    override suspend fun claim(id: String, phase: ProposalDecisionPhase): Boolean = claims.add("$id:$phase")
 }

@@ -67,6 +67,20 @@ abstract class AbstractOutboxDispatcher {
      * `TppOutboxDispatcher` (`tpp-registry`, not `tpp`), `DomesticPaymentOutboxDispatcher`
      * (`domestic`, not `domestic-payment`). A new dispatcher whose class name does not already
      * match its own gauge's `service` must override this the same way.
+     *
+     * **`this::class.java.simpleName` is NOT the class you wrote (issue #5143).** This getter is
+     * inherited from the abstract base, so `this` at the call site is Quarkus Arc's generated
+     * bean subclass, not the developer's `LedgerOutboxDispatcher` — `simpleName` came back
+     * `"LedgerOutboxDispatcher_Subclass"` in production, confirmed live: the first real dispatch
+     * on `ledger-service` after this mechanism deployed recorded
+     * `openbank_outbox_dispatched_total{service="ledger-outbox-dispatcher_-subclass",...}` while
+     * the sibling `openbank_outbox_backlog` gauge on the SAME dispatcher, same pod, same moment,
+     * correctly read `service="ledger"` — that gauge's `service` is `abstract`, forcing an
+     * explicit value per subclass, which is exactly why it was never exposed to this bug. Not an
+     * edge case: `@ApplicationScoped` is the standard scope every dispatcher in the fleet uses,
+     * so every one relying on the default derivation was affected, and the 3 overrides above were
+     * immune only by coincidence (they exist for a naming disagreement, not this). See
+     * [deriveServiceName] for the fix.
      */
     protected open val service: String get() = deriveServiceName(this::class.java.simpleName)
 
@@ -121,8 +135,21 @@ abstract class AbstractOutboxDispatcher {
         val log: Logger = Logger.getLogger(AbstractOutboxDispatcher::class.java)
         const val DEFAULT_BATCH_SIZE: Int = OutboxDispatch.DEFAULT_BATCH_SIZE
 
-        /** `FooBarOutboxDispatcher` -> `foo-bar`. See [service] for why this exists. */
+        /**
+         * `FooBarOutboxDispatcher` -> `foo-bar`. See [service] for why this exists.
+         *
+         * `substringBefore('_')` strips a Quarkus Arc-generated bean subclass suffix
+         * (`_Subclass`, `_ClientProxy`, ...) BEFORE the kebab-case step — required because
+         * [simpleClassName] is read via `this::class.java.simpleName` from a method inherited
+         * from this abstract class, so at runtime `this` is Arc's generated instance, not the
+         * developer's class (issue #5143). Cutting at the first underscore rather than
+         * enumerating Arc's exact suffix vocabulary is deliberate: no dispatcher class name in
+         * the fleet contains one (`git grep '^class.*OutboxDispatcher'` — none do, and this
+         * repo's naming convention is PascalCase throughout), so it is a safe general strip that
+         * does not need updating if a future Quarkus version generates a different marker.
+         */
         internal fun deriveServiceName(simpleClassName: String): String = simpleClassName
+            .substringBefore('_')
             .removeSuffix("OutboxDispatcher")
             .replace(Regex("(?<!^)(?=[A-Z])"), "-")
             .lowercase()

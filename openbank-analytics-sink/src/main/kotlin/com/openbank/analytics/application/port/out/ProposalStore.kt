@@ -18,8 +18,27 @@ import com.openbank.libs.analytics.Proposal
  * them in a map so the service is offline-buildable; a ClickHouse/Postgres-free durable adapter (e.g.
  * the audit service or an object store) is the documented follow-up.
  */
+/**
+ * The two phases a [Proposal] transition must be claimed for before it is computed and persisted.
+ * [DECIDE] covers approve/reject (mutually exclusive — only one decision may ever win a proposal);
+ * [EXECUTE] covers the one-time backfill run.
+ */
+enum class ProposalDecisionPhase { DECIDE, EXECUTE }
+
 interface ProposalStore {
     suspend fun save(proposal: Proposal<BackfillRequest>)
     suspend fun get(id: String): Proposal<BackfillRequest>?
     suspend fun list(): List<Proposal<BackfillRequest>>
+
+    /**
+     * Atomically claims [phase] for the proposal at [id]. The first caller for a given (id, phase)
+     * pair wins (`true`); every other concurrent — or later — caller for the same pair loses
+     * (`false`) and must treat that as a refusal with no side effect.
+     *
+     * This is the compare-and-set primitive maker-checker relies on. A `get`-then-`save` pair is
+     * NOT enough: two concurrent decisions can both observe [com.openbank.libs.analytics.ProposalState.PROPOSED],
+     * both pass the domain's state check, and both write — a lost update on a segregation-of-duties
+     * control. Callers MUST call [claim] before computing the transition, not after.
+     */
+    suspend fun claim(id: String, phase: ProposalDecisionPhase): Boolean
 }
