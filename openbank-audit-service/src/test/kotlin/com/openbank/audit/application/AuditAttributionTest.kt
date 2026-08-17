@@ -69,6 +69,28 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `balance-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's balance-service fix: BalanceEvent now carries "sourceService" on the
+        // serialised event (same idiom as its existing actorId/actorType, #3994's original fix) for
+        // all six publish sites (BalanceService's hold/credit/debit, LedgerProjectionService, and
+        // ValueDateRollScheduler). Before this, EventAttribution's `openbank.balance.events` ->
+        // `balance-service` entry already resolved these rows correctly, but as TOPIC-sourced
+        // rather than the producer's own claim — and this topic IS in audit-service's
+        // consumed-topics list today, so this is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventId":"${UUID.randomUUID()}","eventType":"BALANCE_UPDATED",""" +
+                """"sourceService":"balance-service"}""",
+            EventAddress(topic = "openbank.balance.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("BALANCE_UPDATED")
+        assertThat(entry.captured.sourceService).isEqualTo("balance-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
