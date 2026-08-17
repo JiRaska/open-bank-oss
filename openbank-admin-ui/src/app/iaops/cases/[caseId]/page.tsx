@@ -12,8 +12,9 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
+import { caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
+import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
 
-type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED'
 type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
 
 interface ThreadEntry {
@@ -71,19 +72,6 @@ export default function IaopsCaseThreadPage() {
   const fmt = useCallback(
     (epochMs: number) => new Date(epochMs).toLocaleString(locale, { dateStyle: 'short', timeStyle: 'short' }),
     [locale],
-  )
-
-  const statusLabel = useCallback(
-    (status: CaseStatus): string => {
-      switch (status) {
-        case 'OPEN': return t('Otevřený', 'Open')
-        case 'CONVERGING': return t('Konverguje', 'Converging')
-        case 'CONTESTED': return t('Sporný', 'Contested')
-        case 'SYNTHESIZED': return t('Syntetizovaný', 'Synthesized')
-        case 'CLOSED': return t('Uzavřený', 'Closed')
-      }
-    },
-    [t],
   )
 
   const load = useCallback(async () => {
@@ -150,15 +138,19 @@ export default function IaopsCaseThreadPage() {
             {(() => {
               const visual = statusVisual(thread.status)
               const Icon = visual.icon
+              const presentation = caseStatusPresentation(thread.status, language)
               return (
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '5px',
-                  fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '10px',
-                  background: visual.bg, color: visual.fg,
-                }}>
-                  <Icon size={12} />
-                  {statusLabel(thread.status)}
-                </span>
+                <div>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '10px',
+                    background: visual.bg, color: visual.fg,
+                  }}>
+                    <Icon size={12} />
+                    {presentation.label}
+                  </span>
+                  <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-tertiary)' }}>{presentation.detail}</div>
+                </div>
               )
             })()}
           </div>
