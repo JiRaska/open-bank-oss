@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.155.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.5...admin-ui-v0.155.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify swarm proposal events ([#5227](https://github.com/JiRaska/open-bank-oss/issues/5227)) ([97d3524](https://github.com/JiRaska/open-bank-oss/commit/97d35241b15140eb23c4331046dbabd817d65674))
+
 ## [0.155.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.155.4...admin-ui-v0.155.5) (2026-08-17)
 
 

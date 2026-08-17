@@ -70,8 +70,8 @@ Tajemství (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) přicházejí z prostřed
 ### Platby uvízlé v PENDING
 Nárůst `PENDING` znamená, že sankční brána platby drží — buď skutečné REVIEW výstupy, nebo pravděpodobněji **sanctions-service je nedostupná** (fail-closed, ADR-0032 §C). Zkontroluj health sanctions-service a stav circuit-breakeru. Každá podržená platba má otevřený AML případ (`AML_HOLD` nebo `SCREENING_UNAVAILABLE`); řeš přes aml-service / compliance ops. Platby jsou uloženy, nikdy ztraceny.
 
-### Backlog outboxu
-Zaostává-li `openbank.sepa.instant.events`, zkontroluj `sct_inst_outbox` na řádky s `status != SENT` a rostoucím `attempt_count` / `last_error`. Dispatcher běží každých 5 s (dávka 25, `concurrentExecution = SKIP`). Zkontroluj health Kafka emitteru / brokeru.
+### Zpoždění publikace událostí
+Události se publikují přímo a synchronně ze `SctInstPaymentService` přes `KafkaSctInstEventPublisher` — na této cestě není žádný outbox ani dispatcher (dřívější outbox pipeline byla odstraněna jako mrtvý kód, issue #1034). Zaostává-li `openbank.sepa.instant.events`, zkontroluj health Kafka emitteru / brokeru a logy na straně producenta u samotného volání publikace; signálem je zaseknutý přechod stavu platby, ne zaseknutá backlog tabulka.
 
 ### Flyway checksum mismatch při startu
 Způsobeno přepsanou aplikovanou migrací. Dočasná oprava: nastav `QUARKUS_FLYWAY_REPAIR_AT_START=true` v GitOps env, pak odeber, jakmile se DB ustálí. Nikdy nepřepisuj aplikovanou migraci.
