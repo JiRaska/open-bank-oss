@@ -6,12 +6,15 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Banknote, Search, RefreshCw, Plus, Zap, Globe, CheckCircle2, XCircle,
   Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle, ChevronRight
 } from 'lucide-react'
 import { stashRow } from '@/lib/services/rowHandoff'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
@@ -233,11 +236,13 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
 export default function PaymentsPage() {
   const { t } = useLanguage()
   return (
-    <div className="page-container">
-      <Suspense fallback={<p>{t('Načítání...', 'Loading...')}</p>}>
-        <PaymentsContent />
-      </Suspense>
-    </div>
+    <AuthGuard permission="payments:view">
+      <div className="page-container">
+        <Suspense fallback={<p>{t('Načítání...', 'Loading...')}</p>}>
+          <PaymentsContent />
+        </Suspense>
+      </div>
+    </AuthGuard>
   )
 }
 
@@ -245,6 +250,8 @@ function PaymentsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { t, language } = useLanguage()
+  const { data: session } = useSession()
+  const canCreate = hasPermission(session?.user?.roles ?? [], 'payments:create')
 
   const [activeTab, setActiveTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'all')
   const [payments, setPayments] = useState<Payment[]>([])
@@ -305,6 +312,7 @@ function PaymentsContent() {
   useEffect(() => { if (activeTab === 'sct-inst') loadSct() }, [activeTab, loadSct])
 
   const selectPaymentType = (t: CreateType) => {
+    if (!canCreate) return
     setCreateError(null)
     setCreateSuccess(null)
     if (t === 'domestic-standard' || t === 'domestic-instant') {
@@ -319,6 +327,10 @@ function PaymentsContent() {
   const handleDomesticCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreateError(null); setCreateSuccess(null)
+    if (!canCreate) {
+      setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
+      return
+    }
     const f = domesticForm
     if (!f.debtorAccountId || !f.debtorAccountNumber || !f.debtorBankCode || !f.debtorName ||
         !f.creditorAccountNumber || !f.creditorBankCode || !f.creditorName || !f.amount) {
@@ -357,6 +369,10 @@ function PaymentsContent() {
   const handleSepaCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreateError(null); setCreateSuccess(null)
+    if (!canCreate) {
+      setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
+      return
+    }
     const f = sepaForm
     if (!f.debtorIban || !f.creditorIban || !f.creditorName || !f.amount) {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
@@ -582,12 +598,14 @@ function PaymentsContent() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
-            <button className="btn btn-primary" onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
-              <Plus size={14} />
-              {t('Nová platba', 'New Payment')}
-            </button>
-          </div>
+          {canCreate && (
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
+              <button className="btn btn-primary" onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
+                <Plus size={14} aria-hidden="true" />
+                {t('Nová platba', 'New Payment')}
+              </button>
+            </div>
+          )}
 
           {/* Payment type selector */}
           {showCreate === 'payment-type' && (
