@@ -94,7 +94,7 @@ export default function SwiftPage() {
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
               <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat BIC, referenci, typ zprávy…', 'Search BIC, reference, message type…')}
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat BIC, referenci, typ zprávy…', 'Search BIC, reference, message type…')} aria-label={t('Hledat SWIFT zprávy', 'Search SWIFT messages')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>

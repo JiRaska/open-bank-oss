@@ -608,7 +608,7 @@ export default function ProductCatalogPage() {
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1, minWidth: '220px', maxWidth: '300px' }}>
               <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód, název, štítek…', 'Code, name, tag…')} value={search} onChange={e => setSearch(e.target.value)} />
+              <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód, název, štítek…', 'Code, name, tag…')} aria-label={t('Hledat v katalogu produktů', 'Search product catalog')} value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             {[
               { label: t('Typ', 'Type'), value: typeFilter, set: setTypeFilter, options: [['ALL', t('Všechny typy', 'All types')], ...uniqueTypes.map(v => [v, v])] },
