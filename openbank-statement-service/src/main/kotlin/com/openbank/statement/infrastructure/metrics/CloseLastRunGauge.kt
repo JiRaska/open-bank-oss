@@ -3,9 +3,9 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.infrastructure.metrics
 
-import com.openbank.statement.application.port.out.CloseRunRepository
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.statement.application.port.out.CloseRunRepository
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.Startup
@@ -54,6 +54,7 @@ class CloseLastRunGauge(private val runs: CloseRunRepository, private val regist
 
     /** Epoch seconds of the last finished close; 0 until the first refresh observes a finished run. */
     private val lastRunEpochSeconds = AtomicLong(0)
+
     @Inject
     lateinit var domainMetrics: DomainMetrics
     private var liveness: WorkflowLivenessRecorder? = null

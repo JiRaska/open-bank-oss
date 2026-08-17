@@ -3,10 +3,10 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.infrastructure.scheduler
 
-import com.openbank.statement.application.port.`in`.RunCloseUseCase
-import com.openbank.statement.domain.model.CloseTrigger
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.statement.application.port.`in`.RunCloseUseCase
+import com.openbank.statement.domain.model.CloseTrigger
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.PostConstruct
