@@ -2037,6 +2037,14 @@ spec:
                 secretKeyRef:
                   name: card-issuance-pan-key
                   key: CARD_PAN_ENCRYPTION_KEY
+            # ADR-0262: OpenBao Transit address for the envelope-encryption key source
+            # (OpenBaoEnvelopeCardSecretCipher). Only consulted when
+            # openbank.card.key-source=openbao-transit is built in — inert otherwise, but declaring
+            # it here (rather than relying only on the @ConfigProperty code default) is what makes
+            # gen-network-policies.py emit the payments -> vault egress edge, same pattern as
+            # document-service's OPENBANK_SIGNATURE_CLIENT_PKI_BAO_ADDR.
+            - name: OPENBANK_CARD_ENVELOPE_BAO_ADDR
+              value: http://openbao.vault.svc:8200
             - name: PRODUCT_CATALOG_SERVICE_URL
               value: http://keda-add-ons-http-interceptor-proxy.keda:8080
             # ADR-0083 T1 re-entry: the interceptor dispatches on Host (see account-service).
