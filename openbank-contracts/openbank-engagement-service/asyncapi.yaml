@@ -5,9 +5,9 @@
 #
 # WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
 # nothing validates its content against what the code actually sends, and no schema is registered
-# in Apicurio. Everything below is DERIVED from `EngagementEventRepositoryImpl.save`, the only
-# producer, and each claim names its source — see the delegation-service contract for the same
-# convention.
+# in Apicurio. Everything below is DERIVED from `EngagementEventRepositoryImpl.save` and
+# `GamificationAwardRepositoryImpl.save`, both producers, and each claim names its source — see the
+# delegation-service contract for the same convention.
 #
 # The producer and analytics consumer are live in GitOps. analytics-sink projects only the
 # server-resolved campaign/step/channel context; partyId and the opaque interaction reference stay
@@ -17,14 +17,18 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Engagement Service — events
-  version: 1.1.0
+  version: 1.2.0
   description: |
-    Impression/click/dismiss/conversion feedback for an in-app engagement surface (ADR-0220 D2).
+    Impression/click/dismiss/conversion feedback for an in-app engagement surface (ADR-0220 D2),
+    plus gamification (D3) award attribution.
 
     Unlike delegation-service's or account-service's events, this is NOT a `DomainEvent` subtype
     — there is no aggregate whose lifecycle this describes. Each event is one customer action on
     one piece of catalogued content (`SurfaceCatalog`), recorded by `RecordEngagementEventUseCase`
-    and published via the transactional outbox.
+    and published via the transactional outbox. `GamificationAward` is the audit-grade record of
+    one `Points` award, published by the SAME outbox dispatcher (`EngagementOutboxDispatcher`
+    drains both this repository's rows and `GamificationAwardRepositoryImpl`'s), so both message
+    types multiplex on the one topic below.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -61,22 +65,26 @@ channels:
     messages:
       EngagementEvent:
         $ref: '#/components/messages/EngagementEvent'
+      GamificationAward:
+        $ref: '#/components/messages/GamificationAward'
 
 operations:
   publishEngagementEvents:
     action: send
-    title: Publish engagement feedback
+    title: Publish engagement feedback and gamification awards
     channel:
       $ref: '#/channels/engagementEvents'
     description: |
       **Producer: `openbank-engagement-service`** — the sole producer, and the owner of this
       contract. Configured as `mp.messaging.outgoing.engagement-outbox-out` in its
-      `application.yaml`.
+      `application.yaml`. `EngagementOutboxDispatcher` drains both `EngagementEventRepositoryImpl`
+      and `GamificationAwardRepositoryImpl`'s outbox rows onto this one channel.
 
       **Consumer: `openbank-analytics-sink`.** It stores the event in bronze and builds the
       privacy-safe `gold_campaign_engagement` projection consumed by the campaign Control Room.
     messages:
       - $ref: '#/channels/engagementEvents/messages/EngagementEvent'
+      - $ref: '#/channels/engagementEvents/messages/GamificationAward'
 
 components:
   messageTraits:
@@ -92,8 +100,12 @@ components:
           ce-type:
             type: string
             description: >-
-              `EngagementEvent.<TYPE>` — `EngagementEventRepositoryImpl.save`'s literal
-              `"EngagementEvent.${event.type.name}"`, e.g. `EngagementEvent.DISMISS`.
+              Either `EngagementEvent.<TYPE>` — `EngagementEventRepositoryImpl.save`'s literal
+              `"EngagementEvent.${event.type.name}"`, e.g. `EngagementEvent.DISMISS` — or
+              `GamificationAward.<challengeId>` — `GamificationAwardRepositoryImpl.save`'s literal
+              `"GamificationAward.${award.challengeId}"`, e.g.
+              `GamificationAward.SAVE_TEN_PERCENT`. A consumer discriminates the message shape by
+              this header's prefix before the first `.`.
           idempotency-key:
             type: string
             format: uuid
@@ -109,6 +121,14 @@ components:
     engagementEventType:
       type: string
       enum: [IMPRESSION, CLICK, DISMISS, CONVERSION]
+    earnSourceId:
+      type: string
+      description: >-
+        `EarnSource.id` (ADR-0220 D3's closed earn-reason catalogue). Only
+        `EDUCATIONAL_CONTENT_COMPLETION` has a real producer in this slice — the other three are
+        declared in code for D3's full intended signal set but award nothing yet; see
+        `EarnSource`'s KDoc.
+      enum: [EDUCATIONAL_CONTENT_COMPLETION, SAVINGS_GOAL_DEPOSIT, LOGIN_STREAK, ON_TIME_REPAYMENT]
 
   messages:
     EngagementEvent:
@@ -170,3 +190,82 @@ components:
           channel:
             type: string
             const: PUSH
+
+    GamificationAward:
+      name: GamificationAward
+      title: The audit-grade record of one Points award (ADR-0220 D3)
+      summary: |
+        Not a `DomainEvent` envelope, same idiom as `EngagementEvent` — this payload is the exact
+        map `GamificationAwardRepositoryImpl.save` builds. `actorType`/`actorId` are the shared
+        `com.openbank.libs.domain.event.EventActor` SYSTEM-attribution convention (#3994), always
+        present and always `SYSTEM` — no person originates an award, the rule engine does.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        type: object
+        required:
+          - awardId
+          - aggregateType
+          - aggregateId
+          - partyId
+          - challengeId
+          - earnSourceId
+          - points
+          - ruleVersion
+          - correlationEventId
+          - occurredAt
+          - actorType
+          - actorId
+        properties:
+          awardId:
+            type: string
+            format: uuid
+            description: Same value as the `ce-id` header — the outbox row's own id.
+          aggregateType:
+            type: string
+            const: GAMIFICATION_AWARD
+          aggregateId:
+            type: string
+            format: uuid
+            description: Analytics addressing for this immutable observation; equal to awardId.
+          partyId:
+            type: string
+            format: uuid
+            description: The party who earned the award. Also the partition key.
+          challengeId:
+            type: string
+            description: A `ChallengeCatalog` entry id, e.g. `SAVE_TEN_PERCENT`.
+          earnSourceId:
+            $ref: '#/components/schemas/earnSourceId'
+          points:
+            type: integer
+            minimum: 0
+            description: '`Points.value` — an opaque, non-negative reward counter, never a monetary amount.'
+          ruleVersion:
+            type: string
+            description: >-
+              `GamificationAwardRule.RULE_VERSION` at the moment of award — freezes which rule
+              revision actually computed this award, independent of the service's own release
+              version.
+          correlationEventId:
+            type: string
+            format: uuid
+            description: >-
+              The triggering `EngagementEvent` row's own id (never a freshly minted id — a
+              correlation id must point at something durable).
+          occurredAt:
+            type: string
+            format: date-time
+            description: '`Instant.toString()` — ISO-8601, the triggering award''s own timestamp.'
+          actorType:
+            type: string
+            const: SYSTEM
+            description: >-
+              `EventActor.FIELD_ACTOR_TYPE`/`EventActor.TYPE_SYSTEM` — always `SYSTEM`, since no
+              person originates an award.
+          actorId:
+            type: string
+            description: >-
+              `EventActor.FIELD_ACTOR_ID`, set via `EventActor.system("engagement",
+              "gamification-award-rule")` — `system:engagement:gamification-award-rule`.

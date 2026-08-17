@@ -337,6 +337,14 @@ def parse_event_classes(service_dir: pathlib.Path) -> dict[str, dict]:
 # less of the gap than it appears to.
 MAPOF_KEY_RE = re.compile(r'"([^"\\\n]+)"\s*to\s')
 BUILDMAP_KEY_RE = re.compile(r'\bput\(\s*"([^"\\\n]+)"\s*,')
+# `EventActor`'s constants are the fleet's shared, non-string-literal spelling for the actor wire
+# keys (#3994 — see openbank-libs-domain's EventActor.kt): `put(EventActor.FIELD_ACTOR_TYPE, ...)`
+# writes the literal key `"actorType"`, but BUILDMAP_KEY_RE cannot see it because the key argument
+# is not a string literal. Recognise the two known constants explicitly rather than leaving every
+# EventActor-attributed hand-built producer unverifiable for exactly the fields #3994 exists to
+# make trustworthy (engagement-service's GamificationAwardRepositoryImpl is the first such site).
+BUILDMAP_ACTOR_KEY_RE = re.compile(r"\bput\(\s*EventActor\.(FIELD_ACTOR_TYPE|FIELD_ACTOR_ID)\s*,")
+ACTOR_FIELD_NAMES = {"FIELD_ACTOR_TYPE": "actorType", "FIELD_ACTOR_ID": "actorId"}
 # A JSON object key inside a string template: `"name":`. Restricted to identifier-shaped names so a
 # `$interpolated` value or a formatted timestamp can never be mistaken for a key.
 JSON_KEY_RE = re.compile(r'"([A-Za-z_][A-Za-z0-9_]*)"\s*:')
@@ -358,6 +366,7 @@ def payload_keys(region: str) -> set[str] | None:
         keys = set(MAPOF_KEY_RE.findall(region))
     elif "buildMap" in region:
         keys = set(BUILDMAP_KEY_RE.findall(region))
+        keys |= {ACTOR_FIELD_NAMES[m] for m in BUILDMAP_ACTOR_KEY_RE.findall(region)}
     else:
         # Only inside string literals: elsewhere a `"x":` shape would be a map entry or a type
         # annotation, not a wire field.
