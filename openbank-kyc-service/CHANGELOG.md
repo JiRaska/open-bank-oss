@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.10...kyc-service-v0.10.11) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.10.10](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.9...kyc-service-v0.10.10) (2026-08-13)
 
 

@@ -9,6 +9,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.payment.SettlementScope
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.transaction.application.port.`in`.GetTransactionQuery
@@ -127,7 +128,17 @@ class TransactionService(
         // own-account move carries no rail -- customer-edge sets none on any of its three TRANSFER
         // payloads -- so the pair (TRANSFER, no rail) is what "never leaves the ledger" actually
         // means here.
-        val dates = if (command.type == TransactionType.TRANSFER && command.rail == null) {
+        // Money that never reaches a scheme must not be dated by one. The original guard here only
+        // covered (TRANSFER, no rail), which left every other in-house booking rolling against the
+        // CERTIS calendar: an openbank-to-openbank domestic payment (rail=DOMESTIC, but with an
+        // internal payee leg), the welcome bonus (type=CREDIT), and reversals. Verified in the
+        // sandbox ledger — a bonus granted 08:31 on a Saturday booked on the Monday, and in-house
+        // "Interní převod" debits made after 16:00 booked the next business day, on a clearing
+        // calendar the money never touched. See [SettlementScope] for why the payee leg, and not
+        // the rail, is what decides this.
+        val staysInTheBank = (command.type == TransactionType.TRANSFER && command.rail == null) ||
+            SettlementScope.staysInTheBank(command.rail, hasInternalPayee = command.targetAccountId != null)
+        val dates = if (staysInTheBank) {
             val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
             SettlementDates(bookingDate = today, valueDate = today)
         } else {

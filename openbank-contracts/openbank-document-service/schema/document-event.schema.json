@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.dev/schemas/openbank-document-service/document-event.schema.json",
+  "title": "openbank.documents.document.event",
+  "description": "ADR-0006/ADR-0260 pilot (#1916). Authored from the ACTUAL serialized wire payload of KafkaDocumentOutboxEventPublisher's two live producers -- objectMapper.writeValueAsString(DocumentGenerated(...)) in DocumentRenderService.kt and objectMapper.writeValueAsString(SignatureCeremonyCompleted(...)) in SignatureCeremonyService.kt -- not from the Kotlin class field names by inspection alone: the shared ObjectMapper has WRITE_DATES_AS_TIMESTAMPS disabled (Quarkus default) with JavaTimeModule registered, so java.time.Instant serializes as an ISO-8601 string, and java.util.UUID serializes via its default Jackson serializer, also a string. Neither DocumentGenerated nor SignatureCeremonyCompleted extends DomainEvent (see the class KDoc in DocumentEvents.kt for why all four sibling event classes share the vocabulary even though only these two are wired to an outbox today) -- which means check-event-schema-compat.py's DomainEvent-scoped constructor diff has NEVER evaluated a change to either class. That is the same structural blind spot SepaPaymentCreatedEvent has on the money-path side, and it is exactly the gap this schema file plus check-event-schema-compat.py's new compare_json_schema() path is meant to close for this one pilot topic.\n\nHEADER-DISCRIMINATOR GAP (ADR-0260 D4): the two message shapes below are NOT distinguished by any body field. KafkaDocumentOutboxEventPublisher forwards OutboxKafkaHeaders.headersFor(entry), which puts entry.eventType (\"document.generated.v1\" / \"signature-ceremony.completed.v1\") on the Kafka `ce-type` header -- never in the payload. The `x-openbank-event-type` keyword on each oneOf branch below records that header value for documentation and for check-event-schema-compat.py's branch-matching, but no JSON Schema validator can enforce it against a header; a consumer must still route on `ce-type`, not on payload shape.\n\nPHASE 1 (this PR): observe-only. Registered in Apicurio with auto-register=false and no producer-side validate-before-publish -- KafkaDocumentOutboxEventPublisher does not import this file and nothing fails a publish if a future edit drifts from it. check-event-schema-compat.py's compare_json_schema() runs advisory-only (rules.yaml: event_change, gate: schema-compat, unchanged enforcement status). See ADR-0260 for the phased plan and what remains unbuilt.",
+  "oneOf": [
+    {
+      "x-openbank-event-type": "document.generated.v1",
+      "title": "DocumentGenerated",
+      "description": "Emitted by DocumentRenderService.render() in the same outbox transaction as the rendered Document row (ADR-0050 transactional outbox).",
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Document.id -- content-addressed identifier of the rendered PDF, java.util.UUID serialized as its default string form."
+        },
+        "templateCode": {
+          "type": "string",
+          "description": "The published template's code, snapshotted at render time (ADR-0162 version-resolution policy)."
+        },
+        "templateVersion": {
+          "type": "string",
+          "description": "The published template's version actually resolved -- pinned if the caller supplied one, otherwise whatever was PUBLISHED at render time. Snapshotted so a later re-publish cannot retroactively change what this document is considered to have been rendered from."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Document.sha256 -- content hash of the rendered PDF bytes."
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Business time, java.time.Instant serialized as ISO-8601 (JavaTimeModule, WRITE_DATES_AS_TIMESTAMPS disabled). The fleet's single accepted spelling for this field is `occurredAt`, not `at` -- see the DocumentEvents.kt class KDoc and issue #3907/#3914 for why the earlier `at` spelling silently broke audit-service's and analytics-sink's business-time reads."
+        }
+      },
+      "required": ["documentId", "templateCode", "templateVersion", "sha256", "occurredAt"],
+      "additionalProperties": true
+    },
+    {
+      "x-openbank-event-type": "signature-ceremony.completed.v1",
+      "title": "SignatureCeremonyCompleted",
+      "description": "Emitted by SignatureCeremonyService.recordDecision() once every signer reaches a terminal decision AND the bank's institutional electronic seal has been applied (ADR-0162 D4, ADR-0021 SCA). Sealing happens BEFORE this event is emitted -- an unsealed document is never representable as a completed, event-emitted ceremony.",
+      "type": "object",
+      "properties": {
+        "ceremonyId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "SignatureCeremony.id."
+        },
+        "documentId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "The Document this ceremony sealed."
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Business time -- same spelling and serialization as DocumentGenerated.occurredAt above."
+        }
+      },
+      "required": ["ceremonyId", "documentId", "occurredAt"],
+      "additionalProperties": true
+    }
+  ]
+}

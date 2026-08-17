@@ -191,7 +191,10 @@ class TransactionServiceTest {
     fun `a SEPA settlement booked as TRANSFER still honours the requested value date`(): Unit = runBlocking {
         val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
         val requested = today.plusMonths(1)
-        val command = initiateCommand().copy(valueDate = requested, rail = PaymentRail.SEPA_CT)
+        // sepa-payment's real settlement request carries no targetAccountId (it never resolves an
+        // internal payee) — the fixture must match that, or this test cannot tell "external SEPA"
+        // apart from "internal transfer that happens to be tagged SEPA_CT".
+        val command = initiateCommand().copy(valueDate = requested, rail = PaymentRail.SEPA_CT, targetAccountId = null)
 
         coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
         every { eventPublisher.initiatedPayload(any()) } returns "{}"
@@ -204,6 +207,115 @@ class TransactionServiceTest {
             .describedAs("a railed TRANSFER must keep going through SettlementDateResolver")
             .isNotEqualTo(today)
         assertThat(result.valueDate).isEqualTo(requested)
+    }
+
+    /**
+     * The original guard (`type == TRANSFER && rail == null`) covered an own-account transfer but
+     * missed everything else that also never leaves the bank. domestic-payment books its in-house
+     * settlement leg as **type=DEBIT, rail=DOMESTIC** — the rail is real (a scheme exists), but a
+     * `targetAccountId` is set because the payee is one of our own accounts, per its own comment:
+     * "External transfers keep a null target (the money genuinely leaves the bank)."
+     *
+     * Verified live in the sandbox ledger before this fix: an in-house "Interní převod" debit at
+     * 21:11 on a Thursday booked value_date the next day, and one made on a Saturday booked two
+     * days out — on a CERTIS calendar the money never touched.
+     */
+    @Test
+    fun `an in-house domestic payment with a resolved payee books same-day despite rail=DOMESTIC`(): Unit =
+        runBlocking {
+            val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+            val command = initiateCommand().copy(
+                type = TransactionType.DEBIT,
+                rail = PaymentRail.DOMESTIC,
+                valueDate = today.plusMonths(1),
+            )
+
+            coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+            every { eventPublisher.initiatedPayload(any()) } returns "{}"
+            stubWorkflowCommitted(TransactionStatus.COMPLETED)
+            every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+            val result = service.initiateTransaction(command)
+
+            assertThat(result.valueDate).isEqualTo(today)
+            assertThat(result.bookingDate).isEqualTo(today)
+        }
+
+    /**
+     * The counterpart: a domestic DEBIT with no resolved payee (the ordinary case — money genuinely
+     * leaving the bank) must keep going through the resolver. Proves the discriminator is the payee
+     * leg, not the transaction type.
+     */
+    @Test
+    fun `a domestic payment leaving the bank still honours the resolver`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val requested = today.plusMonths(1)
+        val command = initiateCommand().copy(
+            type = TransactionType.DEBIT,
+            rail = PaymentRail.DOMESTIC,
+            targetAccountId = null,
+            valueDate = requested,
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate)
+            .describedAs("a domestic payment with no internal payee must keep going through the resolver")
+            .isNotEqualTo(today)
+        assertThat(result.valueDate).isEqualTo(requested)
+    }
+
+    /**
+     * The welcome bonus (account-service, `type=CREDIT`, no rail) and a reversal credit both hit
+     * this same shape: a payee of ours, no rail. Verified live — a bonus granted 08:31 on a Saturday
+     * booked on the Monday.
+     */
+    @Test
+    fun `a welcome-bonus-shaped credit with no rail books same-day`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val command = initiateCommand().copy(
+            type = TransactionType.CREDIT,
+            sourceAccountId = null,
+            rail = null,
+            valueDate = today.plusMonths(1),
+        )
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate).isEqualTo(today)
+        assertThat(result.bookingDate).isEqualTo(today)
+    }
+
+    /**
+     * A rail honestly stamped INTERNAL, FEE or INTEREST must never roll, whatever the type — this is
+     * the guard against the exact regression the audit warned about: the old check was keyed on
+     * `rail == null`, so stamping rail correctly on an own-account move would have silently
+     * re-introduced the bug it fixed.
+     */
+    @Test
+    fun `a rail honestly stamped INTERNAL never rolls`(): Unit = runBlocking {
+        val today = Instant.now(clock).atZone(SettlementDateResolver.BANK_ZONE).toLocalDate()
+        val command = initiateCommand().copy(rail = PaymentRail.INTERNAL, valueDate = today.plusMonths(1))
+
+        coEvery { transactionRepository.findByIdempotencyKey(command.idempotencyKey) } returns null
+        every { eventPublisher.initiatedPayload(any()) } returns "{}"
+        stubWorkflowCommitted(TransactionStatus.COMPLETED)
+        every { workflowStub.execute(any()) } returns SagaState.COMPLETED
+
+        val result = service.initiateTransaction(command)
+
+        assertThat(result.valueDate).isEqualTo(today)
+        assertThat(result.bookingDate).isEqualTo(today)
     }
 
     @Test

@@ -21,6 +21,7 @@ interface AccrualRecord {
 export default function InterestPage() {
   const { t, language } = useLanguage()
   const [search, setSearch] = useState('')
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data, loading, unavailable, waking } = useServiceResource<AccrualRecord[]>(
     svcUrl('interest-service', '/api/v1/interest/accruals'),
     { select: (raw) => (Array.isArray(raw) ? (raw as AccrualRecord[]) : ((raw as { accruals?: AccrualRecord[] }).accruals ?? [])) },
@@ -55,10 +56,10 @@ export default function InterestPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Záznamy celkem', 'Total records'), value: accruals.length, icon: <TrendingUp size={16} />, color: 'var(--accent)' },
-            { label: t('Akruuje', 'Accruing'), value: accruing.length, icon: <Percent size={16} />, color: 'var(--warning)' },
-            { label: t('Kapitalizováno', 'Capitalised'), value: capitalized.length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Celkem naakruováno', 'Total accrued'), value: totalAccrued.toLocaleString('cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <Calendar size={16} />, color: 'var(--accent-2)' },
+            { label: t('Záznamy celkem', 'Total records'), value: accruals.length, icon: <TrendingUp size={16} aria-hidden="true" />, color: 'var(--accent)' },
+            { label: t('Akruuje', 'Accruing'), value: accruing.length, icon: <Percent size={16} aria-hidden="true" />, color: 'var(--warning)' },
+            { label: t('Kapitalizováno', 'Capitalised'), value: capitalized.length, icon: <CheckCircle2 size={16} aria-hidden="true" />, color: 'var(--success)' },
+            { label: t('Celkem naakruováno', 'Total accrued'), value: totalAccrued.toLocaleString(numberLocale, { minimumFractionDigits: 2, maximumFractionDigits: 2 }), icon: <Calendar size={16} aria-hidden="true" />, color: 'var(--accent-2)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
@@ -72,8 +73,9 @@ export default function InterestPage() {
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat účet, status, day count…', 'Search account, status, day count…')}
+                aria-label={t('Hledat v úrokových výpočtech', 'Search interest calculations')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
@@ -102,7 +104,7 @@ export default function InterestPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-primary)' }}>{a.accountId}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accrualDate}</td>
-                  <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(a.accruedAmount ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 4 })}</td>
+                  <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{(a.accruedAmount ?? 0).toLocaleString(numberLocale, { minimumFractionDigits: 4 })}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.currency}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>{((a.rate ?? 0) * 100).toFixed(4)}%</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{a.dayCount}</td>
