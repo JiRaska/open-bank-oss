@@ -31,6 +31,7 @@ describe('route permission projection (ADR-0229 D3)', () => {
 
   it('uses the most specific matching prefix', () => {
     expect(permissionForPath('/dashboard')).toBe('dashboard:view')
+    expect(permissionForPath('/accounts/new')).toBe('accounts:create')
     expect(permissionForPath('/lending/compliance-packs')).toBe('compliance:view')
     expect(permissionForPath('/system/config')).toBe('system:config')
   })

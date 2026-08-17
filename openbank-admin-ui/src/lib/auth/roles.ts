@@ -170,6 +170,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['onboarding:view', ['/onboarding', '/identity-cases']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
+  ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
   ['payments:view', [
     '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',

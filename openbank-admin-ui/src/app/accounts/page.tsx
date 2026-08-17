@@ -13,6 +13,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { Can } from '@/components/auth/AuthGuard'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 // Cap every request and the rendered list. The operator never needs the full
@@ -143,9 +144,9 @@ export default function AccountsPage() {
         subtitle={t('Vyhledávejte a spravujte bankovní účty', 'Search and manage bank accounts')}
         icon={<Landmark size={18} aria-hidden="true" />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Účty', 'Accounts')}</span></div>}
-        actions={<Link href="/accounts/new" className="btn btn-primary">
-          <Plus size={14} /> {t('Založit účet', 'Open Account')}
-        </Link>}
+        actions={<Can permission="accounts:create"><Link href="/accounts/new" className="btn btn-primary">
+          <Plus size={14} aria-hidden="true" /> {t('Založit účet', 'Open Account')}
+        </Link></Can>}
       />
 
       <div className="card">
