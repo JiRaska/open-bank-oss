@@ -17,10 +17,10 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
-import java.util.concurrent.atomic.AtomicInteger
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Regression coverage for ADR-0237's statement close adoption: the defect is in scheduler
