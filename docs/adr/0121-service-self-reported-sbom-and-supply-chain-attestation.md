@@ -2,7 +2,6 @@
 date: 2026-06-28
 decision-status: accepted
 delivery-status: shipped
-followup: []
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []

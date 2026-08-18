@@ -8,7 +8,6 @@ superseded-by: []
 delivery-repos: []
 tags: [ci, governance]
 summary: "Three checks over the gate estate: required-context/workflow parity, a dated expiry on advisory 'benign' verdicts, and whether an incident write-up produced a gate."
-followup: []
 ---
 
 # ADR-0254 — CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage
