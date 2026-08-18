@@ -18,7 +18,8 @@ export default function ServiceConfigPage() {
   const [snapshots, setSnapshots] = useState<ServiceConfigSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   const refresh = useCallback(async () => {
     try {
@@ -65,7 +66,7 @@ export default function ServiceConfigPage() {
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {lastRefresh.toLocaleTimeString()}
+              {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button
