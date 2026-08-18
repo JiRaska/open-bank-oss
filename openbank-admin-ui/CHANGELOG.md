@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.161.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.161.0...admin-ui-v0.161.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** name compact operational filters ([#5488](https://github.com/JiRaska/open-bank-oss/issues/5488)) ([e6c99c3](https://github.com/JiRaska/open-bank-oss/commit/e6c99c37953dd94f2430a7552331e738a4eb19e4))
+
 ## [0.161.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.160.0...admin-ui-v0.161.0) (2026-08-18)
 
 
