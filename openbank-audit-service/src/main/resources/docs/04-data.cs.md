@@ -15,8 +15,9 @@
 |---|---|
 | `V1__create_audit.sql` | Vytvoří `audit_entries` (BIGSERIAL `id` PK, unikátní `entry_id` UUID, sloupce event/aggregate/actor/payload) a lookup indexy na `aggregate_id`, `event_type`, `occurred_at DESC`, partial index na `actor_id`. Granty na `public`. |
 | `V2__compliance_fields.sql` | EBA ICT + GDPR obohacení: přidává `session_id`, `user_agent`, `ip_address`, `data_sensitivity` (default `INTERNAL`), `retention_until`, `is_security_event` (default `FALSE`), `risk_score`. Přidává security/session/retention indexy. **Instaluje neměnnost:** `RULE no_update_audit DO INSTEAD NOTHING` a `RULE no_delete_audit DO INSTEAD NOTHING`. Doplní `retention_until` a instaluje trigger `trg_audit_retention` BEFORE INSERT (`occurred_at + 10 let`). |
-| `V3__create_audit_outbox.sql` | Vytvoří `audit_outbox` (BIGSERIAL `id` PK, unikátní `event_id` UUID, `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, timestamps) plus indexy `(status, created_at)` a `aggregate_id`. |
+| `V3__create_audit_outbox.sql` | Vytvoří `audit_outbox` (BIGSERIAL `id` PK, unikátní `event_id` UUID, `aggregate_id`, `event_type`, `payload`, `status`, `attempt_count`, `sent_at`, `last_error`, timestamps) plus indexy `(status, created_at)` a `aggregate_id`. **Odstraněno V16** — viz níže. |
 | `V4__hibernate_sequences.sql` | Vytvoří `audit_entries_seq` a `audit_outbox_seq` (`INCREMENT BY 50`) vyžadované alokací id PanacheEntity. Rollback: `DROP SEQUENCE audit_entries_seq, audit_outbox_seq;`. |
+| `V16__drop_audit_outbox.sql` | Odstraní `audit_outbox` a `audit_outbox_seq` — transakční-outbox aparatura nad ní postavená neměla nikde ve službě žádného writera (#5126). Rollback obnoví tabulku/indexy/sekvenci ve stavu V8 (viz komentář v migraci). |
 
 ## Tabulky
 
@@ -46,10 +47,6 @@
 | `risk_score` | SMALLINT, null | (V2) |
 
 **Neměnnost:** PostgreSQL pravidla `DO INSTEAD NOTHING` tiše zahodí jakýkoli `UPDATE`/`DELETE`. Stopa je fyzicky append-only; oprava se dělá připojením nového kompenzačního záznamu, nikdy editací.
-
-### `audit_outbox`
-
-Staging transakčního outboxu pro re-emit zaznamenaných událostí (`event_id`, `aggregate_id`, `event_type`, `payload`, `status` ∈ PENDING/SENT/FAILED, `attempt_count`, `sent_at`, `last_error`, `created_at`, `updated_at`). Drainuje `AuditOutboxDispatcher`.
 
 ## PII & klasifikace dat
 

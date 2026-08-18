@@ -14,6 +14,7 @@ import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
 import { caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
 import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
 
@@ -110,19 +111,13 @@ export default function IaopsCaseThreadPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '900px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <div className="breadcrumb">
-          <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-          <Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <Link href="/iaops/cases" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('Swarm case', 'Swarm cases')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{caseId}</span>
-        </div>
-        <Link href="/iaops/cases" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none' }}>
-          <ArrowLeft size={13} /> {t('Zpět na seznam case', 'Back to case list')}
-        </Link>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><Link href="/iaops/cases" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('Swarm case', 'Swarm cases')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{caseId}</span></div>}
+        icon={<GitMerge size={20} aria-hidden="true" />}
+        title={caseId}
+        subtitle={t('Detail sdíleného case vlákna; data jsou pouze pro čtení.', 'Shared case thread detail; data is read-only.')}
+        actions={<Link href="/iaops/cases" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na seznam case', 'Back to case list')}</Link>}
+      />
 
       {loading && !thread ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
@@ -132,9 +127,6 @@ export default function IaopsCaseThreadPage() {
       ) : thread ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            <h1 style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-              {thread.caseId}
-            </h1>
             {(() => {
               const visual = statusVisual(thread.status)
               const Icon = visual.icon

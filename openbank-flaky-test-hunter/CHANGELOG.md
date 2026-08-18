@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.8.1...flaky-test-hunter-v0.9.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** trigger bounded flaky test check ([#5497](https://github.com/JiRaska/open-bank-oss/issues/5497)) ([89f1a9f](https://github.com/JiRaska/open-bank-oss/commit/89f1a9fc3394d4d3a266880f107e6d89015bfbaf))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.8.0...flaky-test-hunter-v0.8.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** map GITHUB_TOKEN env into the config the adapter reads ([#5475](https://github.com/JiRaska/open-bank-oss/issues/5475)) ([c6c927d](https://github.com/JiRaska/open-bank-oss/commit/c6c927dbbd80c8521df3b8f337f7138f7f251979))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.7.0...flaky-test-hunter-v0.8.0) (2026-08-17)
 
 

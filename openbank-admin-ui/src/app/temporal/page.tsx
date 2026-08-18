@@ -9,6 +9,7 @@ import { RefreshCw, CheckCircle, Clock, AlertTriangle, Zap, Database, Shield, Gi
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { MONEY_WORKFLOWS } from '@/lib/temporal/workflows'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ─── types ───────────────────────────────────────────────────────────────────
 
@@ -256,6 +257,7 @@ function PhaseRow({ phase, t }: { phase: typeof PHASES[0]; t: (cs: string, en: s
 
 export default function TemporalPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [tab, setTab] = useState<Tab>('overview')
   const [status, setStatus] = useState<StatusData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -296,36 +298,12 @@ export default function TemporalPage() {
     <AuthGuard permission="system:view">
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
 
-        {/* Header */}
-        <div style={{ marginBottom: '24px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
-                <div style={{
-                  width: '40px', height: '40px', borderRadius: '12px',
-                  background: 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  boxShadow: '0 4px 12px rgba(99,102,241,0.3)',
-                }}>
-                  <Zap size={20} color="white" />
-                </div>
-                <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text)', margin: 0 }}>
-                  Temporal
-                </h1>
-                <span style={{
-                  fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
-                  background: 'rgba(99,102,241,0.15)', color: '#818cf8',
-                  border: '1px solid rgba(99,102,241,0.3)',
-                }}>ADR-0101</span>
-              </div>
-              <p style={{ fontSize: '14px', color: 'var(--text-muted)', margin: 0, maxWidth: '600px' }}>
-                {t(
-                  'Durable execution engine pro money-path workflows — challenger model nahrazující ruční outbox sagu',
-                  'Durable execution engine for money-path workflows — challenger model replacing hand-rolled outbox saga',
-                )}
-              </p>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+        <PageHeader
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">Temporal</span></div>}
+          icon={<Zap size={20} aria-hidden="true" />}
+          title="Temporal"
+          subtitle={t('Durable execution engine pro money-path workflows — challenger model nahrazující ruční outbox sagu', 'Durable execution engine for money-path workflows — challenger model replacing hand-rolled outbox saga')}
+          actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
               {status && (
                 <div style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
@@ -359,14 +337,9 @@ export default function TemporalPage() {
                 <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
-            </div>
-          </div>
-          {lastRefresh && (
-            <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '8px' }}>
-              {t('Aktualizováno', 'Updated')}: {lastRefresh.toLocaleTimeString()}
-            </div>
-          )}
-        </div>
+          </div>}
+        />
+        {lastRefresh && <div style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '8px 0 16px' }}>{t('Aktualizováno', 'Updated')}: {lastRefresh.toLocaleTimeString(dateLocale)}</div>}
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: '4px', marginBottom: '24px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>

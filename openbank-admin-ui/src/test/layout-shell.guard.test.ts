@@ -84,8 +84,8 @@ describe('admin-ui app-shell rule', () => {
 
   it('keeps navigation and header inside the shared app shell', () => {
     const shell = readFileSync(path.resolve(__dirname, '../components/layout/AppShell.tsx'), 'utf8')
-    expect(shell).toMatch(/<Sidebar\s*\/>/)
-    expect(shell).toMatch(/<Header\s*\/>/)
+    expect(shell).toContain('<Sidebar mobileOpen=')
+    expect(shell).toContain('<Header mobileNavOpen=')
   })
 
   it('provides a keyboard skip link to the shared main landmark', () => {

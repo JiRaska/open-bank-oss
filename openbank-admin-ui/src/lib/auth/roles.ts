@@ -135,6 +135,14 @@ export const PERMISSIONS = {
   // also four-eyes gated, which no UI permission could substitute for either way).
   "opsmessage:compose":       [ROLES.ADMIN, ROLES.OPERATOR],
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
+  // Flaky Test Hunter (ADR-0168, issue #5499) — mirrors FlakyTestResource's own
+  // @RolesAllowed exactly: GET /findings(/{id}) takes ROLE_ADMIN + ROLE_VIEWER,
+  // POST /check/trigger takes ROLE_ADMIN only. The page itself is reached under
+  // /iaops (system:view), so :view only gates the finding-detail deep link;
+  // :trigger is what hides the "Run check now" button from anyone the backend
+  // would 403 anyway — UX only, the backend re-checks on every call.
+  "flaky-test-hunter:view":    [ROLES.ADMIN, ROLES.VIEWER],
+  "flaky-test-hunter:trigger": [ROLES.ADMIN],
   // System
   // ROLES.DEMO added 2026-08-16 (issue #5020), verified safe two independent ways before
   // adding: proxy.ts's routeGuards array has a pattern for /system/config (ADMIN only,
