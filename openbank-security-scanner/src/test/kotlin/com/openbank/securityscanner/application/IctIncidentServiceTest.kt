@@ -26,7 +26,7 @@ import java.util.concurrent.CompletableFuture
 
 /**
  * Issue #3994/#5256: `IctIncidentService` is security-scanner's only live event producer (its
- * outbox apparatus was deleted entirely by #4709/#4940 — `V4__drop_security_outbox.sql`). It
+ * outbox apparatus was deleted entirely by #4709/#4940 — `V6__drop_security_outbox.sql`). It
  * publishes a hand-built map, not a serialised data class, straight to
  * `ict-incident-events-out` (`openbank.security.ict.incident`), so `sourceService` has to be
  * added at the map-construction call site rather than on a domain event type.
