@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.0...consent-service-v0.18.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **consent:** add sourceService to consent domain events for audit attribution ([#5376](https://github.com/JiRaska/open-bank-oss/issues/5376)) ([300a223](https://github.com/JiRaska/open-bank-oss/commit/300a223b69be937a8a55a9991ba55b5f8c8b75bc))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.3...consent-service-v0.18.0) (2026-08-18)
 
 
