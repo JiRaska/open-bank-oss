@@ -37,6 +37,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             instructionType = transaction.instructionType
                 ?: com.openbank.libs.domain.payment.InstructionType.UNKNOWN,
             occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
         ),
     )
 
@@ -46,6 +47,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             version = transaction.version,
             referenceNumber = transaction.referenceNumber,
             occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
         ),
     )
 
@@ -56,6 +58,7 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
             referenceNumber = transaction.referenceNumber,
             reason = reason,
             occurredAt = Instant.now(clock),
+            sourceService = SOURCE_SERVICE,
         ),
     )
 
@@ -71,7 +74,17 @@ class LoggingTransactionEventPublisher(private val objectMapper: ObjectMapper, p
                 bookingDate = transaction.bookingDate,
                 settledAt = now,
                 occurredAt = now,
+                sourceService = SOURCE_SERVICE,
             ),
         )
+    }
+
+    private companion object {
+        /**
+         * Producing service for `AuditConsumer` attribution (#3994/#5256). Matches the module
+         * directory without the `openbank-` prefix, the same spelling `EventAttribution` already
+         * maps `openbank.transactions.transaction.initiated` to.
+         */
+        const val SOURCE_SERVICE = "transaction-service"
     }
 }

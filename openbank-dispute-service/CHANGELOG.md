@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.4...dispute-service-v0.9.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.3...dispute-service-v0.9.4) (2026-08-17)
 
 

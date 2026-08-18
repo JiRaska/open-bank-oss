@@ -25,6 +25,14 @@ data class TransactionSettledEvent(
     val bookingDate: LocalDate,
     val settledAt: Instant,
     override val occurredAt: Instant,
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution — issue #3994/#5256. See
+     * `TransactionInitiatedEvent.sourceService` for why `eventType` ("TransactionSettled") stays
+     * unchanged (load-bearing fraud-feature discriminator) while `sourceService` is safe to add
+     * net-new.
+     */
+    val sourceService: String = "transaction-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Transaction"
     override val eventType = "TransactionSettled"

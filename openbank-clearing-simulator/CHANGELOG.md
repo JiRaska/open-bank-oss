@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.7...clearing-simulator-v0.5.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
 ## [0.4.7](https://github.com/JiRaska/open-bank-oss/compare/clearing-simulator-v0.4.6...clearing-simulator-v0.4.7) (2026-08-02)
 
 
