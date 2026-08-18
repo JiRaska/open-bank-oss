@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.166.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.10...admin-ui-v0.166.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** add governance document PDF export ([#5566](https://github.com/JiRaska/open-bank-oss/issues/5566)) ([d728b6d](https://github.com/JiRaska/open-bank-oss/commit/d728b6d73908b7e700750a17c9b9fca3cc9af2ae))
+
 ## [0.165.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.9...admin-ui-v0.165.10) (2026-08-18)
 
 
