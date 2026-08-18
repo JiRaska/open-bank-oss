@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [ai-agents, psd2-api, authz]
 summary: "Expose a first-party MCP server over curated PSD2/admin read tools plus the existing HITL write-proposal flow, every tool-call authorized by the ADR-0034 OPA PDP as principal type AI_AGENT — reusing the agent-governance plane."
-followup: "#1922/#2142/#2152 shipped the server and OPA wiring; the ADR-0030-shape threat model and MCP spec-conformance suite this ADR calls a required deliverable, not a follow-up, are still outstanding"
+followup: "#1922 — the ADR-0030-shape threat model and MCP spec-conformance suite this ADR calls a required deliverable, not a follow-up, are still outstanding"
 ---
 
 # ADR-0181 — MCP server exposing PSD2 and admin read APIs to governed AI agents
