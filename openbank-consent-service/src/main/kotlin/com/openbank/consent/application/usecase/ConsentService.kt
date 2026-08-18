@@ -121,6 +121,7 @@ class ConsentService(
                     scopes = consent.scopes,
                     validTo = consent.validTo,
                     occurredAt = clock.instant(),
+                    sourceService = "consent-service",
                 ),
             )
         } else {
@@ -163,6 +164,7 @@ class ConsentService(
                 scopes = activated.scopes,
                 validTo = activated.validTo,
                 occurredAt = clock.instant(),
+                sourceService = "consent-service",
             ),
         )
     }
@@ -180,6 +182,7 @@ class ConsentService(
                 granteeId = rejected.granteeId,
                 reason = reason,
                 occurredAt = clock.instant(),
+                sourceService = "consent-service",
             ),
         )
     }
@@ -205,6 +208,7 @@ class ConsentService(
                 scopes = revoked.scopes,
                 reason = command.reason,
                 occurredAt = clock.instant(),
+                sourceService = "consent-service",
             ),
         )
     }

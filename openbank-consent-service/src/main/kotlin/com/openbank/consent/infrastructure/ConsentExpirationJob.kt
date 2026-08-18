@@ -99,6 +99,7 @@ class ConsentExpirationJob {
                             partyId = consent.partyId,
                             granteeId = consent.granteeId,
                             occurredAt = threshold.toInstant(),
+                            sourceService = "consent-service",
                         ),
                     ).map { transitioned -> if (transitioned) 1 else 0 }
                 }
