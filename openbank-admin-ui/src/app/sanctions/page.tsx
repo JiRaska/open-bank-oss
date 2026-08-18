@@ -86,12 +86,12 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Čas', 'Time')}</span>
-        <select value={hour} onChange={e => setHour(+e.target.value)}
+        <select id={`sanctions-cron-${list.id}-hour`} aria-label={t('Hodina spouštění', 'Run hour')} value={hour} onChange={e => setHour(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {Array.from({length:24},(_,i)=>i).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
         </select>
         <span style={{ color: 'var(--text-tertiary)', fontSize: '13px' }}>:</span>
-        <select value={minute} onChange={e => setMinute(+e.target.value)}
+        <select id={`sanctions-cron-${list.id}-minute`} aria-label={t('Minuta spouštění', 'Run minute')} value={minute} onChange={e => setMinute(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
         </select>
@@ -99,7 +99,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Dny', 'Days')}</span>
         {DAYS.map(d => (
-          <button key={d} onClick={() => toggleDay(d)}
+          <button key={d} type="button" aria-pressed={days.includes(d)} aria-label={t(`Den ${DAY_LABELS_CS[d]}`, `${DAY_LABELS_EN[d]} day`)} onClick={() => toggleDay(d)}
             style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: '1px solid',
               background: days.includes(d) ? 'var(--accent)' : 'var(--surface)',
               color: days.includes(d) ? 'white' : 'var(--text-secondary)',
