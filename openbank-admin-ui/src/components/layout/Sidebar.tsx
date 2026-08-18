@@ -297,9 +297,9 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
         // next/link would client-side navigate and 404 (ADR-0234). Plain <a>,
         // same origin, so the session cookie reaches the edge gate.
         return item.external ? (
-          <a key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</a>
+          <a key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</a>
         ) : (
-          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</Link>
+          <Link key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</Link>
         )
       })}
     </>
