@@ -170,7 +170,8 @@ const CATALOG_PRESENT = TIERS.flatMap(tier => tier.services.map(s => s.name))
   .filter(n => n.endsWith('-service') || n.endsWith('-payment') || n.endsWith('-instant'))
 
 export default function BcpPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [health, setHealth] = useState<ServiceHealth>({})
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -316,7 +317,7 @@ export default function BcpPage() {
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString('cs-CZ')}
+              {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button
