@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.166.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.5...admin-ui-v0.166.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** align party links with backend roles ([#5608](https://github.com/JiRaska/open-bank-oss/issues/5608)) ([0a8abe2](https://github.com/JiRaska/open-bank-oss/commit/0a8abe2d695fb41de5d355ab1b92b5b191ae4ef4))
+
 ## [0.166.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.4...admin-ui-v0.166.5) (2026-08-18)
 
 

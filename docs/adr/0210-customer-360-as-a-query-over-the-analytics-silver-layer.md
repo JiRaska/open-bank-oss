@@ -3,7 +3,7 @@ date: 2026-07-26
 decision-status: accepted
 delivery-status: shipped
 authors: [Jiri Raska]
-supersedes: []
+supersedes: [0199]
 superseded-by: []
 delivery-repos: []
 tags: [analytics, architecture, privacy-gdpr, admin-ui]

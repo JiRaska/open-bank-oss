@@ -1,16 +1,25 @@
 ---
 date: 2026-07-15
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [mobile-app, onboarding, documents, sca]
 summary: "The app's mock agreement step splits: GDPR consent is captured pre-registration and actually sent to the edge, while the framework agreement is signed after account provisioning via a real PDF viewer and SCA biometric signature."
+followup: "#1284 — real signing is fail-closed on a throwaway dev cert; the OpenBao signing key is unseeded (owner action, not automatable) and require-trusted-issuer is off by default"
 ---
 
 # ADR-0170 — Onboarding e-signature flow in the customer app
+
+**Delivery note (2026-08-18).** The ceremony platform is shipped: `SignatureCeremony`/`Signer`
+domain model, two-tier signature levels, `customer-edge` document/signature routes (PR #1037,
+#1102, #1139) and the idempotent onboarding agreement (#1137). It is not yet a usable real
+signature: `PdfBoxPadesSealAdapter` refuses to seal unless `allow-ephemeral-seals` is explicitly
+true (default false, #1298 fail-closed gate) and the Vault-backed signing keystore has never been
+populated — real ceremonies fail closed by design, not by accident, pending a deliberate
+operator action outside this codebase.
 
 ## Context
 

@@ -10,7 +10,7 @@ import { Map, Plus, Search, RefreshCw, Fingerprint, Clock, CheckCircle2, AlertTr
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 const PID_SERVICE = '/api/svc/pid-service'
@@ -205,9 +205,11 @@ export default function PidPage() {
               <button className="btn btn-secondary" onClick={() => setShowNewForm(true)}>
                 {t('Rychlé vytvoření', 'Quick Create')}
               </button>
-              <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-                <Plus size={13} /> {t('Nový záznam', 'New Record')}
-              </Link>
+              <Can permission="parties:create">
+                <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+                  <Plus size={13} aria-hidden="true" /> {t('Nový záznam', 'New Record')}
+                </Link>
+              </Can>
             </div>
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right' }}>
               {t('Chcete vytvořit záznam rychle?', 'Want to create quickly?')}
@@ -529,9 +531,11 @@ export default function PidPage() {
                   <td style={{ fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{r.identifierValue}</td>
                   <td style={{ color: 'var(--text-secondary)' }}>{r.issuingCountry}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-                    <Link href={`/parties/${r.personId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
-                      {r.personId?.slice(0, 8) || r.personId}...
-                    </Link>
+                    <Can permission="parties:view">
+                      <Link href={`/parties/${r.personId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>
+                        {r.personId?.slice(0, 8) || r.personId}...
+                      </Link>
+                    </Can>
                   </td>
                   <td>
                     <span className="pill" style={{ background: `${STATUS_COLORS[r.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLORS[r.status] ?? 'var(--text-muted)' }}>
