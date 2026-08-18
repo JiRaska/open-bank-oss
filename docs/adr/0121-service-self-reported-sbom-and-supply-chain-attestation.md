@@ -1,8 +1,8 @@
 ---
 date: 2026-06-28
 decision-status: accepted
-delivery-status: partial
-followup: "#1915 — the syft-on-image axis: cosign attest on the KMS key and Kyverno verify-images Audit->Enforce"
+delivery-status: shipped
+followup: []
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
@@ -13,19 +13,17 @@ summary: "SBOM is split into two axes: an operational self-reported SBOM generat
 
 # Service self-reported SBOM and supply-chain attestation
 
-**Delivery note (updated 2026-07-05):** promoted from Proposed — the in-flight branches this
+**Delivery note (updated 2026-08-18):** promoted from Proposed — the in-flight branches this
 ADR was written ahead of have long since merged and the decision held up in practice.
 - **Axis 1 (operational SBOM)** — ✅ Shipped: `openbank-libs-runtime/.../web/SbomResource.kt`
   serves the live `/q/openbank/sbom` contract from the image-baked CycloneDX document; the
   admin-ui Tech Inventory SBOM viewer (`app/api/services/[name]/sbom/route.ts`) reads it live
   per-service with a fallback to the image-baked bundle. Host-side-only generation rule holds.
-- **Axis 2 (attested supply-chain SBOM)** — 🟡 Partial, further along than the previous note
-  suggested: `cosign attest --type cyclonedx` runs on every pushed image in `auto-deploy.yml`
-  (KMS key, same trust root as image signing), and image-signature verification is already
-  **Enforce** in Kyverno (`verify-images-policy.yaml`, ADR-0030 D4). What remains open, per
-  that policy file's own roadmap comment: a **second** `verifyImages` rule requiring the SBOM
-  attestation specifically (not just the signature) at admission — still marked "(planned)"
-  there. That is the one concrete remaining gap closing this ADR fully.
+- **Axis 2 (attested supply-chain SBOM)** — ✅ Shipped: `cosign attest --type cyclonedx` runs on
+  every pushed image in `auto-deploy.yml`, and the dedicated
+  `verify-openbank-image-sbom-attestation` Kyverno policy is Enforce in
+  `verify-sbom-attestation-policy.yaml`. It requires a signed CycloneDX predicate and remains
+  separate from image-signature verification, preserving independent rollout semantics.
 
 <details>
 <summary>Original delivery note (2026-06-30), superseded above</summary>

@@ -1,17 +1,22 @@
 ---
 date: 2026-08-09
 decision-status: accepted
-delivery-status: partial
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, governance]
 summary: "Three checks over the gate estate: required-context/workflow parity, a dated expiry on advisory 'benign' verdicts, and whether an incident write-up produced a gate."
-followup: "#4339 — advisory-finding-staleness needs every existing advisory gate re-annotated with a verified: date before it can enforce; incident-gate-coverage stays advisory permanently by design (see Decision)."
+followup: []
 ---
 
 # ADR-0254 — CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage
+
+**Delivery note (2026-08-18):** All three checks are registered and invoked by the CI gate estate:
+`ruleset-context-parity` (enforced), `advisory-finding-staleness` (enforced with dated claims),
+and `incident-gate-coverage` (advisory by this ADR's explicit decision). The former follow-up is
+closed; no live production or MTTR evidence is inferred.
 
 ## Context
 

@@ -1,7 +1,7 @@
 ---
 date: 2026-07-25
 decision-status: proposed
-delivery-status: planned
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +11,13 @@ summary: "GDPR Art. 20 portability is decided as a scoped, filtered projection o
 ---
 
 # ADR-0204 — GDPR Article 20 data portability — scope, format and direct-transmission decision
+
+**Delivery note (2026-08-18):** The bounded export-only slice is shipped. Party service exposes
+`GET /api/v1/parties/{id}/gdpr-portability-export`, authenticates the subject/DPO/admin shapes,
+audits Art. 20 separately, structurally excludes KYC/legal-obligation data, and aggregates only
+the account, transaction and contract-basis card projection. Direct controller-to-controller
+transmission remains deliberately unimplemented; live MTTR/production evidence is outside this
+ADR's delivery claim.
 
 ## Context
 
