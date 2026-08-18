@@ -37,6 +37,17 @@ class SwiftService(
 
     companion object {
         private const val SWIFT_MESSAGE_STATUS_CHANGED = "swift.message.status-changed"
+
+        /**
+         * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+         * (EVENT-sourced) attribution (#3994/#5256). Matches the fleet's audit convention — the
+         * module directory without the `openbank-` prefix — the same spelling `EventAttribution`
+         * (`TopicAttribution`) already maps `openbank.payments.swift.event` (the real outgoing
+         * Kafka topic for the `swift-events-out` channel both outbox writes below publish on) to.
+         * Audit-service subscribes to that topic today (`application.yaml`'s consumed-topics
+         * list), so this is a live attribution upgrade, not a forward-looking one.
+         */
+        private const val SOURCE_SERVICE = "swift-service"
     }
 
     private val log = Logger.getLogger(SwiftService::class.java)
@@ -93,6 +104,7 @@ class SwiftService(
                 eventType = SWIFT_MESSAGE_STATUS_CHANGED,
                 payload = objectMapper.writeValueAsString(
                     mapOf(
+                        "sourceService" to SOURCE_SERVICE,
                         "swiftMessageId" to updated.id.toString(),
                         "paymentSagaRef" to updated.transactionReference,
                         "status" to updated.status.name,
@@ -129,6 +141,7 @@ class SwiftService(
                 eventType = SWIFT_MESSAGE_STATUS_CHANGED,
                 payload = objectMapper.writeValueAsString(
                     mapOf(
+                        "sourceService" to SOURCE_SERVICE,
                         "swiftMessageId" to completed.id.toString(),
                         "paymentSagaRef" to completed.transactionReference,
                         "status" to completed.status.name,
