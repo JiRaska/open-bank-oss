@@ -634,6 +634,28 @@ class ScaServiceTest {
         assertThat(body.path("credentialId").asText()).isEqualTo("cred-wire")
     }
 
+    /**
+     * Serialization round-trip for `AuditConsumer` attribution (issue #3994/#5256, fleet
+     * follow-up to #5255/#5267/#5329). Before `sourceService` existed on the DEVICE_ENROLLED
+     * payload body, an audit consumer reading this event's wire body had no EVENT-sourced claim
+     * to fall back on — and today's `TopicAttribution` table has no entry for
+     * `openbank.sca.events` at all, so this field is what an audit consumer subscribed to that
+     * topic in the future would read as its strongest signal.
+     */
+    @Test
+    fun `enroll publishes sourceService in the payload body for AuditConsumer attribution`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { enrolledDeviceRepository.findByCredentialId("cred-attribution") } returns null
+        coEvery { enrolledDeviceRepository.save(any()) } answers { firstArg() }
+        val captured = slot<OutboxMessage>()
+        coEvery { outboxRepository.save(capture(captured)) } just runs
+
+        service.enroll(EnrollDeviceCommand(partyId, "cred-attribution", "pk", SignatureAlgorithm.ES256))
+
+        val body = objectMapper.readTree(captured.captured.payload)
+        assertThat(body.path("sourceService").asText()).isEqualTo("sca-service")
+    }
+
     @Test
     fun `enroll returns existing device idempotently for same-party re-enroll`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
