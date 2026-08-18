@@ -125,7 +125,9 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   onRefresh: (listType: string) => void
   onSave: (id: string, patch: Partial<SanctionsList>) => void
 }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [expanded, setExpanded] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -148,8 +150,8 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
         <div style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-tertiary)' }}>
           {list.lastUpdatedAt ? (
             <>
-              <div style={{ color: 'var(--success-text)', fontWeight: 600 }}>{list.lastEntryCount?.toLocaleString()} {t('záznamů', 'entries')}</div>
-              <div>{new Date(list.lastUpdatedAt).toLocaleString('cs-CZ')}</div>
+              <div style={{ color: 'var(--success-text)', fontWeight: 600 }}>{list.lastEntryCount?.toLocaleString(numberLocale)} {t('záznamů', 'entries')}</div>
+              <div>{new Date(list.lastUpdatedAt).toLocaleString(dateLocale)}</div>
             </>
           ) : <div>{t('Nikdy nestaženo', 'Never downloaded')}</div>}
         </div>
@@ -182,6 +184,8 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
 
 export default function SanctionsPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [tab, setTab] = useState<'checks'|'search'|'lists'>('checks')
   const [checks, setChecks] = useState<SanctionCheck[]>([])
   const [lists, setLists] = useState<SanctionsList[]>([])
@@ -599,7 +603,7 @@ export default function SanctionsPage() {
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                          {c.checkedAt ? new Date(c.checkedAt).toLocaleString('cs-CZ') : '—'}
+                          {c.checkedAt ? new Date(c.checkedAt).toLocaleString(dateLocale) : '—'}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px' }}>
                           {c.reviewedBy ? (
@@ -731,7 +735,7 @@ export default function SanctionsPage() {
                               {a.action}{a.makerId ? ` — ${t('žádá', 'asked by')} ${a.makerId}` : ''}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
-                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString('cs-CZ')}` : ''}
+                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString(dateLocale)}` : ''}
                             </div>
                           </div>
                           <button onClick={() => setDecideId(a.id)}
@@ -843,7 +847,7 @@ export default function SanctionsPage() {
                                 {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
                               <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                                {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString()} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
+                                {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString(numberLocale)} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
                               </div>
                             </div>
                           </label>

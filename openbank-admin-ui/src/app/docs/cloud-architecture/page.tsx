@@ -158,7 +158,8 @@ function StatusDot({ status }: { status: Status }) {
 }
 
 export default function CloudArchitecturePage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [selected, setSelected] = useState<Node | null>(null)
   const [liveStatus, setLiveStatus] = useState<Record<string, InfraStatusResult> | null>(null)
   const [checkedAt, setCheckedAt] = useState<string | null>(null)
@@ -171,14 +172,14 @@ export default function CloudArchitecturePage() {
       if (res.ok) {
         const data: Record<string, InfraStatusResult> = await res.json()
         setLiveStatus(data)
-        setCheckedAt(new Date().toLocaleTimeString('cs-CZ'))
+        setCheckedAt(new Date().toLocaleTimeString(dateLocale))
       }
     } catch {
       // graceful degradation — static statuses remain visible
     } finally {
       setRefreshing(false)
     }
-  }, [])
+  }, [dateLocale])
 
   useEffect(() => { void fetchStatus() }, [fetchStatus])
 

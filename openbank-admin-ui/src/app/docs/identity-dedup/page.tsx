@@ -7,6 +7,7 @@
 import { Fingerprint, ShieldCheck, GitMerge, KeyRound, Layers, AlertTriangle, Lock, ArrowRight } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 // Status pill mirrored from the docs status vocabulary (live / partial / planned).
 function Status({ kind, t }: { kind: 'live' | 'partial' | 'planned'; t: (cs: string, en: string) => string }) {
@@ -112,7 +113,7 @@ export default function IdentityDedupPage() {
   const sub = 'var(--text-secondary)'
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span>
@@ -127,6 +128,7 @@ export default function IdentityDedupPage() {
               'How unified customer identity is built the modern way: principles, privacy-preserving deduplication, a three-tier resolver and a worked example (ADR-0072, ADR-0094)',
             )}
         icon={<Fingerprint aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<PrintDocumentButton />}
       />
 
       {/* ---- TL;DR banner ---- */}

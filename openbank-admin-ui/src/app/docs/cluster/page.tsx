@@ -72,13 +72,16 @@ function DefenseRings({ layers, active, onPick, lang }: { layers: Layer[]; activ
   const size = 260
   const cx = size / 2
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: 240, height: 240, flexShrink: 0 }} role="img" aria-label={lang === 'cs' ? 'Obrana do hloubky' : 'Defense in depth'}>
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: 240, height: 240, flexShrink: 0 }} role="group" aria-label={lang === 'cs' ? 'Obrana do hloubky' : 'Defense in depth'}>
       {layers.map((l, i) => {
         const r = (cx - 6) * (1 - i / n)
         const m = STATUS[l.status]
         const on = active === l.id
         return (
-          <g key={l.id} onClick={() => onPick(l.id)} style={{ cursor: 'pointer' }}>
+          <g key={l.id} role="button" tabIndex={0} aria-label={l.label}
+            onClick={() => onPick(l.id)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(l.id) } }}
+            onFocus={() => onPick(l.id)} style={{ cursor: 'pointer' }}>
             <circle cx={cx} cy={cx} r={r} fill={on ? m.bg : 'transparent'} stroke={m.color} strokeWidth={on ? 3 : 2} opacity={on ? 1 : 0.55} />
           </g>
         )
@@ -148,6 +151,7 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
 
 export default function ClusterDossierPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [topo, setTopo] = useState<Topology | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeLayer, setActiveLayer] = useState<string | null>(null)
@@ -336,7 +340,7 @@ export default function ClusterDossierPage() {
       <p style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <FileText size={12} />
         {t('Odvozeno z GitOpsu + reprezentativního Dockerfile při buildu (ADR-0081). Žádná data ručně — gapy se zobrazují poctivě.', 'Derived from GitOps + a representative Dockerfile at build (ADR-0081). No hand-typed data — gaps shown honestly.')}
-        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-US')}</span>}
+        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}
       </p>
     </div>
   )

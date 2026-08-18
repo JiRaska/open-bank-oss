@@ -301,7 +301,8 @@ export default function SecurityPage() {
                     {filteredResults.map((r, i) => {
                       const isSelected = selected?.serviceName === r.serviceName
                       return (
-                        <tr key={`${r.serviceName}-${i}`} onClick={() => setSelected(r)}
+                        <tr key={`${r.serviceName}-${i}`} tabIndex={0} aria-label={t(`Vybrat službu ${r.serviceName}`, `Select service ${r.serviceName}`)} onClick={() => setSelected(r)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r) } }}
                           style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer',
                             background: isSelected ? 'var(--accent-light)' : 'transparent',
                             transition: 'background 0.15s' }}

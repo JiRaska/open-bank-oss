@@ -32,7 +32,17 @@ dependencies {
     api("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
 
     // Framework APIs — compileOnly (services provide impls via Quarkus platform BOM).
-    // Versions MUST equal what quarkus-bom:3.33.2 ships.
+    // Versions MUST equal what the CURRENT quarkus-bom (libs.versions.toml: quarkus) ships —
+    // these literals do not float with a platform bump, so they rot silently. Caught live
+    // 2026-08: this block's io.micrometer:micrometer-core stayed pinned to 1.14.5 across the
+    // Quarkus 3.33.2->3.38.0 bump (#2700), long after quarkus-bom:3.38.0 started managing
+    // 1.17.0 for every service. Nothing here failed to compile — compileOnly/testImplementation
+    // don't reach a consuming service's runtime classpath — but this module's OWN dependency
+    // graph submission still reported the stale 1.14.5, and a later-disclosed GHSA against
+    // the 1.14.x line (CVE-2026-40984, no patched release on that line at all) turned six
+    // months of unnoticed drift into a fleet-wide dependency-review failure on every PR
+    // (issue #5482). Re-check this whole block against the BOM's actual managed versions on
+    // every Quarkus platform bump, not just the ones a compile error would catch.
     compileOnly("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     compileOnly("jakarta.annotation:jakarta.annotation-api:3.0.0")
     compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")

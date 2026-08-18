@@ -1,5 +1,88 @@
 # Changelog
 
+## [0.165.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.6...admin-ui-v0.165.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** keyboard-enable architecture maps ([#5547](https://github.com/JiRaska/open-bank-oss/issues/5547)) ([7ae346d](https://github.com/JiRaska/open-bank-oss/commit/7ae346d8d1766ed157f55322b9b9ef56a9c76878))
+
+## [0.165.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.5...admin-ui-v0.165.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** keyboard-enable table rows ([#5544](https://github.com/JiRaska/open-bank-oss/issues/5544)) ([49e2726](https://github.com/JiRaska/open-bank-oss/commit/49e272660f77592fc4bcb12dfb75f674b314b348))
+
+## [0.165.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.4...admin-ui-v0.165.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** trap command palette focus ([#5540](https://github.com/JiRaska/open-bank-oss/issues/5540)) ([d50ad3b](https://github.com/JiRaska/open-bank-oss/commit/d50ad3b2e5d2ce6f553123cf3ea5dbaac4cf28d1))
+
+## [0.165.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.3...admin-ui-v0.165.4) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize allocation amounts ([#5536](https://github.com/JiRaska/open-bank-oss/issues/5536)) ([2a12a1e](https://github.com/JiRaska/open-bank-oss/commit/2a12a1ef340a89109efc3da559c62038e3341a60))
+
+## [0.165.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.2...admin-ui-v0.165.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove dead pid detail action ([#5530](https://github.com/JiRaska/open-bank-oss/issues/5530)) ([8a001a8](https://github.com/JiRaska/open-bank-oss/commit/8a001a8046c0463ab0589317e2c3c6888d214054))
+
+## [0.165.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.1...admin-ui-v0.165.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize banking record dates ([#5523](https://github.com/JiRaska/open-bank-oss/issues/5523)) ([81993da](https://github.com/JiRaska/open-bank-oss/commit/81993da51fac0d2245f5c63e8aa4c2fbdd898fd0))
+
+## [0.165.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.0...admin-ui-v0.165.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize operational refresh timestamps ([#5519](https://github.com/JiRaska/open-bank-oss/issues/5519)) ([0643766](https://github.com/JiRaska/open-bank-oss/commit/064376629e7a77f72a614558a5894385026b75f6))
+
+## [0.165.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.164.0...admin-ui-v0.165.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** trigger bounded flaky test check ([#5497](https://github.com/JiRaska/open-bank-oss/issues/5497)) ([89f1a9f](https://github.com/JiRaska/open-bank-oss/commit/89f1a9fc3394d4d3a266880f107e6d89015bfbaf))
+
+
+### Bug Fixes
+
+* **admin-ui:** honor active locale in ops docs ([#5514](https://github.com/JiRaska/open-bank-oss/issues/5514)) ([6425547](https://github.com/JiRaska/open-bank-oss/commit/642554709bc42f5192fc07b0c1e73fcc0efc4642))
+
+## [0.164.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.163.0...admin-ui-v0.164.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** extend static docs PDF export ([#5510](https://github.com/JiRaska/open-bank-oss/issues/5510)) ([b8576b5](https://github.com/JiRaska/open-bank-oss/commit/b8576b50d3cf9daa370098945541f10b18aa7135))
+
+## [0.163.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.162.0...admin-ui-v0.163.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** add flaky-test-hunter findings page ([#5504](https://github.com/JiRaska/open-bank-oss/issues/5504)) ([1d45bfb](https://github.com/JiRaska/open-bank-oss/commit/1d45bfb1fc4fd909c09d06db3c27dc3945d7adff)), closes [#5499](https://github.com/JiRaska/open-bank-oss/issues/5499)
+* **admin-ui:** extend PDF export to governance docs ([#5502](https://github.com/JiRaska/open-bank-oss/issues/5502)) ([8fadc19](https://github.com/JiRaska/open-bank-oss/commit/8fadc19ddea315146b1f4efaaad544dbf3acc43e))
+
+## [0.162.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.161.1...admin-ui-v0.162.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** add mobile navigation drawer ([#5493](https://github.com/JiRaska/open-bank-oss/issues/5493)) ([764b4ce](https://github.com/JiRaska/open-bank-oss/commit/764b4ce15f7ddbe4a102c3d57352294fdecbedfe))
+
 ## [0.161.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.161.0...admin-ui-v0.161.1) (2026-08-18)
 
 

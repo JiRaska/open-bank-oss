@@ -51,16 +51,22 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const [loading, setLoading] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   const shown = query.trim().length >= 2 ? results : recents
 
   useEffect(() => {
     if (open) {
+      openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
       setQuery('')
       setResults([])
       setRecents(loadRecents())
       setActive(0)
       setTimeout(() => inputRef.current?.focus(), 0)
+    } else if (openerRef.current) {
+      openerRef.current.focus()
+      openerRef.current = null
     }
   }, [open])
 
@@ -121,6 +127,16 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') { e.preventDefault(); onCloseRef.current() }
+      if (e.key === 'Tab') {
+        const focusables = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [])
+        if (focusables.length === 0) return
+        const first = focusables[0]
+        const last = focusables[focusables.length - 1]
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+      }
       if (e.key === 'ArrowDown') {
         e.preventDefault()
         setActive(a => Math.max(0, Math.min(a + 1, shownRef.current.length - 1)))
@@ -151,6 +167,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   return (
     <div
       role="dialog" aria-modal="true" aria-label={t('Rychlé hledání', 'Quick search')}
+      ref={dialogRef}
       onClick={onClose}
       style={{
         position: 'fixed', inset: 0, zIndex: 100, background: 'rgba(0,0,0,0.45)',
@@ -166,24 +183,26 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-          <Search size={15} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+          <Search size={15} aria-hidden="true" style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
           <input
             ref={inputRef}
             value={query}
             onChange={e => { setQuery(e.target.value); setActive(0) }}
             placeholder={t('Jméno, e-mail, telefon, IČO, IBAN…', 'Name, email, phone, reg. no., IBAN…')}
             aria-label={t('Hledat klienty a účty', 'Search parties and accounts')}
+            aria-controls="command-palette-results"
+            aria-activedescendant={shown[active] ? `command-palette-option-${shown[active].type}-${shown[active].id}` : undefined}
             style={{
               flex: 1, border: 'none', outline: 'none', background: 'transparent',
               fontSize: '14px', color: 'var(--text-primary)',
             }}
           />
-          <button onClick={onClose} aria-label={t('Zavřít', 'Close')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0 }}>
-            <X size={15} />
+          <button type="button" onClick={onClose} aria-label={t('Zavřít', 'Close')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: 0 }}>
+            <X size={15} aria-hidden="true" />
           </button>
         </div>
 
-        <div ref={listRef} style={{ maxHeight: '46vh', overflowY: 'auto', padding: '6px' }}>
+        <div id="command-palette-results" ref={listRef} role="listbox" aria-label={t('Výsledky hledání', 'Search results')} style={{ maxHeight: '46vh', overflowY: 'auto', padding: '6px' }}>
           {query.trim().length < 2 && recents.length > 0 && (
             <div style={{ padding: '6px 10px', fontSize: '10px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-tertiary)' }}>
               {t('Nedávné', 'Recent')}
@@ -200,6 +219,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 return (
                   <div
                     key={`${ref.type}:${ref.id}`}
+                    id={`command-palette-option-${ref.type}-${ref.id}`}
                     onClick={() => choose(ref)}
                     onMouseEnter={() => setActive(index)}
                     role="option" aria-selected={isActive}
