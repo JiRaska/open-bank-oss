@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.5...swift-service-v0.7.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **swift:** add sourceService for AuditConsumer attribution ([#5349](https://github.com/JiRaska/open-bank-oss/issues/5349)) ([2c6975c](https://github.com/JiRaska/open-bank-oss/commit/2c6975c09a13c8a5d3454fc6ef5ecf277f30000a)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.4...swift-service-v0.7.5) (2026-08-17)
 
 
