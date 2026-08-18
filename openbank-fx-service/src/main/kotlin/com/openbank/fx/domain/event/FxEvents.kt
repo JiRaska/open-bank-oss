@@ -4,7 +4,9 @@
 
 package com.openbank.fx.domain.event
 
-import java.math.BigDecimal; import java.time.Instant; import java.util.UUID
+import java.math.BigDecimal
+import java.time.Instant
+import java.util.UUID
 
 sealed class FxEvent {
     abstract val occurredAt: Instant
@@ -25,9 +27,19 @@ sealed class FxEvent {
         internal const val SOURCE_SERVICE = "fx-service"
     }
 }
-data class FxRatePublished(val rateId: UUID, val pair: String, val midRate: BigDecimal,
-    override val occurredAt: Instant = Instant.EPOCH) : FxEvent()
-data class FxConversionExecuted(val conversionId: UUID, val partyId: UUID,
-    val fromCurrency: String, val toCurrency: String,
-    val fromAmount: Long, val toAmount: Long, val rate: BigDecimal,
-    override val occurredAt: Instant = Instant.EPOCH) : FxEvent()
+data class FxRatePublished(
+    val rateId: UUID,
+    val pair: String,
+    val midRate: BigDecimal,
+    override val occurredAt: Instant = Instant.EPOCH,
+) : FxEvent()
+data class FxConversionExecuted(
+    val conversionId: UUID,
+    val partyId: UUID,
+    val fromCurrency: String,
+    val toCurrency: String,
+    val fromAmount: Long,
+    val toAmount: Long,
+    val rate: BigDecimal,
+    override val occurredAt: Instant = Instant.EPOCH,
+) : FxEvent()
