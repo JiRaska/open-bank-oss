@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.6...admin-ui-v0.165.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** keyboard-enable architecture maps ([#5547](https://github.com/JiRaska/open-bank-oss/issues/5547)) ([7ae346d](https://github.com/JiRaska/open-bank-oss/commit/7ae346d8d1766ed157f55322b9b9ef56a9c76878))
+
 ## [0.165.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.5...admin-ui-v0.165.6) (2026-08-18)
 
 
