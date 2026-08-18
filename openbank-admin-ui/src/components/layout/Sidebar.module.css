@@ -80,3 +80,15 @@
 .footer { flex-shrink: 0; padding: 15px 20px 17px; background: rgba(2, 6, 23, 0.34); border-top: 1px solid rgba(148, 163, 184, 0.12); }
 .footerVersion { color: #a8b7cc; font-size: 11px; font-weight: 700; }
 .footerScope { margin-top: 4px; color: #5a6b83; font-size: 10px; letter-spacing: 0.035em; }
+
+@media (max-width: 860px) {
+  .sidebar {
+    position: fixed;
+    z-index: 30;
+    inset: 0 auto 0 0;
+    transform: translateX(-102%);
+    transition: transform .2s ease;
+    box-shadow: 16px 0 38px rgba(15, 23, 42, .24);
+  }
+  .mobileOpen { transform: translateX(0); }
+}

@@ -58,6 +58,7 @@ function PaymentDetailContent() {
   const params = useSearchParams()
   const type = (params.get('type') ?? '').toUpperCase()
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   const [payment, setPayment] = useState<Payment | null>(null)
   const [loading, setLoading] = useState(true)
@@ -130,9 +131,9 @@ function PaymentDetailContent() {
               { label: t('ID platby', 'Payment ID'), value: payment.id, mono: true },
               { label: t('Typ', 'Type'), value: payment.type ?? '—' },
               { label: t('Stav', 'Status'), value: payment.status ?? '—' },
-              { label: t('Částka', 'Amount'), value: payment.amount != null ? `${Number(payment.amount).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-US', { minimumFractionDigits: 2 })} ${payment.currency ?? ''}` : '—' },
+              { label: t('Částka', 'Amount'), value: payment.amount != null ? `${Number(payment.amount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} ${payment.currency ?? ''}` : '—' },
               { label: 'End-to-End ID', value: (payment.endToEndId as string) ?? '—', mono: true },
-              { label: t('Vytvořeno', 'Created'), value: payment.createdAt ? new Date(payment.createdAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB') : '—' },
+              { label: t('Vytvořeno', 'Created'), value: payment.createdAt ? new Date(payment.createdAt).toLocaleString(numberLocale) : '—' },
             ]} />
           </div>
           <div className="card">

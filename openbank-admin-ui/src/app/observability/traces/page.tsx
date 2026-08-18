@@ -76,7 +76,8 @@ function fmtDuration(ms: number): string {
 }
 
 export default function TraceExplorerPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [traces, setTraces] = useState<TraceSummary[] | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -259,7 +260,7 @@ export default function TraceExplorerPage() {
 
         {lastRefresh && (
           <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-            {t('Zdroj: Tempo · ', 'Source: Tempo · ')}{t('aktualizováno', 'updated')} {lastRefresh.toLocaleTimeString()}
+            {t('Zdroj: Tempo · ', 'Source: Tempo · ')}{t('aktualizováno', 'updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
           </div>
         )}
       </div>

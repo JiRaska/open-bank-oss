@@ -919,7 +919,10 @@ function PaymentsContent() {
                 {!loading && filtered.map(p => (
                   <tr key={`${p.type}-${p.id}`} style={{ cursor: 'pointer' }}
                     title={t('Zobrazit detail platby', 'View payment detail')}
-                    onClick={() => { stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) }}>
+                    tabIndex={0}
+                    aria-label={t(`Otevřít detail platby ${p.id.slice(0, 8)}`, `Open payment ${p.id.slice(0, 8)} detail`)}
+                    onClick={() => { stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stashRow('payments', p.id, p); router.push(`/payments/${p.id}?type=${p.type}`) } }}>
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{p.id.slice(0, 8)}…</td>
                     <td><span className="tag" style={{ color: p.type === 'SEPA' ? 'var(--accent)' : 'var(--green)' }}>{p.type}</span></td>
                     <td>

@@ -28,7 +28,8 @@ interface MetricsData {
 }
 
 export default function ObservabilityPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [metrics, setMetrics] = useState<MetricsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -146,7 +147,7 @@ export default function ObservabilityPage() {
           )}
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginLeft: '8px' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <Link href="/observability/stack" className="btn btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
