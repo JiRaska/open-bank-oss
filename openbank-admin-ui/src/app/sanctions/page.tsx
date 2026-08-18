@@ -538,7 +538,7 @@ export default function SanctionsPage() {
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
                   <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')}
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')} aria-label={t('Hledat sankční kontroly', 'Search sanctions checks')}
                     style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                       border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
