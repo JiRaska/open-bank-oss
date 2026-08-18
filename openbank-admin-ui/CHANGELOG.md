@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.158.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.7...admin-ui-v0.158.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize account detail values ([f756b1f](https://github.com/JiRaska/open-bank-oss/commit/f756b1fe19aeaf3029b894f29b7a97cc53c88b03))
+* **admin-ui:** replace account action prompt ([e36c1dc](https://github.com/JiRaska/open-bank-oss/commit/e36c1dcc66088de472e8a86c5d19bfb2a305bc09))
+
 ## [0.158.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.6...admin-ui-v0.158.7) (2026-08-18)
 
 
