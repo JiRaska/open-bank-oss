@@ -109,6 +109,33 @@ class DisputeServiceTest {
         verify(exactly = 1) { timelineRepo.save(any()) }
     }
 
+    /**
+     * #3994/#5256: `sourceService` is the strongest (EVENT-sourced) attribution
+     * `AuditConsumer.resolveSourceService` reads. Before this field, `TopicAttribution` already
+     * resolved `openbank.dispute.events` -> `dispute-service` correctly, but only as
+     * TOPIC-sourced — and audit-service subscribes to this topic today, so this is a live
+     * attribution upgrade, not a forward-looking one.
+     */
+    @Test
+    fun `open publishes sourceService in the payload body for AuditConsumer attribution`() {
+        val request = OpenDisputeRequest(
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            amount = BigDecimal("25.00"),
+            transactionDate = today,
+            description = "Unauthorized card payment",
+        )
+        val outbox = slot<List<OutboxMessage>>()
+        every { disputeRepo.save(any(), capture(outbox)) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        service.open(request).await().indefinitely()
+
+        assertThat(outbox.captured.single().payload).contains(""""sourceService":"dispute-service"""")
+    }
+
     @Test
     fun `update changes status and emits timeline event`() {
         val id = UUID.randomUUID()
@@ -254,6 +281,11 @@ class DisputeServiceTest {
         val remediationEvent = messagesSlot.captured.first { it.eventType == "dispute.remediation_requested" }
         assertThat(remediationEvent.payload).contains(existing.accountId.toString())
         assertThat(remediationEvent.payload).contains("\"amount\":50.00")
+
+        // #3994/#5256: both outbox events carry the producer's own sourceService claim.
+        messagesSlot.captured.forEach {
+            assertThat(it.payload).contains(""""sourceService":"dispute-service"""")
+        }
     }
 
     /**

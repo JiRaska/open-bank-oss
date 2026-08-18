@@ -263,7 +263,7 @@ class DisputeService(
         payload = """{"eventType":"dispute.opened","disputeId":"${dispute.id}",""" +
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
             """"disputeType":"${dispute.disputeType}","status":"${dispute.status}",""" +
-            """"openedAt":"${dispute.createdAt}"}""",
+            """"openedAt":"${dispute.createdAt}","sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -286,7 +286,8 @@ class DisputeService(
             """"reference":"${dispute.reference}","partyId":"${dispute.partyId}",""" +
             """"outcome":"${dispute.remediationOutcome}",""" +
             """"status":"${dispute.status}","resolvedAt":"${dispute.resolvedAt}",""" +
-            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}",""" +
+            """"sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -310,7 +311,8 @@ class DisputeService(
             // same transaction and describes the remediation that resolution warrants. It has no
             // separate business instant of its own, and inventing one (a fresh clock read) would
             // put two different "when"s on one indivisible state change.
-            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}"}""",
+            """"occurredAt":"${dispute.resolvedAt?.toInstant() ?: Instant.now(clock)}",""" +
+            """"sourceService":"$SOURCE_SERVICE"}""",
         createdAt = Instant.now(clock),
     )
 
@@ -336,5 +338,16 @@ class DisputeService(
             DisputeStatus.PENDING_CUSTOMER,
             DisputeStatus.PENDING_MERCHANT,
         )
+
+        /**
+         * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+         * (EVENT-sourced) attribution — issue #3994/#5256. Before this field, `TopicAttribution`
+         * already resolves `openbank.dispute.events` -> `dispute-service` correctly, but only as
+         * TOPIC-sourced — and audit-service DOES subscribe to this topic today (it is in
+         * `application.yaml`'s consumed-topics list), so this is a live attribution improvement.
+         * Value matches the fleet's audit convention: the module directory without the
+         * `openbank-` prefix, the same spelling `TopicAttribution` already maps this topic to.
+         */
+        internal const val SOURCE_SERVICE = "dispute-service"
     }
 }
