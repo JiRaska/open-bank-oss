@@ -242,6 +242,9 @@ class FxServiceTest {
         assertThat(outboxMessage.captured.eventType).isEqualTo("fx.conversion.executed.v1")
         assertThat(outboxMessage.captured.aggregateId).isEqualTo(result.id)
         assertThat(outboxMessage.captured.payload).contains(result.id.toString()).contains("\"toAmount\"")
+        // Issue #3994/#5256: the wire payload actually reaching Kafka carries sourceService — a
+        // domain-level assertion on FxConversionExecuted alone cannot prove that.
+        assertThat(outboxMessage.captured.payload).contains("\"sourceService\":\"fx-service\"")
     }
 
     @Test

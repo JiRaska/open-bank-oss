@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.11.0...fx-service-v0.11.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **fx-service:** add sourceService to outbox events for audit attribution ([#5390](https://github.com/JiRaska/open-bank-oss/issues/5390)) ([842497b](https://github.com/JiRaska/open-bank-oss/commit/842497b9b6f4627ba0e8b2098d14849197d324d4))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.10.0...fx-service-v0.11.0) (2026-08-18)
 
 
