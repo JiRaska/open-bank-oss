@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.162.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.161.1...admin-ui-v0.162.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** add mobile navigation drawer ([#5493](https://github.com/JiRaska/open-bank-oss/issues/5493)) ([764b4ce](https://github.com/JiRaska/open-bank-oss/commit/764b4ce15f7ddbe4a102c3d57352294fdecbedfe))
+
 ## [0.161.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.161.0...admin-ui-v0.161.1) (2026-08-18)
 
 
