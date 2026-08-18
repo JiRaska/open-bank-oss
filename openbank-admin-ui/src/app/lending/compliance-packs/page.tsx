@@ -191,7 +191,7 @@ export default function CompliancePacksPage() {
           'Jurisdictional credit compliance packs (ADR-0212 D4). A maker proposes, a DIFFERENT compliance principal decides. An activated pack takes effect immediately — no service release.',
         )}
         actions={<button onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+          <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
       {actor && (
@@ -202,7 +202,7 @@ export default function CompliancePacksPage() {
 
       {degraded.length > 0 && (
         <div className="card" data-testid="degraded" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--warning)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <AlertTriangle size={14} />
+          <AlertTriangle aria-hidden="true" size={14} />
           {t(
             `Nepřečteno (403 / nedostupné): ${degraded.join(', ')} — prázdný seznam NEZNAMENÁ, že nic nečeká.`,
             `Not read (403 / unavailable): ${degraded.join(', ')} — an empty list does NOT mean nothing is pending.`,
@@ -221,7 +221,7 @@ export default function CompliancePacksPage() {
       )}
 
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <CheckCircle2 size={15} /> {t('Aktivní packy', 'Active packs')} ({active.length})
+        <CheckCircle2 aria-hidden="true" size={15} /> {t('Aktivní packy', 'Active packs')} ({active.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -259,7 +259,7 @@ export default function CompliancePacksPage() {
       </div>
 
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Clock size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
+        <Clock aria-hidden="true" size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         {pending.map(p => (
@@ -304,7 +304,7 @@ export default function CompliancePacksPage() {
       </div>
 
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <ScrollText size={15} /> {t('Navrhnout pack (maker)', 'Propose a pack (maker)')}
+        <ScrollText aria-hidden="true" size={15} /> {t('Navrhnout pack (maker)', 'Propose a pack (maker)')}
       </div>
       <div className="card" style={{ padding: 14 }}>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 0 }}>

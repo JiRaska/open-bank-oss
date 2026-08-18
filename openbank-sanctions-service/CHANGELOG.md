@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.1...sanctions-service-v0.9.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sanctions:** add sourceService to audit-attribution outbox payload ([#5343](https://github.com/JiRaska/open-bank-oss/issues/5343)) ([74b609f](https://github.com/JiRaska/open-bank-oss/commit/74b609f52ab65c13aa7ec591a0136729b5e11fb2)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.0...sanctions-service-v0.9.1) (2026-08-17)
 
 
