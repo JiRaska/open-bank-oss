@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.3...admin-ui-v0.165.4) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize allocation amounts ([#5536](https://github.com/JiRaska/open-bank-oss/issues/5536)) ([2a12a1e](https://github.com/JiRaska/open-bank-oss/commit/2a12a1ef340a89109efc3da559c62038e3341a60))
+
 ## [0.165.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.2...admin-ui-v0.165.3) (2026-08-18)
 
 
