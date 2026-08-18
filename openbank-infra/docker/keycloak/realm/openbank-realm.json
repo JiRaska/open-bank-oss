@@ -41,6 +41,23 @@
   },
   "clients": [
     {
+      "clientId": "admin-cli",
+      "name": "${client_admin-cli}",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles"
+      ],
+      "attributes": {}
+    },
+    {
       "clientId": "openbank-services",
       "name": "OpenBank Services",
       "enabled": true,
