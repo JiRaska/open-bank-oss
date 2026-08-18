@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.8...admin-ui-v0.158.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize ledger amounts ([88f6776](https://github.com/JiRaska/open-bank-oss/commit/88f67768ad3dc4ada60e7884c0cf2cb889d0bafa))
+
 ## [0.158.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.7...admin-ui-v0.158.8) (2026-08-18)
 
 
