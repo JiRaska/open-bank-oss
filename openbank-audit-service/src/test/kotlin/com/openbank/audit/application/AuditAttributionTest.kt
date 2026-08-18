@@ -90,6 +90,28 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `sanctions-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's sanctions-service fix: SanctionsRepositoryImpl.eventPayload now
+        // serialises "sourceService" onto the outbox payload (the serialised SanctionsCheck
+        // aggregate) for both the screening and review events. Before this, EventAttribution's
+        // `openbank.sanctions.screening.event` -> `sanctions-service` entry already resolved these
+        // rows correctly, but as TOPIC-sourced rather than the producer's own claim — and this
+        // topic IS in audit-service's consumed-topics list today, so this is a live attribution
+        // upgrade (unlike sca-service's #5337, whose topic audit-service does not consume at all).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"id":"${UUID.randomUUID()}","status":"CLEAR","eventType":"SanctionChecked",""" +
+                """"sourceService":"sanctions-service"}""",
+            EventAddress(topic = "openbank.sanctions.screening.event"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("SanctionChecked")
+        assertThat(entry.captured.sourceService).isEqualTo("sanctions-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `account-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's account-service fix: AccountCreatedEvent /
         // AccountStatusChangedEvent / AccountClosedEvent / SavingsWithdrawalApproved now serialise
