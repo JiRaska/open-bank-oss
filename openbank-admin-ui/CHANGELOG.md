@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.7...admin-ui-v0.165.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** keyboard-enable inline navigation ([#5554](https://github.com/JiRaska/open-bank-oss/issues/5554)) ([a4ed5c1](https://github.com/JiRaska/open-bank-oss/commit/a4ed5c1c7d91a13c260af49d9016670c008d031b))
+
 ## [0.165.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.6...admin-ui-v0.165.7) (2026-08-18)
 
 
