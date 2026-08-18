@@ -38,7 +38,7 @@ The audit-service is a **compliance-domain** service (`governance.yaml: dataDoma
 
 **Out:**
 - Read API → admin-ui (auditors/admins/compliance), intra-OpenBank, role-gated.
-- `audit_outbox` → Kafka re-emit (compliance/SIEM stream) — wired in code, outbound channel not yet configured ([05](./05-operations.md)).
+- No outbound Kafka re-emit — the previously dead `audit_outbox` re-emit apparatus was removed as unused code (#5126); audit-service publishes no domain event of its own.
 
 No data leaves the EU/EEA region.
 
@@ -76,8 +76,6 @@ Deletion before expiry is blocked at the database layer (`no_delete_audit` rule)
 - ✅ Immutable storage: DB-level UPDATE/DELETE rejection
 - ✅ Rate limiting: `openbank.rate-limit` (200 concurrent)
 - ✅ Security headers: CSP `default-src 'self'`, HSTS, `X-Frame-Options: DENY`, nosniff, referrer/permissions policy
-- ✅ Resilience: outbox dispatcher with bulkhead/circuit-breaker/retry/timeout
 - ✅ Observability: Prometheus + OpenTelemetry + SmallRye Health
 - ✅ Secrets: env-injected, dev placeholders never shipped (Vault, ADR-0017)
-- ⚠️ Outbound re-emit channel (`audit-events-out`) not yet configured — dormant ([05](./05-operations.md))
 - ✅ `governance.yaml` datastore fields match the code (`primaryDatastore: PostgreSQL`, `databaseName: openbank_audit`; tables in `public`)

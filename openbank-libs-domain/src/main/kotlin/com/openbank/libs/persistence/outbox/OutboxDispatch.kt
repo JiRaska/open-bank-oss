@@ -47,13 +47,7 @@ sealed class OutboxDispatchOutcome {
  * [OutboxDispatch.isTransportUnavailable]) is simply absent — not a synthetic `Failed`, since no
  * attempt was made against it.
  */
-data class OutboxDispatchResult(val outcomes: List<OutboxDispatchOutcome> = emptyList()) {
-    /** Count of rows this batch delivered successfully. */
-    val dispatchedCount: Int get() = outcomes.count { it is OutboxDispatchOutcome.Dispatched }
-
-    /** Count of rows this batch parked as terminal DEAD (ADR-0050 N5). */
-    val deadCount: Int get() = outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }
-}
+data class OutboxDispatchResult(val outcomes: List<OutboxDispatchOutcome> = emptyList())
 
 object OutboxDispatch {
     // JDK System.Logger, not org.jboss.logging.Logger — this module must stay framework-free

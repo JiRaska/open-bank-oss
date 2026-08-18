@@ -28,8 +28,6 @@ Build je fast-jar (nikdy uber-jar — viz GitOps pravidla v root CLAUDE.md). Gen
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) nesou placeholdery `CHANGE_ME_LOCAL_DEV_ONLY`; produkce injektuje reálné hodnoty (Vault, ADR-0017). Placeholdery nikdy nešipuj.
 
-> **Mezera v odchozím kanálu:** Kafka kanál `audit-events-out` používaný `KafkaAuditOutboxEventPublisher` **není deklarován** v `application.yaml`. Dokud se nepřidá konektor `mp.messaging.outgoing.audit-events-out`, outbox dispatcher nemá živý sink. Jde o známou konfigurační mezeru, ne o tvrzení o runtime funkci.
-
 ## Serverless / workload tier (ADR-0057)
 
 audit-service je event consumer se stálou, low-latency ingest povinností a 10letým durability mandátem. **Není** dobrý kandidát na scale-to-zero: studený consumer by zaostával za audit streamem a riskoval zmeškání/zpoždění regulované evidence. Klasifikuj jako workload **always-on (warm) tier** podle [ADR-0057](../../../../docs/adr/0057-scale-to-zero-workload-tiers-and-finops-classifier.md); samotné read API by scale-down sneslo, ale Kafka consumer by měl zůstat rezidentní. (Přesný štítek tieru se nastavuje v konfiguraci FinOps klasifikátoru, ne v této službě.)

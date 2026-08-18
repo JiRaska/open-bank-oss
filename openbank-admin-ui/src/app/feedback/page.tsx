@@ -19,6 +19,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { MessageSquare, RefreshCw } from 'lucide-react'
+import { PageHeader } from '@/components/ui/PageHeader'
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
 } from 'recharts'
@@ -63,7 +64,7 @@ export default function ScreenFeedbackPage() {
   if (!data?.available) {
     return (
       <div className="page">
-        <h1><MessageSquare size={20} /> {cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}</h1>
+        <PageHeader icon={<MessageSquare size={18} aria-hidden="true" />} title={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'} subtitle={cs ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'} />
         <DataUnavailable
           kind={data?.error ? 'unreachable' : 'no_data'}
           service="ClickHouse"
@@ -83,12 +84,14 @@ export default function ScreenFeedbackPage() {
 
   return (
     <div className="page">
-      <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <h1><MessageSquare size={20} /> {cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}</h1>
-        <button className="btn btn-secondary" onClick={() => void load()}>
-          <RefreshCw size={16} /> {cs ? 'Obnovit' : 'Refresh'}
-        </button>
-      </header>
+      <PageHeader
+        icon={<MessageSquare size={18} aria-hidden="true" />}
+        title={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
+        subtitle={cs ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'}
+        actions={<button className="btn btn-secondary" onClick={() => void load()}>
+          <RefreshCw size={16} aria-hidden="true" /> {cs ? 'Obnovit' : 'Refresh'}
+        </button>}
+      />
 
       <section>
         <h2>{cs ? 'Které obrazovky bolí' : 'Which screens hurt'}</h2>

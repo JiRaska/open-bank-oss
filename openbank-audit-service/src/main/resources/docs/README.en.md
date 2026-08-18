@@ -9,7 +9,7 @@ This documentation is published directly by the service at the management endpoi
 | Section | Audience | What you'll find |
 |---|---|---|
 | [01 — Overview](./01-overview.md) | Product, audit, management | What the service does, who feeds it, where it sits in the domain |
-| [02 — Architecture](./02-architecture.md) | Engineering, tech leads | C4 diagrams, hexagonal layers, consume + outbox flow |
+| [02 — Architecture](./02-architecture.md) | Engineering, tech leads | C4 diagrams, hexagonal layers, consume flow |
 | [03 — API](./03-api.md) | Service developers, integrators | REST contract, error model, role gating |
 | [04 — Data](./04-data.md) | Data, analytics, DBA | Schema, migrations, immutability, retention, PII fields |
 | [05 — Operations](./05-operations.md) | DevOps, SRE, release engineers | Build, deploy, runbooks, SLO |
@@ -19,9 +19,9 @@ This documentation is published directly by the service at the management endpoi
 
 - **Tech stack:** Kotlin / Quarkus 3 (LTS) / JDK / PostgreSQL / Hibernate Reactive (Panache) / SmallRye Reactive Messaging (Kafka)
 - **Port:** 8113 (app), 8085 (management, root-path `/q`)
-- **Persistence:** PostgreSQL database `openbank_audit`, table `audit_entries` (append-only, `public` schema), Flyway migrations V1..V4
+- **Persistence:** PostgreSQL database `openbank_audit`, table `audit_entries` (append-only, `public` schema), Flyway migrations V1..V16
 - **Ingest:** Kafka consumer `audit-events-in` over topics `openbank.accounts.account.created`, `openbank.transactions.transaction.initiated`, `openbank.balance.events`, `openbank.party.events`, `openbank.kyc.events`, `openbank.consent.events`
-- **Outbox:** `audit_outbox` table + scheduled dispatcher (re-emit path, see [02](./02-architecture.md))
+- **Outbox:** none — no domain event of its own to publish; the dead `audit_outbox` re-emit apparatus was removed (#5126)
 - **Idempotency:** no `Idempotency-Key` header — write path is event-driven, each entry carries a unique `entry_id` UUID
 - **Auth:** Keycloak OIDC; read API gated to roles `ROLE_AUDITOR`, `ROLE_ADMIN`, `ROLE_COMPLIANCE`
 - **Money-path:** No (not in `rules.yaml: money_path_services`)
