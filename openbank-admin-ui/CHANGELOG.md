@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.11...admin-ui-v0.158.12) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize operator dates ([e4e1054](https://github.com/JiRaska/open-bank-oss/commit/e4e105452e348039e7f3e446bdc7f8fb0a43f13f))
+
 ## [0.158.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.10...admin-ui-v0.158.11) (2026-08-18)
 
 
