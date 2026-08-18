@@ -31,6 +31,8 @@ export default function AccountDetailPage() {
   const [error, setError]       = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [acting, setActing]     = useState(false)
+  const [actionIntent, setActionIntent] = useState<'freeze' | 'unfreeze' | 'close' | null>(null)
+  const [actionReason, setActionReason] = useState('')
 
   async function load() {
     setLoading(true); setError(null)
@@ -49,16 +51,22 @@ export default function AccountDetailPage() {
 
   useEffect(() => { load() }, [id])
 
-  async function doAction(action: 'freeze' | 'unfreeze' | 'close') {
+  function requestAction(action: 'freeze' | 'unfreeze' | 'close') {
+    setActionIntent(action)
+    setActionReason('')
+    setActionError(null)
+  }
+
+  async function doAction(action: 'freeze' | 'unfreeze' | 'close', reason: string) {
     if (!account) return
-    const reason = window.prompt(`Reason for ${action}:`)
-    if (reason === null) return
     setActing(true); setActionError(null)
     try {
       if (action === 'freeze')   await accountApi.freeze(id, reason)
       if (action === 'unfreeze') await accountApi.unfreeze(id, reason)
       if (action === 'close')    await accountApi.close(id, reason)
       await load()
+      setActionIntent(null)
+      setActionReason('')
     } catch {
       // Never surface a raw backend message (could be a bare "HTTP 500") for a
       // user-initiated write — show a calm, localized human message instead.
@@ -96,19 +104,19 @@ export default function AccountDetailPage() {
           <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
           <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true"/> {t('Zpět', 'Back')}</Link>
           {account.status === 'ACTIVE' && (
-            <button className="btn btn-secondary" onClick={() => doAction('freeze')} disabled={acting}>
+            <button className="btn btn-secondary" onClick={() => requestAction('freeze')} disabled={acting}>
               <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
             </button>
           )}
           {account.status === 'FROZEN' && (
-            <button className="btn btn-secondary" onClick={() => doAction('unfreeze')} disabled={acting}>
+            <button className="btn btn-secondary" onClick={() => requestAction('unfreeze')} disabled={acting}>
               <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
             </button>
           )}
           {account.status !== 'CLOSED' && (
             <button
               className="btn btn-secondary"
-              onClick={() => doAction('close')}
+              onClick={() => requestAction('close')}
               disabled={acting}
               style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
             >
@@ -117,6 +125,48 @@ export default function AccountDetailPage() {
           )}
         </div>}
       />
+
+      {actionIntent && (
+        <section
+          aria-labelledby="account-action-title"
+          aria-describedby="account-action-description"
+          style={{
+            marginBottom: '16px', padding: '16px', background: 'var(--surface)',
+            border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
+            boxShadow: '0 12px 28px rgba(15,23,42,0.12)',
+          }}
+        >
+          <h2 id="account-action-title" style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)' }}>
+            {t(
+              actionIntent === 'freeze' ? 'Zmrazit účet' : actionIntent === 'unfreeze' ? 'Odmrazit účet' : 'Zrušit účet',
+              actionIntent === 'freeze' ? 'Freeze account' : actionIntent === 'unfreeze' ? 'Unfreeze account' : 'Close account',
+            )}
+          </h2>
+          <p id="account-action-description" style={{ margin: '6px 0 12px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            {t('Uveďte důvod. Důvod se uloží do auditní stopy této změny.', 'Provide a reason. It will be recorded in this change’s audit trail.')}
+          </p>
+          <label htmlFor="account-action-reason" style={{ display: 'block', fontSize: '12px', fontWeight: 650, color: 'var(--text-primary)', marginBottom: '6px' }}>
+            {t('Důvod změny', 'Reason for change')}
+          </label>
+          <textarea
+            id="account-action-reason"
+            className="input"
+            rows={3}
+            autoFocus
+            value={actionReason}
+            onChange={event => setActionReason(event.target.value)}
+            placeholder={t('Např. žádost klienta / podezření na zneužití…', 'E.g. customer request / suspected abuse…')}
+          />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '10px' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => { setActionIntent(null); setActionReason(''); setActionError(null) }} disabled={acting}>
+              {t('Zrušit', 'Cancel')}
+            </button>
+            <button type="button" className="btn btn-primary" onClick={() => doAction(actionIntent, actionReason)} disabled={acting}>
+              {acting ? t('Ukládám…', 'Saving…') : t('Potvrdit změnu', 'Confirm change')}
+            </button>
+          </div>
+        </section>
+      )}
 
       {actionError && (
         <div
