@@ -93,6 +93,9 @@ quarkus:
       check-cron: "0 0 5 31 2 ?"
 
 openbank:
+  api:
+    # Major matches the served /api/v1 path and openapi.yaml (ADR-0048).
+    version: 1
   temporal:
     enabled: ${TEMPORAL_ENABLED:false}
     server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
