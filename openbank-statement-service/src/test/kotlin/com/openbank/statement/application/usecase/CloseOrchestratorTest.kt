@@ -132,5 +132,8 @@ class CloseOrchestratorTest {
 
         verify { outbox.append(capture(msg)) }
         AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, Instant.parse("2026-06-20T10:00:00Z"))
+        // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
+        // (EVENT-sourced) attribution.
+        assertThat(msg.captured.payload).contains("\"sourceService\":\"statement-service\"")
     }
 }

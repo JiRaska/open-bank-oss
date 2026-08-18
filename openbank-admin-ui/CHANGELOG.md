@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.159.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.14...admin-ui-v0.159.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** modernize legacy ops headers ([#5465](https://github.com/JiRaska/open-bank-oss/issues/5465)) ([ca23bea](https://github.com/JiRaska/open-bank-oss/commit/ca23bea2d8966670981a44e93effabe31695b84a))
+
 ## [0.158.14](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.13...admin-ui-v0.158.14) (2026-08-18)
 
 
