@@ -27,6 +27,7 @@ const EVENT_COLOR: Record<string, string> = {
 
 export default function AuditPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [entries, setEntries]   = useState<AuditEntry[]>([])
   const [loading, setLoading]   = useState(false)
   // Instead of a raw "HTTP 404" string, hold a typed reason that renders as a
@@ -75,6 +76,7 @@ export default function AuditPage() {
               className="input"
               style={{ paddingLeft: '32px', width: '100%', fontFamily: 'var(--font-mono)', fontSize: '12px' }}
               placeholder="Aggregate ID (account UUID, party UUID, transaction UUID…)"
+              aria-label={t('ID agregátu', 'Aggregate ID')}
               value={aggregateId}
               onChange={e => setAggregateId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()}
@@ -129,7 +131,7 @@ export default function AuditPage() {
                       {e.actorId ? `${e.actorType ?? 'USER'}:${e.actorId.slice(0, 8)}…` : 'system'}
                     </td>
                     <td style={{ fontSize: '12px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                      {new Date(e.occurredAt).toLocaleString()}
+                      {new Date(e.occurredAt).toLocaleString(dateLocale)}
                     </td>
                     <td style={{ color: 'var(--accent)', fontSize: '12px' }}>{expanded === e.id ? '▲' : '▼'}</td>
                   </tr>

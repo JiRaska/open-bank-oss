@@ -90,6 +90,46 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `document-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's document-service fix: DocumentGenerated and
+        // SignatureCeremonyCompleted (both objectMapper.writeValueAsString) now carry
+        // "sourceService". Before this, EventAttribution's `openbank.documents.document.event` ->
+        // `document-service` entry already resolved these rows correctly, but as TOPIC-sourced —
+        // and this topic IS in audit-service's consumed-topics list today, so this is a live
+        // attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"documentId":"${UUID.randomUUID()}","sourceService":"document-service"}""",
+            EventAddress(topic = "openbank.documents.document.event"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("document-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `security-scanner's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's security-scanner fix: IctIncidentService's hand-built
+        // ict-incident-events-out payload (its ONLY live event producer — the outbox apparatus
+        // was deleted entirely by #4709/#4940) now carries "sourceService". Before this,
+        // EventAttribution's `openbank.security.ict.incident` -> `security-scanner` entry
+        // already resolved these rows correctly, but as TOPIC-sourced rather than the producer's
+        // own claim — and this topic IS in audit-service's consumed-topics list today, so this
+        // is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"ICT_INCIDENT_REPORTED","sourceService":"security-scanner"}""",
+            EventAddress(topic = "openbank.security.ict.incident"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("ICT_INCIDENT_REPORTED")
+        assertThat(entry.captured.sourceService).isEqualTo("security-scanner")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
