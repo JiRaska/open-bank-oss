@@ -97,6 +97,30 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `domestic-payment's own eventType and sourceService win, no longer falling to the sentinels`(): Unit =
+        runBlocking {
+            // Issue #3994's own fix on the producer side: DomesticPaymentCreatedEvent /
+            // DomesticPaymentStatusChangedEvent now serialise "eventType" and "sourceService"
+            // themselves (openbank-domestic-payment/.../DomesticPaymentEvents.kt), so this no
+            // longer needs the ce-type header or the topic table to attribute correctly — the
+            // shape below is the real wire payload KafkaDomesticPaymentEventPublisher emits.
+            // RED before that producer change: with no such keys in the body this fell through to
+            // ce-type/topic (still correct, per the other tests here) but as TOPIC-sourced, not
+            // the producer's own EVENT-sourced claim.
+            val entry = capturingSave()
+
+            consumer.consume(
+                """{"paymentId":"${UUID.randomUUID()}","status":"SETTLED",""" +
+                    """"eventType":"DOMESTIC_PAYMENT_STATUS_CHANGED","sourceService":"domestic-payment"}""",
+                EventAddress(topic = "openbank.domestic.payment.events", ceType = "domestic.payment.status-changed"),
+            )
+
+            assertThat(entry.captured.eventType).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
+            assertThat(entry.captured.sourceService).isEqualTo("domestic-payment")
+            assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+        }
+
+    @Test
     fun `statement-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's statement-service fix: both hand-built JSON payload templates
         // (period.closed.v1 in StatementService.periodClosedEvent, period.close_failed.v1 in

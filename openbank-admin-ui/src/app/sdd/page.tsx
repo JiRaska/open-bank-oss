@@ -31,6 +31,7 @@ const STATUSES = ['', 'PENDING_CONFIRMATION', 'ACTIVE', 'SUSPENDED', 'CANCELLED'
 
 export default function SddPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [status, setStatus] = useState('')
   const [rows, setRows] = useState<Mandate[]>([])
   const [loading, setLoading] = useState(true)
@@ -108,7 +109,7 @@ export default function SddPage() {
                     <StatusBadge status={m.status} />
                   </td>
                   <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
-                    {m.createdAt ? new Date(m.createdAt).toLocaleString() : '—'}
+                    {m.createdAt ? new Date(m.createdAt).toLocaleString(dateLocale) : '—'}
                   </td>
                 </tr>
               )

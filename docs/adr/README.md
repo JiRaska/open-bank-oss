@@ -135,7 +135,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0118](0118-gdpr-data-lifecycle-and-retention.md) | GDPR data lifecycle — PII classification, retention periods, erasure model | Accepted | Shipped | privacy-gdpr,compliance,audit | — |
 | [0119](0119-ai-devops-agent.md) | AI DevOps Agent: proactive SSDLC / DORA observability and durable-fix proposals | Accepted | Partial | ai-agents,ci,observability | — |
 | [0120](0120-migrate-transaction-payment-orchestration-to-temporal.md) | Migrate transaction-service payment orchestration to Temporal | Accepted | Shipped | payments,transactions,resilience | — |
-| [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Accepted | Partial | supply-chain,security-ops,ci | — |
+| [0121](0121-service-self-reported-sbom-and-supply-chain-attestation.md) | Service self-reported SBOM and supply-chain attestation | Accepted | Shipped | supply-chain,security-ops,ci | — |
 | [0122](0122-split-openbank-libs-into-domain-and-runtime.md) | Split openbank-libs into domain and runtime modules | Accepted | Partial | libs,architecture,ci | — |
 | [0123](0123-relicense-to-apache-2.0.md) | Relicense the platform from MPL-2.0 to Apache-2.0 | Accepted | Shipped | licensing,governance | — |
 | [0124](0124-oss-readiness-and-public-launch-hardening.md) | OSS-readiness and public-launch hardening | Accepted | Partial | governance,security-ops,docs | — |
@@ -212,7 +212,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0201](0201-customer-segmentation-and-next-best-action-on-the-ml-decisioning-platform.md) | Customer segmentation and next-best-action on the ML decisioning platform | Proposed | Planned | ml,analytics,compliance,product-catalog | — |
 | [0202](0202-agent-to-agent-collaboration-over-proposal-events-mcp-and-temporal.md) | Agent-to-agent collaboration over proposal events, MCP and Temporal | Proposed | Planned | ai-agents,authz,kafka,governance | — |
 | [0203](0203-business-plane-ai-agents.md) | Business-plane AI agents | Proposed | Planned | ai-agents,governance,fraud,compliance | — |
-| [0204](0204-gdpr-article-20-data-portability-scope-format-and-direct-transmission-decision.md) | GDPR Article 20 data portability — scope, format and direct-transmission decision | Proposed | Planned | privacy-gdpr,compliance,psd2-api | — |
+| [0204](0204-gdpr-article-20-data-portability-scope-format-and-direct-transmission-decision.md) | GDPR Article 20 data portability — scope, format and direct-transmission decision | Proposed | Shipped | privacy-gdpr,compliance,psd2-api | — |
 | [0205](0205-marketing-consent-forwarder-and-sca-exempt-activation.md) | Marketing consent forwarder shape and SCA-exempt activation | Accepted | Shipped | privacy-gdpr,sca,accounts | — |
 | [0206](0206-scope-m2m-consent-grant-revoke-by-grantee-resource.md) | Scope M2M consent grant/revoke by grantee resource | Accepted | Shipped | authz,security-ops | — |
 | [0207](0207-business-date-authority-and-the-accounting-day-state-machine.md) | Business date authority and the accounting day state machine | Accepted | Partial | accounting-close,ledger,statements | — |
@@ -251,7 +251,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0240](0240-campaign-conversion-attribution-product-event.md) | Campaign conversion attribution: a product event correlated to the goal | Proposed | Planned | notifications,analytics,privacy-gdpr | — |
 | [0241](0241-alert-hygiene-zero-standing-critical-alerts.md) | Alert hygiene: zero standing critical alerts | Proposed | Planned | observability,governance,resilience | — |
 | [0242](0242-quarterly-dr-and-chaos-drill-with-measured-rto-rpo.md) | Quarterly DR and chaos drill with measured RTO/RPO | Proposed | Planned | resilience,governance,ci | — |
-| [0243](0243-k6-performance-gate-as-ci-advisory-check.md) | k6 performance gate as CI advisory check | Proposed | Planned | ci,testing,observability | — |
+| [0243](0243-k6-performance-gate-as-ci-advisory-check.md) | k6 performance gate as CI advisory check | Proposed | Shipped | ci,testing,observability | — |
 | [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Proposed | Planned | ai-agents,architecture,resilience,governance | — |
 | [0245](0245-campaign-conversion-as-an-observed-product-event.md) | Campaign conversion as an observed product event | Proposed | Planned | analytics,kafka,privacy-gdpr,admin-ui | — |
 | [0246](0246-admin-ui-swarm-thread-view-over-temporal-case-history.md) | Admin-ui swarm thread view over Temporal case history | Proposed | Planned | ai-agents,admin-ui,observability,governance | — |
@@ -262,7 +262,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0251](0251-independent-model-review-of-money-path-and-governance-prs.md) | Independent model review of money-path and governance PRs | Proposed | Planned | ci,governance,ai-agents,compliance | — |
 | [0252](0252-synthetic-customer-fleet.md) | Synthetic customer fleet and journey-based production assurance | Accepted | Partial | testing,observability,notifications,compliance | openbank-app |
 | [0253](0253-evidence-of-effect-a-control-must-be-able-to-show-it-carried-work.md) | Evidence of effect: a control must be able to show it carried work | Proposed | Planned | observability,testing,governance,architecture | — |
-| [0254](0254-ci-gate-estate-integrity.md) | CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage | Accepted | Partial | ci,governance | — |
+| [0254](0254-ci-gate-estate-integrity.md) | CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage | Accepted | Shipped | ci,governance | — |
 | [0255](0255-ci-gate-observability.md) | CI/QG observability: a read-only health snapshot, an admin-ui panel, and a ClickHouse/Grafana historical trend | Accepted | Partial | ci,governance,observability | — |
 | [0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md) | Perpetual KYC: event-driven re-screening between periodic reviews | Proposed | Planned | kyc,aml-sanctions,kafka,ai-agents | — |
 | [0257](0257-industry-neutral-product-catalog-kernel-and-standalone-distribution.md) | Industry-neutral product catalog kernel and standalone distribution | Accepted | Shipped | product-catalog,architecture,api-contract,database | — |
