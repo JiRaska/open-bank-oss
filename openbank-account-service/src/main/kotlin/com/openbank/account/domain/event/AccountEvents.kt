@@ -19,6 +19,19 @@ data class AccountCreatedEvent(
     val productId: UUID,
     val currency: String,
     override val occurredAt: Instant,
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution — issue #3994/#5256. This class already carries `eventType`
+     * via [DomainEvent], and that value ("AccountCreated") is a load-bearing discriminator read
+     * verbatim by balance-service's `BalanceInitConsumer`, document-service's
+     * `AccountCreatedConsumer`, statement-service's `AccountRegistryConsumer` and
+     * campaign-service's catalogs — it must NOT be renamed to match the audit fleet's
+     * SCREAMING_SNAKE_CASE convention (unlike domestic-payment's #5255 fix, which added a brand
+     * new field). `sourceService` has no such consumer, so it is safe to add net-new. Value
+     * matches the fleet's audit convention: the module directory without the `openbank-` prefix,
+     * the same spelling `TopicAttribution` already maps `openbank.accounts.account.created` to.
+     */
+    val sourceService: String = "account-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountCreated"
@@ -31,6 +44,8 @@ data class AccountStatusChangedEvent(
     val newStatus: AccountStatus,
     val reason: String?,
     override val occurredAt: Instant,
+    /** See [AccountCreatedEvent.sourceService] (#3994/#5256). */
+    val sourceService: String = "account-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountStatusChanged"
@@ -41,6 +56,8 @@ data class AccountClosedEvent(
     override val version: Long,
     val reason: String?,
     override val occurredAt: Instant,
+    /** See [AccountCreatedEvent.sourceService] (#3994/#5256). */
+    val sourceService: String = "account-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "AccountClosed"
@@ -61,6 +78,8 @@ data class SavingsWithdrawalApproved(
     val approvalId: String,
     val scaSessionId: UUID,
     override val occurredAt: Instant,
+    /** See [AccountCreatedEvent.sourceService] (#3994/#5256). */
+    val sourceService: String = "account-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Account"
     override val eventType = "SavingsWithdrawalApproved"
