@@ -12,7 +12,7 @@
 import { test, expect } from '@playwright/test'
 import { signInAsOperator } from './helpers/auth'
 
-// The console gates every route on an Auth.js session (src/middleware.ts); there is no
+// The console gates every route on an Auth.js session (src/proxy.ts); there is no
 // Keycloak in this environment, so each test signs in via a minted session cookie instead
 // of a real OIDC flow (see helpers/auth.ts for why this is safe).
 test.beforeEach(async ({ context, baseURL }) => {
