@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.167.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.6...admin-ui-v0.167.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** resolve party when opening account ([#5609](https://github.com/JiRaska/open-bank-oss/issues/5609)) ([741e66c](https://github.com/JiRaska/open-bank-oss/commit/741e66ce94b3731b8bb2f9966ebbed92c244cf75))
+
+
+### Bug Fixes
+
+* **admin-ui:** align AIOps enforcement copy ([#5607](https://github.com/JiRaska/open-bank-oss/issues/5607)) ([5f17064](https://github.com/JiRaska/open-bank-oss/commit/5f17064d2bb84f29a46be55c6c452b0b93a19558))
+
 ## [0.166.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.5...admin-ui-v0.166.6) (2026-08-18)
 
 
