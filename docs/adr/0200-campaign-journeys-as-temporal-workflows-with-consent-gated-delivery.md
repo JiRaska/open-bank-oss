@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [notifications, privacy-gdpr, compliance, mobile-app]
 summary: "A campaign-service ships the cohort capability ADR-0176 deferred: each enrolment is a Temporal workflow, consent is re-checked per step and revocation arrives as a workflow signal, so a journey stops mid-flight instead of at the next batch."
-followup: "#2749 — first sandbox rollout found 17 defects (4 stacked on the D2 revocation signal path alone); all fixed, but the path had never been exercised under traffic before that rollout"
+followup: "#2949 — first sandbox rollout found 17 defects (4 stacked on the D2 revocation signal path alone, e.g. #2949/#2973); all fixed, but the path had never been exercised under traffic before that rollout"
 ---
 
 # ADR-0200 — Campaign journeys as Temporal workflows with consent-gated delivery
@@ -17,9 +17,9 @@ followup: "#2749 — first sandbox rollout found 17 defects (4 stacked on the D2
 `CampaignJourneyWorkflow`/`CampaignEnrolmentSweepWorkflow`, per-step consent re-check and a
 `signalConsentRevoked` workflow signal (D2), suppression-aware reporting (D6), and the shared
 `openbank-libs-temporal` module ADR-0209 D1 required before this could ship without becoming a
-15th copy of `TemporalClientProducer.kt`. First rollout to sandbox (#2749) found and fixed 17
-defects, four independently masking the revocation path as a silent no-op — none visible from pod
-health alone.
+15th copy of `TemporalClientProducer.kt`. First rollout to sandbox (tracked in #2749, defects
+fixed across PRs including #2870/#2896/#2908/#2921/#2949/#2978) found and fixed 17 defects, four
+independently masking the revocation path as a silent no-op — none visible from pod health alone.
 
 ## Context
 
