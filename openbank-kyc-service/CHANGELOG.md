@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.12](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.11...kyc-service-v0.10.12) (2026-08-18)
+
+
+### Bug Fixes
+
+* **kyc:** add sourceService to KycEvents for audit attribution ([#5336](https://github.com/JiRaska/open-bank-oss/issues/5336)) ([3aa5e63](https://github.com/JiRaska/open-bank-oss/commit/3aa5e63af6335f04c2f773a9eae1a3429054910d)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.10...kyc-service-v0.10.11) (2026-08-17)
 
 
