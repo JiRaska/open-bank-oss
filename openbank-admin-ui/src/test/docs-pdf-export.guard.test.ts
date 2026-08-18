@@ -14,13 +14,18 @@ describe('long-form documentation PDF export contract', () => {
     const compliance = read('app/docs/compliance/page.tsx')
     const documentManagement = read('app/docs/document-management/page.tsx')
     const identityDedup = read('app/docs/identity-dedup/page.tsx')
+    const bcp = read('app/docs/bcp/page.tsx')
+    const zeroTrust = read('app/docs/zero-trust/page.tsx')
     const css = read('app/globals.css')
     expect(button).toContain('window.print()')
     expect(button).toContain("t('Exportovat PDF', 'Export PDF')")
-    for (const source of [readiness, threat, adr, compliance, documentManagement, identityDedup]) {
+    for (const source of [readiness, threat, adr, compliance, documentManagement, identityDedup, bcp, zeroTrust]) {
       expect(source).toContain('PrintDocumentButton')
       expect(source).toContain('className="docs-printable"')
     }
+    expect(bcp).toContain('className="docs-header-actions"')
+    expect(bcp).toContain('className="btn"')
+    expect(zeroTrust).toContain('className="docs-header-actions"')
     expect(css).toContain('.docs-printable .card')
   })
 })
