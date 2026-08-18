@@ -178,7 +178,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0167](0167-authz-policy-auditor-ai-agent.md) | authz-policy-auditor AI agent | Accepted | Partial | ai-agents,authz,governance | — |
 | [0168](0168-flaky-test-hunter-ai-agent.md) | flaky-test-hunter AI agent | Accepted | Partial | ai-agents,testing,ci | — |
 | [0169](0169-customer-document-access-and-sca-bound-signing.md) | Customer document access & SCA-bound signing over customer-edge | Accepted | Shipped | customer-edge,documents,sca,authz | — |
-| [0170](0170-onboarding-e-signature-flow-in-the-customer-app.md) | Onboarding e-signature flow in the customer app | Proposed | Planned | mobile-app,onboarding,documents,sca | — |
+| [0170](0170-onboarding-e-signature-flow-in-the-customer-app.md) | Onboarding e-signature flow in the customer app | Proposed | Partial | mobile-app,onboarding,documents,sca | — |
 | [0171](0171-verification-of-payee-for-outbound-credit-transfers.md) | Verification of Payee for outbound credit transfers | Accepted | Partial | payments,compliance | — |
 | [0172](0172-cryptographic-key-management-and-lifecycle.md) | Cryptographic key management and lifecycle | Accepted | Partial | crypto-keys,secrets,compliance | — |
 | [0173](0173-capacity-management-and-headroom.md) | Capacity management and headroom | Accepted | Partial | capacity,kubernetes,finops | — |
@@ -207,8 +207,8 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0196](0196-governance-declarations-are-cross-checked-against-the-code.md) | Governance declarations are cross-checked against the code | Accepted | Shipped | governance,database,compliance,ci | — |
 | [0197](0197-agpl-open-core-boundary-covers-the-whole-agent-plane.md) | AGPL open-core boundary covers the whole agent plane, enumerated in rules.yaml | Accepted | Shipped | licensing,ai-agents,governance | — |
 | [0198](0198-marketing-consent-as-a-first-class-consent-service-scope.md) | Marketing consent as a first-class consent-service scope | Accepted | Partial | privacy-gdpr,notifications,compliance | — |
-| [0199](0199-customer-360-read-model-in-a-new-crm-service.md) | Customer 360 read model in a new crm-service | Proposed | Planned | analytics,privacy-gdpr,architecture,admin-ui | — |
-| [0200](0200-campaign-journeys-as-temporal-workflows-with-consent-gated-delivery.md) | Campaign journeys as Temporal workflows with consent-gated delivery | Proposed | Planned | notifications,privacy-gdpr,compliance,mobile-app | — |
+| [0199](0199-customer-360-read-model-in-a-new-crm-service.md) | Customer 360 read model in a new crm-service | Superseded by [ADR-0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Planned | analytics,privacy-gdpr,architecture,admin-ui | — |
+| [0200](0200-campaign-journeys-as-temporal-workflows-with-consent-gated-delivery.md) | Campaign journeys as Temporal workflows with consent-gated delivery | Proposed | Partial | notifications,privacy-gdpr,compliance,mobile-app | — |
 | [0201](0201-customer-segmentation-and-next-best-action-on-the-ml-decisioning-platform.md) | Customer segmentation and next-best-action on the ML decisioning platform | Proposed | Planned | ml,analytics,compliance,product-catalog | — |
 | [0202](0202-agent-to-agent-collaboration-over-proposal-events-mcp-and-temporal.md) | Agent-to-agent collaboration over proposal events, MCP and Temporal | Proposed | Planned | ai-agents,authz,kafka,governance | — |
 | [0203](0203-business-plane-ai-agents.md) | Business-plane AI agents | Proposed | Planned | ai-agents,governance,fraud,compliance | — |
@@ -217,7 +217,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0206](0206-scope-m2m-consent-grant-revoke-by-grantee-resource.md) | Scope M2M consent grant/revoke by grantee resource | Accepted | Shipped | authz,security-ops | — |
 | [0207](0207-business-date-authority-and-the-accounting-day-state-machine.md) | Business date authority and the accounting day state machine | Accepted | Partial | accounting-close,ledger,statements | — |
 | [0208](0208-admin-ui-consolidation-a-primitive-layer-one-status-vocabulary-and-an-interactive-flow-explainer.md) | Admin UI consolidation: a primitive layer, one status vocabulary, and an interactive flow explainer | Proposed | Planned | admin-ui,architecture,governance | — |
-| [0209](0209-crm-and-campaign-sequencing-prerequisites-first-slice-and-what-must-not-start-yet.md) | CRM and campaign sequencing: prerequisites, first slice, and what must not start yet | Proposed | Planned | governance,architecture,ml,analytics | — |
+| [0209](0209-crm-and-campaign-sequencing-prerequisites-first-slice-and-what-must-not-start-yet.md) | CRM and campaign sequencing: prerequisites, first slice, and what must not start yet | Proposed | Partial | governance,architecture,ml,analytics | — |
 | [0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Customer 360 as a query over the analytics silver layer | Accepted | Shipped | analytics,architecture,privacy-gdpr,admin-ui | — |
 | [0211](0211-loan-origination-orchestration.md) | Loan origination orchestration: persisted state machine with durable timers, not a BPM suite | Proposed | Planned | lending,architecture,resilience | — |
 | [0212](0212-jurisdictional-credit-compliance-packs.md) | Jurisdictional credit compliance packs as versioned effective-dated data | Proposed | Planned | lending,compliance,product-catalog | — |
