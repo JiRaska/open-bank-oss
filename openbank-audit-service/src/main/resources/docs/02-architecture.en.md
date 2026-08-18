@@ -11,13 +11,7 @@ The service follows the hexagonal (ports & adapters) layout mandated by [ADR-000
  topics ─┼─►│ AuditConsumer   │────► │ AuditRepository  │────► │ PostgreSQL         │ │
  (in)   │  │ (@Incoming)     │ save │ (Panache)        │ JDBC │ openbank_audit     │ │
         │  └─────────────────┘      └──────────────────┘      │  • audit_entries   │ │
-        │                                                       │  • audit_outbox    │ │
-        │  ┌─────────────────┐      ┌──────────────────┐      └────────────────────┘ │
- Kafka  │  │ AuditOutbox     │◄──── │ AuditOutbox      │                              │
- (out)  │◄─┤ Dispatcher      │ drain│ Repository       │                              │
-        │  │ (@Scheduled 5s) │      └──────────────────┘                              │
-        │  └─────────────────┘                                                        │
-        │                                                                            │
+        │                                                       └────────────────────┘ │
         │  ┌─────────────────┐                                                        │
  HTTP  ─┼─►│ AuditResource   │────► AuditRepository.findByAggregateId(...)            │
  (read) │  │ (JAX-RS, OIDC)  │                                                        │
@@ -32,13 +26,9 @@ The service follows the hexagonal (ports & adapters) layout mandated by [ADR-000
 
 ### Application (`com.openbank.audit.application`)
 - **`AuditConsumer`** — the inbound use case. `@Incoming("audit-events-in")` receives a raw JSON string, parses it with Jackson, maps it to an `AuditEntry` (deriving `aggregateType`/`aggregateId` from the payload shape), and calls `AuditRepository.save`. Failures are logged and swallowed so a single poison message never stalls the consumer.
-- **`application.port.out`** — outbound ports: `AuditOutboxRepository` (read processable rows, mark sent/failed) and `AuditOutboxEventPublisher` (publish a payload). `AuditOutboxStatus` enum: `PENDING` / `SENT` / `FAILED`.
 
 ### Adapters / infrastructure (`com.openbank.audit.infrastructure`)
 - **`persistence.AuditRepository`** + `AuditEntryEntity` — Hibernate Reactive Panache repository. `save` runs inside `Panache.withTransaction`; `findByAggregateId` reads inside `Panache.withSession`, ordered by `occurredAt DESC`, paged to a caller-supplied limit (clamped 1..500).
-- **`persistence.entity.AuditOutboxEntity`** + `repository.AuditOutboxRepositoryImpl` — the transactional-outbox row mapping for `audit_outbox`.
-- **`outbox.AuditOutboxDispatcher`** — `@Scheduled(every = "5s")` drains up to 25 processable rows, publishing each through a resilience-wrapped call (`@Bulkhead`, `@CircuitBreaker`, `@Retry`, `@Timeout`) and marking it `SENT` or `FAILED`. The scheduler catches and swallows top-level errors so it never crashes the loop.
-- **`kafka.KafkaAuditOutboxEventPublisher`** — implements `AuditOutboxEventPublisher` by emitting a `Record<String,String>` on the `audit-events-out` channel.
 - **`rest.AuditResource`** — JAX-RS resource exposing the single read endpoint, gated with `@RolesAllowed`.
 
 ## Ingest flow (consume)
@@ -48,11 +38,15 @@ The service follows the hexagonal (ports & adapters) layout mandated by [ADR-000
 3. The payload is parsed; aggregate identity is inferred; a new `AuditEntry` with a fresh `entry_id` UUID and `recordedAt = now` is built.
 4. `AuditRepository.save` persists it transactionally. The DB trigger stamps `retention_until = occurred_at + 10 years`; immutability rules block any later mutation.
 
-## Outbox → Kafka flow (re-emit)
+## No outbound re-emit path
 
-The service carries the standard transactional-outbox machinery (`audit_outbox` table, `AuditOutboxDispatcher`, `KafkaAuditOutboxEventPublisher`) so recorded events can be re-published downstream (e.g. to a compliance/SIEM stream) with at-least-once delivery and back-pressure-safe resilience.
-
-> **Operational note:** the inbound channel `audit-events-in` is configured in `application.yaml`; the outbound `audit-events-out` channel is referenced by the publisher in code but is **not yet declared** in `application.yaml`. Treat the re-emit path as wired-but-dormant until the outgoing connector is configured (see [05 — Operations](./05-operations.md)). This is a deliberate inventory note, not a fabricated topic.
+audit-service is a consumer/sink: it writes append-only `audit_entries` from other services'
+events and publishes no domain event of its own. It previously carried a full
+transactional-outbox pipeline (`audit_outbox` table, `AuditOutboxDispatcher`,
+`KafkaAuditOutboxEventPublisher`) intended for a future compliance/SIEM re-emit, but nothing
+ever wrote to it — deleted as dead code (#5126), mirroring PR #1364's removal of sepa-instant's
+analogous unused `SctInstOutboxPort` pipeline. If a real need for an outbound audit event
+emerges, design it against that consumer, not by resurrecting this apparatus speculatively.
 
 ## Key ports
 
@@ -60,8 +54,6 @@ The service carries the standard transactional-outbox machinery (`audit_outbox` 
 |---|---|---|
 | `audit-events-in` (Kafka channel) | inbound | `AuditConsumer.consume` |
 | `AuditRepository.save` / `findByAggregateId` | persistence | Panache + PostgreSQL |
-| `AuditOutboxRepository` | outbound (DB) | `AuditOutboxRepositoryImpl` |
-| `AuditOutboxEventPublisher` | outbound (Kafka) | `KafkaAuditOutboxEventPublisher` |
 | `GET /api/v1/audit/entries/{aggregateId}` | inbound (HTTP) | `AuditResource` |
 
 ## Cross-cutting
