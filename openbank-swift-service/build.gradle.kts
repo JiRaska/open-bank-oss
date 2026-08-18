@@ -89,18 +89,11 @@ tasks.withType<Test> {
     // runner until the 45-minute fleet job timeout takes the whole matrix down with it — the
     // failure mode that caused the exclusion in the first place. Fail fast, not fail wide.
     systemProperty("junit.jupiter.execution.timeout.default", "8m")
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+
+    // Pact rootDir + Pact Broker property forwarding centralised into
+    // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // (ADR-0250 Phase 2, issue #4414) — the timeout above and the CI-only jvmArgs below are the
+    // service-specific parts that remain.
 
     // SwiftMessagePactProviderVerificationTest re-enabled 2026-07-23: the 404-hang reason is
     // gone — transaction-service publishes a consumer pact for openbank-swift-service on every

@@ -121,11 +121,24 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Same Linux-ARM64 scope and the same reasoning as auto-deploy's build-push.",
     ),
     "_service-ci.yml::build": (
-        "conditional",
-        "Provably never writes, by two complementary expressions: `cache-disabled` on "
-        "self-hosted (ARC NAT egress, ~$200/mo) and `cache-read-only` on GitHub-hosted. "
-        "Declared so that changing EITHER expression alone — which would silently re-arm "
-        "26 per-service writers — shows up here.",
+        "read-only",
+        "ADR-0250 Phase 2 split the old single self-hosted-or-GitHub-hosted job in two: "
+        "`build` is now ALWAYS GitHub-hosted (never self-hosted), so its Gradle-cache "
+        "inputs are literal (`cache-disabled: false`, `cache-read-only: true`) rather "
+        "than the `runner.environment`-conditioned expressions the pre-split job used — "
+        "there is no longer a self-hosted branch here to make this `conditional`. The "
+        "self-hosted, cache-disabled leg (ARC NAT egress, ~$200/mo) moved to the new "
+        "`contract` job below.",
+    ),
+    "_service-ci.yml::contract": (
+        "disabled",
+        "ADR-0250 Phase 2: the self-hosted half of the pre-split `build` job (ARC NAT "
+        "egress FinOps, ~$200/mo — ties GitHub Actions cache off entirely and relies on "
+        "the in-cluster remote Gradle build cache instead, GRADLE_REMOTE_CACHE_URL via "
+        "arc-runners.tf, ADR-0043). Runs only on main push/dispatch to publish provider-"
+        "pact verification, never on a PR, so it costs the writer budget nothing either "
+        "way — declared for the same reason `build` is: so a change to `cache-disabled` "
+        "here shows up.",
     ),
     "api-fuzz.yml::fuzz": ("read-only", "Consumer; restores fleet-lint's home."),
     "api-fuzz-authenticated.yml::fuzz-authenticated": (
