@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.165.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.164.0...admin-ui-v0.165.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** trigger bounded flaky test check ([#5497](https://github.com/JiRaska/open-bank-oss/issues/5497)) ([89f1a9f](https://github.com/JiRaska/open-bank-oss/commit/89f1a9fc3394d4d3a266880f107e6d89015bfbaf))
+
+
+### Bug Fixes
+
+* **admin-ui:** honor active locale in ops docs ([#5514](https://github.com/JiRaska/open-bank-oss/issues/5514)) ([6425547](https://github.com/JiRaska/open-bank-oss/commit/642554709bc42f5192fc07b0c1e73fcc0efc4642))
+
 ## [0.164.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.163.0...admin-ui-v0.164.0) (2026-08-18)
 
 
