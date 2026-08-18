@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.2...document-service-v0.11.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **document-service:** add sourceService to outbox events for audit attribution ([#5391](https://github.com/JiRaska/open-bank-oss/issues/5391)) ([e89923a](https://github.com/JiRaska/open-bank-oss/commit/e89923acc9d091fb397eec3fe2a57742ff603fe1)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.1...document-service-v0.11.2) (2026-08-17)
 
 
