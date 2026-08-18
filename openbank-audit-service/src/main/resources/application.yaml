@@ -178,8 +178,6 @@ openbank:
     commit: "${GIT_COMMIT:unknown}"
   gdpr:
     audit-retention-days: 3650
-  outbox:
-    dispatch-enabled: true
   retention:
     # ADR-0118 §2/§5, issue #268: session/access-log TTL cleanup.
     # SAFETY: enabled defaults to false and dry-run defaults to true — this scheduler ships

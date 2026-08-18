@@ -4,7 +4,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText } from 'lucide-react'
+import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText, Printer } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
@@ -18,7 +18,7 @@ export default function QrlessPayPage() {
   const { t } = useLanguage()
 
   return (
-    <div>
+    <div className="qrlesspay-doc">
       <DocsPageHeader
         crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -31,6 +31,12 @@ export default function QrlessPayPage() {
             'Open BLE phone-to-phone profile for scan-less pay. Bank-agnostic, backend-optional — aimed at becoming a standard (ČBA/EPC).',
           )}
         icon={<Bluetooth aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+        actions={
+          <button type="button" className="qrlesspay-export-action" onClick={() => window.print()}>
+            <Printer size={14} aria-hidden="true" />
+            {t('Exportovat PDF', 'Export PDF')}
+          </button>
+        }
       />
 
       {/* Status strip */}

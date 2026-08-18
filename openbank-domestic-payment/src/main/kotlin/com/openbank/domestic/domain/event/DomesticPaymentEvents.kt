@@ -34,6 +34,25 @@ data class DomesticPaymentCreatedEvent(
      * payments with no consumer-side change.
      */
     val initiatedByPartyId: UUID?,
+    /**
+     * Discriminator read by `AuditConsumer` (`node.textOrNull("eventType")`) — issue #3994. Before
+     * this field the body had no `eventType` key at all, so the consumer fell all the way through
+     * to `address.ceType` (the outbox `ce-type` header, itself only populated once #3994's
+     * consumer-side fix landed) or the `"UNKNOWN"` sentinel. SCREAMING_SNAKE_CASE to match the
+     * fleet's other direct body-field producers (`BalanceEventType.BALANCE_UPDATED`,
+     * customer-edge's `CUSTOMER_POCKET_EXCHANGED`/`STANDING_ORDER_CREATED`) rather than the
+     * dotted-lowercase spelling the outbox `eventType` column uses for the same event
+     * (`domestic.payment.created`) — that column feeds the `ce-type` header, a different audience.
+     */
+    val eventType: String = "DOMESTIC_PAYMENT_CREATED",
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution — stronger than its topic-derived fallback (issue #3994). Value
+     * matches the fleet's audit convention: the module directory without the `openbank-` prefix,
+     * the same spelling `TopicAttribution` already maps `openbank.domestic.payment.events` to and
+     * that customer-edge already writes for its own events.
+     */
+    val sourceService: String = "domestic-payment",
 )
 
 data class DomesticPaymentStatusChangedEvent(
@@ -43,6 +62,10 @@ data class DomesticPaymentStatusChangedEvent(
     val rejectReason: String?,
     val rejectDetail: String?,
     val occurredAt: Instant,
+    /** See [DomesticPaymentCreatedEvent.eventType] (#3994). */
+    val eventType: String = "DOMESTIC_PAYMENT_STATUS_CHANGED",
+    /** See [DomesticPaymentCreatedEvent.sourceService] (#3994). */
+    val sourceService: String = "domestic-payment",
 )
 
 fun DomesticPayment.toCreatedEvent(clock: Clock) = DomesticPaymentCreatedEvent(
@@ -60,4 +83,6 @@ fun DomesticPayment.toCreatedEvent(clock: Clock) = DomesticPaymentCreatedEvent(
     endToEndId = endToEndId,
     occurredAt = Instant.now(clock),
     initiatedByPartyId = initiatedByPartyId,
+    eventType = "DOMESTIC_PAYMENT_CREATED",
+    sourceService = "domestic-payment",
 )

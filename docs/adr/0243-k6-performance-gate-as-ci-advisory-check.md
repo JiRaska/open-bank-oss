@@ -1,7 +1,7 @@
 ---
 date: 2026-08-04
 decision-status: proposed
-delivery-status: planned
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +11,11 @@ summary: "Add an advisory k6 HTTP performance gate to CI: boot a service via qua
 ---
 
 # ADR-0243 — k6 performance gate as CI advisory check
+
+**Delivery note (2026-08-18):** The advisory pilot is shipped. `perf-gate.yml` runs the
+product-catalog smoke script weekly/manual, performs a real-route preflight, enforces k6
+thresholds, uploads the summary artifact, and raises an issue for scheduled failures. Money-path
+promotion and enforcement remain future work and are not claimed here.
 
 ## Context
 

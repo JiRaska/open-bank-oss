@@ -28,8 +28,6 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) carry `CHANGE_ME_LOCAL_DEV_ONLY` placeholders; production injects real values (Vault, ADR-0017). Never ship the placeholders.
 
-> **Outbound channel gap:** the `audit-events-out` Kafka channel used by `KafkaAuditOutboxEventPublisher` is **not declared** in `application.yaml`. Until an `mp.messaging.outgoing.audit-events-out` connector is added, the outbox dispatcher has no live sink. This is a known config gap, not a runtime feature claim.
-
 ## Serverless / workload tier (ADR-0057)
 
 audit-service is an event consumer with a steady, low-latency ingest obligation and a 10-year durability mandate. It is **not** a good scale-to-zero candidate: a cold consumer would lag the audit stream and risk missing/ delaying regulated evidence. Classify it as an **always-on (warm) tier** workload under [ADR-0057](../../../../docs/adr/0057-scale-to-zero-workload-tiers-and-finops-classifier.md); the read API alone could tolerate scale-down, but the Kafka consumer should stay resident. (Exact tier label is set in the FinOps classifier config, not in this service.)

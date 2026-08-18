@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { ShieldCheck, ScrollText, Scale, Lock, Landmark, ListOrdered, Info } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 const ACCENT = '#6366f1'
 const INK = 'var(--text-primary)'
@@ -102,7 +103,7 @@ export default function QrlessPayReadinessPage() {
   const { t } = useLanguage()
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -117,6 +118,7 @@ export default function QrlessPayReadinessPage() {
             'What security, compliance and counsel will each ask — including the questions we would rather they did not. A self-assessment by the implementing team, not an approval.',
           )}
         icon={<ScrollText aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+        actions={<PrintDocumentButton />}
       />
 
       <div className="card" style={{ padding: 14, marginBottom: 16, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', gap: 10 }}>
