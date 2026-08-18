@@ -106,6 +106,7 @@ export function AgentDock() {
               <select
                 value={model}
                 onChange={e => setModel(e.target.value)}
+                aria-label={t('Model asistenta', 'Assistant model')}
                 style={{ fontSize: 11, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-secondary)' }}
               >
                 {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
