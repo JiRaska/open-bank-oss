@@ -11,6 +11,7 @@ import {
   ShieldCheck, Dna, Star,
 } from 'lucide-react'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 import type { TestResultsResponse, ServiceTestResult } from '@/lib/types/test-results'
 import type { QualityReport, MutationScore, ContractVerification, ServiceQualityScore } from '@/lib/types/quality-report'
 
@@ -59,7 +60,8 @@ function StatusBadge({ status }: { status: 'passed' | 'failed' | 'pending' }) {
 // ── Tests tab ─────────────────────────────────────────────────────────────────
 
 function ServiceRow({ svc }: { svc: ServiceTestResult }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const hasTests = svc.tests > 0
   const hasFail = svc.failed + svc.errors > 0
   const statusIcon = !hasTests
@@ -91,7 +93,7 @@ function ServiceRow({ svc }: { svc: ServiceTestResult }) {
         {hasTests ? `${svc.durationMs}ms` : '—'}
       </td>
       <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-        {svc.lastRunAt ? new Date(svc.lastRunAt).toLocaleString() : '—'}
+        {svc.lastRunAt ? new Date(svc.lastRunAt).toLocaleString(dateLocale) : '—'}
       </td>
       <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '11px', color: 'var(--text-tertiary)' }}>
         {t(`${svc.unit.tests} unit`, `${svc.unit.tests} unit`)} / {t(`${svc.integration.tests} int.`, `${svc.integration.tests} int.`)}
@@ -195,7 +197,8 @@ function TestsTab({ data, error, loading }: { data: TestResultsResponse | null; 
 // ── Contract tab ──────────────────────────────────────────────────────────────
 
 function ContractTab({ contracts, error }: { contracts: ContractVerification[]; error: boolean }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   if (error) {
     return (
@@ -267,7 +270,7 @@ function ContractTab({ contracts, error }: { contracts: ContractVerification[]; 
                             <StatusBadge status={contract.status} />
                             {contract.verifiedAt && (
                               <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>
-                                {new Date(contract.verifiedAt).toLocaleDateString()}
+                                {new Date(contract.verifiedAt).toLocaleDateString(dateLocale)}
                               </span>
                             )}
                           </div>
@@ -360,7 +363,8 @@ function MutationGauge({ score, threshold = 70 }: { score: number | null; thresh
 }
 
 function MutationTab({ mutations, error }: { mutations: MutationScore[]; error: boolean }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   if (error) {
     return (
@@ -414,7 +418,7 @@ function MutationTab({ mutations, error }: { mutations: MutationScore[]; error: 
               </div>
               {mut.reportedAt && (
                 <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                  {new Date(mut.reportedAt).toLocaleDateString()}
+                  {new Date(mut.reportedAt).toLocaleDateString(dateLocale)}
                 </div>
               )}
             </div>
@@ -520,7 +524,8 @@ function QualityTab({ scores }: { scores: ServiceQualityScore[] }) {
 type Tab = 'tests' | 'contract' | 'mutation' | 'quality'
 
 export default function TestCoveragePage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [tab, setTab] = useState<Tab>('tests')
 
   const [testData, setTestData] = useState<TestResultsResponse | null>(null)
@@ -571,36 +576,23 @@ export default function TestCoveragePage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>{t('OpenBank', 'OpenBank')}</span><span className="breadcrumb-sep">/</span>
-            <span>{t('Systém', 'System')}</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Kvalita kódu', 'Code Quality')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FlaskConical size={18} style={{ color: 'var(--accent)' }} />
-            {t('Kvalita kódu', 'Code Quality')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
-              'Výsledky testů, kontraktní verifikace (Pact), mutační testování (pitest) a kompozitní skóre kvality.',
-              'Test results, contract verification (Pact), mutation testing (pitest), and composite quality score.',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>{t('OpenBank', 'OpenBank')}</span><span className="breadcrumb-sep">/</span><span>{t('Systém', 'System')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Kvalita kódu', 'Code Quality')}</span></div>}
+        icon={<FlaskConical size={20} aria-hidden="true" />}
+        title={t('Kvalita kódu', 'Code Quality')}
+        subtitle={t('Výsledky testů, kontraktní verifikace (Pact), mutační testování (pitest) a kompozitní skóre kvality.', 'Test results, contract verification (Pact), mutation testing (pitest), and composite quality score.')}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button onClick={load} disabled={testLoading || qualityLoading} className="btn btn-secondary btn-sm">
             <RefreshCw size={13} style={{ animation: (testLoading || qualityLoading) ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       <div style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
         {tabs.map(tabDef => (

@@ -1,0 +1,50 @@
+name: Standing critical alert digest
+
+on:
+  schedule:
+    - cron: "30 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  digest:
+    name: Query Alertmanager and publish digest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Render standing-critical digest
+        env:
+          ALERTMANAGER_URL: ${{ secrets.ALERTMANAGER_URL }}
+          ALERTMANAGER_DIGEST_TOKEN: ${{ secrets.ALERTMANAGER_DIGEST_TOKEN }}
+          DIGEST_OUTPUT: standing-critical-digest.md
+        run: python3 .github/scripts/standing-critical-digest.py
+      - name: Upload digest and RCA review artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: standing-critical-digest-${{ github.run_id }}
+          path: standing-critical-digest.md
+          retention-days: 90
+      - name: Publish to on-call Slack
+        env:
+          WEBHOOK: ${{ secrets.ALERTMANAGER_DIGEST_SLACK_WEBHOOK }}
+        run: |
+          test -n "$WEBHOOK" || { echo "ALERTMANAGER_DIGEST_SLACK_WEBHOOK is required" >&2; exit 1; }
+          python3 - <<'PY'
+          import json, os, urllib.request
+          body = open('standing-critical-digest.md', encoding='utf-8').read()
+          request = urllib.request.Request(os.environ['WEBHOOK'], data=json.dumps({'text': body}).encode(), headers={'Content-Type': 'application/json'})
+          with urllib.request.urlopen(request, timeout=20) as response:
+              if response.status >= 300: raise SystemExit(f'Slack returned HTTP {response.status}')
+          PY
+      - name: Open weekly RCA review issue when criticals stand
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if grep -q 'Open criticals: \*\*[1-9]' standing-critical-digest.md; then
+            gh issue create --title "Weekly critical-alert RCA review (${{ github.run_id }})" \
+              --body-file standing-critical-digest.md
+          fi
