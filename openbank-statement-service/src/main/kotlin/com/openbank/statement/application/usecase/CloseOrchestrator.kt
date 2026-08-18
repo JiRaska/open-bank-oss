@@ -209,6 +209,8 @@ class CloseOrchestrator(
         // One clock read, used for both names: `failedAt` is this event's business instant, so
         // `occurredAt` must be the SAME value, not a second read. Two reads would put two "when"s
         // on one failure and let them drift under load.
+        // `sourceService` (issue #3994/#5256): see periodClosedEvent's KDoc in StatementService.kt
+        // for the full rationale — same live attribution upgrade, same hand-built JSON idiom.
         val failedAt = clock()
         val payload = """
             {"eventType":"account.statement.period.close_failed.v1",
@@ -221,7 +223,8 @@ class CloseOrchestrator(
             "failedAt":"$failedAt",
             "occurredAt":"$failedAt",
             "actorId":"${StatementEventActors.PERIOD_CLOSE}",
-            "actorType":"${EventActor.TYPE_SYSTEM}"}
+            "actorType":"${EventActor.TYPE_SYSTEM}",
+            "sourceService":"statement-service"}
         """.trimIndent().replace("\n", "")
         return outbox.append(
             StatementOutboxMessage(
