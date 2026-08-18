@@ -57,6 +57,16 @@ object KycEvents {
             "occurredAt" to at,
             EventActor.FIELD_ACTOR_ID to actorId(case),
             EventActor.FIELD_ACTOR_TYPE to actorType(case),
+            // Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+            // (EVENT-sourced) attribution — issue #3994/#5256. `eventType` here is already
+            // SCREAMING_SNAKE_CASE (KYC_CASE_OPENED etc.) and load-bearing for
+            // onboarding-service's `OnboardingEventConsumer` and party-service's
+            // `KycAmlEventConsumer`, so it is unchanged. `sourceService` has no such consumer,
+            // so it is safe to add net-new. Value matches the fleet's audit convention: the
+            // module directory without the `openbank-` prefix, the same spelling
+            // `TopicAttribution` already maps `openbank.kyc.events` to and this file's own
+            // `actorId`/`SERVICE` constant already uses for the SYSTEM actor id.
+            "sourceService" to SERVICE,
         ),
     )
 
