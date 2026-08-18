@@ -22,6 +22,7 @@ const STATUS_PILL: Record<string, string> = {
 export default function LedgerPage() {
   const [fromDate, setFromDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 10) })
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
   const [result, setResult]     = useState<CursorPage<JournalEntry> | null>(null)
   const [loading, setLoading]   = useState(false)
@@ -200,11 +201,11 @@ export default function LedgerPage() {
                                       </span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0', textAlign: 'right' }}>
-                                      <span className="mono">{Number(line.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                      <span className="mono">{Number(line.amount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}><span className="tag">{line.currencyCode}</span></td>
                                     <td style={{ padding: '6px 12px 6px 0', textAlign: 'right' }}>
-                                      <span className="mono">{Number(line.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                      <span className="mono">{Number(line.baseAmount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td style={{ padding: '6px 0' }}><span className="tag">{line.baseCurrencyCode}</span></td>
                                   </tr>
