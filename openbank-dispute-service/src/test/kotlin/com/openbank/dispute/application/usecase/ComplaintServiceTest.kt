@@ -65,6 +65,24 @@ class ComplaintServiceTest {
         AuditEventTime.assertRecordedAsEventTime(msg.captured.payload, filed.updatedAt.toInstant())
     }
 
+    /**
+     * #3994/#5256: `sourceService` is the strongest (EVENT-sourced) attribution
+     * `AuditConsumer.resolveSourceService` reads. Complaints share dispute-service's own outbox
+     * topic (`openbank.dispute.events`), which audit-service subscribes to today — a live
+     * attribution upgrade over `TopicAttribution`'s TOPIC-sourced fallback, not a forward-looking
+     * one.
+     */
+    @Test
+    fun `the complaint payload carries sourceService for AuditConsumer attribution`() {
+        val today = LocalDate.of(2026, 6, 9)
+        val msg = slot<OutboxMessage>()
+        every { repo.save(any(), capture(msg)) } answers { Uni.createFrom().item(firstArg<Complaint>()) }
+
+        serviceAt(today).file(fileRequest()).await().indefinitely()
+
+        assertThat(msg.captured.payload).contains(""""sourceService":"dispute-service"""")
+    }
+
     // ---- intake deadline clock (15 business days, CZK / CERTIS) ----
 
     @Test
