@@ -103,6 +103,25 @@ class CardServiceTest {
         }
     }
 
+    @Test fun `issue card's outbox payload carries sourceService for AuditConsumer attribution`(): Unit = runBlocking {
+        // Issue #3994/#5256: `sourceService` is the strongest (EVENT-sourced) attribution
+        // `AuditConsumer.resolveSourceService` reads. `openbank.cards.events` is in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade over
+        // `TopicAttribution`'s TOPIC-sourced fallback, not a forward-looking one.
+        val command = issueCmd("idem-source-service")
+        coEvery { repo.findByIdempotencyKey(command.idempotencyKey) } returns null
+        coEvery { repo.save(any(), any()) } answers { firstArg() }
+
+        service.issueCard(command)
+
+        coVerify {
+            repo.save(
+                any(),
+                match { it.payload.contains(""""sourceService":"card-issuance-service"""") },
+            )
+        }
+    }
+
     @Test fun `activate card writes status changed event to the outbox`(): Unit = runBlocking {
         val pending = card(status = CardStatus.PENDING)
         val command = CardStatusCommand(cardId = pending.id, reason = "Manual activation", changedBy = "ops-user")
