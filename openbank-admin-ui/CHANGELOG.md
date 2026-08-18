@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.1...admin-ui-v0.165.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize banking record dates ([#5523](https://github.com/JiRaska/open-bank-oss/issues/5523)) ([81993da](https://github.com/JiRaska/open-bank-oss/commit/81993da51fac0d2245f5c63e8aa4c2fbdd898fd0))
+
 ## [0.165.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.0...admin-ui-v0.165.1) (2026-08-18)
 
 
