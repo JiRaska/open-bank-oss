@@ -260,16 +260,19 @@ jobs:
           shopt -s nullglob
           files=(pacts/${{ inputs.service }}-*.json)
           for f in "${files[@]}"; do cp "$f" pact-handoff/; done
-          echo "pact-count=${#files[@]}" > pact-handoff/.manifest
+          echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
           echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: consumer-pacts-${{ inputs.service }}
           path: pact-handoff/
-          # `.manifest` is always written above, so an empty consumer-pact set still
+          # `manifest.txt` is always written above, so an empty consumer-pact set still
           # produces a non-empty artifact — "if-no-files-found" only fires if the whole
           # collection step never ran, which should already have failed the job outright.
+          # NOT named `.manifest`: actions/upload-artifact defaults to
+          # include-hidden-files: false, so a dotfile-only directory silently uploads as
+          # empty and if-no-files-found fires anyway, even though the step above ran fine.
           if-no-files-found: error
           retention-days: 3
 
@@ -577,11 +580,11 @@ jobs:
       - name: Stage handed-off consumer pacts into pacts/
         run: |
           set -euo pipefail
-          if [ ! -f pact-handoff/.manifest ]; then
-            echo "::error::pact hand-off artifact from the build job has no .manifest — treating this as a failed hand-off, not an empty consumer-pact set (the build job always writes one)."
+          if [ ! -f pact-handoff/manifest.txt ]; then
+            echo "::error::pact hand-off artifact from the build job has no manifest.txt — treating this as a failed hand-off, not an empty consumer-pact set (the build job always writes one)."
             exit 1
           fi
-          cat pact-handoff/.manifest
+          cat pact-handoff/manifest.txt
           mkdir -p pacts
           shopt -s nullglob
           files=(pact-handoff/*.json)
