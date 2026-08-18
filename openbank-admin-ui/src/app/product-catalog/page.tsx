@@ -129,7 +129,8 @@ function InfoRow({ label, value, mono }: { label: string; value: React.ReactNode
 }
 
 function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { product: Product; onClose: () => void; onEdit: () => void; onToggleStatus: () => void }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [tab, setTab] = useState<'overview' | 'cards' | 'multicurrency' | 'overdraft' | 'deposit' | 'savings' | 'fees' | 'tac' | 'history'>('overview')
 
   type TabId = 'overview' | 'cards' | 'multicurrency' | 'overdraft' | 'deposit' | 'savings' | 'fees' | 'tac' | 'history'
@@ -211,8 +212,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
             <div>
               <SectionHeader icon={<TrendingDown size={13} />} label="Sazby & limity" />
               {product.baseRate != null && product.baseRate > 0 && <InfoRow label="Základní sazba" value={`${(product.baseRate * 100).toFixed(3)} % p.a.`} mono />}
-              {product.minBalance != null && <InfoRow label="Min. zůstatek" value={`${product.minBalance.toLocaleString('cs-CZ')} ${product.currency}`} mono />}
-              {product.maxBalance != null && <InfoRow label="Max. zůstatek" value={`${product.maxBalance.toLocaleString('cs-CZ')} ${product.currency}`} mono />}
+              {product.minBalance != null && <InfoRow label="Min. zůstatek" value={`${product.minBalance.toLocaleString(numberLocale)} ${product.currency}`} mono />}
+              {product.maxBalance != null && <InfoRow label="Max. zůstatek" value={`${product.maxBalance.toLocaleString(numberLocale)} ${product.currency}`} mono />}
             </div>
 
             {(product.tags?.length ?? 0) > 0 && (
@@ -261,7 +262,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{f.name}</span>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 800, color: f.amount === 0 ? 'var(--success-text)' : 'var(--text-primary)' }}>
-                      {f.amount === 0 ? 'Zdarma' : f.frequency === 'PERCENTAGE' ? `${f.amount} %` : `${f.amount.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} ${f.currency}`}
+                      {f.amount === 0 ? 'Zdarma' : f.frequency === 'PERCENTAGE' ? `${f.amount} %` : `${f.amount.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} ${f.currency}`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -317,7 +318,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           <div>
             <SectionHeader icon={<TrendingDown size={13} />} label="Konfigurace debetu" />
             <InfoRow label="Typ" value={product.overdraftConfig.type} />
-            <InfoRow label="Max. limit" value={`${product.overdraftConfig.maxLimitAmount.toLocaleString('cs-CZ')} ${product.currency}`} mono />
+            <InfoRow label="Max. limit" value={`${product.overdraftConfig.maxLimitAmount.toLocaleString(numberLocale)} ${product.currency}`} mono />
             <InfoRow label="Sazba (sjednaný)" value={`${(product.overdraftConfig.interestRateAnnual * 100).toFixed(2)} % p.a.`} mono />
             <InfoRow label="Ochranná lhůta" value={`${product.overdraftConfig.gracePeriodDays} dní`} mono />
             <InfoRow label="Auto-schválení" value={product.overdraftConfig.autoApprovalEnabled ? 'Ano' : 'Ne'} />
@@ -351,8 +352,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                   </tr></thead>
                   <tbody>{product.savingsConfig.interestTiers.map((tier, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.fromAmount.toLocaleString('cs-CZ')}</td>
-                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.toAmount != null ? tier.toAmount.toLocaleString('cs-CZ') : '∞'}</td>
+                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.fromAmount.toLocaleString(numberLocale)}</td>
+                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.toAmount != null ? tier.toAmount.toLocaleString(numberLocale) : '∞'}</td>
                       <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 700, color: 'var(--success-text)' }}>{(tier.rateAnnual * 100).toFixed(3)} %</td>
                     </tr>
                   ))}</tbody>
