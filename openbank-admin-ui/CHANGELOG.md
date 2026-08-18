@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.9...admin-ui-v0.165.10) (2026-08-18)
+
+
+### Performance
+
+* **admin-ui:** stabilize cloud diagram renders ([#5562](https://github.com/JiRaska/open-bank-oss/issues/5562)) ([30de830](https://github.com/JiRaska/open-bank-oss/commit/30de83029d6bc0f25b1c153edcfcb2ff98ff2dbe))
+
 ## [0.165.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.8...admin-ui-v0.165.9) (2026-08-18)
 
 
