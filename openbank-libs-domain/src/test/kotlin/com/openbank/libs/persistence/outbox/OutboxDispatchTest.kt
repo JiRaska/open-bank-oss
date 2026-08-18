@@ -156,8 +156,8 @@ class OutboxDispatchTest {
 
         val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { } }
 
-        assertThat(result.dispatchedCount).isEqualTo(2)
-        assertThat(result.deadCount).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isEqualTo(2)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
         assertThat(result.outcomes).allMatch { it is OutboxDispatchOutcome.Dispatched }
         assertThat(result.outcomes.map { it.entry.eventId }).containsExactly(rows[0].eventId, rows[1].eventId)
     }
@@ -170,8 +170,8 @@ class OutboxDispatchTest {
 
         val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { error("kafka down") } }
 
-        assertThat(result.dispatchedCount).isZero()
-        assertThat(result.deadCount).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
         val outcome = result.outcomes.single() as OutboxDispatchOutcome.Failed
         assertThat(outcome.terminal).isFalse()
     }
@@ -184,8 +184,8 @@ class OutboxDispatchTest {
 
         val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { error("still failing") } }
 
-        assertThat(result.dispatchedCount).isZero()
-        assertThat(result.deadCount).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isEqualTo(1)
         val outcome = result.outcomes.single() as OutboxDispatchOutcome.Failed
         assertThat(outcome.terminal).isTrue()
     }
@@ -205,8 +205,8 @@ class OutboxDispatchTest {
 
         // This is the falsifying assertion: a no-op/wrong wiring that always reports
         // dispatchedCount == claimed.size, or deadCount == failedCount, would fail here.
-        assertThat(result.dispatchedCount).isEqualTo(1)
-        assertThat(result.deadCount).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isEqualTo(1)
         assertThat(result.outcomes.filterIsInstance<OutboxDispatchOutcome.Failed>()).hasSize(2)
         assertThat(
             result.outcomes.filterIsInstance<OutboxDispatchOutcome.Failed>().count { !it.terminal },
@@ -238,7 +238,7 @@ class OutboxDispatchTest {
         assertThat(outcome.terminal)
             .describedAs("must reflect the DEAD status markFailed actually returned")
             .isTrue()
-        assertThat(result.deadCount).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isEqualTo(1)
     }
 
     @Test
@@ -253,7 +253,7 @@ class OutboxDispatchTest {
         // The breaker aborts before the first row's publish is even attempted (#4005) — no
         // outcome at all, not a Failed(terminal = false).
         assertThat(result.outcomes).isEmpty()
-        assertThat(result.dispatchedCount).isZero()
-        assertThat(result.deadCount).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
     }
 }
