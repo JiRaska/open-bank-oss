@@ -235,7 +235,7 @@ function HeapBar({ pct, efficiency }: { pct: number | null; efficiency: string }
 // "concern" direction (red) per the FinOps framing.
 function DailySpendTrend({ daily, currency }: { daily: DailyCost[]; currency: string }) {
   const { t, language } = useLanguage()
-  const locale = language === 'cs' ? 'cs-CZ' : 'en-US'
+  const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = (v: number) => v.toLocaleString(locale, { maximumFractionDigits: 0 })
 
   if (!daily || daily.length < 2) {
@@ -338,6 +338,7 @@ function toAgentFinding(a: FinOpsAnomaly, t: (cs: string, en: string) => string)
 
 function FinOpsContent() {
   const { t, language } = useLanguage()
+  const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [lifecycle, setLifecycle] = useState<LifecycleData | null>(null)
   const [resources, setResources] = useState<ResourceData | null>(null)
   const [costs, setCosts] = useState<CostReport | null>(null)
@@ -415,7 +416,7 @@ function FinOpsContent() {
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(locale)}
             </span>
           )}
           <Link
@@ -453,7 +454,7 @@ function FinOpsContent() {
               icon={<ShieldCheck size={18} />}
               label={t('Typ podpory EKS', 'EKS Support Tier')}
               value={lifecycle.currentTier === 'standard' ? 'Standard' : lifecycle.currentTier === 'extended' ? 'Extended' : 'EOL'}
-              sub={`v${lifecycle.currentVersion} · $${lifecycle.monthlyEstimate.toLocaleString()}/mo`}
+              sub={`v${lifecycle.currentVersion} · $${lifecycle.monthlyEstimate.toLocaleString(locale)}/mo`}
               color={tierColor}
               accent
             />
@@ -468,7 +469,7 @@ function FinOpsContent() {
             <KpiCard
               icon={<DollarSign size={18} />}
               label={t('Měsíční cloud náklady', 'Monthly Cloud Spend')}
-              value={costs?.available ? `$${Math.round(costs.total).toLocaleString()}` : '—'}
+              value={costs?.available ? `$${Math.round(costs.total).toLocaleString(locale)}` : '—'}
               sub={costs?.available
                 ? t(`${costs.services.length} služeb · ${costs.periodStart}→${costs.periodEnd}`, `${costs.services.length} services · ${costs.periodStart}→${costs.periodEnd}`)
                 : t('Cost Explorer snapshot není k dispozici', 'No Cost Explorer snapshot')}
@@ -570,7 +571,7 @@ function FinOpsContent() {
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: '14px', marginBottom: '20px',
                     padding: '16px 20px', borderRadius: '12px', background: 'rgba(22,163,74,0.05)', border: '1px solid #86efac' }}>
                     <span style={{ fontSize: '48px', fontWeight: 900, color: '#16a34a', letterSpacing: '-0.05em', lineHeight: 1 }}>
-                      ${costs.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${costs.total.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </span>
                     <div>
                       <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -601,7 +602,7 @@ function FinOpsContent() {
                             {t('Posledních 7 dní', 'Last 7 days')}
                           </div>
                           <div style={{ fontSize: '26px', fontWeight: 800, color: 'var(--text-primary)', lineHeight: 1.15 }}>
-                            ${l7.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            ${l7.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                           </div>
                         </div>
                         <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -926,7 +927,7 @@ function FinOpsContent() {
               {aiCosts?.available && (
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('Zdroj: Langfuse → Prometheus (ADR-0112 P1)', 'Source: Langfuse → Prometheus (ADR-0112 P1)')}
-                  {' · '}{new Date(aiCosts.collectedAt).toLocaleTimeString()}
+                  {' · '}{new Date(aiCosts.collectedAt).toLocaleTimeString(locale)}
                 </span>
               )}
             </div>
@@ -955,7 +956,7 @@ function FinOpsContent() {
                   padding: '14px 18px', borderRadius: '10px', background: 'rgba(99,102,241,0.05)', border: '1px solid rgba(99,102,241,0.2)' }}>
                   <div>
                     <div style={{ fontSize: '32px', fontWeight: 900, color: '#6366f1', letterSpacing: '-0.04em', lineHeight: 1 }}>
-                      ${aiCosts.totalCostLast7dUsd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      ${aiCosts.totalCostLast7dUsd.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '2px' }}>
                       {t('Celkem AI náklady — posledních 7 dní', 'Total AI costs — last 7 days')}
@@ -1202,13 +1203,13 @@ function FinOpsContent() {
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
                     <span>{t('Měsíční odhad', 'Monthly estimate')}</span>
                     <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace' }}>
-                      ${lifecycle.monthlyEstimate.toLocaleString()}
+                      ${lifecycle.monthlyEstimate.toLocaleString(locale)}
                     </span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>{t('Roční úspora vs. extended', 'Annual savings vs extended')}</span>
                     <span style={{ fontWeight: 700, color: '#16a34a', fontFamily: 'monospace' }}>
-                      +${lifecycle.annualSavingsVsExtended.toLocaleString()}
+                      +${lifecycle.annualSavingsVsExtended.toLocaleString(locale)}
                     </span>
                   </div>
                 </div>

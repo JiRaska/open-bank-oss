@@ -7,6 +7,7 @@ import { useState, useEffect } from 'react'
 import { ShieldAlert, CheckCircle2, XCircle, Clock, AlertTriangle, RefreshCw, ChevronDown, ChevronRight, Server, Database, Lock, Zap, CreditCard, Eye, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 
 type Bilingual = [cs: string, en: string]
@@ -170,7 +171,8 @@ const CATALOG_PRESENT = TIERS.flatMap(tier => tier.services.map(s => s.name))
   .filter(n => n.endsWith('-service') || n.endsWith('-payment') || n.endsWith('-instant'))
 
 export default function BcpPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [health, setHealth] = useState<ServiceHealth>({})
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
@@ -301,7 +303,7 @@ export default function BcpPage() {
   }
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span>
@@ -313,13 +315,15 @@ export default function BcpPage() {
         title={t('Plán kontinuity provozu', 'Business Continuity Plan')}
         subtitle={t('Prioritizovaný plán obnovy dle DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines', 'Prioritized recovery plan per DORA Art. 11-12, CNB § 20d, EBA ICT Risk Guidelines')}
         icon={<ShieldAlert aria-hidden="true" size={18} style={{ color: '#dc2626' }} />}
-        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-              {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString('cs-CZ')}
+              {t('Aktualizováno:', 'Updated:')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
+          <PrintDocumentButton />
           <button
+            className="btn"
             onClick={fetchHealth}
             disabled={loading}
             style={{

@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
+# See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
+
+openapi: 3.1.0
+info:
+  title: Flaky Test Hunter API
+  version: 1.0.0
+  description: Internal development-plane agent API. It scans fleet test source; any automated repair is constrained to the agent's own test source and is proposed for human review only.
+  license:
+    name: AGPL-3.0-only
+    url: https://www.gnu.org/licenses/agpl-3.0.html
+servers:
+  - url: http://localhost:8148
+    description: Local development
+tags:
+  - name: Flaky test checks
+paths:
+  /api/v1/flaky-test-hunter/check/trigger:
+    post:
+      tags: [Flaky test checks]
+      operationId: triggerFlakyTestCheck
+      summary: Run a flaky-test check and wait for its report
+      security: [{ bearerAuth: [ROLE_ADMIN] }]
+      responses:
+        '200': { description: Completed check report }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/flaky-test-hunter/check/trigger-async:
+    post:
+      tags: [Flaky test checks]
+      operationId: triggerFlakyTestCheckAsync
+      summary: Admit a durable flaky-test workflow without waiting for its report
+      description: A 202 confirms only workflow admission, not completion, a proposal, PR creation, or human approval.
+      security: [{ bearerAuth: [ROLE_ADMIN] }]
+      responses:
+        '202':
+          description: Workflow admission accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [workflowId]
+                properties:
+                  workflowId: { type: string }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/flaky-test-hunter/findings:
+    get:
+      tags: [Flaky test checks]
+      operationId: listFlakyTestFindings
+      summary: List active flaky-test findings
+      security: [{ bearerAuth: [ROLE_ADMIN, ROLE_VIEWER] }]
+      responses:
+        '200': { description: Active findings }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/flaky-test-hunter/findings/{id}:
+    get:
+      tags: [Flaky test checks]
+      operationId: getFlakyTestFinding
+      summary: Get one active flaky-test finding
+      security: [{ bearerAuth: [ROLE_ADMIN, ROLE_VIEWER] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Finding }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Finding not found }
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer }
+  responses:
+    Unauthorized: { description: Authentication is required }
+    Forbidden: { description: The authenticated role is not permitted }

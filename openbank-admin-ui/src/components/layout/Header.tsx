@@ -4,10 +4,10 @@
 
 'use client'
 
-import { Bell, Search, HelpCircle, LogOut, ChevronDown } from 'lucide-react'
+import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CommandPalette } from '@/components/search/CommandPalette'
@@ -15,12 +15,19 @@ import styles from './Header.module.css'
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
-export function Header() {
+export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolean; onMenuToggle?: () => void }) {
   const { data: session } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const mobileMenuRef = useRef<HTMLButtonElement>(null)
+  const wasMobileNavOpen = useRef(false)
   const { language, setLanguage, t } = useLanguage()
   const [build, setBuild] = useState<BuildInfo | null>(null)
+
+  useEffect(() => {
+    if (wasMobileNavOpen.current && !mobileNavOpen) mobileMenuRef.current?.focus()
+    wasMobileNavOpen.current = Boolean(mobileNavOpen)
+  }, [mobileNavOpen])
 
   useEffect(() => {
     let mounted = true
@@ -57,6 +64,17 @@ export function Header() {
 
   return (
     <header className={styles.header}>
+      <button
+        type="button"
+        ref={mobileMenuRef}
+        className={styles.mobileMenu}
+        aria-label={mobileNavOpen ? t('Zavřít navigaci', 'Close navigation') : t('Otevřít navigaci', 'Open navigation')}
+        aria-expanded={mobileNavOpen}
+        aria-controls="admin-sidebar"
+        onClick={onMenuToggle}
+      >
+        {mobileNavOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
+      </button>
       {/* Search — ADR-0228 D3: the painted placeholder is now a real palette. */}
       <button
         onClick={() => setPaletteOpen(true)}

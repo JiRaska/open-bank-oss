@@ -6,6 +6,7 @@
 import { Shield, CheckCircle2, AlertTriangle, XCircle, Info } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 // Bilingual string tuple: [Czech, English] — spread into t(cs, en) at render.
 type Bilingual = [string, string]
@@ -138,7 +139,7 @@ export default function CompliancePage() {
   const warnItems = COMPLIANCE_AREAS.flatMap(a => a.items).filter(i => i.status === 'warn').length
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -148,6 +149,7 @@ export default function CompliancePage() {
         title={t('Report compliance', 'Compliance Report')}
         subtitle={t('EBA · ČNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · připravenost na audit', 'EBA · CNB · PSD2 · GDPR · AML 5AMLD/6AMLD · FATCA/CRS · audit readiness')}
         icon={<Shield aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<PrintDocumentButton />}
       />
 
       {/* Summary */}

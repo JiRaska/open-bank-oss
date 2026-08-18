@@ -18,6 +18,7 @@ import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
 import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 
 @Path("/api/v1/flaky-test-hunter")
@@ -28,6 +29,18 @@ class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private 
     @RolesAllowed("ROLE_ADMIN")
     fun triggerCheck(): FlakyTestReport = runBlocking {
         runCheck.run(RunTrigger.OPERATOR_MANUAL)
+    }
+
+    /**
+     * Starts the durable operator workflow without holding an Admin UI request open for a fleet
+     * scan and any per-finding diagnosis. The id is the operator-visible handle; completion and
+     * any proposal remain recorded by the workflow, not implied by this accepted response.
+     */
+    @POST
+    @Path("/check/trigger-async")
+    @RolesAllowed("ROLE_ADMIN")
+    fun triggerCheckAsync(): Response = runBlocking {
+        Response.accepted(FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL))).build()
     }
 
     @GET
@@ -44,3 +57,5 @@ class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private 
         getFindings.getById(id) ?: throw NotFoundException("Finding $id not found")
     }
 }
+
+data class FlakyTestCheckStarted(val workflowId: String)
