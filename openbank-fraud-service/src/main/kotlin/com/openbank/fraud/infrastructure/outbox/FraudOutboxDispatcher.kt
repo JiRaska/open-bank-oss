@@ -5,6 +5,7 @@
 package com.openbank.fraud.infrastructure.outbox
 
 import com.openbank.fraud.application.port.out.FraudOutboxRepository
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -29,7 +30,8 @@ class FraudOutboxDispatcher(
     // that fills forever with attempt_count staying 0 and no error anywhere.
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
 

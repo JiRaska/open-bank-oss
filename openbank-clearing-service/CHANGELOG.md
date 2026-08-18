@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.10](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.9...clearing-service-v0.7.10) (2026-08-18)
+
+
+### Bug Fixes
+
+* **clearing:** add sourceService for AuditConsumer attribution ([#5351](https://github.com/JiRaska/open-bank-oss/issues/5351)) ([0a6d67d](https://github.com/JiRaska/open-bank-oss/commit/0a6d67d0be73249cf4f81df430432dcc3c742cdb)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.7.9](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.8...clearing-service-v0.7.9) (2026-08-17)
 
 

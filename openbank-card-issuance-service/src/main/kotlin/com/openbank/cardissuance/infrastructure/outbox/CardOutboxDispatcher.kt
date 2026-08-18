@@ -5,6 +5,7 @@ package com.openbank.cardissuance.infrastructure.outbox
 
 import com.openbank.cardissuance.application.port.out.CardOutboxRepository
 import com.openbank.cardissuance.infrastructure.kafka.KafkaCardOutboxEventPublisher
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -42,7 +43,8 @@ class CardOutboxDispatcher(
     private val publisher: KafkaCardOutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
 
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher

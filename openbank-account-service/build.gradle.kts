@@ -102,22 +102,9 @@ tasks.withType<Test> {
     // boots per module rather than keep paying for them.
     maxHeapSize = "2g"
 
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-
-    // Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D` into the
-    // (forked) test JVM. When `pactbroker.url` is unset (local) the @PactBroker provider test is
-    // @EnabledIfSystemProperty-skipped and git-pact above stays the fallback.
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    // Pact rootDir + Pact Broker property forwarding centralised into
+    // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
 }
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266). Weekly +

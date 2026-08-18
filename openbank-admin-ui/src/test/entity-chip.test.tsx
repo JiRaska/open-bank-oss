@@ -7,13 +7,20 @@
 // always deep-links to the entity.
 
 import { render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { SessionProvider } from 'next-auth/react'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { ROLES } from '@/lib/auth/roles'
 
 const PARTY_ID = 'b7c1a2d3-1111-4000-8000-0000000000aa'
 const ACCOUNT_ID = 'c8d2b3e4-2222-4000-8000-0000000000bb'
 
 describe('EntityChip (ADR-0231 D3)', () => {
+  const renderChip = (chip: ReactElement) => render(
+    <SessionProvider session={{ user: { roles: [ROLES.VIEWER] } } as never}>{chip}</SessionProvider>,
+  )
+
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ legalName: 'Jan Novák' }), { status: 200 }),
@@ -24,7 +31,7 @@ describe('EntityChip (ADR-0231 D3)', () => {
   })
 
   it('renders a pre-resolved label as a deep-link without fetching', () => {
-    render(<EntityChip type="party" id={PARTY_ID} label="Jan Novák" />)
+    renderChip(<EntityChip type="party" id={PARTY_ID} label="Jan Novák" />)
     const link = screen.getByRole('link')
     expect(link.getAttribute('href')).toBe(`/parties/${PARTY_ID}`)
     expect(link.textContent).toContain('Jan Novák')
@@ -32,7 +39,7 @@ describe('EntityChip (ADR-0231 D3)', () => {
   })
 
   it('resolves the label through the BFF when only the id is known', async () => {
-    render(<EntityChip type="party" id={PARTY_ID} />)
+    renderChip(<EntityChip type="party" id={PARTY_ID} />)
     await waitFor(() => expect(screen.getByText('Jan Novák')).toBeTruthy())
     const [url] = vi.mocked(fetch).mock.calls[0] as [string]
     expect(url).toContain(`/api/v1/parties/${PARTY_ID}`)
@@ -42,14 +49,14 @@ describe('EntityChip (ADR-0231 D3)', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ accountNumber: '192000145399/0800' }), { status: 200 }),
     ))
-    render(<EntityChip type="account" id={ACCOUNT_ID} />)
+    renderChip(<EntityChip type="account" id={ACCOUNT_ID} />)
     await waitFor(() => expect(screen.getByText('192000145399/0800')).toBeTruthy())
     expect(screen.getByRole('link').getAttribute('href')).toBe(`/accounts/${ACCOUNT_ID}`)
   })
 
   it('falls back to a shortened UUID when resolution fails', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('down')))
-    render(<EntityChip type="party" id={PARTY_ID} />)
+    renderChip(<EntityChip type="party" id={PARTY_ID} />)
     await waitFor(() => expect(screen.getByRole('link').textContent).toContain('b7c1a2d3…'))
   })
 })

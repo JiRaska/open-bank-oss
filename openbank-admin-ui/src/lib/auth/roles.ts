@@ -63,10 +63,11 @@ export const PERMISSIONS = {
   "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
   "catalog:author":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_AUTHOR],
   "catalog:publish":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_PUBLISH],
-  // Parties / KYC / Onboarding — KYC_OPENER may NOT approve (four-eyes, ADR-0116);
-  // KYC_REVIEWER may NOT open. The UI mirrors the backend @RolesAllowed split so a
-  // holder of only one KYC role gets exactly their half of the workflow.
-  "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // Parties / KYC / Onboarding — party-service's list/search/detail GETs accept
+  // VIEWER/OPERATOR/ADMIN/KYC only (PartyResource.kt). Compliance and the
+  // split KYC opener/reviewer roles use their own case endpoints and must not
+  // receive a PII party directory link that the backend will 403.
+  "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC],
   // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
   // must never be offered a customer-creation workflow.
   "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],

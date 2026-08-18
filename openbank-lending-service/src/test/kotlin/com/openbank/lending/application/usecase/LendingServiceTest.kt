@@ -1893,4 +1893,163 @@ class LendingServiceTest {
         assertThat(occurredAtOf(emitted.single { it.eventType == "loan.provisioned" }))
             .isEqualTo(expectedEventTime)
     }
+
+    // --- sourceService (issue #3994/#5256, fleet follow-up to #5255 and the eighteen prior slices) ---
+    //
+    // `sourceService` is the strongest (EVENT-sourced) attribution `AuditConsumer.resolveSourceService`
+    // reads. `EventAttribution.TopicAttribution` already maps `openbank.lending.events` ->
+    // `lending-service` correctly, but only as TOPIC-sourced — and audit-service subscribes to that
+    // topic today (`openbank-audit-service`'s `application.yaml` consumed-topics list; all nine lending
+    // event types share this single outbox channel/topic, `KafkaLendingOutboxEventPublisher`'s
+    // `lending-events-out` -> `openbank.lending.events`), so this is a live attribution upgrade for
+    // every event type below, not a forward-looking one. lending-service is a money-path service
+    // (`rules.yaml: money_path_services`).
+    //
+    // The literal value is `"lending"`, matching the 3 event types that already carried it before this
+    // PR (`credit.application.transition`, `credit.decision.evaluated`, `credit.loan.transition`) —
+    // not `"lending-service"`, the string `EventAttribution`'s topic-fallback table uses for this
+    // producer. That is a pre-existing inconsistency this PR preserves rather than introduces: every
+    // lending-service event now agrees with every OTHER lending-service event, which is a strictly
+    // better state than adding a second, different self-reported string for these six.
+
+    private fun sourceServiceOf(message: LendingOutboxMessage): String =
+        com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get("sourceService").asText()
+
+    @Test
+    fun `loan disbursed carries sourceService on the wire`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
+
+        service.disburse(app.id, "dave").await().indefinitely()
+
+        val disbursed = emitted.single { it.eventType == "loan.disbursed" }
+        assertThat(sourceServiceOf(disbursed)).isEqualTo("lending")
+        assertThat(disbursed.payload).contains("\"sourceService\":\"lending\"")
+    }
+
+    @Test
+    fun `loan interest_accrued carries sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val due = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { installments.findAccruable(any(), any()) } returns Uni.createFrom().item(due)
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500).await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.interest_accrued" }))
+            .isEqualTo("lending")
+    }
+
+    @Test
+    fun `loan written_off carries sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol", reason = "insolvency"))
+            .await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.written_off" }))
+            .isEqualTo("lending")
+    }
+
+    @Test
+    fun `loan rescheduled carries sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.rescheduled" }))
+            .isEqualTo("lending")
+    }
+
+    @Test
+    fun `loan stage_changed and loan provisioned carry sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val asOf = firstDue.plusDays(40)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-06",
+            asOf = firstDue,
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.stage_changed" }))
+            .isEqualTo("lending")
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.provisioned" }))
+            .isEqualTo("lending")
+    }
 }

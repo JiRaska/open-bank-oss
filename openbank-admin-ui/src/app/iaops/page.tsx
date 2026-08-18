@@ -798,8 +798,8 @@ function IAOpsContent() {
             </div>
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '12px 0 0', lineHeight: 1.5 }}>
               {t(
-                'Pozn.: Fáze 1 je advisory + audit-only — kontroly jsou zavedené, ale enforcement (OPA block) ještě neběží. EU AI Act se klasifikuje per agent; oversight/dev agenti jsou proposal-only (pravděpodobně limited risk). Žádný agent se nedotýká scoringu úvěruschopnosti.',
-                'Note: Phase 1 is advisory + audit-only — controls are in place but enforcement (OPA block) is not yet live. EU AI Act is classified per agent; oversight/dev agents are proposal-only (likely limited risk). No agent touches creditworthiness scoring.',
+                'Pozn.: Fáze 1 je vynucovaná, je-li PDP dostupný: policy gate je deny-by-default a OPA blokuje nepovolené volání nástrojů. Při výpadku PDP se režim degraduje na advisory. Fáze 2 zůstává read-only a proposal-only — každý návrh rozhoduje člověk. EU AI Act se klasifikuje per agent; žádný agent se nedotýká scoringu úvěruschopnosti.',
+                'Note: Phase 1 is enforced while the PDP is available: the policy gate is deny-by-default and OPA blocks disallowed tool calls. A PDP outage degrades the gate to advisory. Phase 2 remains read-only and proposal-only — a human decides every proposal. EU AI Act is classified per agent; no agent touches creditworthiness scoring.',
               )}
             </p>
           </Card>

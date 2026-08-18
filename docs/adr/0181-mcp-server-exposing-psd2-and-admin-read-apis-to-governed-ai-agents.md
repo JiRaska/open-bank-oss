@@ -1,16 +1,25 @@
 ---
 date: 2026-07-23
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ai-agents, psd2-api, authz]
 summary: "Expose a first-party MCP server over curated PSD2/admin read tools plus the existing HITL write-proposal flow, every tool-call authorized by the ADR-0034 OPA PDP as principal type AI_AGENT — reusing the agent-governance plane."
+followup: "#1922 — the ADR-0030-shape threat model and MCP spec-conformance suite this ADR calls a required deliverable, not a follow-up, are still outstanding"
 ---
 
 # ADR-0181 — MCP server exposing PSD2 and admin read APIs to governed AI agents
+
+**Delivery note (2026-08-18).** `openbank-mcp-service` is built and live in the sandbox
+(port 8150, version 0.15.1): the 5 curated tools (4 read-only + `propose_payment` HITL) from the
+Decision section, gated by the shared ADR-0034 OPA PDP as `AI_AGENT` (PR #2104 phase 1, PR #2142 +
+#2152 phase-2 OPA wiring — `tools/call` verified live against both `agents.allow` and the REST
+bridge). What this ADR's own Assurance clause treats as part of the deliverable rather than a
+follow-up has not shipped: no `docs/threat-models/mcp-service.md`, and no verification against the
+MCP spec conformance suite — both still gate enabling the surface outside the sandbox.
 
 ## Context
 
