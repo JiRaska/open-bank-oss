@@ -69,6 +69,8 @@ function readStateFor(status: number): ReadState {
 export default function ApplicationFlowPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
 
   const [app, setApp] = useState<Application | null>(null)
   const [events, setEvents] = useState<EvidenceEvent[]>([])
@@ -165,7 +167,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
     s ? (STATE_LABELS[s] ? (language === 'cs' ? STATE_LABELS[s].cs : STATE_LABELS[s].en) : s) : '—'
 
   const money = (m?: { amount: number; currency: string }) =>
-    m ? `${m.amount.toLocaleString('cs-CZ')} ${m.currency}` : '—'
+    m ? `${m.amount.toLocaleString(numberLocale)} ${m.currency}` : '—'
 
   return (
     <div>
@@ -292,7 +294,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
                   {history.map((h, i) => (
                     <tr key={`${h.state}-${h.at}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
-                        {h.at ? new Date(h.at).toLocaleString() : '—'}
+                        {h.at ? new Date(h.at).toLocaleString(dateLocale) : '—'}
                       </td>
                       <td style={{ padding: '10px 14px' }}>
                         <span title={h.state}>{stateLabel(h.state)}</span>

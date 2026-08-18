@@ -24,15 +24,21 @@ const ACTION_ICON: Record<CardAction, React.ElementType> = {
 }
 
 export function CardTransitionButtons({
-  card, busy, onSelect,
+  card, busy, canManage, canBlock, onSelect,
 }: {
   card: Card
   /** `${cardId}:${action}` of the in-flight write, or null. */
   busy: string | null
+  /** activate, suspend and resume are ROLE_OPERATOR/ROLE_ADMIN only. */
+  canManage: boolean
+  /** block and cancel also admit the service-authorized ROLE_COMPLIANCE emergency role. */
+  canBlock: boolean
   onSelect: (transition: CardTransition) => void
 }) {
   const { t } = useLanguage()
-  const transitions = legalTransitions(card.status)
+  const transitions = legalTransitions(card.status).filter(tr =>
+    tr.action === 'block' || tr.action === 'cancel' ? canBlock : canManage,
+  )
 
   if (transitions.length === 0) {
     return (

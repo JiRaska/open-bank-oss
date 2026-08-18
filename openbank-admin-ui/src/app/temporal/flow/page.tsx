@@ -10,6 +10,7 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { ArrowMarker } from '@/components/topology/TopologyDefs'
 import { MONEY_WORKFLOWS } from '@/lib/temporal/workflows'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ---------------------------------------------------------------------------
 // Temporal workflow flow (ADR-0100). The third animated topology view: each
@@ -68,24 +69,17 @@ export default function TemporalFlowPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <PageHeader
+        breadcrumb={<div className="breadcrumb">
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>Temporal</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Tok workflow', 'Workflow Flow')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Workflow size={18} style={{ color: 'var(--accent)' }} />
-            {t('Tok Temporal workflow', 'Temporal Workflow Flow')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Money-path ságy jako animované řetězce kroků (krok → krok → kompenzace). Kroky jsou zdokumentované definice ság; metriky jsou živé, ale agregátní za namespace (ne přehrání jednotlivých běhů).',
+          </div>}
+        title={t('Tok Temporal workflow', 'Temporal Workflow Flow')}
+        icon={<Workflow aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        subtitle={t('Money-path ságy jako animované řetězce kroků (krok → krok → kompenzace). Kroky jsou zdokumentované definice ság; metriky jsou živé, ale agregátní za namespace (ne přehrání jednotlivých běhů).',
                'Money-path sagas as animated step-chains (step → step → compensation). The steps are the documented saga definitions; the metrics are live but namespace-aggregate (not per-run replay).')}
-          </p>
-        </div>
-      </div>
-
+      />
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '14px', gap: '8px' }}>
         <button onClick={() => setFlow(v => !v)} aria-pressed={flow} title={t('Přepnout tok', 'Toggle flow')}

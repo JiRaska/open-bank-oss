@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.16.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.3...transaction-service-v1.16.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **transaction:** a payee of ours settles same-day, whatever the rail says ([#5225](https://github.com/JiRaska/open-bank-oss/issues/5225)) ([aaef8b7](https://github.com/JiRaska/open-bank-oss/commit/aaef8b7d6719faf522d3e09c3c2f0f591810548e))
+
 ## [1.16.3](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.2...transaction-service-v1.16.3) (2026-08-15)
 
 

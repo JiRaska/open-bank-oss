@@ -62,6 +62,14 @@ quarkus:
     sepa-payment-service:
       url: ${SEPA_PAYMENT_SERVICE_URL:http://localhost:8115}
       scope: jakarta.inject.Singleton
+    # DOMESTIC/INTERNAL routing (#889 follow-up): resolve the creditor IBAN, then book the
+    # transfer directly when it is one of ours.
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
+      scope: jakarta.inject.Singleton
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://transaction-service.payments.svc:8102}
+      scope: jakarta.inject.Singleton
   redis:
     hosts: redis://localhost:6379
   smallrye-reactive-messaging:

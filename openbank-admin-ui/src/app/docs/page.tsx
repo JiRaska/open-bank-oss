@@ -6,6 +6,7 @@
 import Link from 'next/link'
 import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // Each section's title/desc is a [cs, en] tuple, spread into t(...) at render.
 const sections: {
@@ -176,20 +177,16 @@ export default function DocsPage() {
   const { t } = useLanguage()
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Dokumentace', 'Documentation')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <BookOpen size={18} style={{ color: 'var(--accent)' }} />
-            {t('Dokumentační portál OpenBank', 'OpenBank Documentation Portal')}
-          </h1>
-          <p className="page-subtitle">{t('Architektura, business procesy, API dokumentace a compliance přehled', 'Architecture, business processes, API documentation and compliance overview')}</p>
-        </div>
-      </div>
+          </>}
+        title={t('Dokumentační portál OpenBank', 'OpenBank Documentation Portal')}
+        subtitle={t('Architektura, business procesy, API dokumentace a compliance přehled', 'Architecture, business processes, API documentation and compliance overview')}
+        icon={<BookOpen aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
         {sections.map(s => (

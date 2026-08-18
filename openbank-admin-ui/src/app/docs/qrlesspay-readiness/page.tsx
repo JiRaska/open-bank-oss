@@ -6,6 +6,7 @@
 import Link from 'next/link'
 import { ShieldCheck, ScrollText, Scale, Lock, Landmark, ListOrdered, Info } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 const ACCENT = '#6366f1'
 const INK = 'var(--text-primary)'
@@ -102,25 +103,21 @@ export default function QrlessPayReadinessPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
           <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
           <Link href="/docs/qrlesspay" style={{ color: 'inherit' }}>QRlessPay</Link>
           <span className="breadcrumb-sep">/</span>
           <span className="breadcrumb-current">{t('Připravenost', 'Readiness')}</span>
-        </div>
-        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <ScrollText size={18} style={{ color: ACCENT }} />
-          {t('QRlessPay — posouzení připravenosti', 'QRlessPay — readiness assessment')}
-        </h1>
-        <p className="page-subtitle">
-          {t(
+        </>}
+        title={t('QRlessPay — posouzení připravenosti', 'QRlessPay — readiness assessment')}
+        subtitle={t(
             'Co se zeptá bezpečnost, compliance a právníci — včetně otázek, které bychom raději neslyšeli. Sebehodnocení implementačního týmu, ne schválení.',
             'What security, compliance and counsel will each ask — including the questions we would rather they did not. A self-assessment by the implementing team, not an approval.',
           )}
-        </p>
-      </div>
+        icon={<ScrollText aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+      />
 
       <div className="card" style={{ padding: 14, marginBottom: 16, background: 'var(--accent-bg)', border: '1px solid var(--accent-border)', display: 'flex', gap: 10 }}>
         <Info size={16} style={{ color: ACCENT, flexShrink: 0, marginTop: 1 }} />

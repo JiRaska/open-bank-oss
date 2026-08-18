@@ -21,6 +21,7 @@ interface Dispute {
 
 export default function DisputesPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
   const { data, loading, unavailable, waking } = useServiceResource<Dispute[]>(
     svcUrl('dispute-service', '/api/v1/disputes'),
@@ -95,8 +96,8 @@ export default function DisputesPage() {
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat referenci, typ, status…', 'Search reference, type, status…')} className="input" style={{ paddingLeft: '30px', height: '32px' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat referenci, typ, status…', 'Search reference, type, status…')} aria-label={t('Hledat spory', 'Search disputes')} className="input" style={{ paddingLeft: '30px', height: '32px' }} />
             </div>
           </div>
           {loading ? (
@@ -124,13 +125,13 @@ export default function DisputesPage() {
                     <td style={{ color: 'var(--text-secondary)' }}>{d.disputeType}</td>
                     <td className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{d.transactionId?.slice(0, 8)}…</td>
                     <td style={{ fontWeight: 600 }}>
-                      {(d.amount ?? 0).toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {d.currency}
+                      {(d.amount ?? 0).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {d.currency}
                     </td>
                     <td>
                       <StatusBadge status={d.status} />
                     </td>
                     <td>{slaStatus(d.slaDeadline, d.status)}</td>
-                    <td style={{ color: 'var(--text-tertiary)' }}>{d.createdAt ? new Date(d.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                    <td style={{ color: 'var(--text-tertiary)' }}>{d.createdAt ? new Date(d.createdAt).toLocaleString(numberLocale) : '—'}</td>
                   </tr>
                 ))}</tbody>
               </table>

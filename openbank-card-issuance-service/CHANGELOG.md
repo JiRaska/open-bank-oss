@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.22.0...card-issuance-service-v0.23.0) (2026-08-17)
+
+
+### Features
+
+* **card-issuance:** re-encrypt batch job for a rotated OpenBao DEK ([#5347](https://github.com/JiRaska/open-bank-oss/issues/5347)) ([13fedea](https://github.com/JiRaska/open-bank-oss/commit/13fedea50cfc44aa00b930acbb9bca290a2c72c7))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.21.0...card-issuance-service-v0.22.0) (2026-08-17)
+
+
+### Features
+
+* **card-issuance:** envelope encryption for PAN vault via OpenBao Transit ([#5224](https://github.com/JiRaska/open-bank-oss/issues/5224)) ([7817150](https://github.com/JiRaska/open-bank-oss/commit/78171506bf435797142827b7f60ec6ab90d8a4bd))
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.20.0...card-issuance-service-v0.21.0) (2026-08-16)
 
 

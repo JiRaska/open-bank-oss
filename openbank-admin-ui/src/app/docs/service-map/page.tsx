@@ -9,6 +9,7 @@ import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { svcUrl } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { edgeGeometry, mixHex, pathId, type Pt, type Half } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
@@ -554,20 +555,16 @@ export default function ServiceMapPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Mapa služeb', 'Service Map')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Network size={18} style={{ color: 'var(--accent)' }} />
-            {t('Mapa architektury služeb', 'Service Architecture Map')}
-          </h1>
-          <p className="page-subtitle">{t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}</p>
-        </div>
-      </div>
+          </>}
+        title={t('Mapa architektury služeb', 'Service Architecture Map')}
+        subtitle={t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}
+        icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       <CatalogDriftBanner present={CATALOG_PRESENT} />
 

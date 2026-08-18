@@ -16,6 +16,7 @@ import { useState } from 'react'
 import type { ElementType } from 'react'
 import { ShieldCheck, Info, CheckCircle2, CircleDashed, Circle, X } from 'lucide-react'
 import { Mermaid } from '@/components/docs/Mermaid'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { overallScore, type Process, type Status, type TechNode } from '@/lib/docs/process/schema'
 
 type Mode = 'reality' | 'target'
@@ -59,20 +60,16 @@ export function ProcessView({ proc }: { proc: Process }) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>Docs</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{proc.title}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <TitleIcon size={18} style={{ color: 'var(--accent)' }} />
-            {proc.title}
-          </h1>
-          <p className="page-subtitle">{proc.subtitle}</p>
-        </div>
-      </div>
+          </>}
+        title={proc.title}
+        subtitle={proc.subtitle}
+        icon={<TitleIcon aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Honesty banner + reality/target toggle */}
       <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>

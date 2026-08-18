@@ -49,6 +49,15 @@ export const PERMISSIONS = {
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Card-issuance deliberately has a narrower read role than the wider payments
+  // workspace: its GET endpoints accept only VIEWER/OPERATOR/ADMIN, and every
+  // lifecycle writes except block/cancel accept only OPERATOR/ADMIN. Compliance
+  // retains the service-authorized emergency block/cancel pair, not limit or
+  // channel-control changes. Keep the console's controls aligned with that split.
+  "cards:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER],
+  "cards:issue":           [ROLES.ADMIN, ROLES.OPERATOR],
+  "cards:manage":          [ROLES.ADMIN, ROLES.OPERATOR],
+  "cards:block":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Generic Product Studio. Scope-derived roles make the same UI usable with a provider-neutral
   // standalone OIDC issuer; OpenBank OPERATOR/ADMIN remain compatible personas.
   "catalog:read":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.CATALOG_READ, ROLES.CATALOG_AUTHOR, ROLES.CATALOG_PUBLISH],
@@ -58,6 +67,9 @@ export const PERMISSIONS = {
   // KYC_REVIEWER may NOT open. The UI mirrors the backend @RolesAllowed split so a
   // holder of only one KYC role gets exactly their half of the workflow.
   "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
+  // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
+  // must never be offered a customer-creation workflow.
+  "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
   "parties:edit":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "kyc:view":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER],
   "kyc:approve":          [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.KYC_REVIEWER],
@@ -125,7 +137,7 @@ export const PERMISSIONS = {
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
   // ROLES.DEMO added 2026-08-16 (issue #5020), verified safe two independent ways before
-  // adding: middleware.ts's routeGuards array has a pattern for /system/config (ADMIN only,
+  // adding: proxy.ts's routeGuards array has a pattern for /system/config (ADMIN only,
   // the mutation path — untouched) but NONE for the general /system/* view pages, so no
   // route-level role check exists to conflict with; and every BFF route these pages call
   // (finops/*, devops/*, security, observability/*, temporal/status) either has no
@@ -168,12 +180,15 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['audit:view', ['/audit']],
   ['kyc:view', ['/kyc']],
   ['onboarding:view', ['/onboarding', '/identity-cases']],
+  ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
+  ['accounts:create', ['/accounts/new']],
   ['accounts:view', ['/accounts', '/ledger', '/day-end']],
+  ['cards:view', ['/cards']],
   ['payments:view', [
     '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
-    '/fx', '/swift', '/cards', '/interest', '/pid', '/fees', '/lending',
+    '/fx', '/swift', '/interest', '/pid', '/fees', '/lending',
   ]],
   ['compliance:view', [
     '/aml', '/fraud', '/sanctions', '/disputes', '/consents', '/customer-360', '/campaigns',

@@ -70,6 +70,8 @@ const STALE_HOURS = 72
 
 export default function LendingPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [applications, setApplications] = useState<Application[]>([])
   const [loans, setLoans] = useState<Loan[]>([])
   // Absent = the aggregate endpoints are not in the deployed build yet. The page then falls back to
@@ -120,9 +122,9 @@ export default function LendingPage() {
   }
 
   const fmt = (m?: { amount: number; currency: string }) =>
-    m ? `${m.amount.toLocaleString('cs-CZ')} ${m.currency}` : '—'
+    m ? `${m.amount.toLocaleString(numberLocale)} ${m.currency}` : '—'
 
-  const money = (n: number, ccy: string) => `${Math.round(n).toLocaleString('cs-CZ')} ${ccy}`
+  const money = (n: number, ccy: string) => `${Math.round(n).toLocaleString(numberLocale)} ${ccy}`
 
   /** Headline figures, all computed from the SAME capped lists the tables show — so the page can
    *  never claim more than it fetched. */
@@ -293,7 +295,7 @@ export default function LendingPage() {
                   <span title={a.status}><StatusBadge status={a.status} label={label(a.status)} /></span>
                 </td>
                 <td style={{ ...td, color: 'var(--text-tertiary)', fontSize: 12 }}>
-                  {a.createdAt ? new Date(a.createdAt).toLocaleString() : '—'}
+                  {a.createdAt ? new Date(a.createdAt).toLocaleString(dateLocale) : '—'}
                 </td>
                 <td style={td}>
                   <Link href={`/lending/applications/${a.id}`} style={{ color: 'var(--accent)', fontSize: 12 }}>
@@ -310,7 +312,7 @@ export default function LendingPage() {
                   <StatusBadge status={l.status} tone={LOAN_TROUBLE.has(l.status) ? 'danger' : undefined} />
                 </td>
                 <td style={{ ...td, color: 'var(--text-tertiary)', fontSize: 12 }}>
-                  {l.disbursedAt ? new Date(l.disbursedAt).toLocaleString() : '—'}
+                  {l.disbursedAt ? new Date(l.disbursedAt).toLocaleString(dateLocale) : '—'}
                 </td>
               </tr>
             ))}

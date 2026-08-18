@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.3...dispute-service-v0.9.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.2...dispute-service-v0.9.3) (2026-08-16)
 
 

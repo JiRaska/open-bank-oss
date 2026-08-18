@@ -538,7 +538,7 @@ export default function SanctionsPage() {
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
                   <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')}
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')} aria-label={t('Hledat sankční kontroly', 'Search sanctions checks')}
                     style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                       border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
@@ -651,10 +651,10 @@ export default function SanctionsPage() {
                                 <>
                                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                      <label htmlFor="sanctions-review-status" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                         {t('Nový stav', 'New status')}
                                       </label>
-                                      <select value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
+                                      <select id="sanctions-review-status" value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
                                         style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
                                         <option value="CLEAR">{t('CLEAR — falešná shoda', 'CLEAR — false positive')}</option>
                                         <option value="WHITELISTED">{t('WHITELISTED — trvale povoleno', 'WHITELISTED — permanently allowed')}</option>
@@ -664,10 +664,10 @@ export default function SanctionsPage() {
                                     </div>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    <label htmlFor="sanctions-review-note" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                       {t('Odůvodnění *', 'Rationale *')}
                                     </label>
-                                    <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
+                                    <textarea id="sanctions-review-note" value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
                                       placeholder={t('Proč je toto rozhodnutí správné — jde o auditní stopu.', 'Why this decision is correct — this is the audit trail.')}
                                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', resize: 'vertical' }} />
                                   </div>
@@ -744,7 +744,7 @@ export default function SanctionsPage() {
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
+                    <input id="sanctions-approval-id" aria-label={t('ID žádosti', 'Approval id')} value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
                       style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
                         fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                     <button onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()}
@@ -769,28 +769,28 @@ export default function SanctionsPage() {
               <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Manuální prověření entity', 'Manual entity screening')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Jméno / Název *', 'Name / Entity *')}</label>
-                  <input value={searchName} onChange={e => setSearchName(e.target.value)} placeholder={t('Celé jméno nebo název organizace', 'Full name or organisation name')}
+                  <label htmlFor="sanctions-search-name" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Jméno / Název *', 'Name / Entity *')}</label>
+                  <input id="sanctions-search-name" value={searchName} onChange={e => setSearchName(e.target.value)} placeholder={t('Celé jméno nebo název organizace', 'Full name or organisation name')}
                     onKeyDown={e => e.key === 'Enter' && handleScreen()}
                     style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Typ entity', 'Entity type')}</label>
-                    <select value={searchType} onChange={e => setSearchType(e.target.value as 'INDIVIDUAL'|'ORGANIZATION')}
+                    <label htmlFor="sanctions-search-type" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Typ entity', 'Entity type')}</label>
+                    <select id="sanctions-search-type" value={searchType} onChange={e => setSearchType(e.target.value as 'INDIVIDUAL'|'ORGANIZATION')}
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
                       <option value="INDIVIDUAL">{t('Fyzická osoba', 'Individual')}</option>
                       <option value="ORGANIZATION">{t('Organizace', 'Organisation')}</option>
                     </select>
                   </div>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Datum narození', 'Date of birth')}</label>
-                    <input value={searchDob} onChange={e => setSearchDob(e.target.value)} type="date"
+                    <label htmlFor="sanctions-search-dob" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Datum narození', 'Date of birth')}</label>
+                    <input id="sanctions-search-dob" value={searchDob} onChange={e => setSearchDob(e.target.value)} type="date"
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }} />
                   </div>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Státní příslušnost', 'Nationality')}</label>
-                    <input value={searchNationality} onChange={e => setSearchNationality(e.target.value.toUpperCase().slice(0,2))}
+                    <label htmlFor="sanctions-search-nationality" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Státní příslušnost', 'Nationality')}</label>
+                    <input id="sanctions-search-nationality" value={searchNationality} onChange={e => setSearchNationality(e.target.value.toUpperCase().slice(0,2))}
                       placeholder="CZ" maxLength={2}
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} />
                   </div>

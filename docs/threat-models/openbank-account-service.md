@@ -94,6 +94,16 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-17** — **New inbound trust edge: the `lending` namespace.** #3931 added `lending` as
+  an allowed ingress peer in this component's `network-policies.yaml`, so `lending-service` can
+  now reach this service's `GET /api/v1/accounts/iban/{iban}` from inside the cluster —
+  resolving the borrower's own CURRENT account for a loan disbursement (`account.read`, the same
+  M2M `openbank-services` client already trusted by ~10 other callers, §2). Read-only; no
+  mutation reachable from this edge. Risk class = **information disclosure** at most (an
+  IBAN→account/party lookup), bounded the same way as every other `openbank-services` caller —
+  the NetworkPolicy decides reach, `@RolesAllowed`/OPA still decide permission. Rollback: drop
+  the `namespaceSelector` entry for `lending`. See `docs/threat-models/openbank-lending-service.md`
+  §2 items 7-8 for the calling side.
 - **2026-08-16** — Account close (TOP-10 #10, part 2): `POST /{accountId}/close` gains a balance
   guard (`AccountNotEmptyException`, mapped to 422) and threads `customerPartyId` +
   `denyIfNotOwner` through the endpoint the same way the goal/nickname endpoints already do, so

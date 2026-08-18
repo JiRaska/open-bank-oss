@@ -10,6 +10,7 @@ import {
   Globe, Bot,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // Static explainer — the LGTM(P) + GlitchTip correlation layer (ADR-0087), extended with
 // SLO-as-code, on-call, durable S3 retention and mobile RUM (ADR-0088 / ADR-0089). No backend
@@ -115,19 +116,12 @@ export default function ObservabilityStackPage() {
 
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
-      {/* Title */}
-      <div style={{ marginBottom: '24px' }}>
-        <div style={{ fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '6px' }}>
-          {t('Observability · ADR-0087 / 0088 / 0089', 'Observability · ADR-0087 / 0088 / 0089')}
-        </div>
-        <h1 style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.02em', margin: 0 }}>
-          {t('Jak funguje náš observability stack', 'How our observability stack works')}
-        </h1>
-        <p style={{ fontSize: '14px', color: 'var(--text-secondary)', marginTop: '8px', lineHeight: 1.6 }}>
-          {t('Čtyři pilíře (metriky, logy, traces, profily) + mobilní pády se sbíhají do jednoho plátna v Grafaně; na to navazuje SLO-as-code (Pyrra), on-call s eskalací (GoAlert → ntfy), trvanlivé úložiště v S3, mobilní RUM, syntetické proby zvenčí (blackbox + k6) a AI root-cause analýza nad alerty (HolmesGPT). Páteří je trace_id a X-Correlation-ID — z každého bodu se proklikneš do souvisejícího kontextu. Vše čistě open-source, self-hosted, ve VPC.',
-             'Four pillars (metrics, logs, traces, profiles) + mobile crashes converge into one pane in Grafana; on top sit SLO-as-code (Pyrra), on-call with escalation (GoAlert → ntfy), durable S3 storage, mobile RUM, external synthetic probes (blackbox + k6) and AI root-cause analysis over alerts (HolmesGPT). The spine is trace_id and X-Correlation-ID — from any point you click through to the related context. All pure OSS, self-hosted, in-VPC.')}
-        </p>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Observabilita', 'Observability')}</span></div>}
+        icon={<Globe size={20} aria-hidden="true" />}
+        title={t('Jak funguje náš observability stack', 'How our observability stack works')}
+        subtitle={t('Čtyři pilíře (metriky, logy, traces, profily) + mobilní pády se sbíhají do jednoho plátna v Grafaně; na to navazuje SLO-as-code (Pyrra), on-call s eskalací (GoAlert → ntfy), trvanlivé úložiště v S3, mobilní RUM, syntetické proby zvenčí (blackbox + k6) a AI root-cause analýza nad alerty (HolmesGPT). Páteří je trace_id a X-Correlation-ID — z každého bodu se proklikneš do souvisejícího kontextu. Vše čistě open-source, self-hosted, ve VPC.', 'Four pillars (metrics, logs, traces, profiles) + mobile crashes converge into one pane in Grafana; on top sit SLO-as-code (Pyrra), on-call with escalation (GoAlert → ntfy), durable S3 storage, mobile RUM, external synthetic probes (blackbox + k6) and AI root-cause analysis over alerts (HolmesGPT). The spine is trace_id and X-Correlation-ID — from any point you click through to the related context. All pure OSS, self-hosted, in-VPC.')}
+      />
 
       {/* Pillar cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginBottom: '28px' }}>

@@ -26,6 +26,13 @@ export interface AiGovernanceAuditTrail {
   planned: string[]
 }
 
+export interface AiGovernancePhaseRoadmapEntry {
+  number: number
+  status: 'complete' | 'active' | 'blocked' | 'planned'
+  title: string
+  outcome: string
+}
+
 export interface AiGovernanceSnapshot {
   adrRef: string
   adrStatus: string
@@ -33,6 +40,7 @@ export interface AiGovernanceSnapshot {
   totalPhases: number
   phaseLabel: string
   agentsActing: number
+  phaseRoadmap: AiGovernancePhaseRoadmapEntry[]
   decisions: AiGovernanceDecision[]
   decisionSummary: { built: number; partial: number; planned: number; total: number }
   compliance: AiGovernanceComplianceRow[]
