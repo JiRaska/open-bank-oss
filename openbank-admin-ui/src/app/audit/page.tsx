@@ -120,7 +120,7 @@ export default function AuditPage() {
             <tbody>
               {entries.map(e => (
                 <>
-                  <tr key={e.id} tabIndex={0} aria-expanded={expanded === e.id} aria-label={t('Rozbalit auditní událost', 'Expand audit event')} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}
+                  <tr key={e.id} tabIndex={0} aria-expanded={expanded === e.id} aria-label={expanded === e.id ? t('Sbalit auditní událost', 'Collapse audit event') : t('Rozbalit auditní událost', 'Expand audit event')} style={{ cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}
                     onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setExpanded(expanded === e.id ? null : e.id) } }}>
                     <td>
                       <span className="pill" style={{ background: `${EVENT_COLOR[e.eventType] ?? 'var(--text-muted)'}22`, color: EVENT_COLOR[e.eventType] ?? 'var(--text-muted)' }}>
