@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.3...security-scanner-v0.7.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** add sourceService to ICT incident events ([#5381](https://github.com/JiRaska/open-bank-oss/issues/5381)) ([cc78dbe](https://github.com/JiRaska/open-bank-oss/commit/cc78dbe7d972957068794cacdd8e7fe6c08cd1fb)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.2...security-scanner-v0.7.3) (2026-08-17)
 
 

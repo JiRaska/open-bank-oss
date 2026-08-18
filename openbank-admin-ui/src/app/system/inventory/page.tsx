@@ -10,6 +10,7 @@ import { fetchAllServiceSnapshots } from '@/lib/api'
 import type { ServiceSnapshot, ServiceStack } from '@/types'
 import { Package, RefreshCw, CheckCircle2, AlertTriangle, XCircle, Clock, ShieldAlert } from 'lucide-react'
 import { SbomViewer } from '@/components/sbom/SbomViewer'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const POLL = 30_000
 
@@ -117,7 +118,8 @@ function aggregate(snapshots: ServiceSnapshot[]): ComponentAggregate[] {
 }
 
 export default function TechInventoryPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [snapshots, setSnapshots] = useState<ServiceSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
@@ -163,22 +165,16 @@ export default function TechInventoryPage() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      {/* Page header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 300, color: 'var(--text-primary)', letterSpacing: '-0.02em', margin: 0 }}>
-            <Package size={20} style={{ display: 'inline', marginRight: '8px', verticalAlign: '-2px' }} />
-            {t('Tech Inventory', 'Tech Inventory')}
-          </h1>
-          <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-            {t('Verze runtime stacku napříč všemi službami. Generuje se z /api/v1/info každé služby.',
-               'Runtime stack versions across all services. Sourced from each service\'s /api/v1/info.')}
-          </div>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Systém', 'System')}</span></div>}
+        icon={<Package size={20} aria-hidden="true" />}
+        title={t('Tech Inventory', 'Tech Inventory')}
+        subtitle={t('Verze runtime stacku napříč všemi službami. Generuje se z /api/v1/info každé služby.',
+          'Runtime stack versions across all services. Sourced from each service\'s /api/v1/info.')}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              <Clock size={11} /> {lastRefreshed.toLocaleTimeString()}
+              <Clock size={11} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button
@@ -193,8 +189,8 @@ export default function TechInventoryPage() {
             <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {/* Summary cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
