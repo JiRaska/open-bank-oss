@@ -116,7 +116,11 @@ class AccountServiceTest {
                             it.accountNumber == iban.value &&
                             it.accountType == command.accountType &&
                             it.partyId == command.partyId &&
-                            it.currency == command.currency.code
+                            it.currency == command.currency.code &&
+                            // AuditConsumer attribution (#3994/#5256): the real construction site
+                            // passes this explicitly rather than relying on the default silently
+                            // working (#5255's own discipline).
+                            it.sourceService == "account-service"
                     },
                 )
             }
