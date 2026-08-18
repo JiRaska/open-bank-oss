@@ -184,7 +184,7 @@ independent review gate.
 
 ## E2E tests (Playwright)
 
-- **Every route is gated on an Auth.js session** (`src/middleware.ts`), and there is no Keycloak in
+- **Every route is gated on an Auth.js session** (`src/proxy.ts`), and there is no Keycloak in
   the Playwright environment — a `page.goto()` without a session silently renders `/auth/login`
   instead of the target page, so an assertion can time out (or worse, false-pass against login-page
   markup) without anyone noticing. Sign in first via `signInAsOperator(context, baseURL)`
