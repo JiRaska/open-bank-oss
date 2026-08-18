@@ -1058,3 +1058,15 @@ main {
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Documentation print/PDF export. The browser's native print pipeline keeps SVG diagrams
+   crisp and lets operators choose their paper size/destination without a server-side renderer. */
+@media print {
+  .ob-app-shell { display: block; height: auto; min-height: 0; overflow: visible; background: #fff; }
+  .ob-app-shell > aside, .ob-app-frame > header, .ob-skip-link, .qrlesspay-export-action { display: none !important; }
+  .ob-app-frame, .ob-app-content { display: block; min-height: 0; overflow: visible; padding: 0; }
+  .ob-app-content > * { width: 100%; max-width: none; }
+  .qrlesspay-doc { color: #111827; }
+  .qrlesspay-doc .card { box-shadow: none; break-inside: avoid; }
+  .qrlesspay-doc a { color: #3730a3; }
+}
