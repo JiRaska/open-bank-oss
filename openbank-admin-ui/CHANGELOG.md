@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.0...admin-ui-v0.165.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize operational refresh timestamps ([#5519](https://github.com/JiRaska/open-bank-oss/issues/5519)) ([0643766](https://github.com/JiRaska/open-bank-oss/commit/064376629e7a77f72a614558a5894385026b75f6))
+
 ## [0.165.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.164.0...admin-ui-v0.165.0) (2026-08-18)
 
 
