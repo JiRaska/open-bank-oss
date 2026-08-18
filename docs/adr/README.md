@@ -270,7 +270,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0259](0259-ai-assisted-product-catalog-authoring-and-offer-intelligence.md) | AI-assisted product-catalog authoring and offer intelligence | Accepted | Shipped | product-catalog,ai-agents,governance,compliance | — |
 | [0260](0260-event-schema-format-and-compatibility-json-schema-over-avro.md) | Event schema format and compatibility: JSON Schema over Avro | Accepted | Partial | kafka,api-contract,governance,documents | — |
 | [0261](0261-gamification-engine-engagement-service-d3-slice-1.md) | Gamification engine — engagement service D3 slice 1 | Accepted | Partial | mobile-app,privacy-gdpr,lending,compliance | — |
-| [0262](0262-envelope-encryption-for-card-pan-vault-via-openbao-transit.md) | Envelope encryption for card PAN vault via OpenBao Transit | Proposed | Planned | cards,crypto-keys,secrets,compliance | — |
+| [0262](0262-envelope-encryption-for-card-pan-vault-via-openbao-transit.md) | Envelope encryption for card PAN vault via OpenBao Transit | Accepted | Shipped | cards,crypto-keys,secrets,compliance | — |
 | [0263](0263-versioned-decision-graph-campaign-journeys-via-dual-temporal-workflow-types.md) | Versioned Decision-Graph Campaign Journeys via Dual Temporal Workflow Types | Accepted | Shipped | notifications,testing,architecture,compliance | — |
 | [0264](0264-loan-products-in-the-industry-neutral-catalog-kernel.md) | Loan Products in the Industry-Neutral Catalog Kernel | Accepted | Partial | product-catalog,lending,governance,api-contract | — |
 

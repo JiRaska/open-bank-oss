@@ -137,7 +137,7 @@ export const PERMISSIONS = {
   "opsmessage:approve":       [ROLES.ADMIN, ROLES.OPERATOR],
   // System
   // ROLES.DEMO added 2026-08-16 (issue #5020), verified safe two independent ways before
-  // adding: middleware.ts's routeGuards array has a pattern for /system/config (ADMIN only,
+  // adding: proxy.ts's routeGuards array has a pattern for /system/config (ADMIN only,
   // the mutation path — untouched) but NONE for the general /system/* view pages, so no
   // route-level role check exists to conflict with; and every BFF route these pages call
   // (finops/*, devops/*, security, observability/*, temporal/status) either has no

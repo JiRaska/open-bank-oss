@@ -158,7 +158,7 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     // three lines above it that also contains the string "api/gate", so a
     // whole-file grep stays green after the exclusion itself is deleted. That is
     // exactly what happened when this assertion was fed the deleted case.
-    const matcher = readFileSync('src/middleware.ts', 'utf8')
+    const matcher = readFileSync('src/proxy.ts', 'utf8')
       .replace(/\/\/.*$/gm, '')
       .match(/matcher:\s*\[([\s\S]*?)\]/)?.[1]
     expect(matcher, 'middleware config.matcher not found').toBeDefined()

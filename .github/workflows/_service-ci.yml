@@ -256,17 +256,28 @@ jobs:
       # message — it does not scan the cache for "suspicious" entries (an earlier, broader
       # heuristic — pom present, jar absent — flagged legitimate BOM-only and
       # never-downloaded transitive dependencies as corrupt; do not resurrect that).
+      #
+      # It is ADVISORY only: a hosted PR runner can hang in Gradle cache resolution before the
+      # actual gate starts (#3345). Bound it so a stale cache service never consumes the whole
+      # service job. The real Build + test step below remains mandatory and unchanged.
       - name: Warm Gradle dependency cache (self-heal corrupted entries)
         continue-on-error: true
         run: |
           set +e
-          ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
           warmup_status=$?
-          if [ $warmup_status -ne 0 ]; then
+          if [ $warmup_status -eq 124 ]; then
+            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
+            cat /tmp/gradle-warmup.log
+          elif [ $warmup_status -ne 0 ]; then
             cat /tmp/gradle-warmup.log
             if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
               echo "retrying dependency warm-up after healing corrupted cache entries"
-              ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              retry_status=$?
+              if [ $retry_status -eq 124 ]; then
+                echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
+              fi
             else
               echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
             fi
