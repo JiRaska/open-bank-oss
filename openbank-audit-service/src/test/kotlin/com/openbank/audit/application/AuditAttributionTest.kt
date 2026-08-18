@@ -69,6 +69,27 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `sepa-instant's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's sepa-instant fix: KafkaSctInstEventPublisher.publish builds a
+        // hand-built map (not a serialised data class), now including "sourceService" alongside
+        // "type"/"paymentId"/"occurredAt". Before this, EventAttribution's
+        // `openbank.sepa.instant.events` -> `sepa-instant` entry already resolved these rows
+        // correctly, but as TOPIC-sourced — and this topic IS in audit-service's consumed-topics
+        // list today, so this is a live attribution upgrade. sepa-instant is a money-path service
+        // (rules.yaml: money_path_services).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"type":"SctInstPaymentSubmitted","paymentId":"${UUID.randomUUID()}",""" +
+                """"sourceService":"sepa-instant"}""",
+            EventAddress(topic = "openbank.sepa.instant.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sepa-instant")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `balance-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's balance-service fix: BalanceEvent now carries "sourceService" on the
         // serialised event (same idiom as its existing actorId/actorType, #3994's original fix) for
