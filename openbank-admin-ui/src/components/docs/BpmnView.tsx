@@ -23,6 +23,7 @@ import { useState } from 'react'
 import { GitBranch, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import type { BpmnProcess, BpmnStep } from '@/lib/docs/bpmn/schema'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const LANE_BG: Record<string, string> = {
   compliance: '#fef2f2', core: '#eff6ff', psd2: '#fffbeb', payment: '#faf5ff',
@@ -143,6 +144,8 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
 }
 
 function ProcessLayerMap({ process }: { process: BpmnProcess }) {
+  const { language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, 'up' | 'down' | 'loading' | 'unknown'>>({})
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
@@ -208,7 +211,7 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
             borderRadius: '6px', color: 'var(--text-secondary)', cursor: 'pointer',
           }}>
           <RefreshCw size={14} />
-          {lastRefresh ? `Refreshed ${lastRefresh.toLocaleTimeString()}` : 'Check Status'}
+          {lastRefresh ? `Refreshed ${lastRefresh.toLocaleTimeString(dateLocale)}` : 'Check Status'}
         </button>
       </div>
 

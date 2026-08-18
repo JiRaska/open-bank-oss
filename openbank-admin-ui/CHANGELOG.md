@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.166.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.4...admin-ui-v0.166.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize shared component timestamps ([#5593](https://github.com/JiRaska/open-bank-oss/issues/5593)) ([c173f13](https://github.com/JiRaska/open-bank-oss/commit/c173f139c1df92c10c35a6d95f24ef049352bdb1))
+* **admin-ui:** name shared operator inputs ([#5594](https://github.com/JiRaska/open-bank-oss/issues/5594)) ([09d9265](https://github.com/JiRaska/open-bank-oss/commit/09d926572ecfdb59ca14b124624aba77de4cec0a))
+
+
+### Performance
+
+* **admin-ui:** parallelize dashboard health reads ([#5595](https://github.com/JiRaska/open-bank-oss/issues/5595)) ([1b653e9](https://github.com/JiRaska/open-bank-oss/commit/1b653e9fa26b39af862b3a1c37721667341ac83c))
+
 ## [0.166.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.3...admin-ui-v0.166.4) (2026-08-18)
 
 

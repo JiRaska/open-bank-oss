@@ -74,22 +74,27 @@ export default function DashboardPage() {
     if (loadingRef.current) return
     loadingRef.current = true
     setLoading(true)
+    // Governance and live health are independent reads. Start them together so a
+    // slow health probe cannot delay the canonical roster (and vice versa).
+    const governanceRequest = fetch('/api/services/governance', { cache: 'no-store' }).catch(() => null)
+    const healthRequest = fetch('/api/services/health', { signal: AbortSignal.timeout(10000), cache: 'no-store' }).catch(() => null)
+    const [govRes, res] = await Promise.all([governanceRequest, healthRequest])
+
     // Canonical fleet from the code-derived governance manifest (ADR-0071).
     let fleet: { name: string; group: string }[] = []
-    try {
-      const govRes = await fetch('/api/services/governance', { cache: 'no-store' })
-      if (govRes.ok) {
+    if (govRes?.ok) {
+      try {
         const g = await govRes.json() as { items?: { serviceName: string; dataDomain: string }[] }
         fleet = (g.items ?? []).map(e => ({ name: e.serviceName, group: e.dataDomain }))
-      }
-    } catch { /* fleet stays empty → roster degrades calmly, no blank crash */ }
+      } catch { /* fleet stays empty → roster degrades calmly, no blank crash */ }
+    }
+
     try {
-      const res = await fetch('/api/services/health', { signal: AbortSignal.timeout(10000), cache: 'no-store' })
       // Live discovery (ADR-0051) keyed by bare deployment name. Empty on failure —
       // the fleet still renders, every member simply shows as not-deployed rather
       // than the page going blank.
       const discovered = new Map<string, HealthEntry>()
-      if (res.ok) {
+      if (res?.ok) {
         const data = await res.json() as { services: HealthEntry[] }
         for (const e of (data.services ?? [])) discovered.set(e.name, e)
       }

@@ -80,7 +80,8 @@ function StatCard({ icon, label, value, tone }: {
 }
 
 export function QualityGateHealthPanel() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GateHealthResponse | null>(null)
   const [failed, setFailed] = useState(false)
 
@@ -207,7 +208,7 @@ export function QualityGateHealthPanel() {
               <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
                 <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{g.id}</span>
                 <span style={{ color: 'var(--text-tertiary)' }}>
-                  {g.lastRed?.sha.slice(0, 8)} · {g.lastRed?.createdAt ? new Date(g.lastRed.createdAt).toLocaleDateString() : '—'}
+                  {g.lastRed?.sha.slice(0, 8)} · {g.lastRed?.createdAt ? new Date(g.lastRed.createdAt).toLocaleDateString(dateLocale) : '—'}
                 </span>
               </div>
             ))}
