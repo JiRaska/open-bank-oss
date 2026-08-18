@@ -197,6 +197,20 @@ what the catalogue may hold.
 
 ## 6. Change log
 
+- **2026-08-17** — **New inbound trust edge: the `lending` namespace.** #3931 added `lending` as
+  an allowed ingress peer in this component's `network-policies.yaml`, so `lending-service` can
+  now reach `POST /api/v1/transactions` from inside the cluster — the disbursement's
+  customer-facing credit leg (the loan book's own ledger journal only ever posts to internal GL
+  accounts and cannot move a customer's balance; see
+  `docs/threat-models/openbank-lending-service.md` §2 items 7-8 for the calling side and why it
+  exists). Same M2M `openbank-services` client, `Roles.OPERATOR`, already the caller identity for
+  every other `initiateTransaction` edge (welcome bonus, SEPA/SWIFT/domestic settlement legs) —
+  this adds a caller, not a new grant shape. Risk class = **elevation of privilege**: a NetworkPolicy
+  decides reach, not permission, so the actual control is unchanged (`@RolesAllowed(Roles.OPERATOR)`
+  + idempotent posting, §3) — this edge widens who may attempt the call. `type=CREDIT` with no
+  `rail` books same-day per `SettlementScope` (#5225); the amount and target account are entirely
+  determined by lending-service's own disbursement flow, not caller-suppliable beyond that.
+  Rollback: drop the `namespaceSelector` entry for `lending`.
 - **2026-08-07** — Merchant enrichment (D5). `GET /api/v1/transactions` answers an optional `merchant` object (clean name, logo, category, shop geo) resolved from the new `merchant_catalog` table via an exact match on the normalised acquirer descriptor. STRIDE supplement in §4c. No new endpoint, caller, role or Kafka topic. Three properties are load-bearing rather than incidental: matching is **exact** (fuzzy matching would hand one merchant's identity and coordinates to a similarly-named other, which is a fabrication with a trust cost, not a UX nicety); the field is `NON_NULL`, so a transaction with no catalogue entry produces a body byte-identical to before (serialising `"merchant": null` is a wire change for every existing consumer and did in fact fail the sepa-payment Pact verification); and `description` is passed through untouched, because disputes and SPAYD are built from the raw acquirer text and must never inherit a prettified name. Geo is null for card-not-present merchants, with a CHECK constraint keeping lat/lon both-or-neither so a half-filled row cannot render as a pin at 0°. Rollback: revert.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listTransactions. Listing "transactions for an account" with no account is a malformed request; the null reached `ListTransactionsQuery` and answered 500. The sibling searchTransactions endpoint already declares `accountId` nullable by design (search is deliberately multi-criteria) and is untouched. No new caller or boundary; `@RolesAllowed` and `@Authorize(action = "transaction.list")` are unchanged and still run first. Rollback: revert.

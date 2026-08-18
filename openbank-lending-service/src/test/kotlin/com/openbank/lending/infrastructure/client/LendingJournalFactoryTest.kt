@@ -54,6 +54,22 @@ class LendingJournalFactoryTest {
         assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.loansReceivable)
     }
 
+    /**
+     * A cooling-off unwind must be the disbursement's mirror image (the same shape as SETTLEMENT
+     * below), or it re-books the same asset increase instead of clearing it. Regression test for
+     * the bug fixed alongside #3931: WITHDRAWAL_UNWIND used to share the DISBURSEMENT pair
+     * unconditionally, doubling Loans Receivable on every statutory withdrawal.
+     */
+    @Test
+    fun `withdrawal unwind reverses the disbursement legs, not re-books them`() {
+        val lines = LendingJournalFactory.buildLines(
+            posting(PostingKind.WITHDRAWAL_UNWIND, "loan:1:withdraw"),
+            accounts,
+        )
+        assertThat(lines.single { side(it) == "DEBIT" }.glAccountId).isEqualTo(accounts.fundingClearing)
+        assertThat(lines.single { side(it) == "CREDIT" }.glAccountId).isEqualTo(accounts.loansReceivable)
+    }
+
     @Test
     fun `interest credits interest income`() {
         val lines = LendingJournalFactory.buildLines(

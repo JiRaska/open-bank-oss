@@ -4,7 +4,7 @@
 
 // Static, pre-login, single-language legal notice — same class as the /auth/*
 // screens (i18n.guard / layout-shell.guard EXEMPT). GDPR Art. 13 requires this
-// notice to be reachable WITHOUT an account (middleware.ts carries the bypass),
+// notice to be reachable WITHOUT an account (proxy.ts carries the bypass),
 // since the data subjects it describes are the operators who are about to log in.
 
 export const metadata = {

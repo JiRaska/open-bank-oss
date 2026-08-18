@@ -9,6 +9,7 @@ import {
   FileText, ShieldAlert, Info,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 const ACCENT = '#6366f1'
 const INK = 'var(--text-primary)'
@@ -19,23 +20,19 @@ export default function DocumentManagementDocsPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
           <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
           <span className="breadcrumb-current">{t('Správa dokumentů', 'Document Management')}</span>
-        </div>
-        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <FileSignature size={18} style={{ color: ACCENT }} />
-          {t('Správa dokumentů, šablon a e-podpisu', 'Document Management, Templating & E-Signature')}
-        </h1>
-        <p className="page-subtitle">
-          {t(
+        </>}
+        title={t('Správa dokumentů, šablon a e-podpisu', 'Document Management, Templating & E-Signature')}
+        subtitle={t(
             'Nová hraniční doména (openbank-document-service): šablony → generování PDF → uložení → podpisová ceremonie → audit → downstream konzumenti.',
             'A new bounded context (openbank-document-service): templates → PDF generation → storage → signature ceremony → audit → downstream consumers.',
           )}
-        </p>
-      </div>
+        icon={<FileSignature aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+      />
 
       {/* Status strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>

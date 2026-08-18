@@ -135,6 +135,7 @@ function MidCell({ mid, symbol }: { mid: number; symbol?: string }) {
 
 export default function FxPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState<string | null>(null)
   // Typed unavailable reason for a failed aggregate fetch → renders the calm
@@ -375,7 +376,7 @@ export default function FxPage() {
             { label: t('CNB Páry', 'CNB Pairs'), value: cnbRates.length, icon: <Banknote size={16} />, color: 'var(--accent)' },
             { label: t('ECB Páry', 'ECB Pairs'), value: ecbRates.length, icon: <Globe size={16} />, color: 'var(--info)' },
             { label: t('Publikované měny', 'Published Currencies'), value: Object.values(overrides).filter(o => o.published).length, icon: <Eye size={16} />, color: 'var(--success)' },
-            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume > 0 ? totalVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }) : '—', icon: <TrendingUp size={16} />, color: 'var(--warning)' },
+            { label: t('Objem (EUR)', 'Volume (EUR)'), value: totalVolume > 0 ? totalVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }) : '—', icon: <TrendingUp size={16} />, color: 'var(--warning)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: k.color, marginBottom: '10px' }}>{k.icon}</div>
@@ -399,7 +400,7 @@ export default function FxPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('Střed kurzu z ČNB · Nákup/Prodej = střed ±', 'CNB mid rate · Buy/Sell = mid ±')} {cnbSpread}% {t('(orientační)', '(indicative)')}
-                  {cnbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(cnbSyncedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US')}`}
+                  {cnbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(cnbSyncedAt).toLocaleTimeString(numberLocale)}`}
                   {cnbError && <span style={{ color: 'var(--red)', marginLeft: '8px' }}>⚠ {cnbError}</span>}
                 </span>
                 <button onClick={() => manualRefresh('cnb')} disabled={!!refreshing || loading} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -448,7 +449,7 @@ export default function FxPage() {
               <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
                   {t('ECB referenční kurzy (EUR base) · Nákup/Prodej = střed ±', 'ECB reference rates (EUR base) · Buy/Sell = mid ±')} {margin.buyPct}%/{margin.sellPct}%
-                  {ecbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(ecbSyncedAt).toLocaleTimeString(language === 'cs' ? 'cs-CZ' : 'en-US')}`}
+                  {ecbSyncedAt && ` · ${t('Synchronizace', 'Sync')}: ${new Date(ecbSyncedAt).toLocaleTimeString(numberLocale)}`}
                   {ecbError && <span style={{ color: 'var(--red)', marginLeft: '8px' }}>⚠ {ecbError}</span>}
                 </span>
                 <button onClick={() => manualRefresh('ecb')} disabled={!!refreshing || loading} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--info)', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
@@ -497,14 +498,14 @@ export default function FxPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--success-text)' }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--success-bg)', border: '1px solid var(--success-border)', borderRadius: '3px', padding: '0 4px' }}>BUY</span>
-                        <input type="number" step="0.1" min="0" max="20" value={marginDraft.buyPct}
+                        <input type="number" aria-label={t('Nákupní marže v procentech', 'Buy margin percent')} step="0.1" min="0" max="20" value={marginDraft.buyPct}
                           onChange={e => setMarginDraft(p => ({ ...p, buyPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--danger-text)' }}>
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
-                        <input type="number" step="0.1" min="0" max="20" value={marginDraft.sellPct}
+                        <input type="number" aria-label={t('Prodejní marže v procentech', 'Sell margin percent')} step="0.1" min="0" max="20" value={marginDraft.sellPct}
                           onChange={e => setMarginDraft(p => ({ ...p, sellPct: parseFloat(e.target.value) || 0 }))}
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
@@ -564,7 +565,7 @@ export default function FxPage() {
                         <td style={{ padding: '8px 16px' }}><MidCell mid={r.mid} /></td>
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
-                            <input type="number" step="0.0001" placeholder={r.buyCalc.toFixed(4)} value={overrideDraft.buyOverride ?? ''}
+                            <input type="number" aria-label={t(`Override nákupního kurzu ${r.code}`, `Buy rate override ${r.code}`)} step="0.0001" placeholder={r.buyCalc.toFixed(4)} value={overrideDraft.buyOverride ?? ''}
                               onChange={e => setOverrideDraft(p => ({ ...p, buyOverride: e.target.value ? parseFloat(e.target.value) : null }))}
                               style={{ width: '80px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--success-border)', borderRadius: '4px', color: 'var(--success-text)', fontFamily: 'var(--font-mono)' }} />
                           ) : (
@@ -576,7 +577,7 @@ export default function FxPage() {
                         </td>
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
-                            <input type="number" step="0.0001" placeholder={r.sellCalc.toFixed(4)} value={overrideDraft.sellOverride ?? ''}
+                            <input type="number" aria-label={t(`Override prodejního kurzu ${r.code}`, `Sell rate override ${r.code}`)} step="0.0001" placeholder={r.sellCalc.toFixed(4)} value={overrideDraft.sellOverride ?? ''}
                               onChange={e => setOverrideDraft(p => ({ ...p, sellOverride: e.target.value ? parseFloat(e.target.value) : null }))}
                               style={{ width: '80px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--danger-border)', borderRadius: '4px', color: 'var(--danger-text)', fontFamily: 'var(--font-mono)' }} />
                           ) : (
@@ -649,7 +650,7 @@ export default function FxPage() {
                   </div>
                   <div style={{ textAlign: 'right', minWidth: '110px' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{t('Poslední spuštění', 'Last run')}</div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{s.lastRun ? new Date(s.lastRun).toLocaleTimeString('cs-CZ') : '—'}</div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{s.lastRun ? new Date(s.lastRun).toLocaleTimeString(numberLocale) : '—'}</div>
                   </div>
                   <div style={{ minWidth: '80px', textAlign: 'center' }}>
                     {s.lastStatus === 'ok' && (
@@ -682,7 +683,7 @@ export default function FxPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)' }}>{t('Čas:', 'Time:')}</span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <select value={scheduleDraft.hour ?? s.hour}
+                        <select aria-label={t(`Hodina plánu ${s.id}`, `Schedule hour ${s.id}`)} value={scheduleDraft.hour ?? s.hour}
                           onChange={e => setScheduleDraft(p => ({ ...p, hour: parseInt(e.target.value) }))}
                           style={{ padding: '4px 8px', fontSize: '13px', fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
                           {Array.from({ length: 24 }, (_, i) => (
@@ -690,7 +691,7 @@ export default function FxPage() {
                           ))}
                         </select>
                         <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-secondary)' }}>:</span>
-                        <select value={scheduleDraft.minute ?? s.minute}
+                        <select aria-label={t(`Minuta plánu ${s.id}`, `Schedule minute ${s.id}`)} value={scheduleDraft.minute ?? s.minute}
                           onChange={e => setScheduleDraft(p => ({ ...p, minute: parseInt(e.target.value) }))}
                           style={{ padding: '4px 8px', fontSize: '13px', fontFamily: 'var(--font-mono)', fontWeight: 700, background: 'var(--surface-2)', border: '1px solid var(--border)', borderRadius: '5px', color: 'var(--text-primary)', cursor: 'pointer' }}>
                           {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map(m => (
@@ -748,7 +749,7 @@ export default function FxPage() {
                 <tbody>
                   {history.map((h, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{new Date(h.timestamp).toLocaleTimeString('cs-CZ')}</td>
+                      <td style={{ padding: '6px 16px', fontSize: '11px', color: 'var(--text-secondary)' }}>{new Date(h.timestamp).toLocaleTimeString(numberLocale)}</td>
                       <td style={{ padding: '6px 16px', fontSize: '11px', fontWeight: 600 }}>
                         <span style={{ padding: '2px 6px', borderRadius: '4px', background: h.source === 'CNB' ? 'var(--accent)' : h.source.includes('Override') ? 'var(--warning)' : h.source.includes('Margin') ? 'var(--info)' : 'var(--info)', color: '#fff', opacity: 0.85 }}>{h.source}</span>
                       </td>
@@ -787,7 +788,7 @@ export default function FxPage() {
                     <tr key={c.id} style={{ borderBottom: '1px solid var(--border)' }}
                       onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                       onMouseLeave={e => (e.currentTarget.style.background = '')}>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleString(numberLocale) : '—'}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                           <span style={{ fontSize: '14px' }}>{CURRENCY_META[c.fromCurrency]?.flag ?? '🏳️'}</span>
@@ -797,8 +798,8 @@ export default function FxPage() {
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: 600 }}>{c.toCurrency}</span>
                         </div>
                       </td>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.fromAmount?.toLocaleString('cs-CZ')}</td>
-                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>{c.toAmount?.toLocaleString('cs-CZ')}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.fromAmount?.toLocaleString(numberLocale)}</td>
+                      <td style={{ padding: '10px 16px', fontSize: '12px', color: 'var(--text-primary)', fontWeight: 600 }}>{c.toAmount?.toLocaleString(numberLocale)}</td>
                       <td style={{ padding: '10px 16px' }}>
                         <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
                           background: c.status === 'COMPLETED' ? 'var(--success-bg)' : 'var(--warning-bg)',

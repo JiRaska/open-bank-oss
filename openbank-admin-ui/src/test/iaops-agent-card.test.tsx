@@ -70,8 +70,6 @@ describe('AIOps agent card interactions', () => {
       }
       return response({ anomalies: [] })
     }))
-    const alertSpy = vi.fn()
-    vi.stubGlobal('alert', alertSpy)
     const user = userEvent.setup()
 
     render(<IAOpsPage />)
@@ -95,12 +93,8 @@ describe('AIOps agent card interactions', () => {
     await user.keyboard('{Enter}')
     expect(linkClick).not.toHaveBeenCalled()
 
-    const trigger = screen.getByRole('button', { name: 'Trigger Analysis' })
-    trigger.focus()
-    await user.keyboard('{Enter}')
-    expect(alertSpy).toHaveBeenCalledOnce()
+    const analysisStatus = screen.getByText('Analysis is not connected to the HITL backend yet')
+    expect(analysisStatus).toBeVisible()
     expect(linkClick).not.toHaveBeenCalled()
-
-    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 })

@@ -7,6 +7,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { FileCode, RefreshCw, CheckCircle2, XCircle, MinusCircle, ChevronDown, ChevronRight, Zap } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 // UI short-id → Kubernetes Deployment/Service name (the BFF's canonical key).
 // All but `catalog` carry a `specId` of the form `openbank-<k8s-name>`, so we
@@ -551,26 +552,20 @@ export default function ApiCatalogPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('API Katalog', 'API Catalog')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FileCode size={18} style={{ color: 'var(--accent)' }} />
-            {t('API Katalog', 'API Catalog')}
-          </h1>
-          <p className="page-subtitle">{t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
+          </>}
+        title={t('API Katalog', 'API Catalog')}
+        subtitle={t(`Swagger/OpenAPI dokumentace ${allServices.length} služeb · live status · proklik na Swagger UI`, `Swagger/OpenAPI documentation for ${allServices.length} services · live status · link to Swagger UI`)}
+        icon={<FileCode aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
             <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
             {t('Obnovit', 'Refresh')}
-          </button>
-        </div>
-      </div>
+          </button>}
+      />
 
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '4px', marginBottom: '16px', borderBottom: '1px solid var(--border)', paddingBottom: '0' }}>

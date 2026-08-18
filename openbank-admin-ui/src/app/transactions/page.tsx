@@ -132,19 +132,22 @@ export default function TransactionsPage() {
         <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)', borderRadius: '8px 8px 0 0', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
             <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-            <input className="input" style={{ paddingLeft: '30px', width: '100%' }}
+            <label className="sr-only" htmlFor="transaction-account-id">{t('Hledat podle ID účtu', 'Search by account ID')}</label>
+            <input id="transaction-account-id" className="input" style={{ paddingLeft: '30px', width: '100%' }}
               placeholder={t('ID účtu (UUID)…', 'Account ID (UUID)…')}
               value={accountId} onChange={e => setAccountId(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '180px' }}>
-            <input className="input" style={{ width: '100%' }}
+            <label className="sr-only" htmlFor="transaction-iban">{t('Filtrovat podle IBAN', 'Filter by IBAN')}</label>
+            <input id="transaction-iban" className="input" style={{ width: '100%' }}
               placeholder={t('IBAN (CZ65 0800 …)', 'IBAN (CZ65 0800 …)')}
               value={iban} onChange={e => setIban(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
           </div>
           <div style={{ position: 'relative', flex: 1, minWidth: '160px' }}>
-            <input className="input" style={{ width: '100%' }}
+            <label className="sr-only" htmlFor="transaction-bban">{t('Filtrovat podle BBAN', 'Filter by BBAN')}</label>
+            <input id="transaction-bban" className="input" style={{ width: '100%' }}
               placeholder={t('BBAN (123456-1234567890/0800)', 'BBAN (123456-1234567890/0800)')}
               value={bban} onChange={e => setBban(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && search()} />
