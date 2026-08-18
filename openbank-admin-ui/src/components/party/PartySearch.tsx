@@ -110,6 +110,7 @@ export function PartySearch({ onSelect, selectedId, busy = false, placeholder, l
             onChange={e => setTerm(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter') run() }}
             placeholder={placeholder ?? t('Jméno nebo název firmy (nebo UUID party)', 'Name or company name (or party UUID)')}
+            aria-label={t('Vyhledat stranu', 'Search parties')}
             style={{
               flex: '1 1 340px', padding: '8px 12px', borderRadius: '8px', border: '1px solid var(--border)',
               background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '13px',

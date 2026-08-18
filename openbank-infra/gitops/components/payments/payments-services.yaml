@@ -2691,7 +2691,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-ec7b6509
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-2c6975c0
 
           imagePullPolicy: IfNotPresent
           ports:
