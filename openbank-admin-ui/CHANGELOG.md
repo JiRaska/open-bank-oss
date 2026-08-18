@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.13](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.12...admin-ui-v0.158.13) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize lending values ([#5449](https://github.com/JiRaska/open-bank-oss/issues/5449)) ([fd43c7d](https://github.com/JiRaska/open-bank-oss/commit/fd43c7dbd3ecf320768b31ded5f64fcb290553d6))
+
 ## [0.158.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.11...admin-ui-v0.158.12) (2026-08-18)
 
 
