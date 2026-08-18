@@ -36,6 +36,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function PidPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [records, setRecords] = useState<PidRecord[]>([])
   const [loading, setLoading] = useState(true)
   // Inline error is reserved for user-initiated writes (the quick-create form);
@@ -540,7 +541,7 @@ export default function PidPage() {
                   <td>
                     {r.verified ? <CheckCircle2 size={14} color="var(--success)" /> : <Clock size={14} color="var(--warning)" />}
                   </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.createdAt).toLocaleDateString()}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.createdAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
                       {t('Detail', 'View')} <ChevronRight size={12} />
