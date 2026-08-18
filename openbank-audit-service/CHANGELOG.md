@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.4...audit-service-v0.16.0) (2026-08-17)
+
+
+### Features
+
+* **audit:** subscribe to openbank.sca.events for SCA enrollment audit trail ([#5369](https://github.com/JiRaska/open-bank-oss/issues/5369)) ([9446fda](https://github.com/JiRaska/open-bank-oss/commit/9446fda2d4e2768bce5f3d1d54d1d63066cc20ef)), closes [#5337](https://github.com/JiRaska/open-bank-oss/issues/5337) [#5338](https://github.com/JiRaska/open-bank-oss/issues/5338)
+
 ## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.15.3...audit-service-v0.15.4) (2026-08-17)
 
 

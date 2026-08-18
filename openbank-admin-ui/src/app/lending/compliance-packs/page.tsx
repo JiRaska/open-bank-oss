@@ -184,8 +184,8 @@ export default function CompliancePacksPage() {
             <span>{t('Úvěry', 'Lending')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Compliance packy', 'Compliance packs')}</span>
           </div>}
-        title={t('Aktivace compliance packů', 'Compliance pack activation')}
         icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        title={t('Aktivace compliance packů', 'Compliance pack activation')}
         subtitle={t(
           'Jurisdikční úvěrové compliance packy (ADR-0212 D4). Maker navrhne, JINÝ compliance principál rozhodne. Aktivovaný pack platí okamžitě — bez release služby.',
           'Jurisdictional credit compliance packs (ADR-0212 D4). A maker proposes, a DIFFERENT compliance principal decides. An activated pack takes effect immediately — no service release.',
@@ -195,10 +195,11 @@ export default function CompliancePacksPage() {
         </button>}
       />
       {actor && (
-        <p className="page-subtitle" data-testid="acting-as">
+        <p className="page-subtitle" data-testid="acting-as" style={{ marginTop: -20, marginBottom: 20 }}>
           {t('Jednáte jako', 'Acting as')}: <strong>{actor}</strong>
         </p>
       )}
+
       {degraded.length > 0 && (
         <div className="card" data-testid="degraded" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--warning)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
           <AlertTriangle size={14} />
