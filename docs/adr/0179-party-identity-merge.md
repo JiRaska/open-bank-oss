@@ -1,16 +1,26 @@
 ---
 date: 2026-07-19
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [kyc, accounts, ledger]
 summary: "Party-service gains a first-class merge operation (status MERGED plus merged_into, four-eyes gated, emitting PARTY_MERGED) distinct from GDPR erasure, because retiring a duplicate via erasure is a false compliance statement."
+followup: "#1783 shipped the merge mechanism; the party.merge four-eyes gate runs with AUTHZ_ENFORCE=false (advisory) pending a fleet-wide M2M service-role fix"
 ---
 
 # ADR-0179 — Duplicate party identity merge
+
+**Delivery note (2026-08-18).** The merge mechanism is shipped and has processed a live merge:
+`PartyStatus.MERGED` + `merged_into` (V15), `POST /api/v1/parties/{id}/merge`, `PARTY_MERGED`
+event and the fail-closed account guard (PR #1783, deployed via #1793). The four-eyes gate on
+`party.merge` is wired but currently advisory — `AUTHZ_ENFORCE=false` on party-service — because
+the enabling OPA rule over-grants `party.*` to the shared M2M client and needs a distinct
+service-role first (same shape as account-service). `transaction-service`'s companion
+`POST /api/v1/transactions/merge-sweep` (PR #1789) is merged but has not yet been exercised on a
+live path.
 
 ## Context
 
