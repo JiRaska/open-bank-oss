@@ -87,7 +87,9 @@ describe('lending console + aggregates', () => {
     expect(screen.getByText('Active loans').closest('.stat-card')?.textContent).toMatch(/300/)
     // \s, not a literal space: cs-CZ groups thousands with a NON-BREAKING space (U+00A0), so a
     // plain-space regex fails against text that reads identically on screen.
-    expect(screen.getByText('Active loans').closest('.stat-card')?.textContent).toMatch(/7\s100\s000/)
+    expect(screen.getByText('Active loans').closest('.stat-card')?.textContent).toMatch(
+      /7(?:[\s,\u00a0])100(?:[\s,\u00a0])000/,
+    )
     expect(screen.getByText('Loans in trouble').closest('.stat-card')?.textContent).toMatch(/9/)
     // The cap disclosure must be gone: there is nothing truncated to disclose.
     expect(screen.getByTestId('cap-note').textContent).not.toMatch(/NOT in these numbers/)
