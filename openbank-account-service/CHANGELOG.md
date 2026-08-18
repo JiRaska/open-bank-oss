@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.21.2...account-service-v0.21.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **account,party:** add sourceService to audit-consumed events ([#5267](https://github.com/JiRaska/open-bank-oss/issues/5267)) ([2aeefeb](https://github.com/JiRaska/open-bank-oss/commit/2aeefebc6275c45068049aa40869e84a1efd58c4))
+
 ## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.21.1...account-service-v0.21.2) (2026-08-17)
 
 
