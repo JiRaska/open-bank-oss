@@ -138,6 +138,29 @@ class StatementServiceTest {
         assertThat(json.get("actorType").asText()).isEqualTo("SYSTEM")
     }
 
+    /**
+     * Issue #3994/#5256: read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution — before this key, `openbank.statement.event` rows resolved
+     * only via `EventAttribution.TopicAttribution`'s TOPIC-sourced fallback. Parsed as JSON, same
+     * reasoning as the actor-origin test above: this payload is a hand-built template, so a
+     * substring match could pass against the key landing anywhere.
+     */
+    @Test
+    fun `the period-closed payload carries sourceService for AuditConsumer attribution`() {
+        every { periods.findByPeriod(any(), any(), any(), any()) } returns Uni.createFrom().nullItem()
+        every { balance.closingBalance(Fixtures.ACCOUNT_ID, "CZK", to) } returns
+            Uni.createFrom().item(BalanceAnchor(BigDecimal("1075.00"), "CZK", to))
+        every { periods.nextLegalSequence(Fixtures.ACCOUNT_ID, "CZK") } returns Uni.createFrom().item(7L)
+        val msg = slot<StatementOutboxMessage>()
+        every { periods.saveWithOutbox(any(), capture(msg)) } answers
+            { Uni.createFrom().item(firstArg<StatementPeriod>()) }
+
+        service.closeMonth(Fixtures.ACCOUNT_ID, from, to).await().indefinitely()
+
+        val json = ObjectMapper().readTree(msg.captured.payload)
+        assertThat(json.get("sourceService").asText()).isEqualTo("statement-service")
+    }
+
     @Test
     fun `a re-run is idempotent - it returns the existing close without minting a new sequence`() {
         val existing = StatementPeriod(
