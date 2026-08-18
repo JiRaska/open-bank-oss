@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { ShieldCheck, Search, RefreshCw, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { Can } from '@/components/auth/AuthGuard'
 
 const KYC_SERVICE = '/api/svc/kyc-service'
 
@@ -134,7 +135,7 @@ export default function KycPage() {
               <tr key={c.id}>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>{c.id.slice(0, 8)}…</td>
                 <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-                  <Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.partyId.slice(0, 8)}…</Link>
+                  <Can permission="parties:view"><Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', textDecoration: 'none' }}>{c.partyId.slice(0, 8)}…</Link></Can>
                 </td>
                 <td>
                   <StatusBadge status={c.status} />
@@ -149,9 +150,9 @@ export default function KycPage() {
                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{c.reviewedBy ?? '—'}</td>
                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(c.updatedAt).toLocaleDateString(dateLocale)}</td>
                 <td>
-                  <Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
+                  <Can permission="parties:view"><Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
                     {t('Klient', 'Party')} <ChevronRight size={12} />
-                  </Link>
+                  </Link></Can>
                 </td>
               </tr>
             ))}

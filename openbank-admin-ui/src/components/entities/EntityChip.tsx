@@ -13,6 +13,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { CreditCard, User } from 'lucide-react'
 import { svcUrl } from '@/lib/services/bff'
+import { useSession } from 'next-auth/react'
+import { hasPermission } from '@/lib/auth/roles'
 
 export type EntityChipType = 'party' | 'account'
 
@@ -45,36 +47,41 @@ function shortId(id: string): string {
 }
 
 export function EntityChip({ type, id, label, sublabel }: Props) {
+  const { data: session } = useSession()
+  const canOpenParty = type !== 'party' || hasPermission(session?.user?.roles ?? [], 'parties:view')
   const [resolved, setResolved] = useState<string | undefined>(label)
   const Icon = type === 'party' ? User : CreditCard
 
   useEffect(() => {
     if (label) { setResolved(label); return }
+    if (!canOpenParty) { setResolved(undefined); return }
     const ctrl = new AbortController()
     fetch(RESOLVER[type].url(id), { signal: ctrl.signal, cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then(d => { if (d) setResolved(RESOLVER[type].pick(d) ?? shortId(id)) })
       .catch(() => setResolved(shortId(id)))
     return () => ctrl.abort()
-  }, [type, id, label])
+  }, [type, id, label, canOpenParty])
 
-  return (
-    <Link
-      href={ROUTE[type](id)}
-      title={`${type}: ${id}`}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: '6px',
-        padding: '3px 8px', borderRadius: '8px', textDecoration: 'none',
-        background: 'var(--surface-3)', border: '1px solid var(--border)',
-        color: 'var(--accent)', fontSize: '12px', fontWeight: 600,
-        maxWidth: '280px',
-      }}
-    >
-      <Icon size={12} style={{ flexShrink: 0 }} />
+  const content = (
+    <>
+      <Icon size={12} aria-hidden="true" style={{ flexShrink: 0 }} />
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {resolved ?? shortId(id)}
       </span>
       {sublabel && <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>{sublabel}</span>}
-    </Link>
+    </>
+  )
+  const style = {
+    display: 'inline-flex', alignItems: 'center', gap: '6px',
+    padding: '3px 8px', borderRadius: '8px', textDecoration: 'none',
+    background: 'var(--surface-3)', border: '1px solid var(--border)',
+    color: 'var(--accent)', fontSize: '12px', fontWeight: 600,
+    maxWidth: '280px',
+  }
+  return canOpenParty ? (
+    <Link href={ROUTE[type](id)} title={`${type}: ${id}`} style={style}>{content}</Link>
+  ) : (
+    <span title={`${type}: ${id}`} style={{ ...style, color: 'var(--text-secondary)' }}>{content}</span>
   )
 }
