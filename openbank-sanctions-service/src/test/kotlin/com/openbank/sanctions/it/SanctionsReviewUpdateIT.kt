@@ -186,6 +186,30 @@ class SanctionsReviewUpdateIT {
         AuditEventTime.assertRecordedAsEventTime(payloads[1], requireNotNull(reviewed.reviewedAt))
     }
 
+    /**
+     * #3994/#5256: both outbox payloads must carry `sourceService` as the strongest (EVENT-sourced)
+     * claim `AuditConsumer.resolveSourceService` reads. Before this field, `TopicAttribution`
+     * already resolved `openbank.sanctions.screening.event` -> `sanctions-service` correctly, but
+     * only as TOPIC-sourced — and audit-service subscribes to this topic today, so this is a live
+     * attribution upgrade (unlike sca-service's #5337, whose topic audit-service does not consume).
+     * Read from the real `sanctions_outbox` rows, same reasoning as the `occurredAt` test above: the
+     * payload durably persisted is what the dispatcher publishes verbatim.
+     */
+    @Test
+    fun `both the screening and the review payloads carry sourceService for AuditConsumer attribution`() {
+        val stored = onEventLoop { repository.saveWithEvent(hit("review-key-5"), "SanctionChecked") }
+
+        onEventLoop {
+            useCase.review(
+                ReviewCommand(stored.id, "operator-5", "confirmed", SanctionsCheckStatus.ESCALATED),
+            )
+        }
+
+        val payloads = outboxPayloadsOldestFirst()
+        assertThat(payloads).hasSize(2)
+        payloads.forEach { assertThat(it).contains(""""sourceService":"sanctions-service"""") }
+    }
+
     private fun outboxPayloadsOldestFirst(): List<String> = onEventLoop {
         pool.query("SELECT payload FROM sanctions_outbox ORDER BY created_at, id").execute().awaitSuspending()
             .map { it.getString("payload") }
