@@ -166,6 +166,7 @@ class ValueDateRollScheduler(
                     occurredAt = OffsetDateTime.ofInstant(accountingClock.instant(), java.time.ZoneOffset.UTC),
                     actorId = BalanceEventActors.VALUE_DATE_ROLL,
                     actorType = EventActor.TYPE_SYSTEM,
+                    sourceService = "balance-service",
                 ),
             )
             published++
