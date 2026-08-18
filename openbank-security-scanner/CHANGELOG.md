@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.4...security-scanner-v0.7.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **security-scanner:** apply Flyway out-of-order to fix V4/V5 boot collision ([#5630](https://github.com/JiRaska/open-bank-oss/issues/5630)) ([57a39a6](https://github.com/JiRaska/open-bank-oss/commit/57a39a64644f4e390a2dea6fa877467e60f9441f))
+
 ## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.3...security-scanner-v0.7.4) (2026-08-17)
 
 
