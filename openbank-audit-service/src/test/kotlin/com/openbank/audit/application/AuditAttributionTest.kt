@@ -69,6 +69,29 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `clearing-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's clearing-service fix: ClearingEventPublisherImpl.batchSettledPayload
+        // and .itemClearedPayload now put "sourceService" onto the hand-built outbox map for both
+        // the batch.settled and item.cleared events. Before this, EventAttribution's
+        // `openbank.clearing.batch.event` -> `clearing-service` entry (the real outgoing topic for
+        // both event types, via the `clearing-events-out` channel) already resolved these rows
+        // correctly, but as TOPIC-sourced rather than the producer's own claim — and audit-service
+        // subscribes to this topic today (its `application.yaml` consumed-topics list), so this is
+        // a live attribution upgrade, not a forward-looking one.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"batchId":"${UUID.randomUUID()}","eventType":"openbank.clearing.batch.settled",""" +
+                """"sourceService":"clearing-service"}""",
+            EventAddress(topic = "openbank.clearing.batch.event"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("openbank.clearing.batch.settled")
+        assertThat(entry.captured.sourceService).isEqualTo("clearing-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `swift-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's swift-service fix: SwiftService.submitToScheme/settle now put
         // "sourceService" onto the hand-built outbox maps for both the SENT and COMPLETED
