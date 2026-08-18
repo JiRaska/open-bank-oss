@@ -340,8 +340,11 @@ export default function InfraTopologyPage() {
               const st = statusOf(n.id)
               const x = p.cx - p.w / 2, y = p.cy - PILL_H / 2
               return (
-                <g key={n.id} style={{ cursor: 'pointer', transition: 'opacity 0.15s' }} opacity={emphasized ? 1 : 0.25}
+                <g key={n.id} role="button" tabIndex={0} aria-label={n.label}
+                  style={{ cursor: 'pointer', transition: 'opacity 0.15s' }} opacity={emphasized ? 1 : 0.25}
                   onClick={() => setSelected(s => s === n.id ? null : n.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === n.id ? null : n.id) } }}
+                  onFocus={() => setHovered(n.id)}
                   onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}>
                   <rect x={x} y={y} width={p.w} height={PILL_H} rx={PILL_H / 2}
                     fill={isSel ? meta.color : 'var(--surface)'} stroke={meta.color} strokeWidth={isSel ? 1.9 : 1.3}
