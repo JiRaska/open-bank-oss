@@ -114,4 +114,28 @@ describe('CommandPalette (ADR-0228 D3)', () => {
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onClose).toHaveBeenCalled()
   })
+
+  it('keeps focus inside the modal and restores the opener on close', async () => {
+    const user = userEvent.setup()
+    const opener = document.createElement('button')
+    opener.type = 'button'
+    document.body.appendChild(opener)
+    opener.focus()
+    const onClose = vi.fn()
+    const { rerender } = renderPalette(true, onClose)
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveFocus())
+    await user.tab({ shift: true })
+    expect(screen.getByRole('button', { name: /zavřít|close/i })).toHaveFocus()
+    await user.tab()
+    expect(screen.getByRole('textbox')).toHaveFocus()
+    rerender(<LanguageProvider><CommandPalette open={false} onClose={onClose} /></LanguageProvider>)
+    expect(opener).toHaveFocus()
+    opener.remove()
+  })
+
+  it('exposes a labelled listbox and active descendant for assistive technology', () => {
+    renderPalette()
+    expect(screen.getByRole('listbox', { name: /výsledky|search results/i })).toBeTruthy()
+    expect(screen.getByRole('textbox')).not.toHaveAttribute('aria-activedescendant')
+  })
 })

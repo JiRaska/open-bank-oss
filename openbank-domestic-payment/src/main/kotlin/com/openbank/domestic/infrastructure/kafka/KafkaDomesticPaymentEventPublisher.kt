@@ -42,6 +42,8 @@ class KafkaDomesticPaymentEventPublisher(
                 rejectReason = current.rejectReason?.name,
                 rejectDetail = current.rejectDetail,
                 occurredAt = Instant.now(clock),
+                eventType = "DOMESTIC_PAYMENT_STATUS_CHANGED",
+                sourceService = "domestic-payment",
             ),
         )
 

@@ -275,7 +275,8 @@ export default function OnboardingPage() {
                 </tr>
               )}
               {!loading && records.map(r => (
-                <tr key={r.partyId} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}>
+                <tr key={r.partyId} tabIndex={0} aria-label={t(`Vybrat onboarding subjekt ${r.legalName ?? r.partyId}`, `Select onboarding party ${r.legalName ?? r.partyId}`)} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r) } }}>
                   <td style={{ fontWeight: 500 }}>{r.legalName ?? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)' }}>{r.email ?? '—'}</td>
                   <td>

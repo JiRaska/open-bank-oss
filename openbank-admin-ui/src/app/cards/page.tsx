@@ -39,6 +39,7 @@ const ALL = '__ALL__'
 
 export default function CardsPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const router = useRouter()
   const { data: session } = useSession()
   const canIssue = hasPermission(session?.user?.roles ?? [], 'cards:issue')
@@ -245,7 +246,7 @@ export default function CardsPage() {
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.expiryDate}</td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.cardholderName || '—'}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(language === 'cs' ? 'cs-CZ' : 'en-US') : '—'}</td>
+                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                         <td style={{ padding: '10px 16px' }} onClick={e => e.stopPropagation()}>
                           {(canManage || canBlock) && <CardTransitionButtons card={c} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={tr => onSelectTransition(c, tr)} />}
                         </td>

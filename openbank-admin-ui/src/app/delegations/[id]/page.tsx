@@ -21,6 +21,7 @@ import { ArrowLeft, ShieldQuestion, Lock } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { EntityChip } from '@/components/entities/EntityChip'
 import {
   DelegationStatusBadge,
@@ -57,18 +58,13 @@ export default function DelegationDetailPage() {
 
   return (
     <div>
-      <Link href="/delegations" className="btn btn-secondary" style={{ marginBottom: '16px', fontSize: '12px' }}>
-        <ArrowLeft size={14} />
-        {t('Zpět na delegace', 'Back to delegations')}
-      </Link>
-
-      <h1 className="page-title">{t('Detail delegace', 'Delegation detail')}</h1>
-      <p className="page-subtitle">
-        {t(
-          'Udělená práva, stropy a časová osa stavu (ADR-0232).',
-          'Granted rights, ceilings and status timeline (ADR-0232).',
-        )}
-      </p>
+      <PageHeader
+        icon={<ShieldQuestion size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><Link href="/delegations">{t('Delegace', 'Delegations')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Detail', 'Detail')}</span></div>}
+        title={t('Detail delegace', 'Delegation detail')}
+        subtitle={t('Udělená práva, stropy a časová osa stavu (ADR-0232).', 'Granted rights, ceilings and status timeline (ADR-0232).')}
+        actions={<Link href="/delegations" className="btn btn-secondary"><ArrowLeft size={14} aria-hidden="true" />{t('Zpět na delegace', 'Back to delegations')}</Link>}
+      />
 
       {unavail && (
         <DataUnavailable

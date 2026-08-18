@@ -60,7 +60,9 @@ import sys
 # Baselined violations. Each is a service that ships an outbox nothing writes to, measured
 # 2026-08-07. Removing one from this list is the definition of done for that service.
 BASELINE = {
-    "openbank-audit-service": "#4007 — dispatcher + gauge, no OutboxMessage construction",
+    # openbank-audit-service is no longer a violation: the dead outbox apparatus was deleted
+    # entirely (#5126) rather than wired, since no consumer need for an outbound audit-service
+    # event was ever identified. The service no longer ships a dispatcher at all.
     "openbank-balance-service": "#4007 — publishes via the direct KafkaBalanceEventPublisher instead",
     # openbank-billing-service was never a violation (#4007): it writes billing.fee.post-intent.v1
     # from BillingAssessmentRepositoryImpl by constructing BillingOutboxEntity() inside the same
