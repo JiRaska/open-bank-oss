@@ -30,7 +30,7 @@ export default defineConfig({
         'src/test/**',
         'src/**/*.d.ts',
         'src/types/**',
-        'src/middleware.ts',
+        'src/proxy.ts',
         'src/instrumentation*.ts',
       ],
       // ── Ratchet (repo convention: coverage may never go down) ──────────────
