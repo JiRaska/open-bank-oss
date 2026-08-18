@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.5...admin-ui-v0.165.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** keyboard-enable table rows ([#5544](https://github.com/JiRaska/open-bank-oss/issues/5544)) ([49e2726](https://github.com/JiRaska/open-bank-oss/commit/49e272660f77592fc4bcb12dfb75f674b314b348))
+
 ## [0.165.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.4...admin-ui-v0.165.5) (2026-08-18)
 
 
