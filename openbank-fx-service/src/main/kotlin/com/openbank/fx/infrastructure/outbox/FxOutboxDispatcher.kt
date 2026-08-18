@@ -4,6 +4,7 @@
 package com.openbank.fx.infrastructure.outbox
 
 import com.openbank.fx.application.port.out.FxOutboxRepository
+import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -33,7 +34,8 @@ class FxOutboxDispatcher(
     private val publisher: OutboxEventPublisher,
     @ConfigProperty(name = "openbank.outbox.dispatch-enabled", defaultValue = "false")
     private val dispatchEnabled: Boolean,
-) : AbstractOutboxDispatcher() {
+    metrics: DomainMetrics,
+) : AbstractOutboxDispatcher(metrics) {
     override val outboxRepository: OutboxRepository get() = repo
     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
 
