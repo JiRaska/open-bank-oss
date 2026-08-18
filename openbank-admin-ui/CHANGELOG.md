@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.10...admin-ui-v0.158.11) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize fx values ([#5440](https://github.com/JiRaska/open-bank-oss/issues/5440)) ([0a9c052](https://github.com/JiRaska/open-bank-oss/commit/0a9c052e812cd7f5974619f03dd2de37ca590501))
+
 ## [0.158.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.9...admin-ui-v0.158.10) (2026-08-18)
 
 
