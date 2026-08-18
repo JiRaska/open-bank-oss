@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.164.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.163.0...admin-ui-v0.164.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** extend static docs PDF export ([#5510](https://github.com/JiRaska/open-bank-oss/issues/5510)) ([b8576b5](https://github.com/JiRaska/open-bank-oss/commit/b8576b50d3cf9daa370098945541f10b18aa7135))
+
 ## [0.163.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.162.0...admin-ui-v0.163.0) (2026-08-18)
 
 
