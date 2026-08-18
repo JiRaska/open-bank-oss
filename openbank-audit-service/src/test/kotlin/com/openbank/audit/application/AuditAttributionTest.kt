@@ -69,6 +69,34 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `transaction-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's transaction-service fix: TransactionInitiatedEvent /
+        // TransactionCompletedEvent / TransactionFailedEvent / TransactionSettledEvent now
+        // serialise "sourceService" themselves
+        // (openbank-transaction-service/.../domain/event/TransactionEvents.kt +
+        // TransactionSettledEvent.kt). Before this, EventAttribution's single
+        // "openbank.transactions.transaction.initiated" -> "transaction-service" entry already
+        // resolved TransactionInitiatedEvent rows correctly (but as TOPIC-sourced, not the
+        // producer's own claim) — and the other three event types, which share that same
+        // outbound topic, resolved to the same table entry too, which is coincidentally correct
+        // rather than verified per event type. This is unlike #5255's domestic-payment fix:
+        // "eventType" ("TransactionInitiated" etc., via DomainEvent) already existed on the wire
+        // and is read verbatim by the fraud feature engine
+        // (VelocityFeatures.TRANSACTION_INITIATED), so it is unchanged here.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"aggregateId":"${UUID.randomUUID()}","eventType":"TransactionInitiated",""" +
+                """"sourceService":"transaction-service"}""",
+            EventAddress(topic = "openbank.transactions.transaction.initiated"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("TransactionInitiated")
+        assertThat(entry.captured.sourceService).isEqualTo("transaction-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `clearing-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's clearing-service fix: ClearingEventPublisherImpl.batchSettledPayload
         // and .itemClearedPayload now put "sourceService" onto the hand-built outbox map for both
