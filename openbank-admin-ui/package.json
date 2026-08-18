@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "0.161.1",
+  "version": "0.162.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",
