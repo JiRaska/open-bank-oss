@@ -30,7 +30,7 @@ Není co nakreslit jako ER diagram: služba nevlastní žádné tabulky.
 |---|---|---|
 | `V2__create_security_outbox.sql` | Vytvořila `security_outbox` s indexy na `(status, created_at)` a `aggregate_id` | Aplikována na živé DB; nahrazena V4 |
 | `V3__hibernate_sequences.sql` | Vytvořila Hibernate/Panache sekvenci pro surrogate klíč outboxu | Aplikována; sekvenci ruší V4 |
-| `V6__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — outbox neměl producenta (#4709) | Aktuální hlava |
+| `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — outbox neměl producenta (#4709) | Aktuální hlava |
 
 > V1 chybí — scanner byl v první iteraci bezestavový a V2 je první migrací, která vznikla. V2 a V3
 > jsou záměrně ponechány jako soubory a nesmazány: obě jsou zaznamenány jako aplikované v živé

@@ -31,7 +31,7 @@ There is no ER diagram to draw: the service owns no tables.
 |---|---|---|
 | `V2__create_security_outbox.sql` | Created `security_outbox` with indexes on `(status, created_at)` and `aggregate_id` | Applied on the live database; superseded by V4 |
 | `V3__hibernate_sequences.sql` | Created the Hibernate/Panache sequence used for the outbox surrogate key | Applied; the sequence is dropped by V4 |
-| `V6__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — the outbox had no producer (#4709) | The current head |
+| `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — the outbox had no producer (#4709) | The current head |
 
 > V1 is absent — the scanner was stateless in its first iteration and V2 is the first migration that
 > landed. V2 and V3 are deliberately kept as files rather than deleted: both are recorded as applied
