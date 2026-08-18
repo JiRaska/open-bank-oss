@@ -23,6 +23,7 @@ interface KycCase {
 export default function KycPage() {
   const [cases, setCases]     = useState<KycCase[]>([])
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading] = useState(true)
   // Typed unavailable reason → renders the calm <DataUnavailable> panel instead
   // of leaking a raw "HTTP 404" string (admin-ui graceful-state rule).
@@ -146,7 +147,7 @@ export default function KycPage() {
                   </div>
                 </td>
                 <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{c.reviewedBy ?? '—'}</td>
-                <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(c.updatedAt).toLocaleDateString()}</td>
+                <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(c.updatedAt).toLocaleDateString(dateLocale)}</td>
                 <td>
                   <Link href={`/parties/${c.partyId}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
                     {t('Klient', 'Party')} <ChevronRight size={12} />
