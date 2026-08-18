@@ -100,16 +100,7 @@ tasks.withType<Test> {
     // a global bump would be an unmeasured ratchet applied to 50 modules to fix one.
     maxHeapSize = "2g"
 
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    // Pact rootDir + Pact Broker property forwarding centralised into
+    // build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
 }

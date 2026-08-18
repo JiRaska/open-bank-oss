@@ -41,9 +41,10 @@ dependencies {
 // The consumer test regenerates the file on every run; developers commit the result, and
 // openbank-ledger-service's LedgerPactProviderVerificationTest (@PactFolder("../pacts")) replays it.
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 kover {
     reports {

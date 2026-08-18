@@ -98,30 +98,10 @@ kover {
 // Pact: provider verification reads pact files from the shared pacts/ dir (git-pact, ADR-0063).
 System.setProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 
-// Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D` into the
-// (forked) test JVM. When `pactbroker.url` is unset (local `./gradlew build`) the @PactBroker
-// provider test is @EnabledIfSystemProperty-skipped and git-pact above stays the fallback;
-// publishResults + provider.version/branch tag the verification result for can-i-deploy.
-tasks.withType<Test> {
-    // Forwarded into the FORKED test JVM, which the config-time System.setProperty above does not
-    // reach — that one only ever set it on the Gradle daemon. Without it a consumer pact is written
-    // to `build/pacts` instead of the shared `pacts/` dir, where nothing commits it and
-    // `derive-pact-drift-scope.sh` reports it as an uncommitted pact (#3921). The provider
-    // verification is unaffected either way: it resolves `@PactFolder("../pacts")` relative to the
-    // module, not through this property.
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.

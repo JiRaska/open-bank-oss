@@ -76,17 +76,7 @@ kover {
 }
 
 // Pact: write generated consumer contracts to pacts/ and forward broker config for verification.
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.

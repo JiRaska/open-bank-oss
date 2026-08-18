@@ -88,20 +88,10 @@ kover {
 // Pact: write generated pact files to the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // The consumer test regenerates the file on every run; developers commit the result.
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
-tasks.withType<Test> {
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
-}
+// Pact rootDir + Pact Broker property forwarding centralised into
+// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
+// fleet-standard block, so nothing service-specific remains here.
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.
