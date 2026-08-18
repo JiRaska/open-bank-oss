@@ -24,6 +24,16 @@ data class SepaPaymentCreatedEvent(
     val currency: String,
     val endToEndId: String,
     val occurredAt: Instant,
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` (audit-service) as the
+     * strongest (EVENT-sourced) attribution — issue #3994/#5256. `EventAttribution.TopicAttribution`
+     * already maps `openbank.sepa.payment.events` -> `sepa-payment` correctly, but only as
+     * TOPIC-sourced, not the producer's own claim, and audit-service subscribes to this topic today
+     * (`openbank-audit-service/src/main/resources/application.yaml`'s consumed-topics list), so this
+     * is a live attribution upgrade. Serialised via `objectMapper.writeValueAsString` in
+     * `KafkaSepaPaymentEventPublisher`, so the wire key exists only as this Kotlin property name.
+     */
+    val sourceService: String = "sepa-payment",
 )
 
 data class SepaPaymentStatusChangedEvent(
@@ -33,6 +43,8 @@ data class SepaPaymentStatusChangedEvent(
     val rejectReason: String?,
     val rejectDetail: String?,
     val occurredAt: Instant,
+    /** See [SepaPaymentCreatedEvent.sourceService] (#3994/#5256). */
+    val sourceService: String = "sepa-payment",
 )
 
 fun SepaPayment.toStatusChangedEvent(previousStatus: SepaPaymentStatus, clock: Clock) = SepaPaymentStatusChangedEvent(
@@ -42,6 +54,7 @@ fun SepaPayment.toStatusChangedEvent(previousStatus: SepaPaymentStatus, clock: C
     rejectReason = rejectReason?.name,
     rejectDetail = rejectDetail,
     occurredAt = Instant.now(clock),
+    sourceService = "sepa-payment",
 )
 
 fun SepaPayment.toCreatedEvent(clock: Clock) = SepaPaymentCreatedEvent(
@@ -56,4 +69,5 @@ fun SepaPayment.toCreatedEvent(clock: Clock) = SepaPaymentCreatedEvent(
     currency = currency,
     endToEndId = endToEndId,
     occurredAt = Instant.now(clock),
+    sourceService = "sepa-payment",
 )
