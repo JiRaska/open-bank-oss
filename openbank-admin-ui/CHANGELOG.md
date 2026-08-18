@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.161.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.160.0...admin-ui-v0.161.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** modernize delegation and feedback headers ([#5478](https://github.com/JiRaska/open-bank-oss/issues/5478)) ([966989e](https://github.com/JiRaska/open-bank-oss/commit/966989e426b33974ac0c41996e8078f397abc3e6))
+
 ## [0.160.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.159.0...admin-ui-v0.160.0) (2026-08-18)
 
 
