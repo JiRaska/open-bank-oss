@@ -90,6 +90,28 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `swift-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's swift-service fix: SwiftService.submitToScheme/settle now put
+        // "sourceService" onto the hand-built outbox maps for both the SENT and COMPLETED
+        // swift.message.status-changed writes. Before this, EventAttribution's
+        // `openbank.payments.swift.event` -> `swift-service` entry already resolved these rows
+        // correctly, but as TOPIC-sourced rather than the producer's own claim — and audit-service
+        // subscribes to this topic today (its `application.yaml` consumed-topics list), so this is
+        // a live attribution upgrade, not a forward-looking one.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"swiftMessageId":"${UUID.randomUUID()}","eventType":"swift.message.status-changed",""" +
+                """"sourceService":"swift-service"}""",
+            EventAddress(topic = "openbank.payments.swift.event"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("swift.message.status-changed")
+        assertThat(entry.captured.sourceService).isEqualTo("swift-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `sanctions-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's sanctions-service fix: SanctionsRepositoryImpl.eventPayload now
         // serialises "sourceService" onto the outbox payload (the serialised SanctionsCheck
