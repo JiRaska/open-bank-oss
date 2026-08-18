@@ -73,6 +73,8 @@ class PartyEventEnvelopeContractTest {
         // It must be a FLAT envelope — NOT the pid-service nested {aggregateId,payload} form.
         assertThat(json.has("aggregateId")).isFalse()
         assertThat(json.has("payload")).isFalse()
+        // AuditConsumer attribution (#3994/#5256): the strongest (EVENT-sourced) claim it reads.
+        assertThat(json.get("sourceService").asText()).isEqualTo("party-service")
     }
 
     @Test
@@ -107,6 +109,7 @@ class PartyEventEnvelopeContractTest {
 
         val json = mapper.readTree(mapper.writeValueAsString(event.envelope))
         assertThat(json.get("mergedIntoPartyId").asText()).isEqualTo("22222222-2222-2222-2222-222222222222")
+        assertThat(json.get("sourceService").asText()).isEqualTo("party-service")
     }
 
     @Test
@@ -117,6 +120,7 @@ class PartyEventEnvelopeContractTest {
         assertThat(json.get("eventType").asText()).isEqualTo("PARTY_ERASED")
         assertThat(json.get("partyId").asText()).isEqualTo(id.toString())
         assertThat(json.has("erasedAt")).isTrue()
+        assertThat(json.get("sourceService").asText()).isEqualTo("party-service")
         listOf("legalName", "email", "partyType", "status", "kycStatus").forEach {
             assertThat(json.has(it)).describedAs("PARTY_ERASED must not carry %s", it).isFalse()
         }
