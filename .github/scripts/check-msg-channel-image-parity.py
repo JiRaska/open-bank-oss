@@ -50,6 +50,7 @@ import pathlib
 import re
 import subprocess
 import sys
+import time
 
 import gatelib
 
@@ -71,22 +72,54 @@ def _git_show(root: pathlib.Path, ref: str, path: str):
     return p.stdout if p.returncode == 0 else None
 
 
+_TRANSIENT_RETRIES = 2
+_TRANSIENT_BACKOFF_SECONDS = 1.0
+
+
 def _api_show(repo: str, ref: str, path: str):
-    """Read a file at an arbitrary commit through the GitHub contents API."""
-    p = subprocess.run(
-        # -X GET is required: without it `gh api -f` sends `ref` as a POST body field and
-        # the contents endpoint answers 404, which reads exactly like "that commit has no
-        # such file" rather than "the request was malformed".
-        ["gh", "api", "-X", "GET", f"repos/{repo}/contents/{path}", "-f", f"ref={ref}",
-         "--jq", ".content"],
-        capture_output=True, text=True,
+    """Read a file at an arbitrary commit through the GitHub contents API.
+
+    A 404 ("No commit found for the ref ..." or "Not Found") is terminal: the ref genuinely
+    has no such file, or does not exist on this remote, and retrying cannot change that.
+    Anything else — a rate limit (403/429), a 5xx, or a bare network failure with no HTTP
+    status in `gh`'s stderr at all — is retried with a short backoff before giving up, because
+    those are exactly the failures a single high-concurrency CI window produces and self-heal
+    within seconds. Measured live on #5270: the identical lookup for the identical commit
+    failed once during a 240-runs-in-10-minutes window and succeeded 6 minutes later with
+    nothing about the commit having changed — a transient failure was misreported as "that
+    commit could not be read", which reads exactly like a genuinely unreachable one.
+    """
+    last_stderr = ""
+    for attempt in range(1 + _TRANSIENT_RETRIES):
+        p = subprocess.run(
+            # -X GET is required: without it `gh api -f` sends `ref` as a POST body field and
+            # the contents endpoint answers 404, which reads exactly like "that commit has no
+            # such file" rather than "the request was malformed".
+            ["gh", "api", "-X", "GET", f"repos/{repo}/contents/{path}", "-f", f"ref={ref}",
+             "--jq", ".content"],
+            capture_output=True, text=True,
+        )
+        if p.returncode == 0 and p.stdout.strip():
+            try:
+                return base64.b64decode(p.stdout.strip()).decode("utf-8", "replace")
+            except (ValueError, binascii.Error):
+                return None
+        if p.returncode == 0:
+            # Success but an empty body — e.g. the path is a directory, not a file. Not
+            # something a retry can fix.
+            return None
+        last_stderr = p.stderr
+        if "(HTTP 404)" in p.stderr or "Not Found" in p.stderr:
+            return None  # terminal: no such ref/file, retrying cannot help
+        if attempt < _TRANSIENT_RETRIES:
+            time.sleep(_TRANSIENT_BACKOFF_SECONDS * (attempt + 1))
+    sys.stderr.write(
+        f"::warning::gh api contents lookup for {repo}@{ref}:{path} failed "
+        f"{1 + _TRANSIENT_RETRIES} times with no HTTP 404 (last error: "
+        f"{last_stderr.strip() or '(no stderr)'}) — treating as unreadable after retrying "
+        f"transient failures.\n"
     )
-    if p.returncode != 0 or not p.stdout.strip():
-        return None
-    try:
-        return base64.b64decode(p.stdout.strip()).decode("utf-8", "replace")
-    except (ValueError, binascii.Error):
-        return None
+    return None
 
 
 def git_show(root: pathlib.Path, ref: str, path: str, repo: str):
@@ -283,11 +316,65 @@ mp:
         print(f"  {'ok ' if ok else 'BAD'} {why}")
         if not ok:
             bad_cases.append(why)
+
+    retry_cases = _self_test_api_show_retry()
+    bad_cases.extend(retry_cases)
+
     if bad_cases:
         print("\n::error::self-test FAILED: " + "; ".join(bad_cases))
         return 1
     print("\nself-test: the scanner distinguishes a servable channel from a declared-only one.")
     return 0
+
+
+def _self_test_api_show_retry():
+    """`_api_show` must retry a transient failure and give up immediately on a real 404.
+
+    Regression cover for #5270: a single non-404 `gh api` failure (rate limit, 5xx, a bare
+    network error) must not be reported the same way as a ref that genuinely does not exist.
+    """
+    import unittest.mock as mock
+
+    bad = []
+    orig_sleep = time.sleep
+    time.sleep = lambda _s: None  # keep the self-test fast; retry COUNT is what's asserted
+    try:
+        transient = mock.Mock(returncode=1, stdout="", stderr="gh: … (HTTP 503)")
+        ok = mock.Mock(returncode=0, stdout="aGVsbG8=\n", stderr="")
+        with mock.patch("subprocess.run", side_effect=[transient, transient, ok]) as m:
+            out = _api_show("owner/repo", "deadbeef", "some/path")
+            if out != "hello":
+                bad.append(f"a transient failure that later succeeds should return the "
+                            f"content, got {out!r}")
+            if m.call_count != 3:
+                bad.append(f"expected 3 calls (2 transient + 1 success), got {m.call_count}")
+
+        not_found = mock.Mock(returncode=1, stdout="", stderr="gh: No commit found (HTTP 404)")
+        with mock.patch("subprocess.run", side_effect=[not_found, transient, ok]) as m:
+            out = _api_show("owner/repo", "0000000", "some/path")
+            if out is not None:
+                bad.append(f"a 404 must be terminal (no retry), got {out!r}")
+            if m.call_count != 1:
+                bad.append(f"a 404 must not be retried, got {m.call_count} call(s)")
+
+        always_transient = mock.Mock(returncode=1, stdout="", stderr="gh: … (HTTP 429)")
+        with mock.patch("subprocess.run", return_value=always_transient) as m:
+            out = _api_show("owner/repo", "deadbeef", "some/path")
+            if out is not None:
+                bad.append(f"exhausting all retries must still return None, got {out!r}")
+            if m.call_count != 1 + _TRANSIENT_RETRIES:
+                bad.append(
+                    f"expected {1 + _TRANSIENT_RETRIES} attempts before giving up, "
+                    f"got {m.call_count}"
+                )
+    finally:
+        time.sleep = orig_sleep
+
+    for msg in bad:
+        print(f"  BAD {msg}")
+    if not bad:
+        print("  ok  a transient gh-api failure is retried; a real 404 is not")
+    return bad
 
 
 if __name__ == "__main__":

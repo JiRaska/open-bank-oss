@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import { loadSecurityPosture } from '@/lib/governance/security'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,7 +46,7 @@ export default async function ZeroTrustPage() {
 
   if (!posture) {
     return (
-      <div>
+      <div className="docs-printable">
         <DocsPageHeader
           crumbs={<>
               <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -55,6 +56,7 @@ export default async function ZeroTrustPage() {
           </>}
           title={t('Zero-Trust bezpečnostní mapa', 'Zero-Trust Security Map')}
           icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+          actions={<PrintDocumentButton />}
         />
         <div className="card" style={{ padding: '24px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
@@ -218,7 +220,7 @@ export default async function ZeroTrustPage() {
   ]
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -232,10 +234,13 @@ export default async function ZeroTrustPage() {
               'Defense in depth derived from the real, gitops-deployed manifests (NetworkPolicy, Kyverno). No service mesh runs in the sandbox — the mTLS/JWT/L7 rows below say so plainly, not "enforced".',
             )}
         icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ChevronLeft size={14} />
-          {t('Zpět na dokumentaci', 'Back to docs')}
-        </Link>}
+        actions={<div className="docs-header-actions" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <PrintDocumentButton />
+          <Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ChevronLeft size={14} aria-hidden="true" />
+            {t('Zpět na dokumentaci', 'Back to docs')}
+          </Link>
+        </div>}
       />
 
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1.6fr) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>

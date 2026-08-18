@@ -35,8 +35,12 @@
 .headerLink:hover,
 .headerLink:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
 
-@media (max-width: 760px) {
-  .header { height: 54px; padding: 0 14px; }
+.mobileMenu { display: none; }
+
+@media (max-width: 860px) {
+  .header { height: 54px; padding: 0 14px; gap: 10px; }
+  .mobileMenu { display: grid; width: 34px; height: 34px; flex: 0 0 auto; place-items: center; color: var(--text-secondary); background: transparent; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+  .mobileMenu:hover, .mobileMenu:focus-visible { color: var(--accent-text); background: var(--accent-light); outline: none; }
   .searchTrigger { min-width: auto; }
   .searchTrigger span,
   .searchTrigger kbd { display: none; }

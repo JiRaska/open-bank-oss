@@ -121,7 +121,10 @@ export default function SwiftPage() {
                 const sc = STATUS_COLORS[m.status] ?? STATUS_COLORS.PENDING
                 return (
                   <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                    tabIndex={0}
+                    aria-label={t(`Otevřít detail zprávy ${m.messageType}`, `Open ${m.messageType} message detail`)}
                     onClick={() => { stashRow('swift', m.id, m); router.push(`/swift/${m.id}`) }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stashRow('swift', m.id, m); router.push(`/swift/${m.id}`) } }}
                     title={t('Zobrazit detail zprávy', 'View message detail')}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>

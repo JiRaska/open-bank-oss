@@ -148,8 +148,21 @@ jobs:
           # Note what that failure was NOT: not "never triggered" and not "never detected" —
           # 3 of 10 sampled runs the same day issued a real re-run that landed as attempt 2.
           # Only 5xx / 429 / a transport error are retried. A 403/404/422 is a real answer
-          # (run too old, already re-running, no permission); retrying those just burns the
-          # budget and delays the alarm, so they fail immediately.
+          # (run too old, no permission); retrying those just burns the budget and delays the
+          # alarm, so they fail immediately.
+          #
+          # "ALREADY RUNNING" IS NOT ONE OF THOSE (issue #5489). Measured on run 32100417490:
+          # attempt 1 hit `HTTP 502: Server Error` (a transient loss, retried per the rule
+          # above); by attempt 2 the run had already started re-running — a race with GitHub's
+          # own retry of the first, lost call, or with a duplicate trigger — and `gh` answered
+          #   run 32100417490 cannot be rerun; This workflow is already running
+          # Treating that as a hard failure was wrong: the substance this workflow exists to
+          # achieve (the reclaimed run gets a fresh attempt) had ALREADY happened by the time
+          # attempt 2 asked. Filing #5489 for it escalates a no-op as if it were the #4595
+          # case (the API call losing 3/3), which it structurally cannot be — a losing call
+          # never gets to "already running", it gets HTTP 5xx/429/timeout every time. So this
+          # is matched and returned as a distinct success, not folded into the transient-retry
+          # loop above and not falling to the non-transient catch-all.
           rerun_with_retry() {
             # Written with `if ... fi`, never `[ x ] && cmd`, because a trailing AND-list that
             # evaluates false is a FAILING last command and `set -e` would exit the whole step
@@ -166,6 +179,13 @@ jobs:
               fi
               echo "gh run rerun attempt ${attempt}/3 failed: ${out}"
               case "${out}" in
+                *"already running"*)
+                  # Not an error to retry and not an error to escalate: the run is already
+                  # retrying, so there is nothing left for this step to do. Matched BEFORE the
+                  # transient-vs-non-transient case below so it can never fall into either —
+                  # it is neither.
+                  echo "gh run rerun attempt ${attempt}/3: ${RUN_URL} is already running (race with a prior attempt or GitHub's own mechanism) — nothing to do, treating as success"
+                  return 0 ;;
                 *"HTTP 5"*|*"HTTP 429"*|*"Server Error"*|*"connection reset"*|*"EOF"*|*"timeout"*) ;;
                 *) echo "::error title=spot-kill auto-retry::Non-transient error from gh run rerun; not retrying: ${out}"
                    return 1 ;;

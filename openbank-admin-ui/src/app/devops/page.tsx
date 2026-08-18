@@ -225,6 +225,8 @@ function toAgentFinding(f: DevOpsFinding, t: (cs: string, en: string) => string)
 
 function DevOpsContent() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const numberLocale = dateLocale
   const [dora, setDora] = useState<DoraData | null>(null)
   const [tests, setTests] = useState<TestResultsResponse | null>(null)
   const [findings, setFindings] = useState<DevOpsFinding[]>([])
@@ -330,7 +332,7 @@ function DevOpsContent() {
           )}
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {lastRefresh.toLocaleTimeString()}
+              {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button
@@ -620,19 +622,19 @@ function DevOpsContent() {
               {[
                 {
                   label: t('Celkem testů', 'Total Tests'),
-                  value: tests.totals.tests.toLocaleString(),
+                  value: tests.totals.tests.toLocaleString(numberLocale),
                   icon: <FlaskConical size={16} />, color: '#6366f1',
                   sub: `${tests.totals.servicesWithTests}/${tests.totals.services} ${t('služeb', 'services')}`,
                 },
                 {
                   label: t('Prošlo', 'Passed'),
-                  value: tests.totals.passed.toLocaleString(),
+                  value: tests.totals.passed.toLocaleString(numberLocale),
                   icon: <CheckCircle2 size={16} />, color: '#16a34a',
                   sub: fleetPassRate !== null ? t(`${fleetPassRate} % úspěšnost`, `${fleetPassRate}% pass rate`) : '—',
                 },
                 {
                   label: t('Selhalo', 'Failed'),
-                  value: (tests.totals.failed).toLocaleString(),
+                  value: (tests.totals.failed).toLocaleString(numberLocale),
                   icon: <XCircle size={16} />, color: tests.totals.failed > 0 ? '#dc2626' : '#16a34a',
                   sub: t('unit + integrační', 'unit + integration'),
                 },
