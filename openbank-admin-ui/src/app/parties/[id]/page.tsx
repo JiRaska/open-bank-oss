@@ -53,6 +53,7 @@ function PartyDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
   const [party, setParty]     = useState<Party | null>(null)
   const [kyc, setKyc]         = useState<KycCase | null>(null)
@@ -170,8 +171,8 @@ function PartyDetailPage() {
                 [t('Reg. číslo', 'Reg. Number'),          party.registrationNumber ?? '—'],
                 [t('Státní příslušnost', 'Nationality'),  party.nationality ?? '—'],
                 [t('Datum narození', 'Date of Birth'),    party.dateOfBirth ?? '—'],
-                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString()],
-                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString()],
+                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString(dateLocale)],
+                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString(dateLocale)],
               ].map(([label, value]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                   <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -298,6 +299,7 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
   // A helper component outside the page needs its own language context (all admin-ui pages
   // are 'use client') — never reference the page's `t` out of scope (CLAUDE.md rule #4).
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [rows, setRows] = useState<NotificationSummary[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -554,8 +556,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                     {row.status}
                   </span>
                 </td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString() : '—'}</td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString() : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString(dateLocale) : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString(dateLocale) : '—'}</td>
               </tr>
             ))}
           </tbody>

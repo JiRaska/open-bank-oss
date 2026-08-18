@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.1...domestic-payment-v0.14.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **domestic-payment:** add eventType/sourceService to audit-consumed events ([#5255](https://github.com/JiRaska/open-bank-oss/issues/5255)) ([3b3326c](https://github.com/JiRaska/open-bank-oss/commit/3b3326caaeb1a898ce75ef5547da73d812d67ebb))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.0...domestic-payment-v0.14.1) (2026-08-17)
 
 

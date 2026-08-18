@@ -41,10 +41,19 @@ dependencies {
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
+    testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.rest.assured.kotlin)
+    // Git-pact for the Admin UI's bounded operator trigger (ADR-0063): the
+    // consumer shape and provider replay protect the 202/workflowId contract.
+    testImplementation(libs.pact.consumer)
+    testImplementation(libs.pact.provider)
+}
+
+tasks.withType<Test> {
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 }
 
 // Package the ADR-0148 prompt registry onto the classpath so LlmDiagnosisAdapter loads its system

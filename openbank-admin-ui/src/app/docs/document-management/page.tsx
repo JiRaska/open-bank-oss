@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 const ACCENT = '#6366f1'
 const INK = 'var(--text-primary)'
@@ -19,7 +20,7 @@ export default function DocumentManagementDocsPage() {
   const { t } = useLanguage()
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -32,6 +33,7 @@ export default function DocumentManagementDocsPage() {
             'A new bounded context (openbank-document-service): templates → PDF generation → storage → signature ceremony → audit → downstream consumers.',
           )}
         icon={<FileSignature aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+        actions={<PrintDocumentButton />}
       />
 
       {/* Status strip */}
