@@ -46,7 +46,8 @@ const STATE_META: Record<string, { color: string; bg: string; border: string; Ic
 }
 
 export default function ApprovalsPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data: session } = useSession()
   const decidedBy = session?.user?.email || session?.user?.name || 'operator'
 
@@ -166,7 +167,7 @@ export default function ApprovalsPage() {
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
                 {item.resourceId && <span style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
                 {item.maker && <span>{t('navrhl', 'by')} {item.maker}</span>}
-                {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString()}</span>}
+                {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
               </div>
             </div>
             <span style={{ fontSize: 10, fontWeight: 700, color: '#d97706', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
@@ -217,7 +218,7 @@ export default function ApprovalsPage() {
                 <span style={{ fontWeight: 700 }}>{t('Navrhovaná akce: ', 'Suggested action: ')}</span>{p.suggestedAction}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 10 }}>
-                {t('Navrhl', 'Proposed by')} <b>{p.proposedBy}</b> · {new Date(p.proposedAt).toLocaleString('cs-CZ')}
+                {t('Navrhl', 'Proposed by')} <b>{p.proposedBy}</b> · {new Date(p.proposedAt).toLocaleString(dateLocale)}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <input
