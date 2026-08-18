@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.6...admin-ui-v0.158.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove fake IAOPS analysis trigger ([473286a](https://github.com/JiRaska/open-bank-oss/commit/473286aff4b8441beedaf745bb33b647d900f28a))
+
 ## [0.158.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.5...admin-ui-v0.158.6) (2026-08-17)
 
 
