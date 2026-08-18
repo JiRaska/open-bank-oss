@@ -114,6 +114,7 @@ object PartyEvents {
             "eventType" to "PARTY_ERASED",
             "partyId" to partyId,
             "erasedAt" to at,
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
 
@@ -133,6 +134,7 @@ object PartyEvents {
             "occurredAt" to at,
             EventActor.FIELD_ACTOR_ID to actor.id,
             EventActor.FIELD_ACTOR_TYPE to actor.type,
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
 
@@ -151,6 +153,15 @@ object PartyEvents {
             "occurredAt" to at,
             EventActor.FIELD_ACTOR_ID to actor.id,
             EventActor.FIELD_ACTOR_TYPE to actor.type,
+            "sourceService" to SOURCE_SERVICE,
         ),
     )
+
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution — issue #3994/#5256. Value matches the fleet's audit
+     * convention: the module directory without the `openbank-` prefix, the same spelling
+     * `TopicAttribution` already maps `openbank.party.events` to.
+     */
+    private const val SOURCE_SERVICE = "party-service"
 }
