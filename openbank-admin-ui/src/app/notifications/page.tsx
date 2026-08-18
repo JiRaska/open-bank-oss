@@ -31,6 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function NotificationsPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
   const canApprove = hasPermission(roles, 'opsmessage:approve')
   const [items, setItems]     = useState<Notification[]>([])
@@ -148,7 +149,7 @@ export default function NotificationsPage() {
                     </span>
                   </td>
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    {n.sentAt ? new Date(n.sentAt).toLocaleString() : '—'}
+                    {n.sentAt ? new Date(n.sentAt).toLocaleString(dateLocale) : '—'}
                   </td>
                 </tr>
               )
