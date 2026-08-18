@@ -111,6 +111,9 @@ openbank:
     check-cron: ${FLAKY_TEST_HUNTER_CHECK_CRON:0 30 6 ? * SUN}
     github-api-url: ${GITHUB_API_URL:https://api.github.com}
     github-repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
+    # Optional (Optional<String>, no default): absent until openbank/flaky-test-hunter is seeded in
+    # OpenBao, and the writer fails closed on a blank value (see GitHubProposalAdapter).
+    github-token: ${FLAKY_TEST_HUNTER_GITHUB_TOKEN:}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
     # Filesystem path to the monorepo checkout this agent reads */src/test/kotlin/**/*.kt,
     # .github/scripts/*.sh CI guard scripts, and */build/test-results/test/*.xml JUnit reports
