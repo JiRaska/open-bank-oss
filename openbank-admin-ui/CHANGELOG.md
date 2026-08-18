@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.166.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.0...admin-ui-v0.166.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** label product studio icons ([#5570](https://github.com/JiRaska/open-bank-oss/issues/5570)) ([362ca89](https://github.com/JiRaska/open-bank-oss/commit/362ca89403c5471391a5ae7dd314e5ada95a7446))
+
+## [0.166.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.10...admin-ui-v0.166.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** add governance document PDF export ([#5566](https://github.com/JiRaska/open-bank-oss/issues/5566)) ([d728b6d](https://github.com/JiRaska/open-bank-oss/commit/d728b6d73908b7e700750a17c9b9fca3cc9af2ae))
+
 ## [0.165.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.9...admin-ui-v0.165.10) (2026-08-18)
 
 
