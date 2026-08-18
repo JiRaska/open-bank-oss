@@ -91,6 +91,27 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `kyc-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's kyc-service fix: KycEvents.lifecycle's flat envelope now carries
+        // "sourceService" (openbank-kyc-service/.../domain/model/KycEvent.kt) alongside the
+        // "eventType" key it already wrote (KYC_CASE_OPENED etc. — already SCREAMING_SNAKE_CASE,
+        // unchanged here: it's read verbatim by onboarding-service and party-service). Before
+        // this, TopicAttribution's "openbank.kyc.events" -> "kyc-service" entry already resolved
+        // this row correctly, but as TOPIC-sourced, not the producer's own claim.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"KYC_CASE_APPROVED","kycCaseId":"${UUID.randomUUID()}",""" +
+                """"sourceService":"kyc-service"}""",
+            EventAddress(topic = "openbank.kyc.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("KYC_CASE_APPROVED")
+        assertThat(entry.captured.sourceService).isEqualTo("kyc-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `domestic-payment's own eventType and sourceService win, no longer falling to the sentinels`(): Unit =
         runBlocking {
             // Issue #3994's own fix on the producer side: DomesticPaymentCreatedEvent /
