@@ -70,6 +70,10 @@ class DomesticPaymentEventsTest {
         assertThat(event.endToEndId).isEqualTo("DOMU42")
         assertThat(event.occurredAt).isEqualTo(now)
         assertThat(event.initiatedByPartyId).isEqualTo(payment.initiatedByPartyId)
+        // AuditConsumer attribution fields (#3994) — before these existed the audit trail
+        // recorded 124 real domestic-payment rows as event_type="UNKNOWN"/source_service="unknown".
+        assertThat(event.eventType).isEqualTo("DOMESTIC_PAYMENT_CREATED")
+        assertThat(event.sourceService).isEqualTo("domestic-payment")
     }
 
     @Test
@@ -110,5 +114,7 @@ class DomesticPaymentEventsTest {
         assertThat(event.rejectReason).isEqualTo("SANCTIONS_HIT")
         assertThat(event.rejectDetail).isEqualTo("creditor on list")
         assertThat(event.occurredAt).isEqualTo(occurredAt)
+        assertThat(event.eventType).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
+        assertThat(event.sourceService).isEqualTo("domestic-payment")
     }
 }

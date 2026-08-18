@@ -1,0 +1,32 @@
+-- Drops the audit_outbox table: the transactional-outbox apparatus
+-- (AuditOutboxPort/Dispatcher/BacklogGauge/RepositoryImpl/Entity) had zero writers anywhere in
+-- the service — no OutboxMessage(...) was ever constructed — and audit-service publishes no
+-- domain event of its own (it is a consumer/sink; AuditConsumer writes append-only audit_entries
+-- FROM other services' events). Mirrors PR #1364's removal of sepa-instant's analogous dead
+-- SctInstOutboxPort pipeline. Closes #5126.
+--
+-- Also drops audit_outbox_seq (created by V4 for PanacheEntity id allocation on the same
+-- now-deleted entity) — V4 itself is an already-applied migration and must not be edited
+-- (checksum rule), so the sequence is cleaned up here instead.
+--
+-- Rollback: CREATE TABLE audit_outbox (
+--     id BIGSERIAL PRIMARY KEY,
+--     event_id UUID NOT NULL UNIQUE,
+--     aggregate_id UUID NOT NULL,
+--     event_type VARCHAR(128) NOT NULL,
+--     payload TEXT NOT NULL,
+--     status VARCHAR(16) NOT NULL,
+--     attempt_count INTEGER NOT NULL DEFAULT 0,
+--     sent_at TIMESTAMPTZ,
+--     last_error TEXT,
+--     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+--     claimed_at TIMESTAMPTZ
+-- );
+-- CREATE INDEX idx_audit_outbox_status_created_at ON audit_outbox(status, created_at ASC);
+-- CREATE INDEX idx_audit_outbox_aggregate_id ON audit_outbox(aggregate_id);
+-- CREATE SEQUENCE IF NOT EXISTS audit_outbox_seq INCREMENT BY 50;
+-- (recreates the table as of V8; the table was always empty in production, so no data
+-- restoration is needed.)
+DROP TABLE IF EXISTS audit_outbox;
+DROP SEQUENCE IF EXISTS audit_outbox_seq;

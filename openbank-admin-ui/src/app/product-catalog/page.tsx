@@ -612,13 +612,13 @@ export default function ProductCatalogPage() {
               <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód, název, štítek…', 'Code, name, tag…')} aria-label={t('Hledat v katalogu produktů', 'Search product catalog')} value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             {[
-              { label: t('Typ', 'Type'), value: typeFilter, set: setTypeFilter, options: [['ALL', t('Všechny typy', 'All types')], ...uniqueTypes.map(v => [v, v])] },
-              { label: t('Status', 'Status'), value: statusFilter, set: setStatusFilter, options: [['ALL', t('Všechny', 'All')], ...uniqueStatuses.map(s => [s, s])] },
-              { label: t('Viditelnost', 'Visibility'), value: visibilityFilter, set: setVisibilityFilter, options: [['ALL', t('Vše', 'All')], ['PUBLIC', t('Veřejné', 'Public')], ['INTERNAL', t('Interní', 'Internal')]] },
+              { id: 'type', label: t('Typ', 'Type'), value: typeFilter, set: setTypeFilter, options: [['ALL', t('Všechny typy', 'All types')], ...uniqueTypes.map(v => [v, v])] },
+              { id: 'status', label: t('Status', 'Status'), value: statusFilter, set: setStatusFilter, options: [['ALL', t('Všechny', 'All')], ...uniqueStatuses.map(s => [s, s])] },
+              { id: 'visibility', label: t('Viditelnost', 'Visibility'), value: visibilityFilter, set: setVisibilityFilter, options: [['ALL', t('Vše', 'All')], ['PUBLIC', t('Veřejné', 'Public')], ['INTERNAL', t('Interní', 'Internal')]] },
             ].map(f => (
               <div key={f.label} style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{f.label}:</span>
-                <select className="input" style={{ width: 'auto', padding: '5px 10px', fontSize: '12px' }} value={f.value} onChange={e => f.set(e.target.value)}>
+                <select id={`catalog-filter-${f.id}`} className="input" aria-label={f.label} style={{ width: 'auto', padding: '5px 10px', fontSize: '12px' }} value={f.value} onChange={e => f.set(e.target.value)}>
                   {f.options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                 </select>
               </div>
