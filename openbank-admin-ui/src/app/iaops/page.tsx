@@ -536,10 +536,9 @@ function IAOpsContent() {
                           {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
                         </span>
                         {isFinopsAgent && (
-                          <button onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
-                            style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '8px', border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
-                            {t('Spustit analýzu', 'Trigger Analysis')}
-                          </button>
+                          <span role="status" style={{ fontSize: '10px', fontWeight: 650, padding: '3px 8px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}>
+                            {t('Analýza zatím není připojená k HITL backendu', 'Analysis is not connected to the HITL backend yet')}
+                          </span>
                         )}
                       </div>
 
