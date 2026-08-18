@@ -413,17 +413,17 @@ export default function ProductStudioPage() {
       <section className={`card ${styles.panel}`}>
         <div className={styles.panelHead}><div><div className={styles.panelKicker}>{t('Katalog', 'Catalog')}</div><h2 className={styles.panelTitle}><FileJson size={15} />{t('Typ a identita', 'Type and identity')}</h2></div><span className="badge badge-accent">v2</span></div>
         <div className={styles.panelBody}>
-          <label className={styles.smallLabel}>{t('Specifikace', 'Specification')}</label>
-          <select className="input" value={specificationId} onChange={event => { setSpecificationId(event.target.value); setOfferingId('') }}>
+          <label className={styles.smallLabel} htmlFor="studio-specification">{t('Specifikace', 'Specification')}</label>
+          <select id="studio-specification" className="input" value={specificationId} onChange={event => { setSpecificationId(event.target.value); setOfferingId('') }}>
             <option value="">{t('Vyberte specifikaci', 'Select specification')}</option>
             {specifications.map(item => <option key={item.id} value={item.id}>{item.code} · {item.schemaRef.id}:{item.schemaRef.version}</option>)}
           </select>
           <Can permission="catalog:author">
-            <label className={styles.smallLabel}>{t('Nová specifikace', 'New specification')}</label>
-            <select className="input" value={newSpecSchema} onChange={event => setNewSpecSchema(event.target.value)}>
+            <label className={styles.smallLabel} htmlFor="studio-new-spec-schema">{t('Nová specifikace', 'New specification')}</label>
+            <select id="studio-new-spec-schema" className="input" value={newSpecSchema} onChange={event => setNewSpecSchema(event.target.value)}>
               {schemas.map(item => <option key={`${item.id}:${item.version}`} value={`${item.id}:${item.version}`}>{item.id}:{item.version}</option>)}
             </select>
-            <div style={{ display: 'flex', gap: 7, marginTop: 7 }}><input className="input" value={newSpecCode} onChange={e => setNewSpecCode(e.target.value)} placeholder="TERM_LIFE" /><button className="btn btn-secondary" onClick={createSpecification} aria-label={t('Vytvořit specifikaci', 'Create specification')}><Plus size={13} /></button></div>
+            <div style={{ display: 'flex', gap: 7, marginTop: 7 }}><input id="studio-new-spec-code" className="input" aria-label={t('Kód nové specifikace', 'New specification code')} value={newSpecCode} onChange={e => setNewSpecCode(e.target.value)} placeholder="TERM_LIFE" /><button className="btn btn-secondary" onClick={createSpecification} aria-label={t('Vytvořit specifikaci', 'Create specification')}><Plus size={13} /></button></div>
           </Can>
           <div className={styles.schemaHint}>{t('Aktivní schema:', 'Active schema:')} <strong>{activeSchema ? `${activeSchema.id}:${activeSchema.version}` : '—'}</strong><br />{t('Formulář respektuje verzi schématu; publikovaný obsah se nemění.', 'The form respects its schema version; published content never mutates.')}</div>
         </div>
@@ -432,12 +432,13 @@ export default function ProductStudioPage() {
       <section className={`card ${styles.panel}`}>
         <div className={styles.panelHead}><div><div className={styles.panelKicker}>{t('Nabídka', 'Offer')}</div><h2 className={styles.panelTitle}><Boxes size={15} />{t('Kontext a historie', 'Context and history')}</h2></div>{selectedOffering && <span className="badge badge-info">{selectedOffering.code}</span>}</div>
         <div className={styles.panelBody}>
-          <select className="input" value={offeringId} onChange={e => setOfferingId(e.target.value)}>
+          <label className={styles.smallLabel} htmlFor="studio-offering">{t('Nabídka', 'Offer')}</label>
+          <select id="studio-offering" className="input" value={offeringId} onChange={e => setOfferingId(e.target.value)}>
             <option value="">{t('Vyberte nabídku', 'Select offering')}</option>
             {offerings.filter(item => !specificationId || item.specificationId === specificationId).map(item => <option key={item.id} value={item.id}>{item.code}</option>)}
           </select>
           <Can permission="catalog:author">
-            <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input className="input" value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button className="btn btn-secondary" onClick={createOffering} aria-label={t('Vytvořit nabídku', 'Create offering')}><Plus size={13} /></button></div>
+            <div style={{ display: 'flex', gap: 7, marginTop: 8 }}><input id="studio-new-offering-code" className="input" aria-label={t('Kód nové nabídky', 'New offer code')} value={newOfferingCode} onChange={e => setNewOfferingCode(e.target.value)} placeholder="TERM_LIFE_CZ_WEB" /><button className="btn btn-secondary" onClick={createOffering} aria-label={t('Vytvořit nabídku', 'Create offering')}><Plus size={13} /></button></div>
             <div className={styles.marketContext}>
               <div className={styles.marketTitle}><LockKeyhole size={13} /><span>{t('Dostupnost nabídky', 'Offer availability')}</span></div>
               <p>{t('Neveřejná nabídka používá obchodní segment, nikoli identitu zákazníka. Katalog neobsahuje osobní údaje.', 'A private offer uses a commercial segment, never a customer identity. The catalog contains no personal data.')}</p>
@@ -465,8 +466,8 @@ export default function ProductStudioPage() {
             {parsedDraft && <div className={styles.composition}>
               <div className={styles.compositionHead}><div><span><Link2 size={13} />{t('Složení nabídky', 'Offer composition')}</span><p>{t('Bundle přidá existující publikovatelnou nabídku jako komponentu. Služba při publikaci znovu ověří existenci, účinnost i cykly.', 'A bundle adds an existing publishable offer as a component. The service rechecks existence, effectiveness and cycles at publication.')}</p></div><span className="badge badge-neutral">{draftRelationships.length}</span></div>
               {selectedRevision?.state === 'DRAFT' && <div className={styles.compositionControls}>
-                <select className="input" value={relationshipKind} onChange={event => setRelationshipKind(event.target.value as RelationshipKind)}>{relationshipKinds.map(kind => <option key={kind}>{kind}</option>)}</select>
-                <select className="input" value={relationshipTargetId} onChange={event => setRelationshipTargetId(event.target.value)}><option value="">{t('Vyberte nabídku', 'Select an offer')}</option>{relationshipCandidates.map(item => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
+                <label className="sr-only" htmlFor="studio-relationship-kind">{t('Typ vazby', 'Relationship type')}</label><select id="studio-relationship-kind" className="input" value={relationshipKind} onChange={event => setRelationshipKind(event.target.value as RelationshipKind)}>{relationshipKinds.map(kind => <option key={kind}>{kind}</option>)}</select>
+                <label className="sr-only" htmlFor="studio-relationship-target">{t('Cílová nabídka', 'Target offer')}</label><select id="studio-relationship-target" className="input" value={relationshipTargetId} onChange={event => setRelationshipTargetId(event.target.value)}><option value="">{t('Vyberte nabídku', 'Select an offer')}</option>{relationshipCandidates.map(item => <option key={item.id} value={item.id}>{item.code}</option>)}</select>
                 <button className="btn btn-secondary" disabled={!relationshipTargetId} onClick={addRelationship}><Plus size={13} />{t('Přidat', 'Add')}</button>
               </div>}
               {selectedRevision?.state === 'DRAFT' && <div className={styles.bundleProposals}>
@@ -504,7 +505,7 @@ export default function ProductStudioPage() {
             </details>
             <div className={styles.actions}><button className="btn btn-secondary" disabled={!selectedRevision} onClick={() => void validateDraft()}><CheckCircle2 size={13} />{t('Ověřit schéma', 'Validate schema')}</button><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT'} onClick={saveDraft}><Send size={13} />{t('Uložit draft', 'Save draft')}</button></div>
           </Can>
-          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><input className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim()} onClick={publish}><ShieldCheck size={13} />{t('Publikovat', 'Publish')}</button></div></div></Can>
+          <Can permission="catalog:publish"><div className={styles.approvalPanel}><div className={styles.approvalHead}><ShieldCheck size={15} /><span>{t('Nezávislé schválení', 'Independent approval')}</span></div><p>{t('Publikace je nevratné rozhodnutí. Služba ověří, že autor a schvalovatel jsou rozdílné identity — tento formulář to nemůže obejít.', 'Publication is an irreversible decision. The service verifies that maker and checker are different identities — this form cannot bypass it.')}</p><div className={styles.approvalMeta}><span>{t('Autor draftu', 'Draft maker')}: <b>{selectedRevision?.makerId ?? '—'}</b></span><span>{t('Stav ověření', 'Validation')}: <b>{validationState === 'valid' ? t('ověřeno', 'verified') : t('čeká na ověření', 'awaiting validation')}</b></span></div><div style={{ display: 'flex', gap: 7 }}><label className="sr-only" htmlFor="studio-publish-reason">{t('Důvod schválení', 'Approval reason')}</label><input id="studio-publish-reason" className="input" value={publishReason} onChange={e => setPublishReason(e.target.value)} placeholder={t('Důvod schválení', 'Approval reason')} /><button className="btn btn-primary" disabled={!selectedRevision || selectedRevision.state !== 'DRAFT' || !publishReason.trim()} onClick={publish}><ShieldCheck size={13} />{t('Publikovat', 'Publish')}</button></div></div></Can>
         </div>
       </section>
     </div>

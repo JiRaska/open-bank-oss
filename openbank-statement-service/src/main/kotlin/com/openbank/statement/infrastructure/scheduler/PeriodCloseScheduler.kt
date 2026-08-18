@@ -3,13 +3,17 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.infrastructure.scheduler
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.statement.application.port.`in`.RunCloseUseCase
 import com.openbank.statement.domain.model.CloseTrigger
 import io.quarkus.scheduler.Scheduled
-import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /**
  * Drives the scheduled monthly **period-close** cadence (ADR-0035 §F.1, ADR-0069 D3). The actual
@@ -27,8 +31,15 @@ class PeriodCloseScheduler(
     private val runClose: RunCloseUseCase,
     @ConfigProperty(name = "openbank.statement.scheduled-close.enabled", defaultValue = "false")
     private val enabled: Boolean,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(PeriodCloseScheduler::class.java)
+    private var liveness: WorkflowLivenessRecorder? = null
+
+    @PostConstruct
+    fun registerLiveness() {
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+    }
 
     // Europe/Prague is explicit, not incidental (#1302): an unset @Scheduled timeZone means
     // JVM-default, so the close fires on the pod's zone, not the bank's accounting day —
@@ -39,11 +50,20 @@ class PeriodCloseScheduler(
         timeZone = "Europe/Prague",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    fun monthlyClose(): Uni<Void> {
+    suspend fun monthlyClose() {
         if (!enabled) {
             log.debug("Scheduled period-close disabled; use POST /{accountId}/close or the operator retry")
-            return Uni.createFrom().voidItem()
+            return
         }
-        return runClose.runClose(CloseTrigger.SCHEDULED).replaceWithVoid()
+        runClose.runClose(CloseTrigger.SCHEDULED).awaitSuspending()
+        // COMPLETED_WITH_FAILURES is still a completed orchestration; StatementCloseFailures covers
+        // individual pocket failures. Liveness must distinguish a completed control run from an
+        // invocation that never reached the reactive use case.
+        liveness?.recordSuccess()
+    }
+
+    private companion object {
+        const val WORKFLOW_NAME = "statement-period-close"
+        val EXPECTED_INTERVAL: Duration = Duration.ofDays(31)
     }
 }

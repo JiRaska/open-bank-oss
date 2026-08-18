@@ -96,6 +96,7 @@ export default function ConsentsPage() {
 
   const lensSelect = (
             <select
+              aria-label={t('Pohled souhlasů', 'Consent lookup lens')}
               value={lens}
               onChange={e => {
                 const next = e.target.value as Lens
@@ -146,6 +147,7 @@ export default function ConsentsPage() {
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
             {lensSelect}
             <input
+              aria-label={t('ID grantee', 'Grantee ID')}
               value={term}
               onChange={e => setTerm(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') lookup() }}
