@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.0...sepa-payment-v0.10.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sepa-payment:** add sourceService to outbox events for audit attribution ([#5388](https://github.com/JiRaska/open-bank-oss/issues/5388)) ([de59515](https://github.com/JiRaska/open-bank-oss/commit/de59515cfe02746b9af2de75472b7826feb5cae9)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.4...sepa-payment-v0.10.0) (2026-08-18)
 
 
