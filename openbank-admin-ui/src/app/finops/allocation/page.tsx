@@ -44,12 +44,12 @@ const DOMAIN_COLOR: Record<string, string> = {
   identity: '#d97706', 'open-banking': '#0891b2', platform: '#7c3aed',
 }
 
-function money(n: number): string {
-  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+function money(n: number, locale: string): string {
+  return n.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-function BarRow({ label, sub, amount, pct, color, currency }: {
-  label: string; sub?: string; amount: number; pct: number; color: string; currency: string
+function BarRow({ label, sub, amount, pct, color, currency, numberLocale }: {
+  label: string; sub?: string; amount: number; pct: number; color: string; currency: string; numberLocale: string
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -62,7 +62,7 @@ function BarRow({ label, sub, amount, pct, color, currency }: {
       </div>
       <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', minWidth: '44px', textAlign: 'right' }}>{pct.toFixed(0)}%</span>
       <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'monospace', minWidth: '82px', textAlign: 'right' }}>
-        ${money(amount)} {currency}
+        ${money(amount, numberLocale)} {currency}
       </span>
     </div>
   )
@@ -99,6 +99,7 @@ function Section({ icon, title, hint, children }: {
 
 function AllocationContent() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<AllocationResult | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -165,15 +166,15 @@ function AllocationContent() {
           <div className="grid-4" style={{ marginBottom: '28px' }}>
             <Kpi icon={<DollarSign size={18} />} color="#16a34a"
               label={t('Celkové cloud náklady', 'Total cloud spend')}
-              value={`$${money(data.total)}`}
+              value={`$${money(data.total, numberLocale)}`}
               sub={`${data.currency} · ${data.periodStart}→${data.periodEnd}`} />
             <Kpi icon={<Server size={18} />} color="#6366f1"
               label={t('Rozpočítatelný compute', 'Allocatable compute')}
-              value={`$${money(data.allocatable)}`}
+              value={`$${money(data.allocatable, numberLocale)}`}
               sub={t(`${data.byService.length} služeb`, `${data.byService.length} services`)} />
             <Kpi icon={<Layers size={18} />} color="#7c3aed"
               label={t('Platformní režie', 'Platform overhead')}
-              value={`$${money(data.platformOverhead)}`}
+              value={`$${money(data.platformOverhead, numberLocale)}`}
               sub={t('Control plane, NAT, LB, úložiště', 'Control plane, NAT, LB, storage')} />
             <Kpi icon={<Workflow size={18} />} color="#0891b2"
               label={t('Business procesy', 'Business flows')}
@@ -208,7 +209,7 @@ function AllocationContent() {
           <Section icon={<Server size={16} style={{ color: '#6366f1' }} />} title={t('Podle služby', 'By service')}>
             {data.byService.map(s => (
               <BarRow key={s.service} label={s.service} sub={`${domainLabel(s.domain)} · ${s.cpuMillis}m · ${s.memMiB}Mi`}
-                amount={s.amount} pct={s.pct} color={DOMAIN_COLOR[s.domain] ?? '#6366f1'} currency={data.currency} />
+                amount={s.amount} pct={s.pct} color={DOMAIN_COLOR[s.domain] ?? '#6366f1'} currency={data.currency} numberLocale={numberLocale} />
             ))}
           </Section>
 
@@ -217,7 +218,7 @@ function AllocationContent() {
             {data.byDomain.map(d => (
               <BarRow key={d.domain} label={domainLabel(d.domain)}
                 sub={t(`${d.serviceCount} služeb`, `${d.serviceCount} services`)}
-                amount={d.amount} pct={d.pct} color={DOMAIN_COLOR[d.domain] ?? '#6366f1'} currency={data.currency} />
+                amount={d.amount} pct={d.pct} color={DOMAIN_COLOR[d.domain] ?? '#6366f1'} currency={data.currency} numberLocale={numberLocale} />
             ))}
           </Section>
 
@@ -230,7 +231,7 @@ function AllocationContent() {
             {data.byFlow.map(f => (
               <BarRow key={f.id} label={language === 'cs' ? f.labelCs : f.labelEn}
                 sub={f.regulatoryRef ?? t(`${f.services.length} služeb`, `${f.services.length} services`)}
-                amount={f.amount} pct={f.pct} color="#0891b2" currency={data.currency} />
+                amount={f.amount} pct={f.pct} color="#0891b2" currency={data.currency} numberLocale={numberLocale} />
             ))}
           </Section>
         </>
