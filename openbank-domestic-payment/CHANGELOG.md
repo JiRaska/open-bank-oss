@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.2...domestic-payment-v0.15.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+
+### Security
+
+* **deps:** resolve micrometer-core CVE-2026-40984 without a platform bump ([#5495](https://github.com/JiRaska/open-bank-oss/issues/5495)) ([b8b8d7a](https://github.com/JiRaska/open-bank-oss/commit/b8b8d7a2f28375c29949674059613e4ed8867a09))
+
 ## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.1...domestic-payment-v0.14.2) (2026-08-18)
 
 

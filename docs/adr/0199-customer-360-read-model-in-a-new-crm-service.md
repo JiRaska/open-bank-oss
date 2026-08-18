@@ -1,16 +1,23 @@
 ---
 date: 2026-07-25
-decision-status: proposed
+decision-status: superseded
 delivery-status: planned
 authors: [Jiri Raska]
 supersedes: []
-superseded-by: []
+superseded-by: [0210]
 delivery-repos: []
 tags: [analytics, privacy-gdpr, architecture, admin-ui]
 summary: "A new crm-service holds Customer 360 as a pure event-fed read model that owns no facts; GDPR erasure anonymises in place on the PARTY_ERASED event, the same pattern every other consumer already uses."
 ---
 
 # ADR-0199 — Customer 360 read model in a new crm-service
+
+**Superseded note (2026-08-18).** ADR-0210 (2026-07-26, accepted/shipped) explicitly replaces the
+new-`crm-service` approach here with a read API over analytics-sink's existing ClickHouse silver
+layer, and was never linked back — this ADR's own `superseded-by` sat empty for over three weeks
+while a registry check enforces that link should be bidirectional. `delivery-status` stays
+`planned` per `docs/adr/SCHEMA.md`'s own rule: nothing in this ADR's crm-service design was ever
+built.
 
 ## Context
 

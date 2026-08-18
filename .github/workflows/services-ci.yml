@@ -327,22 +327,24 @@ jobs:
       id-token: write
     strategy:
       fail-fast: false
-      # Cap concurrent matrix jobs. The ARC init container raises fs.aio-max-nr to
-      # 1048576 (arc-runners.tf aio_sysctl_init_container — issue #1329 resolved).
-      # Hetzner hosts default to 65536; at max-parallel=8 all 8 Redpanda containers
-      # race to claim async-I/O contexts simultaneously and exhaust the pool
-      # (balance/ledger/lending flakes observed in the 2026-06-23 full-fleet run).
-      # Set 4 for PR/push: safe for both runner pools; the TC pre-warm step already
-      # serialises the registry-cache cold-start window, so the NAT benefit is preserved.
-      # Raise back to 8 once runner-tune-hetzner runs and persists aio-max-nr=1048576.
-      # Nightly schedule now matches PR/push at 4 (was capped at 2). The old cap was a
-      # self-hosted-capacity guard (Hetzner+Mac mini) that no longer applies: since #198
-      # the schedule/nightly matrix runs on ubuntu-latest (hosted, free & unlimited on this
-      # public repo) — same pool and same proven-safe concurrency as PR/push — and Hetzner
-      # was deleted entirely in #208. Not raised past 4: the GitHub account is on the Free
-      # plan, capped at 20 concurrent hosted-runner jobs account-wide (shared with other
-      # repos/workflows), and nightly's matrix is ~30 services, so 4 keeps healthy headroom
-      # under that ceiling instead of racing other concurrent CI for the same slots.
+      # Cap concurrent matrix jobs. Each matrix entry now fans out into _service-ci.yml's
+      # `build` job (ubuntu-latest, EVERY event including main-push, ADR-0250 Phase 2, #4414)
+      # plus, on main-push only, a `contract` job on the self-hosted `openbank-build` ARC pool.
+      #
+      # The governing constraint for `build` is GitHub's 20-concurrent-hosted-job cap, shared
+      # ACCOUNT-WIDE with every other repo and workflow — not the old self-hosted-pool AIO
+      # rationale this comment used to carry (Hetzner/Redpanda async-I/O contexts, #1329/
+      # 2026-06-23). That rationale is stale for `build` specifically: it never applied to a
+      # hosted runner, and `build` runs hosted on every event now, including main-push, which
+      # is the event that changed. It is NOT stale for `contract`, which is still self-hosted
+      # and still bounded by the same ARC pool (12 runners, Phase 1, #4319) — max-parallel is
+      # a single number governing the WHOLE matrix, so it bounds both jobs' concurrency at
+      # once, and 4 stays comfortably under both the 20-job hosted cap (leaving headroom for
+      # other concurrent CI in the account) and the 12-runner ARC pool.
+      #
+      # The number itself is UNCHANGED from before this split (kept conservative rather than
+      # re-tuned on an unmeasured guess) — raising it is a candidate follow-up once real
+      # dispatch data exists for the new hosted-build shape, not asserted here.
       max-parallel: 4
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}

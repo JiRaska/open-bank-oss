@@ -282,6 +282,7 @@ class ScaService(
                         "credentialId" to device.credentialId,
                         "algorithm" to device.algorithm.name,
                         "occurredAt" to device.createdAt.toString(),
+                        "sourceService" to SOURCE_SERVICE,
                     ),
                 ),
             ),
@@ -446,6 +447,19 @@ private fun ScaChallenge.isReplayable(now: OffsetDateTime): Boolean =
  * reaches onboarding-service.
  */
 private const val DEVICE_ENROLLED_EVENT_TYPE = "DEVICE_ENROLLED"
+
+/**
+ * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+ * (EVENT-sourced) attribution — issue #3994/#5256. `eventType` ("DEVICE_ENROLLED") is unchanged
+ * (load-bearing for onboarding-service's `OnboardingEventConsumer`, and customer-edge already
+ * writes its own distinct "SCA_DEVICE_ENROLLED" eventType for a different event on a different
+ * topic, so there is no fleet-wide collision to worry about). `sourceService` has no consumer
+ * today, so it is safe to add net-new. Value matches the fleet's audit convention: the module
+ * directory without the `openbank-` prefix — audit-service does not currently subscribe to
+ * `openbank.sca.events` at all (absent from both `TopicAttribution` and its consumed-topics
+ * list), so this field is forward-looking rather than fixing a live "unknown" row today.
+ */
+private const val SOURCE_SERVICE = "sca-service"
 
 private fun Throwable.causedByUniqueViolation(): Boolean {
     var t: Throwable? = this
