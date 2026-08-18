@@ -275,8 +275,11 @@ export default function ClusterDossierPage() {
             const LI = ICONS[l.icon] ?? Shield
             const on = activeLayer === l.id
             return (
-              <div key={l.id} onClick={() => setActiveLayer(l.id)} className="card" style={{ padding: 14, cursor: 'pointer', borderLeft: `3px solid ${STATUS[l.status].color}`, boxShadow: on ? '0 0 0 1px var(--accent)' : undefined }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 8 : 0 }}>
+              <div key={l.id} className="card" style={{ padding: 14, borderLeft: `3px solid ${STATUS[l.status].color}`, boxShadow: on ? '0 0 0 1px var(--accent)' : undefined }}>
+                <div role="button" tabIndex={0} aria-expanded={on} aria-label={`${l.label} — ${on ? t('Sbalit vrstvu', 'Collapse layer') : t('Rozbalit vrstvu', 'Expand layer')}`}
+                  onClick={() => setActiveLayer(current => current === l.id ? null : l.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveLayer(current => current === l.id ? null : l.id) } }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 8 : 0, cursor: 'pointer' }}>
                   <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 11, color: 'var(--text-tertiary)', width: 18 }}>{i + 1}</span>
                   <LI size={16} style={{ color: K8S_BLUE }} />
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{l.label}</span>
