@@ -208,7 +208,7 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       <div className={styles.brand}>
         <div className={styles.brandLockup}>
           <div className={styles.brandMark}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/>
             </svg>
           </div>
@@ -276,16 +276,16 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
         if (locked) {
           return (
             <div key={item.href} title={language === 'cs' ? 'Přístup není povolen pro demo účet' : 'Not available for demo account'} className={`${styles.navItem} ${styles.locked}`}>
-              <Icon size={16} className={styles.navIcon} />
+              <Icon aria-hidden="true" size={16} className={styles.navIcon} />
               <span className={styles.navLabel}>{displayName}</span>
-              <Lock size={11} className={styles.lockIcon} />
+              <Lock aria-hidden="true" size={11} className={styles.lockIcon} />
             </div>
           )
         }
 
         const row = (
             <div className={`${styles.navItem} ${active ? styles.active : ''}`}>
-              <Icon size={16} className={styles.navIcon} />
+              <Icon aria-hidden="true" size={16} className={styles.navIcon} />
               <span className={styles.navLabel}>{displayName}</span>
               {item.badge && (
                 <span className={styles.navBadge}>{item.badge}</span>
