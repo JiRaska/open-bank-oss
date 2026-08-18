@@ -1,5 +1,15 @@
 -- Drops the transactional outbox that never had a producer (#4709).
 --
+-- Renumbered V4 -> V6 (issue #5628): this migration's own PR (#4940) merged AFTER
+-- V5__create_ict_incidents.sql's PR (#4939) had already deployed and applied V5 to the
+-- live database. A migration numbered lower than the highest already-applied version
+-- fails Flyway's default validateOnMigrate the moment both are on the same classpath --
+-- "Detected resolved migration not applied to database: 4" -- and crash-loops the whole
+-- service on boot, which is what happened: security-scanner-service was down for 4+
+-- hours. Safe to renumber: this migration had never been applied anywhere (absent from
+-- flyway_schema_history on the only environment that runs this service), so no checksum
+-- is at risk -- the checksum-immutability rule only protects an APPLIED migration.
+--
 -- V2 created `security_outbox` and V3 gave it the Panache `_seq` sequence. The port, entity,
 -- repository, @Scheduled dispatcher, backlog gauge, Kafka publisher, the `security-events-out`
 -- channel and the `openbank.security.scan.event` topic were all built and wired correctly —
