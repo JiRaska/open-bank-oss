@@ -25,6 +25,7 @@ const FREQ_LABELS: Record<string, string> = {
 
 export default function StandingOrdersPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
   // standing-order-service is on the FinOps off-hours scaledown allowlist, so it
   // legitimately sits at zero replicas overnight/weekends. Route through the BFF
@@ -67,10 +68,10 @@ export default function StandingOrdersPage() {
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
-            { label: t('Celkem příkazů', 'Total orders'), value: orders.length, icon: <Repeat size={16} />, color: 'var(--accent)' },
-            { label: t('Aktivní', 'Active'), value: orders.filter(o => o.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} />, color: 'var(--success)' },
-            { label: t('Pozastavené', 'Suspended'), value: orders.filter(o => o.status === 'SUSPENDED').length, icon: <Clock size={16} />, color: 'var(--warning)' },
-            { label: t('Zrušené', 'Cancelled'), value: orders.filter(o => o.status === 'CANCELLED').length, icon: <XCircle size={16} />, color: 'var(--danger)' },
+            { label: t('Celkem příkazů', 'Total orders'), value: orders.length, icon: <Repeat size={16} aria-hidden="true" />, color: 'var(--accent)' },
+            { label: t('Aktivní', 'Active'), value: orders.filter(o => o.status === 'ACTIVE').length, icon: <CheckCircle2 size={16} aria-hidden="true" />, color: 'var(--success)' },
+            { label: t('Pozastavené', 'Suspended'), value: orders.filter(o => o.status === 'SUSPENDED').length, icon: <Clock size={16} aria-hidden="true" />, color: 'var(--warning)' },
+            { label: t('Zrušené', 'Cancelled'), value: orders.filter(o => o.status === 'CANCELLED').length, icon: <XCircle size={16} aria-hidden="true" />, color: 'var(--danger)' },
           ].map(k => (
             <div key={k.label} className="stat-card">
               <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
@@ -84,8 +85,9 @@ export default function StandingOrdersPage() {
         <div className="card">
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
-              <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
+              <Search size={13} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat příkazy…', 'Search orders…')}
+                aria-label={t('Hledat trvalé příkazy', 'Search standing orders')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
@@ -114,12 +116,12 @@ export default function StandingOrdersPage() {
                   onMouseLeave={e => (e.currentTarget.style.background = '')}>
                   <td style={{ padding: '12px 16px', fontSize: '13px', fontWeight: 500, color: 'var(--text-primary)' }}>{o.creditorName}</td>
                   <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)' }}>
-                    {o.amount?.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {o.currency}
+                    {o.amount?.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {o.currency}
                   </td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{t(FREQ_LABELS[o.frequency] ?? o.frequency, o.frequency)}</td>
                   <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <Calendar size={11} style={{ color: 'var(--text-tertiary)' }} />
-                    {o.nextExecutionDate ? new Date(o.nextExecutionDate).toLocaleDateString('cs-CZ') : '—'}
+                    <Calendar size={11} aria-hidden="true" style={{ color: 'var(--text-tertiary)' }} />
+                    {o.nextExecutionDate ? new Date(o.nextExecutionDate).toLocaleDateString(numberLocale) : '—'}
                   </td>
                   <td style={{ padding: '12px 16px' }}>
                     <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,

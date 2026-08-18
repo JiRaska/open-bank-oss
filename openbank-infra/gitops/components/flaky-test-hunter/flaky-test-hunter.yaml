@@ -37,7 +37,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-6265ea86
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-9758e8c1
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -75,6 +75,15 @@ spec:
               value: https://api.github.com
             - name: GITHUB_REPO
               value: JiRaska/open-bank-oss
+            # Optional fine-grained token: until OpenBao is seeded, the phase-3 writer fails closed
+            # and no pull request is opened. It is deliberately separate from every other agent's
+            # credential, so revoking this one stops only this bounded development capability.
+            - name: FLAKY_TEST_HUNTER_GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: flaky-test-hunter-secrets
+                  key: FLAKY_TEST_HUNTER_GITHUB_TOKEN
+                  optional: true
             - name: LLM_GATEWAY_URL
               value: http://litellm.ai-platform.svc:4000
             - name: TEMPORAL_NAMESPACE

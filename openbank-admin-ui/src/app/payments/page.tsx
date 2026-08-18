@@ -6,12 +6,15 @@
 
 import { useState, useEffect, useCallback, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   Banknote, Search, RefreshCw, Plus, Zap, Globe, CheckCircle2, XCircle,
   Clock, AlertTriangle, Timer, ShieldCheck, AlertCircle, ChevronRight
 } from 'lucide-react'
 import { stashRow } from '@/lib/services/rowHandoff'
+import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { PageHeader, StatusBadge } from '@/components/ui'
 
 // ADR-0080 P1 (pentest FIND-S3-03/04): all backend access goes through same-origin BFF
@@ -128,7 +131,7 @@ async function fetchPayments(url: string, type: 'SEPA' | 'DOMESTIC'): Promise<Pa
 }
 
 function formatAmount(n: number, currency: string, locale: string) {
-  return n?.toLocaleString(locale === 'cs' ? 'cs-CZ' : 'en-US', { minimumFractionDigits: 2 }) + ' ' + currency
+  return n?.toLocaleString(locale === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 }) + ' ' + currency
 }
 
 function TabNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
@@ -184,7 +187,8 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
         )}
       </div>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
-        <input className="input" style={{ flex: 1 }} placeholder={t('Jméno příjemce pro ověření', 'Payee name to verify')}
+        <label className="sr-only" htmlFor="sepa-vop-payee-name">{t('Jméno příjemce pro ověření', 'Payee name to verify')}</label>
+        <input id="sepa-vop-payee-name" className="input" style={{ flex: 1 }} placeholder={t('Jméno příjemce pro ověření', 'Payee name to verify')}
           value={formData.creditorName} onChange={e => setFormData({ ...formData, vopStatus: 'idle', vopResult: null, creditorName: e.target.value })} />
         <button type="button" className="btn btn-secondary btn-sm" disabled={!formData.creditorIban || !formData.creditorName || formData.vopStatus === 'loading'}
           onClick={async () => {
@@ -233,11 +237,13 @@ function VopSection({ formData, setFormData }: { formData: SepaFormData; setForm
 export default function PaymentsPage() {
   const { t } = useLanguage()
   return (
-    <div className="page-container">
-      <Suspense fallback={<p>{t('Načítání...', 'Loading...')}</p>}>
-        <PaymentsContent />
-      </Suspense>
-    </div>
+    <AuthGuard permission="payments:view">
+      <div className="page-container">
+        <Suspense fallback={<p>{t('Načítání...', 'Loading...')}</p>}>
+          <PaymentsContent />
+        </Suspense>
+      </div>
+    </AuthGuard>
   )
 }
 
@@ -245,6 +251,9 @@ function PaymentsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const { data: session } = useSession()
+  const canCreate = hasPermission(session?.user?.roles ?? [], 'payments:create')
 
   const [activeTab, setActiveTab] = useState<Tab>((searchParams.get('tab') as Tab) || 'all')
   const [payments, setPayments] = useState<Payment[]>([])
@@ -305,6 +314,7 @@ function PaymentsContent() {
   useEffect(() => { if (activeTab === 'sct-inst') loadSct() }, [activeTab, loadSct])
 
   const selectPaymentType = (t: CreateType) => {
+    if (!canCreate) return
     setCreateError(null)
     setCreateSuccess(null)
     if (t === 'domestic-standard' || t === 'domestic-instant') {
@@ -319,6 +329,10 @@ function PaymentsContent() {
   const handleDomesticCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreateError(null); setCreateSuccess(null)
+    if (!canCreate) {
+      setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
+      return
+    }
     const f = domesticForm
     if (!f.debtorAccountId || !f.debtorAccountNumber || !f.debtorBankCode || !f.debtorName ||
         !f.creditorAccountNumber || !f.creditorBankCode || !f.creditorName || !f.amount) {
@@ -357,6 +371,10 @@ function PaymentsContent() {
   const handleSepaCreate = async (e: React.FormEvent) => {
     e.preventDefault()
     setCreateError(null); setCreateSuccess(null)
+    if (!canCreate) {
+      setCreateError(t('Nemáte oprávnění vytvářet platby', 'You do not have permission to create payments'))
+      return
+    }
     const f = sepaForm
     if (!f.debtorIban || !f.creditorIban || !f.creditorName || !f.amount) {
       setCreateError(t('Vyplňte všechna povinná pole', 'Please fill all required fields'))
@@ -497,7 +515,7 @@ function PaymentsContent() {
               { label: t('Platby celkem', 'Total payments'), value: sctPayments.length, icon: <Zap size={16} />, color: 'var(--accent)' },
               { label: t('Vypořádáno', 'Settled'), value: sctSettled, icon: <CheckCircle2 size={16} />, color: '#16a34a' },
               { label: t('Zpracovává se', 'Processing'), value: sctProcessing, icon: <Timer size={16} />, color: '#d97706' },
-              { label: t('Objem (EUR)', 'Volume (EUR)'), value: sctVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }), icon: <Zap size={16} />, color: 'var(--accent)' },
+              { label: t('Objem (EUR)', 'Volume (EUR)'), value: sctVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Zap size={16} />, color: 'var(--accent)' },
             ].map(k => (
               <div key={k.label} className="stat-card">
                 <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
@@ -512,12 +530,13 @@ function PaymentsContent() {
             <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
               <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
                 <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                <input value={sctSearch} onChange={e => setSctSearch(e.target.value)}
+                <label className="sr-only" htmlFor="payments-sct-search">{t('Hledat SCT platby', 'Search SCT payments')}</label>
+                <input id="payments-sct-search" value={sctSearch} onChange={e => setSctSearch(e.target.value)}
                   placeholder={t('Hledat IBAN, end-to-end ID, status…', 'Search IBAN, end-to-end ID, status…')}
                   style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                     border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
               </div>
-              <button className="btn btn-secondary btn-sm" onClick={loadSct} disabled={sctLoading}>
+              <button aria-label={t('Obnovit SCT platby', 'Refresh SCT payments')} className="btn btn-secondary btn-sm" onClick={loadSct} disabled={sctLoading}>
                 <RefreshCw size={12} style={{ animation: sctLoading ? 'spin 0.8s linear infinite' : 'none' }} />
               </button>
             </div>
@@ -553,7 +572,7 @@ function PaymentsContent() {
                         <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{p.status}</span>
                       </td>
                       <td style={{ padding: '12px 16px' }}>{timeoutCountdown(p.executionTimeoutAt, p.status)}</td>
-                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{p.createdAt ? new Date(p.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{p.createdAt ? new Date(p.createdAt).toLocaleString(numberLocale) : '—'}</td>
                     </tr>
                   )
                 })}</tbody>
@@ -582,12 +601,14 @@ function PaymentsContent() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
-            <button className="btn btn-primary" onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
-              <Plus size={14} />
-              {t('Nová platba', 'New Payment')}
-            </button>
-          </div>
+          {canCreate && (
+            <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
+              <button className="btn btn-primary" onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
+                <Plus size={14} aria-hidden="true" />
+                {t('Nová platba', 'New Payment')}
+              </button>
+            </div>
+          )}
 
           {/* Payment type selector */}
           {showCreate === 'payment-type' && (
@@ -640,8 +661,8 @@ function PaymentsContent() {
               <form onSubmit={handleDomesticCreate} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Typ převodu', 'Transfer Scope')}</label>
-                    <select className="input" style={{ width: '100%' }} value={domesticForm.transferScope}
+                    <label htmlFor="domestic-transfer-scope" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Typ převodu', 'Transfer Scope')}</label>
+                    <select id="domestic-transfer-scope" className="input" style={{ width: '100%' }} value={domesticForm.transferScope}
                       onChange={e => setDomesticForm({ ...domesticForm, transferScope: e.target.value })}>
                       <option value="OWN_ACCOUNTS">{t('Vlastní účty', 'Own Accounts')}</option>
                       <option value="INTERNAL_CLIENT">{t('Interní klient', 'Internal Client')}</option>
@@ -650,100 +671,100 @@ function PaymentsContent() {
                   </div>
                   {domesticForm.transferScope === 'TECHNICAL_ACCOUNT' && (
                     <div>
-                      <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Kód technického účtu', 'Technical Account Code')}</label>
-                      <input className="input" style={{ width: '100%' }} value={domesticForm.technicalAccountCode}
+                      <label htmlFor="domestic-technical-account-code" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Kód technického účtu', 'Technical Account Code')}</label>
+                      <input id="domestic-technical-account-code" className="input" style={{ width: '100%' }} value={domesticForm.technicalAccountCode}
                         onChange={e => setDomesticForm({ ...domesticForm, technicalAccountCode: e.target.value })} required />
                     </div>
                   )}
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Účet plátce (ID)', 'Debtor Account ID')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.debtorAccountId}
+                    <label htmlFor="domestic-debtor-account-id" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Účet plátce (ID)', 'Debtor Account ID')}</label>
+                    <input id="domestic-debtor-account-id" className="input" style={{ width: '100%' }} value={domesticForm.debtorAccountId}
                       onChange={e => setDomesticForm({ ...domesticForm, debtorAccountId: e.target.value })} required />
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Číslo účtu plátce', 'Debtor Account No.')}</label>
+                    <label htmlFor="domestic-debtor-account-number" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Číslo účtu plátce', 'Debtor Account No.')}</label>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <input className="input" style={{ flex: 2 }} placeholder="1234567890" value={domesticForm.debtorAccountNumber}
+                      <input id="domestic-debtor-account-number" className="input" style={{ flex: 2 }} placeholder="1234567890" value={domesticForm.debtorAccountNumber}
                         onChange={e => setDomesticForm({ ...domesticForm, debtorAccountNumber: e.target.value })} required />
                       <span style={{ display: 'flex', alignItems: 'center' }}>/</span>
-                      <input className="input" style={{ flex: 1 }} placeholder="0100" value={domesticForm.debtorBankCode}
+                      <input id="domestic-debtor-bank-code" aria-label={t('Kód banky plátce', 'Debtor bank code')} className="input" style={{ flex: 1 }} placeholder="0100" value={domesticForm.debtorBankCode}
                         onChange={e => setDomesticForm({ ...domesticForm, debtorBankCode: e.target.value })} required />
                     </div>
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno plátce', 'Debtor Name')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.debtorName}
+                    <label htmlFor="domestic-debtor-name" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno plátce', 'Debtor Name')}</label>
+                    <input id="domestic-debtor-name" className="input" style={{ width: '100%' }} value={domesticForm.debtorName}
                       onChange={e => setDomesticForm({ ...domesticForm, debtorName: e.target.value })} required />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Číslo účtu příjemce', 'Creditor Account No.')}</label>
+                    <label htmlFor="domestic-creditor-account-number" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Číslo účtu příjemce', 'Creditor Account No.')}</label>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <input className="input" style={{ flex: 2 }} placeholder="0987654321" value={domesticForm.creditorAccountNumber}
+                      <input id="domestic-creditor-account-number" className="input" style={{ flex: 2 }} placeholder="0987654321" value={domesticForm.creditorAccountNumber}
                         onChange={e => setDomesticForm({ ...domesticForm, creditorAccountNumber: e.target.value })} required />
                       <span style={{ display: 'flex', alignItems: 'center' }}>/</span>
-                      <input className="input" style={{ flex: 1 }} placeholder="0100" value={domesticForm.creditorBankCode}
+                      <input id="domestic-creditor-bank-code" aria-label={t('Kód banky příjemce', 'Creditor bank code')} className="input" style={{ flex: 1 }} placeholder="0100" value={domesticForm.creditorBankCode}
                         onChange={e => setDomesticForm({ ...domesticForm, creditorBankCode: e.target.value })} required />
                     </div>
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno příjemce', 'Creditor Name')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.creditorName}
+                    <label htmlFor="domestic-creditor-name" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno příjemce', 'Creditor Name')}</label>
+                    <input id="domestic-creditor-name" className="input" style={{ width: '100%' }} value={domesticForm.creditorName}
                       onChange={e => setDomesticForm({ ...domesticForm, creditorName: e.target.value })} required />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Částka', 'Amount')}</label>
+                    <label htmlFor="domestic-amount" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Částka', 'Amount')}</label>
                     <div style={{ display: 'flex', gap: '8px' }}>
-                      <input type="number" step="0.01" min="0.01" max="2500000" className="input" style={{ flex: 1 }} value={domesticForm.amount}
+                      <input id="domestic-amount" type="number" step="0.01" min="0.01" max="2500000" className="input" style={{ flex: 1 }} value={domesticForm.amount}
                         onChange={e => setDomesticForm({ ...domesticForm, amount: e.target.value })} required />
                       <span className="input" style={{ width: '80px', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--surface-2)' }}>CZK</span>
                     </div>
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Zpráva pro příjemce', 'Message for Payee')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.messageForPayee}
+                    <label htmlFor="domestic-message" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Zpráva pro příjemce', 'Message for Payee')}</label>
+                    <input id="domestic-message" className="input" style={{ width: '100%' }} value={domesticForm.messageForPayee}
                       onChange={e => setDomesticForm({ ...domesticForm, messageForPayee: e.target.value })} />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Variabilní symbol', 'Variable Symbol')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.variableSymbol}
+                    <label htmlFor="domestic-variable-symbol" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Variabilní symbol', 'Variable Symbol')}</label>
+                    <input id="domestic-variable-symbol" className="input" style={{ width: '100%' }} value={domesticForm.variableSymbol}
                       onChange={e => setDomesticForm({ ...domesticForm, variableSymbol: e.target.value })} />
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Specifický symbol', 'Specific Symbol')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.specificSymbol}
+                    <label htmlFor="domestic-specific-symbol" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Specifický symbol', 'Specific Symbol')}</label>
+                    <input id="domestic-specific-symbol" className="input" style={{ width: '100%' }} value={domesticForm.specificSymbol}
                       onChange={e => setDomesticForm({ ...domesticForm, specificSymbol: e.target.value })} />
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Konstantní symbol', 'Constant Symbol')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.constantSymbol}
+                    <label htmlFor="domestic-constant-symbol" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Konstantní symbol', 'Constant Symbol')}</label>
+                    <input id="domestic-constant-symbol" className="input" style={{ width: '100%' }} value={domesticForm.constantSymbol}
                       onChange={e => setDomesticForm({ ...domesticForm, constantSymbol: e.target.value })} />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Priorita', 'Priority')}</label>
-                    <select className="input" style={{ width: '100%' }} value={domesticForm.priority}
+                    <label htmlFor="domestic-priority" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Priorita', 'Priority')}</label>
+                    <select id="domestic-priority" className="input" style={{ width: '100%' }} value={domesticForm.priority}
                       onChange={e => setDomesticForm({ ...domesticForm, priority: e.target.value })}>
                       <option value="STANDARD">{t('Standardní', 'Standard')}</option>
                       <option value="URGENT">{t('Urgentní', 'Urgent')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('End-To-End ID', 'End-To-End ID')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.endToEndId}
+                    <label htmlFor="domestic-end-to-end" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('End-To-End ID', 'End-To-End ID')}</label>
+                    <input id="domestic-end-to-end" className="input" style={{ width: '100%' }} value={domesticForm.endToEndId}
                       onChange={e => setDomesticForm({ ...domesticForm, endToEndId: e.target.value })} />
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Označení výpisu', 'Statement Label')}</label>
-                    <input className="input" style={{ width: '100%' }} value={domesticForm.statementLabel}
+                    <label htmlFor="domestic-statement-label" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Označení výpisu', 'Statement Label')}</label>
+                    <input id="domestic-statement-label" className="input" style={{ width: '100%' }} value={domesticForm.statementLabel}
                       onChange={e => setDomesticForm({ ...domesticForm, statementLabel: e.target.value })} />
                   </div>
                 </div>
@@ -777,51 +798,51 @@ function PaymentsContent() {
               <form onSubmit={handleSepaCreate} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('IBAN plátce', 'Debtor IBAN')}</label>
-                    <input className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
+                    <label htmlFor="sepa-debtor-iban" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('IBAN plátce', 'Debtor IBAN')}</label>
+                    <input id="sepa-debtor-iban" className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
                       placeholder="CZ65 0800 0000 1920 0014 5399" value={sepaForm.debtorIban}
                       onChange={e => setSepaForm({ ...sepaForm, debtorIban: e.target.value })} required />
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('IBAN příjemce', 'Creditor IBAN')}</label>
-                    <input className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
+                    <label htmlFor="sepa-creditor-iban" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('IBAN příjemce', 'Creditor IBAN')}</label>
+                    <input id="sepa-creditor-iban" className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
                       placeholder="CZ65 0800 0000 1920 0014 5399" value={sepaForm.creditorIban}
                       onChange={e => setSepaForm({ ...sepaForm, creditorIban: e.target.value })} required />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno příjemce', 'Creditor Name')}</label>
-                    <input className="input" style={{ width: '100%' }} placeholder="John Doe" value={sepaForm.creditorName}
+                    <label htmlFor="sepa-creditor-name" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Jméno příjemce', 'Creditor Name')}</label>
+                    <input id="sepa-creditor-name" className="input" style={{ width: '100%' }} placeholder="John Doe" value={sepaForm.creditorName}
                       onChange={e => setSepaForm({ ...sepaForm, creditorName: e.target.value })} required />
                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '3px' }}>
                       {t('Max 70 znaků. SWIFT charset: A-Z, 0-9, / - ? : ( ) . , \' + (bez diakritiky)', 'Max 70 chars. SWIFT charset: A-Z, 0-9, / - ? : ( ) . , \' + (no diacritics)')}
                     </div>
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Částka (EUR)', 'Amount (EUR)')}</label>
-                    <input type="number" step="0.01" min="0.01" className="input" style={{ width: '100%' }} placeholder="100.00"
+                    <label htmlFor="sepa-amount" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Částka (EUR)', 'Amount (EUR)')}</label>
+                    <input id="sepa-amount" type="number" step="0.01" min="0.01" className="input" style={{ width: '100%' }} placeholder="100.00"
                       value={sepaForm.amount} onChange={e => setSepaForm({ ...sepaForm, amount: e.target.value })} required />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('BIC (nepovinný)', 'BIC (optional)')}</label>
-                    <input className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }} placeholder="KOMBCZPP"
+                    <label htmlFor="sepa-bic" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('BIC (nepovinný)', 'BIC (optional)')}</label>
+                    <input id="sepa-bic" className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }} placeholder="KOMBCZPP"
                       value={sepaForm.bic} onChange={e => setSepaForm({ ...sepaForm, bic: e.target.value })} />
                     <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '3px' }}>
                       {t('Odvodit z IBAN — nepovinné', 'Derivable from IBAN — optional')}
                     </div>
                   </div>
                   <div>
-                    <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('End-to-End ID (nepovinný)', 'End-to-End ID (optional)')}</label>
-                    <input className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }} placeholder="Max 35 znaků"
+                    <label htmlFor="sepa-end-to-end" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('End-to-End ID (nepovinný)', 'End-to-End ID (optional)')}</label>
+                    <input id="sepa-end-to-end" className="input" style={{ width: '100%', fontFamily: 'var(--font-mono)' }} placeholder="Max 35 znaků"
                       value={sepaForm.endToEndId} onChange={e => setSepaForm({ ...sepaForm, endToEndId: e.target.value })} />
                   </div>
                 </div>
                 <div>
-                  <label className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Zpráva pro příjemce (nepovinná)', 'Remittance Info (optional)')}</label>
-                  <input className="input" style={{ width: '100%' }} placeholder={t('Max 140 znaků, free-form', 'Max 140 chars, free-form')}
+                  <label htmlFor="sepa-remittance" className="stat-label" style={{ display: 'block', marginBottom: '4px' }}>{t('Zpráva pro příjemce (nepovinná)', 'Remittance Info (optional)')}</label>
+                  <input id="sepa-remittance" className="input" style={{ width: '100%' }} placeholder={t('Max 140 znaků, free-form', 'Max 140 chars, free-form')}
                     maxLength={140} value={sepaForm.remittanceInfo}
                     onChange={e => setSepaForm({ ...sepaForm, remittanceInfo: e.target.value })} />
                   <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '3px' }}>
@@ -850,7 +871,8 @@ function PaymentsContent() {
           <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
             <div style={{ position: 'relative', flex: 1, maxWidth: '320px' }}>
               <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-              <input className="input" style={{ paddingLeft: '32px', width: '100%' }}
+              <label className="sr-only" htmlFor="payments-search">{t('Hledat platby', 'Search payments')}</label>
+              <input id="payments-search" className="input" style={{ paddingLeft: '32px', width: '100%' }}
                 placeholder={t('Hledat podle ID, IBAN, příjemce…', 'Search by ID, IBAN, creditor…')}
                 value={search} onChange={e => setSearch(e.target.value)} />
             </div>
@@ -908,7 +930,7 @@ function PaymentsContent() {
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
                       {p.creditorIban ? p.creditorIban : (p.creditorAccountNumber && p.creditorBankCode ? `${p.creditorAccountNumber}/${p.creditorBankCode}` : '—')}
                     </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString(numberLocale)}</td>
                     <td style={{ textAlign: 'right', paddingRight: '8px' }}><ChevronRight size={14} style={{ color: 'var(--text-muted)' }} /></td>
                   </tr>
                 ))}

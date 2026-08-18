@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.4...lending-service-v0.24.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **lending:** actually pay the borrower on disbursement ([#3931](https://github.com/JiRaska/open-bank-oss/issues/3931)) ([#5231](https://github.com/JiRaska/open-bank-oss/issues/5231)) ([0d664f0](https://github.com/JiRaska/open-bank-oss/commit/0d664f078df84a07be659ea50659bc68b340c51f))
+
 ## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.3...lending-service-v0.24.4) (2026-08-17)
 
 

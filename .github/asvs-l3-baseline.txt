@@ -121,6 +121,11 @@ V9.1 openbank-infra/gitops/components/observability/cronjob-journey-public-edge.
 V9.1 openbank-infra/gitops/components/observability/cronjob-rum-attribute-audit.yaml:58: plaintext http:// env value http://tempo.observability.svc:3200
 V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:109: plaintext http:// env value http://ledger-service.ledger.svc:8101
 V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:122: plaintext http:// env value http://tempo.observability.svc:4317
+# #3931: the disbursement customer-credit leg (account-service lookup + transaction-service
+# TRANSFER). Same debt class as every other in-cluster plaintext hop on this baseline — mesh-mTLS
+# is the real fix (Layer 1), not this PR's concern.
+V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:124: plaintext http:// env value http://account-service.accounts.svc:8100
+V9.1 openbank-infra/gitops/components/lending/lending-service.yaml:126: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/statements/statement-service.yaml:103: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/statements/statement-service.yaml:105: plaintext http:// env value http://balance-service.balances.svc:8103
 V9.1 openbank-infra/gitops/components/statements/statement-service.yaml:107: plaintext http:// env value http://account-service.accounts.svc:8100

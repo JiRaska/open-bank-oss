@@ -5,8 +5,8 @@
 package com.openbank.standingorder.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.application.port.`in`.CreateStandingOrderCommand
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
@@ -76,6 +76,12 @@ class StandingOrderService(
                     payload = objectMapper.writeValueAsString(
                         mapOf(
                             "orderId" to order.id,
+                            // The consumer's internal-transfer route only auto-books when the
+                            // resolved creditor belongs to THIS party (own-account move) — a
+                            // standing order paying a different customer needs the screened
+                            // domestic-payment path, not a bare transaction-service TRANSFER,
+                            // which carries no AML/sanctions check of its own.
+                            "partyId" to order.partyId,
                             "paymentType" to order.paymentType,
                             "debitAccountId" to order.debitAccountId,
                             "debtorIban" to order.debtorIban,

@@ -11,6 +11,7 @@ import { ArrowLeft, Save, AlertCircle } from 'lucide-react'
 import { accountApi } from '@/lib/api'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 
 
 const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
@@ -66,7 +67,8 @@ export default function NewAccountPage() {
     setForm(p => ({ ...p, [k]: e.target.value }))
 
   return (
-    <div>
+    <AuthGuard permission="accounts:create">
+      <div>
       <PageHeader
         title={t('Otevřít nový účet', 'Open New Account')}
         subtitle={t('Vytvořte nový bankovní účet pro zákazníka', 'Create a new bank account for a customer party')}
@@ -86,60 +88,69 @@ export default function NewAccountPage() {
                   background: 'var(--danger-bg)', border: '1px solid var(--danger-border)',
                   borderRadius: 'var(--r-md)', display: 'flex', gap: '8px', alignItems: 'flex-start',
                 }}>
-                  <AlertCircle size={14} style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '1px' }}/>
-                  <span style={{ fontSize: '13px', color: 'var(--danger)' }}>{apiError}</span>
+                  <AlertCircle size={14} aria-hidden="true" style={{ color: 'var(--danger)', flexShrink: 0, marginTop: '1px' }}/>
+                  <span role="alert" style={{ fontSize: '13px', color: 'var(--danger)' }}>{apiError}</span>
                 </div>
               )}
 
               <div className="field">
-                <label>{t('Party ID', 'Party ID')} <span style={{ color: 'var(--danger)' }}>*</span></label>
+                <label htmlFor="account-party-id">{t('Party ID', 'Party ID')} <span aria-hidden="true" style={{ color: 'var(--danger)' }}>*</span></label>
                 <input
+                  id="account-party-id"
                   className="input"
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                   value={form.partyId}
                   onChange={set('partyId')}
+                  aria-invalid={Boolean(errors.partyId)}
+                  aria-describedby={errors.partyId ? 'account-party-id-error' : undefined}
                   style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', borderColor: errors.partyId ? 'var(--danger)' : undefined }}
                 />
-                {errors.partyId && <span style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.partyId}</span>}
+                {errors.partyId && <span id="account-party-id-error" role="alert" style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.partyId}</span>}
               </div>
 
               <div className="field">
-                <label>{t('Product ID', 'Product ID')} <span style={{ color: 'var(--danger)' }}>*</span></label>
+                <label htmlFor="account-product-id">{t('Product ID', 'Product ID')} <span aria-hidden="true" style={{ color: 'var(--danger)' }}>*</span></label>
                 <input
+                  id="account-product-id"
                   className="input"
                   placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
                   value={form.productId}
                   onChange={set('productId')}
+                  aria-invalid={Boolean(errors.productId)}
+                  aria-describedby={errors.productId ? 'account-product-id-error' : undefined}
                   style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', borderColor: errors.productId ? 'var(--danger)' : undefined }}
                 />
-                {errors.productId && <span style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.productId}</span>}
+                {errors.productId && <span id="account-product-id-error" role="alert" style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.productId}</span>}
               </div>
 
               <div className="field">
-                <label>{t('Právní název', 'Legal name')} <span style={{ color: 'var(--danger)' }}>*</span></label>
+                <label htmlFor="account-legal-name">{t('Právní název', 'Legal name')} <span aria-hidden="true" style={{ color: 'var(--danger)' }}>*</span></label>
                 <input
+                  id="account-legal-name"
                   className="input"
                   placeholder={t('Celé jméno nebo název společnosti', 'Full name or company name')}
                   value={form.legalName}
                   onChange={set('legalName')}
+                  aria-invalid={Boolean(errors.legalName)}
+                  aria-describedby={errors.legalName ? 'account-legal-name-error' : 'account-legal-name-help'}
                   style={{ borderColor: errors.legalName ? 'var(--danger)' : undefined }}
                 />
                 {errors.legalName
-                  ? <span style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.legalName}</span>
-                  : <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('Použito pro sankční screening (ADR-0032)', 'Used for sanctions screening (ADR-0032)')}</span>
+                  ? <span id="account-legal-name-error" role="alert" style={{ fontSize: '11px', color: 'var(--danger)' }}>{errors.legalName}</span>
+                  : <span id="account-legal-name-help" style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{t('Použito pro sankční screening (ADR-0032)', 'Used for sanctions screening (ADR-0032)')}</span>
                 }
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px' }}>
                 <div className="field">
-                  <label>{t('Typ účtu', 'Account type')}</label>
-                  <select className="input" value={form.accountType} onChange={set('accountType')}>
+                  <label htmlFor="account-type">{t('Typ účtu', 'Account type')}</label>
+                  <select id="account-type" className="input" value={form.accountType} onChange={set('accountType')}>
                     {ACCOUNT_TYPES.map(at => <option key={at}>{at}</option>)}
                   </select>
                 </div>
                 <div className="field">
-                  <label>{t('Měna', 'Currency')}</label>
-                  <select className="input" value={form.currencyCode} onChange={set('currencyCode')}>
+                  <label htmlFor="account-currency">{t('Měna', 'Currency')}</label>
+                  <select id="account-currency" className="input" value={form.currencyCode} onChange={set('currencyCode')}>
                     {CURRENCIES.map(c => <option key={c}>{c}</option>)}
                   </select>
                 </div>
@@ -161,13 +172,14 @@ export default function NewAccountPage() {
             }}>
               <Link href="/accounts" className="btn btn-secondary">{t('Zrušit', 'Cancel')}</Link>
               <button type="submit" className="btn btn-primary" disabled={submitting}>
-                <Save size={13}/>
+                <Save size={13} aria-hidden="true"/>
                 {submitting ? t('Otevírám…', 'Opening…') : t('Otevřít účet', 'Open Account')}
               </button>
             </div>
           </div>
         </form>
       </div>
-    </div>
+      </div>
+    </AuthGuard>
   )
 }

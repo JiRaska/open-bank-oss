@@ -37,6 +37,20 @@
    approvals, matching the TTL-bounded residual-risk posture in §7. Reachable only from
    `lending-service` (generated NetworkPolicy `redis-ingress-allow-list`, ADR-0081). Holds
    short-lived `PendingApproval` records only — no loan, balance or PII data.
+7. **Service → account-service (synchronous REST, new — #3931).** `AccountServiceClient` resolves a
+   party's own CURRENT account by id (`GET /api/v1/accounts/iban/{iban}` shape via
+   `getByIban`) for the disbursement's customer-facing leg — see item 8 for why this exists and
+   §3's new control block for why it cannot mispay. Client-credentials (`openbank-services`,
+   `ROLE_OPERATOR`, accepted by account-service's `account.read`); read-only, no mutation.
+8. **Service → transaction-service (synchronous REST, new — #3931).** `BorrowerCreditClient` posts
+   `type=CREDIT`/`DEBIT` (no rail) to `POST /api/v1/transactions` — the disbursement's second,
+   customer-facing booking. The loan book's own ledger journal (item 2 above) only ever touches
+   internal GL accounts (Loans Receivable, Funding Clearing); it does **not**, and structurally
+   cannot, move a customer's balance. Without this crossing a disbursed loan books an asset for the
+   bank and pays the customer nothing — the defect this PR fixes, confirmed live before the fix (44
+   active loans, 6.6M CZK principal, none of it reaching an account). Client-credentials
+   (`ROLE_OPERATOR`, accepted by `transaction.create`). Build-time gated by
+   `LENDING_BORROWER_CREDIT_BACKEND=rest` (§3), same pattern as item 2's `LENDING_LEDGER_BACKEND`.
 
 ## 3. Controls in place (this slice)
 
@@ -77,6 +91,27 @@
     page with no continuation cursor — a book larger than `limit` silently leaves the tail unprovisioned
     for that cycle with no alert. Acceptable for a first increment on a small loan book; needs a
     pagination/completeness check before the book grows past one batch.
+- **Disbursement customer-credit correctness (#3931, new this slice).** The new §2 items 7-8
+  crossing carries its own specific risks and mitigations:
+  - **Paying nobody.** Fixed by this PR — see item 8. Verified against a real customer: a
+    150,000 CZK loan disbursed 2026-05-20 whose account held only the (unrelated) welcome bonus,
+    nothing from the loan.
+  - **Paying the wrong account.** `AccountServiceClient.findCurrentAccount` filters on
+    `accountType == CURRENT && status == ACTIVE && currency == <loan currency>` — a party with no
+    such account resolves to `null`, not a guess.
+  - **Silently succeeding without paying.** Either the lookup returning no account, or the credit
+    call itself failing, surfaces as a **failed disbursement** — the `loan.disbursed` outbox event
+    (and everything downstream: statements, notifications) does not fire. The loan's origination
+    state was already claimed `DISBURSED` by the point this crossing runs (a pre-existing atomicity
+    gap #3850 already tracks, not new here); a failure past that point needs the same operator
+    attention #3850 does.
+  - **Paying twice on retry.** `idempotencyKey = "loan:<id>:disbursement-credit"` is deterministic
+    per loan — a retried disbursement call replays the same credit rather than paying again, the
+    same shape the ledger crossing (item 2) already uses.
+  - **Shipping built but inert.** `LENDING_BORROWER_CREDIT_BACKEND=rest` must be set alongside
+    `LENDING_LEDGER_BACKEND` in gitops — without it the `@Default` no-op stays bound. The no-op
+    deliberately does NOT silently succeed: the lookup returns `null`, so `disburse()` takes the
+    fail-loud branch — an offline/local build cannot pay a customer and must say so, not pretend to.
 - **Collateral-adjusted LGD correctness (ADR-0028 Phase 3 increment 2, new this slice).** The pure
   `Ifrs9.collateralAdjustedLgd` function and its call site in `LendingService.applyCollateral` carry
   their own specific risks and mitigations:
@@ -149,6 +184,12 @@
 - **Haircut calibration is a placeholder, not a risk model.** Per-`CollateralType` haircuts are supplied
   by the caller at registration time (`CollateralRequest.haircut`) with no platform-enforced or
   actuarially-derived table — see the ADR-0028 delivery note's explicit non-calibration caveat.
+- **Cooling-off unwind has no customer-debit leg (#3931 follow-up).** Fixing the GL account-pair
+  bug in `WITHDRAWAL_UNWIND` (see change log) corrected the loan book's own double-count, but a
+  statutory withdrawal still does not collect the disbursed cash back from the customer's
+  account — the same missing-integration shape disbursement's credit had, on the reverse leg. Not
+  yet triggered in production (0 WITHDRAWN/UNWOUND loans); tracked as a follow-up rather than
+  bundled into this PR.
 - **Reschedule/restructuring has no maker-checker control (issue #667/#668).** Unlike origination
   (proposer≠decider) and collateral (registrant≠decider), `RescheduleLoanUseCase.reschedule` is a
   single-actor action — the same shape as `WriteOffLoanUseCase.writeOff`, which has the same gap.
@@ -299,6 +340,23 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
 
 ## 10. Change log
 
+- **2026-08-17** — Disbursement customer-credit leg (#3931). **New trust boundaries added to §2
+  (items 7-8).** The loan book's ledger journal only ever posted to internal GL accounts (Loans
+  Receivable, Funding Clearing) — it recorded a bank asset and paid the customer nothing.
+  Confirmed live before this fix: 44 active loans, 6.6M CZK principal, none of it ever reaching an
+  account; traced one specific 150,000 CZK disbursement end to end. Adds `AccountServiceClient`
+  (account-service, read-only IBAN/party lookup) and `BorrowerCreditClient` (transaction-service,
+  `CREDIT`/`DEBIT`, no rail — booked same-day per the settlement-scope fix, oss#5225) as new
+  outbound edges, gated by `LENDING_BORROWER_CREDIT_BACKEND=rest` (§3 new control block; §2 items
+  7-8). Either step failing surfaces as a failed disbursement, not a silent one — the
+  `loan.disbursed` event does not fire until the customer is actually paid. Also fixed in the same
+  change: `WITHDRAWAL_UNWIND`'s ledger journal used the `DISBURSEMENT` account pair unchanged
+  instead of its reverse, doubling Loans Receivable instead of clearing it on every statutory
+  cooling-off withdrawal — a GL-correctness fix with no new trust boundary (0 WITHDRAWN/UNWOUND
+  loans in production; caught by inspection, not by symptom). The customer-debit leg of an unwind
+  remains unfixed — new roadmap item in §5. Rollback: revert the commit, or leave
+  `LENDING_BORROWER_CREDIT_BACKEND` unset (the `@Default` no-op fails loud rather than silently
+  resuming the pre-fix behavior).
 - **2026-08-05** — Trust-boundary change (#3734): `operator-lending-write` now excludes `service-account-*` principals, and a new `prohibited` veto closes the eight matrix-granted lending writes (`approve`, `collateralDecide`, `collateralRegister`, `create`, `disburse`, `repay`, `reschedule`, `writeoff`) to `service-account-openbank-edge` — the role_action_matrix grants them to ROLE_OPERATOR and matrix-allows bypasses rule-level exclusions. The edge's verified customer flow, `lending.intake` (loan application, `CustomerEdgeResource.applyForLoan`), is preserved via `edge-customer-intake`; the ~12 non-matrix writes (`acceleration.execute`, `advance`, `default.mark`, `approval.decide`, ...) are closed by the exclusion alone. Ext moved from generator heredoc to standalone `lending_rest_ext.rego` with a 16-test opa suite.
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `partyId` on the two list endpoints (applications, loans). These are read-only queries scoped BY that party, so a null reaching the repository is a query with no subject; the handlers are non-suspend, so in practice it threw at the boundary and 500'd first. The `@Authorize(action = "lending.list")` gate is unchanged and still runs before the guard. No new caller or boundary. Rollback: revert.
 - **2026-07-31** — Termination and early-exit lifecycle (ADR-0215): termination

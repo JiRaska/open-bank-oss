@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const PID_SERVICE = '/api/svc/pid-service'
 
@@ -189,24 +190,15 @@ export default function PidPage() {
   return (
     <AuthGuard>
       <div style={{ animation: 'fadeIn 0.2s ease-out', maxWidth: '1400px', margin: '0 auto' }}>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">PID</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Map size={18} style={{ color: 'var(--accent)' }} />
-              {t('Osobní identifikační údaje (PID)', 'Personal Identification Data (PID)')}
-            </h1>
-            <p className="page-subtitle">
-              {t('Správa identit, dokladů a identifikátorů klientů', 'Management of identities, documents, and client identifiers')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
+        <PageHeader
+          icon={<Map size={18} aria-hidden="true" />}
+          title={t('Osobní identifikační údaje (PID)', 'Personal Identification Data (PID)')}
+          subtitle={t('Správa identit, dokladů a identifikátorů klientů', 'Management of identities, documents, and client identifiers')}
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">PID</span></div>}
+          actions={<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-secondary" onClick={load} disabled={loading}>
-                <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+                <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
               <button className="btn btn-secondary" onClick={() => setShowNewForm(true)}>
@@ -219,8 +211,8 @@ export default function PidPage() {
             <div style={{ fontSize: '11px', color: 'var(--text-secondary)', textAlign: 'right' }}>
               {t('Chcete vytvořit záznam rychle?', 'Want to create quickly?')}
             </div>
-          </div>
-        </div>
+          </div>}
+        />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
@@ -271,8 +263,9 @@ export default function PidPage() {
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('Základní údaje', 'Basic Info')}</h4>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Jméno', 'Given Name')} *</label>
+                  <label htmlFor="pid-given-name" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Jméno', 'Given Name')} *</label>
                   <input 
+                    id="pid-given-name"
                     className="input" 
                     required 
                     style={{ width: '100%' }}
@@ -281,8 +274,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Příjmení', 'Family Name')} *</label>
+                  <label htmlFor="pid-family-name" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Příjmení', 'Family Name')} *</label>
                   <input 
+                    id="pid-family-name"
                     className="input" 
                     required 
                     style={{ width: '100%' }}
@@ -291,8 +285,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum narození', 'Birthdate')} *</label>
+                  <label htmlFor="pid-birthdate" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum narození', 'Birthdate')} *</label>
                   <input 
+                    id="pid-birthdate"
                     type="date"
                     className="input" 
                     required 
@@ -302,8 +297,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Pohlaví', 'Gender')} *</label>
+                  <label htmlFor="pid-gender" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Pohlaví', 'Gender')} *</label>
                   <select 
+                    id="pid-gender"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -316,8 +312,9 @@ export default function PidPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Místo narození', 'Birthplace')} *</label>
+                  <label htmlFor="pid-birthplace" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Místo narození', 'Birthplace')} *</label>
                   <input 
+                    id="pid-birthplace"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -326,8 +323,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Občanství (čárkou oddělené)', 'Nationalities (comma separated)')} *</label>
+                  <label htmlFor="pid-nationalities" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Občanství (čárkou oddělené)', 'Nationalities (comma separated)')} *</label>
                   <input 
+                    id="pid-nationalities"
                     className="input" 
                     required 
                     style={{ width: '100%' }}
@@ -340,8 +338,9 @@ export default function PidPage() {
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('BankID a Kontakt', 'BankID & Contact')}</h4>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('BankID SUB', 'BankID SUB')} *</label>
+                  <label htmlFor="pid-bankid-sub" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('BankID SUB', 'BankID SUB')} *</label>
                   <input 
+                    id="pid-bankid-sub"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -350,8 +349,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Email', 'Email')}</label>
+                  <label htmlFor="pid-email" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Email', 'Email')}</label>
                   <input 
+                    id="pid-email"
                     type="email"
                     className="input" 
                     style={{ width: '100%' }}
@@ -360,8 +360,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Telefon', 'Phone')}</label>
+                  <label htmlFor="pid-phone" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Telefon', 'Phone')}</label>
                   <input 
+                    id="pid-phone"
                     type="tel"
                     className="input" 
                     style={{ width: '100%' }}
@@ -374,8 +375,9 @@ export default function PidPage() {
                   <h4 style={{ fontSize: '13px', margin: '0 0 8px 0', borderBottom: '1px solid var(--border-color)', paddingBottom: '4px' }}>{t('Primární doklad totožnosti', 'Primary ID Document')}</h4>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Typ dokladu', 'Document Type')} *</label>
+                  <label htmlFor="pid-document-type" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Typ dokladu', 'Document Type')} *</label>
                   <select 
+                    id="pid-document-type"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -388,8 +390,9 @@ export default function PidPage() {
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Číslo dokladu', 'Document Number')} *</label>
+                  <label htmlFor="pid-document-number" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Číslo dokladu', 'Document Number')} *</label>
                   <input 
+                    id="pid-document-number"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -398,8 +401,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Vydávající stát', 'Issuing Country')} *</label>
+                  <label htmlFor="pid-document-country" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Vydávající stát', 'Issuing Country')} *</label>
                   <input 
+                    id="pid-document-country"
                     className="input" 
                     required
                     style={{ width: '100%' }}
@@ -408,8 +412,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum vydání', 'Issued At')} *</label>
+                  <label htmlFor="pid-document-issued-at" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Datum vydání', 'Issued At')} *</label>
                   <input 
+                    id="pid-document-issued-at"
                     type="date"
                     className="input" 
                     required
@@ -419,8 +424,9 @@ export default function PidPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Platnost do', 'Expires At')} *</label>
+                  <label htmlFor="pid-document-expires-at" style={{ display: 'block', fontSize: '12px', marginBottom: '6px', color: 'var(--text-secondary)' }}>{t('Platnost do', 'Expires At')} *</label>
                   <input 
+                    id="pid-document-expires-at"
                     type="date"
                     className="input" 
                     required
@@ -455,6 +461,7 @@ export default function PidPage() {
               className="input"
               style={{ paddingLeft: '32px', width: '100%' }}
               placeholder={t('Hledat hodnotu, ID osoby...', 'Search value, person ID...')}
+              aria-label={t('Hledat PID případy', 'Search PID cases')}
               value={search}
               onChange={e => setSearch(e.target.value)}
             />

@@ -98,6 +98,8 @@ class LendingService(
     private val originationConfig: OriginationConfig,
     private val workflowPort: com.openbank.lending.application.port.out.OriginationWorkflowPort,
     private val decisionEngine: OriginationDecisionService,
+    private val borrowerAccounts: com.openbank.lending.application.port.out.BorrowerAccountLookupPort,
+    private val borrowerCredit: com.openbank.lending.application.port.out.BorrowerCreditPort,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -531,7 +533,20 @@ class LendingService(
                 }
             }
             .flatMap { saved ->
-                // Cash leaves the bank: post the disbursement to the ledger (we never mutate balances).
+                // Cash leaves the bank in two bookings, not one. The ledger journal below only ever
+                // touches internal GL accounts (Loans Receivable, Funding Clearing — see
+                // LendingJournalFactory's KDoc); it records that the bank now holds a loan asset, but
+                // it does not, and structurally cannot, move a customer's balance. Without the credit
+                // that follows it, the borrower is left owing a loan they were never paid — confirmed
+                // live: 44 active loans, 6.6M CZK principal, none of it ever reaching an account (#3931).
+                //
+                // The credit resolves the borrower's own CURRENT account and asks transaction-service
+                // to book it — the same two-step shape account-service already uses for the welcome
+                // bonus. It fails loud on either step: a lookup miss or a failed credit surfaces as a
+                // failed disbursement rather than a loan silently booked with nowhere for the money to
+                // go. (The origination state was already claimed DISBURSED above; making that claim and
+                // this credit atomic together is the pre-existing gap #3850 already tracks, not new
+                // scope here — a failure past this point needs the same operator attention #3850 does.)
                 ledger.post(
                     LedgerPosting(
                         "loan:${saved.id.value}:disbursement",
@@ -540,6 +555,26 @@ class LendingService(
                         PostingKind.DISBURSEMENT,
                     ),
                 )
+                    .flatMap {
+                        borrowerAccounts.findCurrentAccount(saved.partyId, saved.principal.currency.code)
+                    }
+                    .flatMap { accountId ->
+                        if (accountId == null) {
+                            Uni.createFrom().failure<Unit>(
+                                IllegalStateException(
+                                    "Loan ${saved.id.value}: party ${saved.partyId} has no active " +
+                                        "CURRENT account in ${saved.principal.currency.code} — " +
+                                        "disbursement booked to the ledger but the borrower was not paid",
+                                ),
+                            )
+                        } else {
+                            borrowerCredit.credit(
+                                "loan:${saved.id.value}:disbursement-credit",
+                                accountId,
+                                saved.principal,
+                            )
+                        }
+                    }
                     .flatMap {
                         events.emit(
                             LendingOutboxMessage(

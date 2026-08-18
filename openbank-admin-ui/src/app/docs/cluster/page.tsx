@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
@@ -173,28 +174,22 @@ export default function ClusterDossierPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Cluster & kontejner', 'Cluster & container')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Boxes size={20} style={{ color: K8S_BLUE }} />
-            {t('Cluster & kontejner — topologie a hardening', 'Cluster & container — topology and hardening')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Cluster & kontejner — topologie a hardening', 'Cluster & container — topology and hardening')}
+        subtitle={t(
               'Jak je platforma rozdělená po namespaces, jak je zabezpečená (obrana do hloubky) a jak je poskládaný a zabezpečený výchozí image — plán vs. realita, odvozeno z GitOpsu (ADR-0081).',
               'How the platform is split across namespaces, how it is secured (defense in depth), and how the default service image is built and hardened — plan vs reality, derived from GitOps (ADR-0081).',
             )}
-          </p>
-        </div>
-        <button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+        icon={<Boxes aria-hidden="true" size={20} style={{ color: K8S_BLUE }} />}
+        actions={<button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
