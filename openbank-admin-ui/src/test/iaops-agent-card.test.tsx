@@ -23,8 +23,8 @@ const FINOPS_AGENT = {
 }
 
 const GOVERNANCE = {
-  adrRef: 'ADR-0031', adrStatus: 'accepted', phase: 1, totalPhases: 4, phaseLabel: 'Advisory',
-  enforcement: 'audit-only', policyDefault: 'deny', agentsActing: 1, chartersAvailable: true,
+  adrRef: 'ADR-0031', adrStatus: 'accepted', phase: 2, totalPhases: 5, phaseLabel: 'Read-only oversight active',
+  enforcement: 'block', policyDefault: 'deny', agentsActing: 0, chartersAvailable: true,
   agentCount: 1, agents: [FINOPS_AGENT], toolTiers: {}, decisions: [],
   decisionSummary: { built: 0, partial: 0, planned: 0, total: 0 }, compliance: [],
   auditTrail: { capture: [], pipeline: [], live: [], planned: [] },
@@ -45,6 +45,17 @@ afterEach(() => {
 })
 
 describe('AIOps agent card interactions', () => {
+  it('describes the enforced policy gate without overstating phase 2 autonomy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
+
+    render(<IAOpsPage />)
+
+    expect(await screen.findByText(/Phase 1 is enforced while the PDP is available/i)).toBeVisible()
+    expect(screen.getByText(/A PDP outage degrades the gate to advisory/i)).toBeVisible()
+    expect(screen.getByText(/Phase 2 remains read-only and proposal-only/i)).toBeVisible()
+    expect(screen.queryByText(/enforcement \(OPA block\) is not yet live/i)).not.toBeInTheDocument()
+  })
+
   it.each(['ai-swarm', 'ai-mesh', 'agent-roster'])('scrolls to the %s fragment after governance data loads', async fragment => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })

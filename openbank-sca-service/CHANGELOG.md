@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.5...sca-service-v0.14.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **sca:** add sourceService to DEVICE_ENROLLED for audit attribution ([#5337](https://github.com/JiRaska/open-bank-oss/issues/5337)) ([247639d](https://github.com/JiRaska/open-bank-oss/commit/247639db84d3e238948df1ebc322d11c2ad07881)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.13.4...sca-service-v0.13.5) (2026-08-17)
 
 

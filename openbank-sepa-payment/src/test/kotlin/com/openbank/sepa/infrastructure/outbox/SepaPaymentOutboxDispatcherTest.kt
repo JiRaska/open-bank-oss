@@ -35,7 +35,12 @@ class SepaPaymentOutboxDispatcherTest {
     fun setUp() {
         outboxRepository = mockk()
         eventPublisher = mockk()
-        dispatcher = SepaPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = true)
+        dispatcher = SepaPaymentOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = true,
+            metrics = mockk(relaxed = true),
+        )
     }
 
     private fun entry(eventId: UUID = UUID.randomUUID(), payload: String = "{\"e\":1}") = OutboxEntry(
@@ -99,7 +104,12 @@ class SepaPaymentOutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op when dispatch-enabled is false`(): Unit = runBlocking {
-        val disabledDispatcher = SepaPaymentOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
+        val disabledDispatcher = SepaPaymentOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         disabledDispatcher.dispatch()
 

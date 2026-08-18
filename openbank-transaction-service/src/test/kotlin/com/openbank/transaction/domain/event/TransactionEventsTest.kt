@@ -40,6 +40,8 @@ class TransactionEventsTest {
         assertThat(event.instructionType).isEqualTo(InstructionType.UNKNOWN)
         assertThat(event.initiatedByPartyId).isNull()
         assertThat(event.eventId).isNotNull()
+        // AuditConsumer attribution (#3994/#5256): read as the strongest (EVENT-sourced) claim.
+        assertThat(event.sourceService).isEqualTo("transaction-service")
     }
 
     @Test
@@ -88,6 +90,7 @@ class TransactionEventsTest {
         assertThat(event.referenceNumber).isEqualTo("REF-3")
         assertThat(event).isEqualTo(event.copy())
         assertThat(event.toString()).contains("REF-3")
+        assertThat(event.sourceService).isEqualTo("transaction-service")
     }
 
     @Test
@@ -105,5 +108,6 @@ class TransactionEventsTest {
         assertThat(event.reason).isEqualTo("insufficient funds")
         assertThat(event).isEqualTo(event.copy())
         assertThat(event.toString()).contains("insufficient funds")
+        assertThat(event.sourceService).isEqualTo("transaction-service")
     }
 }
