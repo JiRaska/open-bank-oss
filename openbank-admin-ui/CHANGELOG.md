@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.4...admin-ui-v0.165.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** trap command palette focus ([#5540](https://github.com/JiRaska/open-bank-oss/issues/5540)) ([d50ad3b](https://github.com/JiRaska/open-bank-oss/commit/d50ad3b2e5d2ce6f553123cf3ea5dbaac4cf28d1))
+
 ## [0.165.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.3...admin-ui-v0.165.4) (2026-08-18)
 
 
