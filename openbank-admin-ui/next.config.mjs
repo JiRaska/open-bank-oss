@@ -7,9 +7,9 @@ const securityHeaders = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=()' },
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
-  // Content-Security-Policy moved to middleware.ts (ADR-0080 P1 / F-AUTH-06): a per-request
+  // Content-Security-Policy moved to proxy.ts (ADR-0080 P1 / F-AUTH-06): a per-request
   // nonce + 'strict-dynamic' replaces 'unsafe-inline' on script-src. A static header here can't
-  // carry a fresh nonce, so the CSP is emitted by the middleware instead.
+  // carry a fresh nonce, so the CSP is emitted by the proxy instead.
 ]
 
 const nextConfig = {
