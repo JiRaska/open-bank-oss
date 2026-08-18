@@ -32,7 +32,7 @@
 #     broker's cluster-DNS name) and runs ONLY on a main push / an on-main workflow_dispatch
 #     (verify-provider.yml). Downloads `build`'s pact artifact rather than regenerating it —
 #     a missing/failed download FAILS the job (no silent skip): see the download step.
-#     Runs the `providerPactTest` Gradle task (build-logic/openbank.quarkus-service.gradle.kts)
+#     Runs the `providerPactTest` Gradle task (build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts)
 #     — a source set/task independent of `test`, so invoking it never forces `test` to re-run.
 name: _service-ci
 
@@ -631,7 +631,7 @@ jobs:
           [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
 
       # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
-      # build-logic/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
+      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
       # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
       # to the Pact Broker) that Gradle's up-to-date/build-cache machinery cannot observe, so a
       # cached providerPactTest would silently skip the publish (#1964's original reason,

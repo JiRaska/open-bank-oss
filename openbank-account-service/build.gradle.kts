@@ -103,7 +103,7 @@ tasks.withType<Test> {
     maxHeapSize = "2g"
 
     // Pact rootDir + Pact Broker property forwarding centralised into
-    // build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
 }
 

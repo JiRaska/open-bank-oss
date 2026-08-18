@@ -72,6 +72,6 @@ kover {
 // propagate). The pactbroker.* keys are forwarded so `_service-ci.yml`'s publish step behaves the
 // same way here as in every other consumer module.
 // Pact rootDir + Pact Broker property forwarding centralised into
-// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.

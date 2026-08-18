@@ -94,7 +94,7 @@ tasks.test {
     )
 
     // Pact rootDir + Pact Broker property forwarding centralised into
-    // build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — this module previously forwarded the broker keys ITSELF
     // via `tasks.test { }` (not `tasks.withType<Test>`) and never set pact.rootDir at all; the
     // centralised version now covers both, applied uniformly across every Test task including

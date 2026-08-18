@@ -76,6 +76,6 @@ kover {
 // permanently UNVERIFIED and undeployable (issue #3285). 14 of 17 providers already had this
 // block; the correlation with the three that did not was exact.
 // Pact rootDir + Pact Broker property forwarding centralised into
-// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.

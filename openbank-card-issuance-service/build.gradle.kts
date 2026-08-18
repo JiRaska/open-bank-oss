@@ -68,7 +68,7 @@ dependencies {
 // publishing no verification result — which is the `can-i-deploy` block the class exists to prevent.
 // A twin that cannot see the broker looks identical to not having one.
 // Pact rootDir + Pact Broker property forwarding centralised into
-// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 

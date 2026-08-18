@@ -68,7 +68,7 @@ dependencies {
 // and pid-service publishes no verification result — the exact `can-i-deploy` block that class
 // exists to prevent. NOTE: must be set on the test JVM fork, not the Gradle daemon.
 // Pact rootDir + Pact Broker property forwarding centralised into
-// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 

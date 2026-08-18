@@ -91,7 +91,7 @@ tasks.withType<Test> {
     systemProperty("junit.jupiter.execution.timeout.default", "8m")
 
     // Pact rootDir + Pact Broker property forwarding centralised into
-    // build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
     // (ADR-0250 Phase 2, issue #4414) — the timeout above and the CI-only jvmArgs below are the
     // service-specific parts that remain.
 

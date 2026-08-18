@@ -68,7 +68,7 @@ dependencies {
 // Pact: read consumer pacts from the shared pacts/ dir at the repo root (git-pact, ADR-0063).
 // NOTE: must be set on the test JVM fork, not the Gradle daemon (System.setProperty would not propagate).
 // Pact rootDir + Pact Broker property forwarding centralised into
-// build-logic/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+// build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 
