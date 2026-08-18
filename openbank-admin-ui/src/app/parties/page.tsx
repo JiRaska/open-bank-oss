@@ -48,6 +48,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function PartiesPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   // ── list mode (no search term) ──────────────────────────────────────────────
   const [parties, setParties]         = useState<Party[]>([])
@@ -258,7 +259,7 @@ export default function PartiesPage() {
                       {p.kycStatus?.replace('_', ' ')}
                     </span>
                   </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <Link href={`/parties/${p.id}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
                       {t('Detail', 'View')} <ChevronRight size={12} />
