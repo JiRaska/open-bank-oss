@@ -5,6 +5,7 @@
 'use client'
 
 import { Bot, Info } from 'lucide-react'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 // ── AgentInsightsPanel — the canonical surface for AI-agent output ─────────────
 //
@@ -103,6 +104,8 @@ export function AgentInsightsPanel({
   title, subtitle, findings, emptyMessage, icon, accentColor = '#d97706',
   sourceLabel, notice, onApprove, onReject, decideLabels, decidingId,
 }: AgentInsightsPanelProps) {
+  const { language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const approveLabel = decideLabels?.approve ?? 'Approve'
   const rejectLabel = decideLabels?.reject ?? 'Reject'
   const showHitl = Boolean(onApprove || onReject)
@@ -196,7 +199,7 @@ export function AgentInsightsPanel({
                     )}
                     {f.detectedAt && (
                       <span style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-                        {new Date(f.detectedAt).toLocaleString()}
+                        {new Date(f.detectedAt).toLocaleString(dateLocale)}
                       </span>
                     )}
                     {showHitl && (
