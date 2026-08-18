@@ -13,6 +13,7 @@ import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
 import { loadAdr, type AdrStatus } from '@/lib/governance/docs'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { PrintDocumentButton } from '@/components/docs/PrintDocumentButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,7 +47,7 @@ export default async function AdrDetailPage({ params }: PageProps) {
   }[s])
 
   return (
-    <div>
+    <div className="docs-printable">
       <DocsPageHeader
         crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
@@ -58,10 +59,13 @@ export default async function AdrDetailPage({ params }: PageProps) {
           </>}
         title={adr ? `ADR-${adr.numberLabel} — ${adr.title}` : t('Rozhodnutí nenalezeno', 'Decision not found')}
         icon={<ScrollText aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<Link href="/docs/adr" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <ChevronLeft size={14} />
-          {t('Zpět na registr', 'Back to registry')}
-        </Link>}
+        actions={<div className="docs-header-actions">
+          <PrintDocumentButton />
+          <Link href="/docs/adr" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <ChevronLeft aria-hidden="true" size={14} />
+            {t('Zpět na registr', 'Back to registry')}
+          </Link>
+        </div>}
       />
 
       <div className="card" style={{ padding: '24px' }}>

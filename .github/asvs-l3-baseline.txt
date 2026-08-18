@@ -241,7 +241,6 @@ V13.1 openbank-control-liveness-sentinel: serves REST resources but publishes no
 V13.1 openbank-devops-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-docs-truth-agent: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-finops-agent: serves REST resources but publishes no openapi.yaml
-V13.1 openbank-flaky-test-hunter: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-governance-auditor: serves REST resources but publishes no openapi.yaml
 V13.1 openbank-release-steward: serves REST resources but publishes no openapi.yaml
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:106: plaintext http:// env value http://sca-service.sca.svc:8110
@@ -252,6 +251,7 @@ V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:81: pla
 V9.1 openbank-infra/gitops/components/case-coordinator/case-coordinator-service.yaml:122: plaintext http:// env value http://litellm.ai-platform.svc:4000/v1
 V9.1 openbank-infra/gitops/components/case-coordinator/case-coordinator-service.yaml:134: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:99: plaintext http:// env value http://case-coordinator-agent.platform.svc:8146
+V9.1 openbank-infra/gitops/components/admin-ui/admin-ui.yaml:104: plaintext http:// env value http://flaky-test-hunter.flaky-test-hunter.svc:8148
 # V9.1 — customer-edge -> delegation-service. NOT a new plaintext edge: the call already
 # ran over plaintext via the resource's @ConfigProperty default
 # (openbank-customer-edge/src/main/resources/application.yaml:121), where neither this gate nor

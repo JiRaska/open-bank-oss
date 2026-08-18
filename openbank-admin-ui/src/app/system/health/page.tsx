@@ -21,7 +21,8 @@ export default function SystemHealthPage() {
   const [configMap, setConfigMap]   = useState<Record<string, ServiceConfigResponse | null>>({})
   const [govMap, setGovMap]         = useState<Record<string, GovernanceManifestEntry>>({})
   const [govTimestamp, setGovTimestamp] = useState<string | null>(null)
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [loading, setLoading]       = useState(true)
   const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -88,7 +89,7 @@ export default function SystemHealthPage() {
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Clock size={12} /> {lastRefreshed.toLocaleTimeString()}
+              <Clock size={12} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing}>
@@ -142,7 +143,8 @@ function SummaryCard({ label, count, total, icon, color, bg, border }: {
 }
 
 function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snapshot: ServiceSnapshot; resilience: ServiceConfigResponse | null; governance?: GovernanceManifestEntry; govTimestamp?: string | null }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { name, port, info, health, rateLimitMax, rateLimitRemaining, apiVersion, latencyMs, reachable } = snapshot
 
   const isUp = reachable && health?.status === 'UP'
@@ -237,7 +239,7 @@ function ServiceCard({ snapshot, resilience, governance, govTimestamp }: { snaps
             </div>
             {govTimestamp && (
               <div style={{ fontSize: '9px', color: 'var(--text-tertiary)' }} title="Metadata freshness">
-                {new Date(govTimestamp).toLocaleTimeString()}
+                {new Date(govTimestamp).toLocaleTimeString(dateLocale)}
               </div>
             )}
           </div>
