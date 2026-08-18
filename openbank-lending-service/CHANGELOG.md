@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.5...lending-service-v0.25.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **lending:** add sourceService to remaining event types for audit attribution ([#5399](https://github.com/JiRaska/open-bank-oss/issues/5399)) ([1de3bff](https://github.com/JiRaska/open-bank-oss/commit/1de3bffdbacc242e13cf5635a2637995a822584a)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.24.5](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.24.4...lending-service-v0.24.5) (2026-08-17)
 
 
