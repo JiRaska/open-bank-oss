@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.166.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.2...admin-ui-v0.166.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** complete shell menu accessibility ([#5584](https://github.com/JiRaska/open-bank-oss/issues/5584)) ([04ee304](https://github.com/JiRaska/open-bank-oss/commit/04ee304e4ffbb32089933f44806a72918ab93038))
+
 ## [0.166.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.1...admin-ui-v0.166.2) (2026-08-18)
 
 
