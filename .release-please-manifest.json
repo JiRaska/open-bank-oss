@@ -9,7 +9,7 @@
   "openbank-authz-policy-auditor": "0.6.0",
   "openbank-balance-service": "1.14.1",
   "openbank-billing-service": "0.10.0",
-  "openbank-card-issuance-service": "0.24.0",
+  "openbank-card-issuance-service": "0.24.1",
   "openbank-clearing-service": "0.7.10",
   "openbank-clearing-simulator": "0.5.0",
   "openbank-consent-service": "0.18.1",

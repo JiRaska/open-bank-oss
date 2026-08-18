@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.0...card-issuance-service-v0.24.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **card-issuance:** add sourceService to card domain events ([#5382](https://github.com/JiRaska/open-bank-oss/issues/5382)) ([ed655a0](https://github.com/JiRaska/open-bank-oss/commit/ed655a0595190e23ac16e7f4f08b6b7f6d060f49)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.23.0...card-issuance-service-v0.24.0) (2026-08-18)
 
 
