@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.166.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.1...admin-ui-v0.166.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** hide operator decorative icons ([#5578](https://github.com/JiRaska/open-bank-oss/issues/5578)) ([f04f987](https://github.com/JiRaska/open-bank-oss/commit/f04f9872af07f0059161e0f526c3408cbbf262cb))
+
 ## [0.166.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.0...admin-ui-v0.166.1) (2026-08-18)
 
 
