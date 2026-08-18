@@ -432,8 +432,11 @@ export default function RegulatoryPage() {
           const isSelected = selected === report.id
           return (
             <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.color}` }}>
-              <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
-                onClick={() => setSelected(s => s === report.id ? null : report.id)}>
+              <div role="button" tabIndex={0} aria-expanded={isSelected}
+                aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
+                style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
+                onClick={() => setSelected(s => s === report.id ? null : report.id)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === report.id ? null : report.id) } }}>
                 {/* Status */}
                 <span style={{ color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
 
