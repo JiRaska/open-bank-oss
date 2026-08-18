@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.163.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.162.0...admin-ui-v0.163.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** add flaky-test-hunter findings page ([#5504](https://github.com/JiRaska/open-bank-oss/issues/5504)) ([1d45bfb](https://github.com/JiRaska/open-bank-oss/commit/1d45bfb1fc4fd909c09d06db3c27dc3945d7adff)), closes [#5499](https://github.com/JiRaska/open-bank-oss/issues/5499)
+* **admin-ui:** extend PDF export to governance docs ([#5502](https://github.com/JiRaska/open-bank-oss/issues/5502)) ([8fadc19](https://github.com/JiRaska/open-bank-oss/commit/8fadc19ddea315146b1f4efaaad544dbf3acc43e))
+
 ## [0.162.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.161.1...admin-ui-v0.162.0) (2026-08-18)
 
 
