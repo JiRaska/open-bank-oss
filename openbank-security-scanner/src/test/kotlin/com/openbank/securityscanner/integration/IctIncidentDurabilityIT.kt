@@ -13,6 +13,7 @@ import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.smallrye.reactive.messaging.kafka.Record
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -59,6 +60,10 @@ class IctIncidentDurabilityIT {
 
     @Inject
     lateinit var dataSource: DataSource
+
+    @jakarta.enterprise.inject.Any
+    @Inject
+    lateinit var connector: InMemoryConnector
 
     private fun reportIncident(title: String): UUID {
         val body = """
@@ -187,6 +192,37 @@ class IctIncidentDurabilityIT {
             jsonPath().getList<String>("id")
         }
         assertThat(none).doesNotContain(id.toString())
+    }
+
+    /**
+     * Issue #4942: `openbank.security.ict.incident` sat at end offset 0 in every real
+     * environment, and the durability tests above never once looked at the channel — they wired
+     * up `InMemoryConnector.switchOutgoingChannelsToInMemory("ict-incident-events-out")` in
+     * [InMemoryKafkaResource] but only ever asserted the JDBC row, never the sink. That leaves
+     * "the producer fires" and "nobody has ever called the endpoint" indistinguishable from the
+     * test suite alone — exactly the ambiguity #4942 asks to resolve. This test closes that gap:
+     * it reports an incident through the real REST endpoint and asserts a corresponding record
+     * landed on the (in-memory) outgoing channel, with the eventType and incident id `emitter.send`
+     * actually put on the wire in [IctIncidentService.publishEvent]. It cannot prove a human has
+     * ever exercised the path in production — only a live topic read could — but it does prove
+     * the producer is not dead code: reachable REST endpoint -> service -> emitter -> channel,
+     * exercised end to end exactly the way a real call would drive it.
+     */
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `reporting an incident actually publishes to the ict-incident-events-out channel`() {
+        val id = reportIncident("kafka broker unreachable ${UUID.randomUUID()}")
+
+        // The emitter is Emitter<Record<String, String>> (IctIncidentService.publishEvent), so the
+        // in-memory sink's payload type is io.smallrye.reactive.messaging.kafka.Record, not String
+        // directly -- the JSON body lives in Record.value(), the incident id in Record.key().
+        val sink = connector.sink<Record<String, String>>("ict-incident-events-out")
+        val mine = sink.received().filter { it.payload.key() == id.toString() }
+
+        assertThat(mine)
+            .describedAs("reportIncident must publish an ICT_INCIDENT_REPORTED record, not just persist the row")
+            .isNotEmpty
+        assertThat(mine.last().payload.value()).contains("\"eventType\":\"ICT_INCIDENT_REPORTED\"")
     }
 
     private companion object {
