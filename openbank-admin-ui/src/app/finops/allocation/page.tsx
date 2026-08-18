@@ -13,6 +13,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // Cost-allocation (showback) view — ADR-0062. Reads /api/finops/allocation, which joins the AWS
 // cost snapshot with build-time resource footprints and rolls spend up service -> domain -> flow.
@@ -131,25 +132,12 @@ function AllocationContent() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <Link href="/finops" style={{ color: 'inherit', textDecoration: 'none' }}>FinOps</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Rozpad nákladů', 'Cost Allocation')}</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '8px 0 4px', letterSpacing: '-0.03em' }}>
-            {t('Rozpad nákladů', 'Cost Allocation')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            {t(
-              'Cloud útraty rozpočítané po službě, doméně a business procesu — showback dle požadovaných zdrojů (ADR-0062)',
-              'Cloud spend split by service, domain and business flow — requests-weighted showback (ADR-0062)',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/finops" style={{ color: 'inherit', textDecoration: 'none' }}>FinOps</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Rozpad nákladů', 'Cost Allocation')}</span></div>}
+        icon={<DollarSign size={20} aria-hidden="true" />}
+        title={t('Rozpad nákladů', 'Cost Allocation')}
+        subtitle={t('Cloud útraty rozpočítané po službě, doméně a business procesu — showback dle požadovaných zdrojů (ADR-0062)', 'Cloud spend split by service, domain and business flow — requests-weighted showback (ADR-0062)')}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <Link href="/finops" style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
             borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
             color: 'var(--text-secondary)', fontSize: '12px', textDecoration: 'none' }}>
@@ -162,8 +150,8 @@ function AllocationContent() {
             <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>

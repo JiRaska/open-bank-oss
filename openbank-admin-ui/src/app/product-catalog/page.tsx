@@ -129,7 +129,8 @@ function InfoRow({ label, value, mono }: { label: string; value: React.ReactNode
 }
 
 function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { product: Product; onClose: () => void; onEdit: () => void; onToggleStatus: () => void }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [tab, setTab] = useState<'overview' | 'cards' | 'multicurrency' | 'overdraft' | 'deposit' | 'savings' | 'fees' | 'tac' | 'history'>('overview')
 
   type TabId = 'overview' | 'cards' | 'multicurrency' | 'overdraft' | 'deposit' | 'savings' | 'fees' | 'tac' | 'history'
@@ -211,8 +212,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
             <div>
               <SectionHeader icon={<TrendingDown size={13} />} label="Sazby & limity" />
               {product.baseRate != null && product.baseRate > 0 && <InfoRow label="Základní sazba" value={`${(product.baseRate * 100).toFixed(3)} % p.a.`} mono />}
-              {product.minBalance != null && <InfoRow label="Min. zůstatek" value={`${product.minBalance.toLocaleString('cs-CZ')} ${product.currency}`} mono />}
-              {product.maxBalance != null && <InfoRow label="Max. zůstatek" value={`${product.maxBalance.toLocaleString('cs-CZ')} ${product.currency}`} mono />}
+              {product.minBalance != null && <InfoRow label="Min. zůstatek" value={`${product.minBalance.toLocaleString(numberLocale)} ${product.currency}`} mono />}
+              {product.maxBalance != null && <InfoRow label="Max. zůstatek" value={`${product.maxBalance.toLocaleString(numberLocale)} ${product.currency}`} mono />}
             </div>
 
             {(product.tags?.length ?? 0) > 0 && (
@@ -261,7 +262,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '4px' }}>
                     <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>{f.name}</span>
                     <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 800, color: f.amount === 0 ? 'var(--success-text)' : 'var(--text-primary)' }}>
-                      {f.amount === 0 ? 'Zdarma' : f.frequency === 'PERCENTAGE' ? `${f.amount} %` : `${f.amount.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} ${f.currency}`}
+                      {f.amount === 0 ? 'Zdarma' : f.frequency === 'PERCENTAGE' ? `${f.amount} %` : `${f.amount.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} ${f.currency}`}
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
@@ -317,7 +318,7 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           <div>
             <SectionHeader icon={<TrendingDown size={13} />} label="Konfigurace debetu" />
             <InfoRow label="Typ" value={product.overdraftConfig.type} />
-            <InfoRow label="Max. limit" value={`${product.overdraftConfig.maxLimitAmount.toLocaleString('cs-CZ')} ${product.currency}`} mono />
+            <InfoRow label="Max. limit" value={`${product.overdraftConfig.maxLimitAmount.toLocaleString(numberLocale)} ${product.currency}`} mono />
             <InfoRow label="Sazba (sjednaný)" value={`${(product.overdraftConfig.interestRateAnnual * 100).toFixed(2)} % p.a.`} mono />
             <InfoRow label="Ochranná lhůta" value={`${product.overdraftConfig.gracePeriodDays} dní`} mono />
             <InfoRow label="Auto-schválení" value={product.overdraftConfig.autoApprovalEnabled ? 'Ano' : 'Ne'} />
@@ -351,8 +352,8 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
                   </tr></thead>
                   <tbody>{product.savingsConfig.interestTiers.map((tier, i) => (
                     <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.fromAmount.toLocaleString('cs-CZ')}</td>
-                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.toAmount != null ? tier.toAmount.toLocaleString('cs-CZ') : '∞'}</td>
+                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.fromAmount.toLocaleString(numberLocale)}</td>
+                      <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{tier.toAmount != null ? tier.toAmount.toLocaleString(numberLocale) : '∞'}</td>
                       <td style={{ padding: '6px 8px', fontFamily: 'var(--font-mono)', fontSize: '13px', fontWeight: 700, color: 'var(--success-text)' }}>{(tier.rateAnnual * 100).toFixed(3)} %</td>
                     </tr>
                   ))}</tbody>
@@ -608,7 +609,7 @@ export default function ProductCatalogPage() {
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1, minWidth: '220px', maxWidth: '300px' }}>
               <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód, název, štítek…', 'Code, name, tag…')} value={search} onChange={e => setSearch(e.target.value)} />
+              <input className="input" style={{ paddingLeft: '30px', width: '100%' }} placeholder={t('Kód, název, štítek…', 'Code, name, tag…')} aria-label={t('Hledat v katalogu produktů', 'Search product catalog')} value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             {[
               { label: t('Typ', 'Type'), value: typeFilter, set: setTypeFilter, options: [['ALL', t('Všechny typy', 'All types')], ...uniqueTypes.map(v => [v, v])] },
@@ -722,48 +723,48 @@ export default function ProductCatalogPage() {
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="grid-2">
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Kód *</label>
-                  <input className="input" required disabled={!!editingProduct} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="SAVINGS_STANDARD" />
+                  <label htmlFor="catalog-code" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Kód *</label>
+                  <input id="catalog-code" className="input" required disabled={!!editingProduct} value={formData.code ?? ''} onChange={e => setFormData(p => ({ ...p, code: e.target.value }))} placeholder="SAVINGS_STANDARD" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Typ *</label>
-                  <select className="input" required value={formData.type ?? ''} onChange={e => setFormData(p => ({ ...p, type: e.target.value }))}>
+                  <label htmlFor="catalog-type" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>Typ *</label>
+                  <select id="catalog-type" className="input" required value={formData.type ?? ''} onChange={e => setFormData(p => ({ ...p, type: e.target.value }))}>
                     {['SAVINGS', 'CURRENT', 'LOAN', 'MORTGAGE', 'CREDIT_CARD', 'TERM_DEPOSIT', 'OVERDRAFT', 'INVESTMENT'].map(t => <option key={t} value={t}>{t}</option>)}
                   </select>
                 </div>
               </div>
               <div>
-                <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
-                <input className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Název produktu', 'Product name')} />
+                <label htmlFor="catalog-name" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Název *', 'Name *')}</label>
+                <input id="catalog-name" className="input" required value={formData.name ?? ''} onChange={e => setFormData(p => ({ ...p, name: e.target.value }))} placeholder={t('Název produktu', 'Product name')} />
               </div>
               <div>
-                <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Krátký popis', 'Short description')}</label>
-                <input className="input" value={formData.shortDescription ?? ''} onChange={e => setFormData(p => ({ ...p, shortDescription: e.target.value }))} placeholder={t('Zobrazí se v přehledu', 'Shown in the overview')} />
+                <label htmlFor="catalog-description" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Krátký popis', 'Short description')}</label>
+                <input id="catalog-description" className="input" value={formData.shortDescription ?? ''} onChange={e => setFormData(p => ({ ...p, shortDescription: e.target.value }))} placeholder={t('Zobrazí se v přehledu', 'Shown in the overview')} />
               </div>
               <div className="grid-3">
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Měna *', 'Currency *')}</label>
-                  <input className="input" required value={formData.currency ?? 'EUR'} onChange={e => setFormData(p => ({ ...p, currency: e.target.value }))} placeholder="EUR" />
+                  <label htmlFor="catalog-currency" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Měna *', 'Currency *')}</label>
+                  <input id="catalog-currency" className="input" required value={formData.currency ?? 'EUR'} onChange={e => setFormData(p => ({ ...p, currency: e.target.value }))} placeholder="EUR" />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Status', 'Status')}</label>
-                  <select className="input" disabled value={formData.status ?? 'DRAFT'} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
+                  <label htmlFor="catalog-status" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Status', 'Status')}</label>
+                  <select id="catalog-status" className="input" disabled value={formData.status ?? 'DRAFT'} onChange={e => setFormData(p => ({ ...p, status: e.target.value }))}>
                     {['DRAFT', 'ACTIVE', 'INACTIVE', 'DEPRECATED', 'ARCHIVED'].map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze', 'Version')}</label>
-                  <input className="input" value={formData.version ?? '1.0.0'} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
+                  <label htmlFor="catalog-version" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Verze', 'Version')}</label>
+                  <input id="catalog-version" className="input" value={formData.version ?? '1.0.0'} onChange={e => setFormData(p => ({ ...p, version: e.target.value }))} placeholder="1.0.0" />
                 </div>
               </div>
               <div className="grid-2">
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Základní sazba (desetinné číslo)', 'Base rate (decimal)')}</label>
-                  <input type="number" step="0.0001" className="input" value={formData.baseRate ?? 0} onChange={e => setFormData(p => ({ ...p, baseRate: parseFloat(e.target.value) || 0 }))} />
+                  <label htmlFor="catalog-base-rate" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Základní sazba (desetinné číslo)', 'Base rate (decimal)')}</label>
+                  <input id="catalog-base-rate" type="number" step="0.0001" className="input" value={formData.baseRate ?? 0} onChange={e => setFormData(p => ({ ...p, baseRate: parseFloat(e.target.value) || 0 }))} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Platnost od', 'Valid from')}</label>
-                  <input type="date" className="input" value={formData.validFrom ?? ''} onChange={e => setFormData(p => ({ ...p, validFrom: e.target.value }))} />
+                  <label htmlFor="catalog-valid-from" style={{ display: 'block', marginBottom: '5px', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>{t('Platnost od', 'Valid from')}</label>
+                  <input id="catalog-valid-from" type="date" className="input" value={formData.validFrom ?? ''} onChange={e => setFormData(p => ({ ...p, validFrom: e.target.value }))} />
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
