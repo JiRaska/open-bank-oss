@@ -12,6 +12,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { CASE_STATUSES, caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
 import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const PAGE_SIZE = 25
 const MAX_LIMIT = 200
@@ -101,29 +102,13 @@ export default function IaopsCasesPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1100px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <div className="breadcrumb">
-          <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-          <Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{t('Swarm case', 'Swarm cases')}</span>
-        </div>
-        <Link href="/iaops" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none' }}>
-          <ArrowLeft size={13} /> {t('Zpět na IAOps', 'Back to IAOps')}
-        </Link>
-      </div>
-
-      <div style={{ marginBottom: '16px' }}>
-        <h1 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.02em' }}>
-          {t('Swarm case', 'Swarm cases')}
-        </h1>
-        <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-          {t(
-            'Sdílené případy, ve kterých agenti koordinovaně přispívají do jednoho vlákna (Temporal CaseWorkflow, ADR-0244). Jen pro čtení.',
-            'Shared cases agents coordinate on in a single thread (Temporal CaseWorkflow, ADR-0244). Read-only.',
-          )}
-        </p>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Swarm case', 'Swarm cases')}</span></div>}
+        icon={<GitMerge size={20} aria-hidden="true" />}
+        title={t('Swarm case', 'Swarm cases')}
+        subtitle={t('Sdílené případy, ve kterých agenti koordinovaně přispívají do jednoho vlákna (Temporal CaseWorkflow, ADR-0244). Jen pro čtení.', 'Shared cases agents coordinate on in a single thread (Temporal CaseWorkflow, ADR-0244). Read-only.')}
+        actions={<Link href="/iaops" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na IAOps', 'Back to IAOps')}</Link>}
+      />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
         <button
