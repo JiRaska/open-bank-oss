@@ -24,6 +24,17 @@ class ClearingEventPublisherImpl @Inject constructor(
     companion object {
         private const val BATCH_SETTLED_EVENT = "openbank.clearing.batch.settled"
         private const val ITEM_CLEARED_EVENT = "openbank.clearing.item.cleared"
+
+        /**
+         * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+         * (EVENT-sourced) attribution (#3994/#5256). Matches the fleet's audit convention — the
+         * module directory without the `openbank-` prefix — the same spelling `EventAttribution`
+         * (`TopicAttribution`) already maps `openbank.clearing.batch.event` (the real outgoing
+         * Kafka topic for the `clearing-events-out` channel both events below publish on) to.
+         * Audit-service subscribes to that topic today (`application.yaml`'s consumed-topics
+         * list), so this is a live attribution upgrade, not a forward-looking one.
+         */
+        private const val SOURCE_SERVICE = "clearing-service"
     }
 
     override fun publishBatchSettled(batch: ClearingBatch): Uni<Void> {
@@ -44,6 +55,7 @@ class ClearingEventPublisherImpl @Inject constructor(
             // eventType is also on OutboxMessage.eventType (-> Kafka header, ce-type), but
             // AuditConsumer (PR #1007) reads only the JSON body, so it is duplicated here.
             "eventType" to BATCH_SETTLED_EVENT,
+            "sourceService" to SOURCE_SERVICE,
             "batchId" to batch.id,
             "batchReference" to batch.batchReference,
             "rail" to batch.rail.name,
@@ -77,6 +89,7 @@ class ClearingEventPublisherImpl @Inject constructor(
     internal fun itemClearedPayload(item: ClearingItem): String = objectMapper.writeValueAsString(
         mapOf(
             "eventType" to ITEM_CLEARED_EVENT,
+            "sourceService" to SOURCE_SERVICE,
             "itemId" to item.id,
             "batchId" to item.batchId,
             "paymentId" to item.paymentId,

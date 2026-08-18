@@ -26,7 +26,12 @@ class FxOutboxDispatcherTest {
 
     private val outboxRepository = mockk<FxOutboxRepository>(relaxed = true)
     private val eventPublisher = mockk<OutboxEventPublisher>(relaxed = true)
-    private val dispatcher = FxOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = true)
+    private val dispatcher = FxOutboxDispatcher(
+        outboxRepository,
+        eventPublisher,
+        dispatchEnabled = true,
+        metrics = mockk(relaxed = true),
+    )
 
     private fun entry(payload: String) = OutboxEntry(
         eventId = UUID.randomUUID(),
@@ -79,7 +84,12 @@ class FxOutboxDispatcherTest {
 
     @Test
     fun `dispatch is a no-op when dispatch-enabled is false`(): Unit = runBlocking {
-        val disabledDispatcher = FxOutboxDispatcher(outboxRepository, eventPublisher, dispatchEnabled = false)
+        val disabledDispatcher = FxOutboxDispatcher(
+            outboxRepository,
+            eventPublisher,
+            dispatchEnabled = false,
+            metrics = mockk(relaxed = true),
+        )
 
         disabledDispatcher.dispatch()
 

@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
 import { PageHeader } from '@/components/ui'
+import { Can } from '@/components/auth/AuthGuard'
 
 const SVC = 'onboarding-service'
 
@@ -400,13 +401,15 @@ function RecordDrawer({
 
         {/* Links */}
         <div style={{ marginTop: '24px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <Link
-            href={`/parties/${record.partyId}`}
-            className="btn btn-secondary"
-            style={{ textDecoration: 'none', fontSize: '12px' }}
-          >
-            {t('Otevřít party →', 'Open party →')}
-          </Link>
+          <Can permission="parties:view">
+            <Link
+              href={`/parties/${record.partyId}`}
+              className="btn btn-secondary"
+              style={{ textDecoration: 'none', fontSize: '12px' }}
+            >
+              {t('Otevřít party →', 'Open party →')}
+            </Link>
+          </Can>
           {record.kycCaseId && (
             <Link
               href={`/kyc`}
