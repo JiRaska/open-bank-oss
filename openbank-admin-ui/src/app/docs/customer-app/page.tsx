@@ -16,6 +16,7 @@
 // from code is why this page cannot repeat that drift.
 
 import { useEffect, useMemo, useState } from 'react'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import Link from 'next/link'
 import {
   Smartphone, ChevronLeft, CheckCircle2, CircleDashed, Circle,
@@ -112,27 +113,21 @@ export default function CustomerAppDossierPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <Link href="/docs" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, textDecoration: 'none', color: 'inherit' }}>
               <ChevronLeft size={13} /> {t('Dokumentace', 'Documentation')}
             </Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Aplikace', 'Customer App')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Smartphone size={18} style={{ color: 'var(--accent)' }} />
-            {t('Aplikace — plán vs realita', 'Customer App — plan vs reality')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Aplikace — plán vs realita', 'Customer App — plan vs reality')}
+        subtitle={t(
               'Jak je zákaznická aplikace (KMP/Compose) tvořena, integrována a zabezpečena — pohledem governance, technologií a bezpečnosti. Fakta odvozená z kódu, ne přepsaná ručně (ADR-0074).',
               'How the customer app (KMP/Compose) is built, integrated and secured — through the governance, technology and security lenses. Facts derived from code, not hand-transcribed (ADR-0074).',
             )}
-          </p>
-        </div>
-      </div>
+        icon={<Smartphone aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {loading && <div className="card" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Načítám…', 'Loading…')}</div>}
 

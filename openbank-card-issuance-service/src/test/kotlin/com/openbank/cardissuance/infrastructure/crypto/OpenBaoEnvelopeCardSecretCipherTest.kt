@@ -4,7 +4,7 @@
 
 package com.openbank.cardissuance.infrastructure.crypto
 
-import com.fasterxml.jackson.databind.ObjectMapper
+import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -12,7 +12,6 @@ import java.security.SecureRandom
 import java.util.Optional
 
 private const val WRAPPED_DEK_FIXTURE = "vault:v1:not-a-real-wrapped-value"
-private const val LOGIN_TOKEN_FIXTURE = "stub-token"
 
 // Shared, not one per call: these are unrelated test fixtures, not real key material, so reusing
 // one generator is both fine and what CodeQL's "Random object created and used only once" wants.
@@ -20,61 +19,56 @@ private val testRandom = SecureRandom()
 
 private fun randomDek(size: Int = 32): ByteArray = ByteArray(size).also { testRandom.nextBytes(it) }
 
-/** Builds a cipher with the two OpenBao HTTP seams stubbed (see the class doc on why lambdas, not subclassing). */
+// Never actually invoked by any test here — real HTTP calls to OpenBao live in
+// OpenBaoTransitDekUnwrapper and are exercised in that class's own test. This cipher test only
+// cares that it calls unwrapFn (or the injected unwrapper, wired but never reached when unwrapFn
+// is set) with the configured wrapped DEK and uses the result.
+private val unusedUnwrapper = mockk<OpenBaoTransitDekUnwrapper>()
+
+/** Builds a cipher with [OpenBaoTransitDekUnwrapper.unwrap] stubbed via the lambda test seam. */
 private fun cipher(
     wrapped: Optional<String>,
     allowEphemeral: Boolean,
-    loginFn: (() -> String)? = { LOGIN_TOKEN_FIXTURE },
-    unwrapDekFn: ((String, String) -> ByteArray)? = { _, _ -> randomDek() },
+    unwrapFn: ((String) -> ByteArray)? = { randomDek() },
 ) = OpenBaoEnvelopeCardSecretCipher(
-    baoAddr = "http://openbao.invalid:8200",
-    role = "card-issuance-pan-dek",
-    transitMount = "transit",
-    kekName = "card-pan",
-    saTokenPath = "/nonexistent/token",
+    unwrapper = unusedUnwrapper,
     wrappedDek = wrapped,
     allowEphemeralKey = allowEphemeral,
-    objectMapper = ObjectMapper(),
-    loginFn = loginFn,
-    unwrapDekFn = unwrapDekFn,
+    unwrapFn = unwrapFn,
 )
 
 class OpenBaoEnvelopeCardSecretCipherTest {
 
     @Test fun `round trips a PAN through the unwrapped DEK`() {
         val dek = randomDek()
-        val c = cipher(Optional.of(WRAPPED_DEK_FIXTURE), allowEphemeral = false, unwrapDekFn = { _, _ -> dek })
+        val c = cipher(Optional.of(WRAPPED_DEK_FIXTURE), allowEphemeral = false, unwrapFn = { dek })
         val pan = "4111111234567893"
 
         assertThat(c.decrypt(c.encrypt(pan))).isEqualTo(pan)
     }
 
-    @Test fun `logs in and unwraps with the configured wrapped DEK and derived token`() {
-        var seenToken: String? = null
+    @Test fun `unwraps with the configured wrapped DEK`() {
         var seenWrapped: String? = null
         val c = cipher(
             wrapped = Optional.of(WRAPPED_DEK_FIXTURE),
             allowEphemeral = false,
-            unwrapDekFn = { token, wrapped ->
-                seenToken = token
+            unwrapFn = { wrapped ->
                 seenWrapped = wrapped
                 randomDek()
             },
         )
         c.encrypt("4111111234567893")
 
-        assertThat(seenToken).isEqualTo(LOGIN_TOKEN_FIXTURE)
         assertThat(seenWrapped).isEqualTo(WRAPPED_DEK_FIXTURE)
     }
 
-    @Test fun `never calls OpenBao when no wrapped DEK is configured and ephemeral is allowed`() {
-        // If loadDelegate() called either seam here, these would throw — proving the ephemeral path
+    @Test fun `never unwraps when no wrapped DEK is configured and ephemeral is allowed`() {
+        // If loadDelegate() called unwrapFn here, this would throw — proving the ephemeral path
         // never reaches OpenBao when no wrapped DEK is configured.
         val c = cipher(
             wrapped = Optional.empty(),
             allowEphemeral = true,
-            loginFn = { error("must not be called: no wrapped DEK configured") },
-            unwrapDekFn = { _, _ -> error("must not be called: no wrapped DEK configured") },
+            unwrapFn = { error("must not be called: no wrapped DEK configured") },
         )
 
         assertThat(c.decrypt(c.encrypt("4111111111111111"))).isEqualTo("4111111111111111")
@@ -93,12 +87,12 @@ class OpenBaoEnvelopeCardSecretCipherTest {
             .hasMessageContaining("openbank.card.envelope.wrapped-dek is not set")
     }
 
-    @Test fun `refuses to start when Transit unwraps a DEK of the wrong length`() {
+    @Test fun `refuses to start when the unwrapped DEK has the wrong length`() {
         assertThatThrownBy {
             cipher(
                 wrapped = Optional.of(WRAPPED_DEK_FIXTURE),
                 allowEphemeral = false,
-                unwrapDekFn = { _, _ -> randomDek(size = 16) },
+                unwrapFn = { randomDek(size = 16) },
             )
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("unwrapped a DEK of 16 bytes, expected 32 (AES-256)")
@@ -108,24 +102,24 @@ class OpenBaoEnvelopeCardSecretCipherTest {
         val sealed = cipher(
             wrapped = Optional.of(WRAPPED_DEK_FIXTURE),
             allowEphemeral = false,
-            unwrapDekFn = { _, _ -> randomDek() },
+            unwrapFn = { randomDek() },
         ).encrypt("4111111234567893")
 
         val otherCipher = cipher(
             wrapped = Optional.of(WRAPPED_DEK_FIXTURE),
             allowEphemeral = false,
-            unwrapDekFn = { _, _ -> randomDek() },
+            unwrapFn = { randomDek() },
         )
 
         assertThatThrownBy { otherCipher.decrypt(sealed) }.isInstanceOf(Exception::class.java)
     }
 
-    @Test fun `propagates a login failure instead of falling back silently`() {
+    @Test fun `propagates an unwrap failure instead of falling back silently`() {
         assertThatThrownBy {
             cipher(
                 wrapped = Optional.of(WRAPPED_DEK_FIXTURE),
                 allowEphemeral = false,
-                loginFn = { error("OpenBao kubernetes-auth login failed: HTTP 403") },
+                unwrapFn = { error("OpenBao transit decrypt failed for key 'card-pan': HTTP 403") },
             )
         }.isInstanceOf(Exception::class.java)
     }

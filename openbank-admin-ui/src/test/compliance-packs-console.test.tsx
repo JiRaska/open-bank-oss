@@ -13,6 +13,8 @@
 //  - an empty active list rendered as unremarkable, when it is precisely the state in which
 //    LENDING_ENFORCE_PACK must not be flipped.
 
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import React from 'react'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
@@ -75,6 +77,21 @@ afterEach(() => {
 })
 
 describe('compliance pack activation console', () => {
+  it('uses the shared PageHeader (ADR-0212 maker-checker console consolidation)', () => {
+    const source = readFileSync(
+      path.resolve(__dirname, '../app/lending/compliance-packs/page.tsx'),
+      'utf8',
+    )
+    expect(source).toContain('<PageHeader')
+    expect(source).toContain('breadcrumb={<div className="breadcrumb">')
+    expect(source).not.toContain('className="page-header"')
+    // The maker-checker "acting as" line and the refresh action are content this migration
+    // must not lose or silently rename — both are asserted for real DOM presence below, this
+    // just pins the source-level wiring so a future header refactor can't drop them quietly.
+    expect(source).toContain('data-testid="acting-as"')
+    expect(source).toContain("onClick={() => void load()}")
+  })
+
   it('lists the active pack with its jurisdiction, product and content hash', async () => {
     vi.stubGlobal('fetch', mockFetch({ active: { status: 200, body: ACTIVE } }))
     render(React.createElement(Providers, null, React.createElement(CompliancePacksPage)))

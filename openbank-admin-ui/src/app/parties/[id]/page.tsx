@@ -84,7 +84,10 @@ function PartyDetailPage() {
 
   if (loading) return (
     <div>
-      <div className="page-header"><div><div className="skeleton" style={{ height: '24px', width: '200px' }} /></div></div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={<div className="skeleton" style={{ height: '24px', width: '200px' }} aria-label={t('Načítání detailu subjektu', 'Loading party detail')} />}
+      />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         {[1,2].map(i => <div key={i} className="card" style={{ padding: '20px', height: '200px' }}><div className="skeleton" style={{ height: '100%' }} /></div>)}
       </div>
@@ -93,9 +96,12 @@ function PartyDetailPage() {
 
   if (unavailable) return (
     <div>
-      <div className="page-header">
-        <button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} /> {t('Zpět', 'Back')}</button>
-      </div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={t('Detail subjektu', 'Party detail')}
+        subtitle={t('Data subjektu nejsou v tomto prostředí dostupná.', 'Party data is unavailable in this environment.')}
+        actions={<button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</button>}
+      />
       <DataUnavailable kind={unavailable.kind} service="Party-service" feature={t('Detail subjektu', 'Party detail')} lang={language} />
     </div>
   )
@@ -113,7 +119,7 @@ function PartyDetailPage() {
       <PageHeader
         icon={<Users size={18} aria-hidden="true" />}
         title={party.legalName}
-        subtitle={party.id}
+        subtitle={<span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{party.id}</span>}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{party.legalName}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
           <button className="btn btn-secondary" onClick={load}><RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}</button>

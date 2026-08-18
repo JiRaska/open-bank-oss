@@ -123,8 +123,28 @@ class IctIncidentService(
 
     private fun publishEvent(eventType: String, incident: IctIncident) {
         val payload = objectMapper.writeValueAsString(
-            mapOf("eventType" to eventType, "incident" to incident, "occurredAt" to Instant.now(clock)),
+            mapOf(
+                "eventType" to eventType,
+                "incident" to incident,
+                "occurredAt" to Instant.now(clock),
+                "sourceService" to SOURCE_SERVICE,
+            ),
         )
         emitter.send(Record.of(incident.id.toString(), payload))
+    }
+
+    companion object {
+        /**
+         * Producing service, read by `AuditConsumer.resolveSourceService` (audit-service) as the
+         * strongest (EVENT-sourced) attribution — issue #3994/#5256. Before this field,
+         * `TopicAttribution` already resolved `openbank.security.ict.incident` ->
+         * `security-scanner` correctly, but only as TOPIC-sourced, not the producer's own claim —
+         * and audit-service DOES subscribe to this topic today (it is in `application.yaml`'s
+         * consumed-topics list), so this is a live attribution improvement, not a
+         * forward-looking one. Value matches the fleet's audit convention: the module directory
+         * without the `openbank-` prefix, the same spelling `TopicAttribution` already maps this
+         * topic to.
+         */
+        internal const val SOURCE_SERVICE = "security-scanner"
     }
 }
