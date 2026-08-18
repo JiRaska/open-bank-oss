@@ -148,6 +148,7 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
 
 export default function ClusterDossierPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [topo, setTopo] = useState<Topology | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeLayer, setActiveLayer] = useState<string | null>(null)
@@ -336,7 +337,7 @@ export default function ClusterDossierPage() {
       <p style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <FileText size={12} />
         {t('Odvozeno z GitOpsu + reprezentativního Dockerfile při buildu (ADR-0081). Žádná data ručně — gapy se zobrazují poctivě.', 'Derived from GitOps + a representative Dockerfile at build (ADR-0081). No hand-typed data — gaps shown honestly.')}
-        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-US')}</span>}
+        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}
       </p>
     </div>
   )
