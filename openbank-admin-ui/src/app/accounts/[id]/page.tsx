@@ -24,7 +24,8 @@ const STATUS_PILL: Record<string, string> = {
 
 export default function AccountDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [account, setAccount]   = useState<Account | null>(null)
   const [balance, setBalance]   = useState<AccountBalance | null>(null)
   const [loading, setLoading]   = useState(true)
@@ -196,8 +197,8 @@ export default function AccountDetailPage() {
               { label: t('Typ', 'Type'),                   value: account.accountType },
               { label: t('Měna', 'Currency'),              value: account.currencyCode },
               { label: t('Stav', 'Status'),                value: account.status },
-              { label: t('Otevřen', 'Opened'),             value: new Date(account.openedAt).toLocaleString('en-GB') },
-              ...(account.closedAt ? [{ label: t('Uzavřen', 'Closed'), value: new Date(account.closedAt).toLocaleString('en-GB') }] : []),
+              { label: t('Otevřen', 'Opened'),             value: new Date(account.openedAt).toLocaleString(numberLocale) },
+              ...(account.closedAt ? [{ label: t('Uzavřen', 'Closed'), value: new Date(account.closedAt).toLocaleString(numberLocale) }] : []),
             ].map((row, i, arr) => (
               <div key={row.label} style={{
                 display: 'flex', justifyContent: 'space-between', alignItems: 'center',
@@ -245,13 +246,13 @@ export default function AccountDetailPage() {
                     color: row.highlight ? 'var(--accent)' : 'var(--text-primary)',
                     fontFamily: 'JetBrains Mono, monospace',
                   }}>
-                    {Number(row.value).toLocaleString('en-US', { minimumFractionDigits: 2 })} {balance.currencyCode}
+                    {Number(row.value).toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {balance.currencyCode}
                   </span>
                 </div>
               ))}
               <div style={{ padding: '10px 18px', borderTop: '1px solid var(--border)' }}>
                 <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                  {t('Naposledy aktualizováno:', 'Last updated:')} {new Date(balance.lastUpdatedAt).toLocaleString('en-GB')}
+                  {t('Naposledy aktualizováno:', 'Last updated:')} {new Date(balance.lastUpdatedAt).toLocaleString(numberLocale)}
                 </span>
               </div>
             </div>
