@@ -20,11 +20,26 @@ import java.util.UUID
  * from being copied off the wrong sibling.
  */
 
+/**
+ * Producing service, read by `AuditConsumer.resolveSourceService` (audit-service) as the
+ * strongest (EVENT-sourced) attribution — issue #3994/#5256. `EventAttribution.TopicAttribution`
+ * already maps `openbank.documents.document.event` -> `document-service` correctly, but only as
+ * TOPIC-sourced, not the producer's own claim, and audit-service subscribes to this topic today
+ * (`openbank-audit-service/src/main/resources/application.yaml`'s consumed-topics list), so this
+ * is a live attribution upgrade for the two event types that actually reach the outbox
+ * ([DocumentGenerated], [SignatureCeremonyCompleted]). Declared on every type here, not just the
+ * two wired ones, for the same reason the file-level comment above gives for `occurredAt`: one
+ * vocabulary in one file is what stops the next event that IS wired up from being copied off a
+ * sibling missing the field.
+ */
+private const val SOURCE_SERVICE = "document-service"
+
 data class DocumentTemplatePublished(
     val templateId: UUID,
     val code: String,
     val version: String,
     val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
 )
 
 data class DocumentGenerated(
@@ -33,8 +48,19 @@ data class DocumentGenerated(
     val templateVersion: String,
     val sha256: String,
     val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
 )
 
-data class DocumentSigned(val documentId: UUID, val ceremonyId: UUID, val occurredAt: Instant)
+data class DocumentSigned(
+    val documentId: UUID,
+    val ceremonyId: UUID,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+)
 
-data class SignatureCeremonyCompleted(val ceremonyId: UUID, val documentId: UUID, val occurredAt: Instant)
+data class SignatureCeremonyCompleted(
+    val ceremonyId: UUID,
+    val documentId: UUID,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+)
