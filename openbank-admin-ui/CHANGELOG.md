@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.158.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.9...admin-ui-v0.158.10) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize product catalog values ([c841eef](https://github.com/JiRaska/open-bank-oss/commit/c841eef9c02291dd67ae9e1edd61d15e5d0368bd))
+
 ## [0.158.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.8...admin-ui-v0.158.9) (2026-08-18)
 
 
