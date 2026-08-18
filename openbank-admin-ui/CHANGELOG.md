@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.2...admin-ui-v0.165.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove dead pid detail action ([#5530](https://github.com/JiRaska/open-bank-oss/issues/5530)) ([8a001a8](https://github.com/JiRaska/open-bank-oss/commit/8a001a8046c0463ab0589317e2c3c6888d214054))
+
 ## [0.165.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.1...admin-ui-v0.165.2) (2026-08-18)
 
 
