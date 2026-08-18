@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.14.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.14.0...balance-service-v1.14.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **balance:** add sourceService to BalanceEvent for audit attribution ([#5374](https://github.com/JiRaska/open-bank-oss/issues/5374)) ([29683d8](https://github.com/JiRaska/open-bank-oss/commit/29683d829ebd18402495e5b31f84969e0a18e572))
+
 ## [1.14.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.13.3...balance-service-v1.14.0) (2026-08-18)
 
 
