@@ -16,6 +16,7 @@ import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity
 import { AgentBodyAnalysis, AgentMeshMap } from '@/components/agent/AgentDiagnostics'
 import type { AgentDiagnostic, AgentMeshSummary } from '@/lib/governance/agentDiagnostics'
 import { OutcomeMetricsCard } from '@/components/agent/AgentOutcomes'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ── Types (mirror /api/iaops/agents/[agentId]) ─────────────────────────────
 interface Schedule { daily: string | null; reactive: string | null }
@@ -177,18 +178,13 @@ function AgentDetailContent() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1100px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <div className="breadcrumb">
-          <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-          <Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{agentId}</span>
-        </div>
-        <Link href="/iaops" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px',
-          fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none' }}>
-          <ArrowLeft size={13} /> {t('Zpět na přehled agentů', 'Back to agent roster')}
-        </Link>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{agentId}</span></div>}
+        icon={<Users size={20} aria-hidden="true" />}
+        title={persona.name}
+        subtitle={persona.role}
+        actions={<Link href="/iaops" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na přehled agentů', 'Back to agent roster')}</Link>}
+      />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
@@ -201,9 +197,6 @@ function AgentDetailContent() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '18px', marginBottom: '20px', flexWrap: 'wrap' }}>
             <AgentPortrait agentId={agentId} />
             <div style={{ flex: 1, minWidth: '200px' }}>
-              <h1 style={{ fontSize: '25px', fontWeight: 850, color: 'var(--text-primary)', margin: 0, letterSpacing: '-0.03em' }}>
-                {persona.name}
-              </h1>
               <p style={{ fontSize: '13px', fontWeight: 750, color: 'var(--text-primary)', margin: '1px 0 3px' }}>
                 {persona.role}
               </p>
