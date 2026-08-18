@@ -131,6 +131,7 @@ class BalanceService(
                 occurredAt = OffsetDateTime.now(clock),
                 actorId = BalanceEventActors.API,
                 actorType = EventActor.TYPE_SYSTEM,
+                sourceService = "balance-service",
             ),
         )
 
@@ -163,6 +164,7 @@ class BalanceService(
                 occurredAt = OffsetDateTime.now(clock),
                 actorId = BalanceEventActors.API,
                 actorType = EventActor.TYPE_SYSTEM,
+                sourceService = "balance-service",
             ),
         )
 
@@ -189,6 +191,7 @@ class BalanceService(
                     occurredAt = OffsetDateTime.now(clock),
                     actorId = BalanceEventActors.API,
                     actorType = EventActor.TYPE_SYSTEM,
+                    sourceService = "balance-service",
                 ),
             )
         }
@@ -219,6 +222,7 @@ class BalanceService(
                     occurredAt = OffsetDateTime.now(clock),
                     actorId = BalanceEventActors.API,
                     actorType = EventActor.TYPE_SYSTEM,
+                    sourceService = "balance-service",
                 ),
             )
         }

@@ -238,4 +238,18 @@ data class BalanceEvent(
      */
     val actorId: String? = null,
     val actorType: String? = null,
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution (#3994/#5256). This class already carries `eventType` via
+     * [BalanceEventType], and those values (`BALANCE_UPDATED`, `HOLD_PLACED`, …) are not touched
+     * here — nothing outside balance-service reads them by name (verified fleet-wide), so there
+     * is no load-bearing-rename risk. `sourceService` has no such consumer today, so it is safe to
+     * add net-new. Value matches the fleet's audit convention: the module directory without the
+     * `openbank-` prefix, the same spelling `TopicAttribution` already maps
+     * `openbank.balance.events` to.
+     *
+     * **This is a serialised data class, not a hand-built map** — the wire key is this Kotlin
+     * property name, same as `actorId`/`actorType` above.
+     */
+    val sourceService: String = "balance-service",
 )

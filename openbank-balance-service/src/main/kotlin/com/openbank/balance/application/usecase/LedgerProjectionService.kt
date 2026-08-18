@@ -83,6 +83,7 @@ class LedgerProjectionService(
                     occurredAt = OffsetDateTime.now(clock),
                     actorId = BalanceEventActors.LEDGER_PROJECTION,
                     actorType = EventActor.TYPE_SYSTEM,
+                    sourceService = "balance-service",
                 ),
             )
         }
