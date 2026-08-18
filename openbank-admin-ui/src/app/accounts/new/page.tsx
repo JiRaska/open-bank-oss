@@ -12,6 +12,7 @@ import { accountApi } from '@/lib/api'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 
 
 const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
@@ -39,6 +40,18 @@ export default function NewAccountPage() {
     else if (!/^[0-9a-f-]{36}$/i.test(form.productId.trim())) e.productId = t('Musí být platné UUID', 'Must be a valid UUID')
     if (!form.legalName.trim()) e.legalName = t('Právní název je povinný pro sankční screening', 'Legal name is required for sanctions screening')
     return e
+  }
+
+  function selectParty(party: PartyHit) {
+    setForm(prev => ({
+      ...prev,
+      partyId: party.id,
+      // The selected party is the source of truth for sanctions screening. Keep
+      // the field editable for exceptional legal-name corrections, but never
+      // make an operator retype a name after selecting an existing party.
+      ...(party.legalName || party.tradingName ? { legalName: partyDisplayName(party) } : {}),
+    }))
+    setErrors(prev => ({ ...prev, partyId: '', legalName: '' }))
   }
 
   async function submit(e: React.FormEvent) {
@@ -77,6 +90,12 @@ export default function NewAccountPage() {
       />
 
       <div style={{ maxWidth: '560px' }}>
+        <PartySearch
+          onSelect={selectParty}
+          selectedId={form.partyId || undefined}
+          busy={submitting}
+          placeholder={t('Vyhledejte existující party podle jména nebo UUID', 'Find an existing party by name or UUID')}
+        />
         <form onSubmit={submit}>
           <div className="card">
             <div className="card-header"><span className="card-header-title">{t('Detaily účtu', 'Account Details')}</span></div>
