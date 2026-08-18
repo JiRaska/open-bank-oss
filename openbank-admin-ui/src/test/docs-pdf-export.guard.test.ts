@@ -11,10 +11,13 @@ describe('long-form documentation PDF export contract', () => {
     const readiness = read('app/docs/qrlesspay-readiness/page.tsx')
     const threat = read('app/docs/threat-models/[service]/page.tsx')
     const adr = read('app/docs/adr/[slug]/page.tsx')
+    const compliance = read('app/docs/compliance/page.tsx')
+    const documentManagement = read('app/docs/document-management/page.tsx')
+    const identityDedup = read('app/docs/identity-dedup/page.tsx')
     const css = read('app/globals.css')
     expect(button).toContain('window.print()')
     expect(button).toContain("t('Exportovat PDF', 'Export PDF')")
-    for (const source of [readiness, threat, adr]) {
+    for (const source of [readiness, threat, adr, compliance, documentManagement, identityDedup]) {
       expect(source).toContain('PrintDocumentButton')
       expect(source).toContain('className="docs-printable"')
     }
