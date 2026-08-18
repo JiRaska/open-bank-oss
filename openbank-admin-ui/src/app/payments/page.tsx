@@ -131,7 +131,7 @@ async function fetchPayments(url: string, type: 'SEPA' | 'DOMESTIC'): Promise<Pa
 }
 
 function formatAmount(n: number, currency: string, locale: string) {
-  return n?.toLocaleString(locale === 'cs' ? 'cs-CZ' : 'en-US', { minimumFractionDigits: 2 }) + ' ' + currency
+  return n?.toLocaleString(locale === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 }) + ' ' + currency
 }
 
 function TabNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
@@ -251,6 +251,7 @@ function PaymentsContent() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data: session } = useSession()
   const canCreate = hasPermission(session?.user?.roles ?? [], 'payments:create')
 
@@ -514,7 +515,7 @@ function PaymentsContent() {
               { label: t('Platby celkem', 'Total payments'), value: sctPayments.length, icon: <Zap size={16} />, color: 'var(--accent)' },
               { label: t('Vypořádáno', 'Settled'), value: sctSettled, icon: <CheckCircle2 size={16} />, color: '#16a34a' },
               { label: t('Zpracovává se', 'Processing'), value: sctProcessing, icon: <Timer size={16} />, color: '#d97706' },
-              { label: t('Objem (EUR)', 'Volume (EUR)'), value: sctVolume.toLocaleString('cs-CZ', { maximumFractionDigits: 0 }), icon: <Zap size={16} />, color: 'var(--accent)' },
+              { label: t('Objem (EUR)', 'Volume (EUR)'), value: sctVolume.toLocaleString(numberLocale, { maximumFractionDigits: 0 }), icon: <Zap size={16} />, color: 'var(--accent)' },
             ].map(k => (
               <div key={k.label} className="stat-card">
                 <div style={{ width: '32px', height: '32px', borderRadius: '8px', background: `${k.color}18`,
@@ -571,7 +572,7 @@ function PaymentsContent() {
                         <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600, background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{p.status}</span>
                       </td>
                       <td style={{ padding: '12px 16px' }}>{timeoutCountdown(p.executionTimeoutAt, p.status)}</td>
-                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{p.createdAt ? new Date(p.createdAt).toLocaleString('cs-CZ') : '—'}</td>
+                      <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{p.createdAt ? new Date(p.createdAt).toLocaleString(numberLocale) : '—'}</td>
                     </tr>
                   )
                 })}</tbody>
@@ -929,7 +930,7 @@ function PaymentsContent() {
                     <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)' }}>
                       {p.creditorIban ? p.creditorIban : (p.creditorAccountNumber && p.creditorBankCode ? `${p.creditorAccountNumber}/${p.creditorBankCode}` : '—')}
                     </td>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString(numberLocale)}</td>
                     <td style={{ textAlign: 'right', paddingRight: '8px' }}><ChevronRight size={14} style={{ color: 'var(--text-muted)' }} /></td>
                   </tr>
                 ))}
