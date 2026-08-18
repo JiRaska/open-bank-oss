@@ -11,6 +11,7 @@ describe('mobile operator shell accessibility contract', () => {
     const header = read('components/layout/Header.tsx')
     const sidebar = read('components/layout/Sidebar.tsx')
     const css = read('app/globals.css')
+    expect(appShell).toContain("'use client'")
     expect(appShell).toContain('onKeyDown')
     expect(appShell).toContain("#admin-sidebar a, #admin-sidebar button")
     expect(appShell).toContain('cancelAnimationFrame')

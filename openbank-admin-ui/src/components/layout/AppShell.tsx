@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+'use client'
+
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
