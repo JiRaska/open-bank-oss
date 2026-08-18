@@ -1,8 +1,10 @@
 # security-scanner-service: periodic fleet health + CVE probe service.
 # Scans all deployed banking services every 30 minutes via their /q/health
-# endpoints and publishes scan results to Kafka (openbank.security.scan.event).
+# endpoints and serves the latest report from GET /api/v1/security/report.
 # ICT incidents (DORA-grade critical findings) go to openbank.security.ict.incident.
-# Backed by a single-owner CNPG Postgres (outbox + scan history, Flyway-migrated).
+# Backed by a single-owner CNPG Postgres holding Flyway history only — scan results and
+# incidents are in-memory. The outbox and openbank.security.scan.event went in #4709: both
+# had existed since the service was written with nothing ever writing to them.
 # OIDC is disabled — the scanner probes internal ClusterIPs only.
 apiVersion: apps/v1
 kind: Deployment
@@ -42,7 +44,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: security-scanner-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-0bf9812a
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-security-scanner:sandbox-cc78dbe7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

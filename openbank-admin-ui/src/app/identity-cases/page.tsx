@@ -156,6 +156,7 @@ function DecisionForm({
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
         <select
+          aria-label={t('Verdikt případu identity', 'Identity case verdict')}
           className="input"
           value={verdict}
           onChange={e => setVerdict(e.target.value as Verdict)}
@@ -169,6 +170,7 @@ function DecisionForm({
 
         {verdict === 'LINK_TO_EXISTING' && (
           <select
+            aria-label={t('Propojit s existující party', 'Link to existing party')}
             className="input"
             value={linkPartyId}
             onChange={e => setLinkPartyId(e.target.value)}
@@ -184,6 +186,7 @@ function DecisionForm({
         )}
 
         <input
+          aria-label={t('Poznámka k rozhodnutí', 'Decision notes')}
           className="input"
           placeholder={t('Poznámka (volitelné)', 'Notes (optional)')}
           value={notes}

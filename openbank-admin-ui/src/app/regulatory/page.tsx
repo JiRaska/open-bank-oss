@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 type Report = (typeof REPORTS)[number]
 
@@ -332,23 +333,16 @@ export default function RegulatoryPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Regulatorní výkaznictví', 'Regulatory Reporting')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FileText size={18} style={{ color: 'var(--accent)' }} />
-            {t('Regulatorní výkaznictví', 'Regulatory Reporting')}
-          </h1>
-          <p className="page-subtitle">{t('CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidenty', 'CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidents')}</p>
-        </div>
-        <a href="https://www.cnb.cz/cs/dohled-financni-trh/vykaznictvi/" target="_blank" rel="noreferrer" className="btn btn-secondary">
-          <ExternalLink size={13} />
+      <PageHeader
+        icon={<FileText size={18} aria-hidden="true" />}
+        title={t('Regulatorní výkaznictví', 'Regulatory Reporting')}
+        subtitle={t('CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidenty', 'CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidents')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Regulatorní výkaznictví', 'Regulatory Reporting')}</span></div>}
+        actions={<a href="https://www.cnb.cz/cs/dohled-financni-trh/vykaznictvi/" target="_blank" rel="noreferrer" className="btn btn-secondary">
+          <ExternalLink size={13} aria-hidden="true" />
           {t('CNB Výkaznictví', 'CNB Reporting')}
-        </a>
-      </div>
+        </a>}
+      />
 
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
@@ -438,8 +432,11 @@ export default function RegulatoryPage() {
           const isSelected = selected === report.id
           return (
             <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.color}` }}>
-              <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
-                onClick={() => setSelected(s => s === report.id ? null : report.id)}>
+              <div role="button" tabIndex={0} aria-expanded={isSelected}
+                aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
+                style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
+                onClick={() => setSelected(s => s === report.id ? null : report.id)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === report.id ? null : report.id) } }}>
                 {/* Status */}
                 <span style={{ color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
 

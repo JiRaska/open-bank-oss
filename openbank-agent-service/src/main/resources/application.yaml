@@ -135,6 +135,13 @@ quarkus:
     migrate-at-start: true
     connect-retries: 10
 
+  # Cross-replica PoP nonce replay guard (issue #4728) — only consulted by RedisNonceStore,
+  # which is only bound when agent.identity.svid.nonce-store=redis (a build-time flag CI sets).
+  # An in-cluster deploy overrides this with QUARKUS_REDIS_HOSTS, same pattern as every other
+  # Redis-consuming service (redis.<namespace>.svc — a per-namespace Deployment, not shared).
+  redis:
+    hosts: redis://localhost:6379
+
 "%dev":
   quarkus:
     oidc:
@@ -237,6 +244,12 @@ agent:
       ca-cert: ${AGENT_IDENTITY_SVID_CA_CERT:}
       enforced: ${AGENT_IDENTITY_SVID_ENFORCED:false}
       max-skew-seconds: ${AGENT_IDENTITY_SVID_MAX_SKEW_SECONDS:60}
+      # BUILD-TIME (Quarkus @IfBuildProperty — resolved at augmentation, a runtime env var
+      # cannot reach it, same trap the analytics-sink ANALYTICS_SINK_TYPE comment documents).
+      # Empty/default -> the offline-buildable InMemoryNonceStore (correct only at replicas: 1).
+      # `redis` -> the cross-replica RedisNonceStore (issue #4728); set via AGENT_SVID_NONCE_STORE
+      # in the CI build step (auto-deploy.yml), never here, so local/dev builds stay infra-free.
+      nonce-store: ${AGENT_SVID_NONCE_STORE:}
   # D2 (ADR-0031): per-agent charter limits enforced by CharterRateLimiter. Mirrors the canonical
   # values in openbank-libs/governance/agents.yaml; code reads from config so no YAML parsing at
   # runtime. Adding an agent = one entry here + the charter entry in agents.yaml.

@@ -75,6 +75,16 @@ data class DomesticPayment(
      * construction site has to change.
      */
     val schemeDispatchedAt: Instant? = null,
+    /**
+     * The authenticated caller who submitted this payment, straight off the JWT
+     * (`CreateDomesticPaymentCommand.actorId`), or `null` for a payment created without an
+     * authenticated actor (e.g. a batch/system-initiated import). Carried on the payment so
+     * [com.openbank.domestic.domain.event.toCreatedEvent] can put it on the wire — previously the
+     * command's `actorId` was used to derive [transferScope] and then discarded, so every domestic
+     * payment's `DomesticPaymentCreatedEvent` named no actor even though the identity was already
+     * authenticated and in hand (issue #3994).
+     */
+    val initiatedByPartyId: UUID? = null,
 ) {
     fun transitionTo(
         targetStatus: DomesticPaymentStatus,

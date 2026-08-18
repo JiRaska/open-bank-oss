@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { Users, ArrowLeft, Save } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 
 const PARTY_SERVICE = '/api/svc/party-service'
 
@@ -66,6 +67,7 @@ export default function NewPartyPage() {
   }
 
   return (
+    <AuthGuard permission="parties:create">
     <div>
       <PageHeader
         icon={<Users size={18} aria-hidden="true" />}
@@ -81,37 +83,37 @@ export default function NewPartyPage() {
           <div className="card" style={{ padding: '20px' }}>
             <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Identita', 'Identity')}</div>
             <div className="field">
-              <label className="field-label">{t('Typ subjektu *', 'Party Type *')}</label>
-              <select className="input" value={form.partyType} onChange={e => set('partyType', e.target.value)}>
+              <label className="field-label" htmlFor="party-type">{t('Typ subjektu *', 'Party Type *')}</label>
+              <select id="party-type" className="input" value={form.partyType} onChange={e => set('partyType', e.target.value)}>
                 <option value="INDIVIDUAL">{t('Fyzická osoba', 'Individual')}</option>
                 <option value="COMPANY">{t('Společnost', 'Company')}</option>
                 <option value="SOLE_TRADER">{t('Živnostník', 'Sole Trader')}</option>
               </select>
             </div>
             <div className="field">
-              <label className="field-label">{t('Obchodní jméno *', 'Legal Name *')}</label>
-              <input className="input" required value={form.legalName} onChange={e => set('legalName', e.target.value)} placeholder={t('Celé právní jméno', 'Full legal name')} />
+              <label className="field-label" htmlFor="party-legal-name">{t('Obchodní jméno *', 'Legal Name *')}</label>
+              <input id="party-legal-name" className="input" required value={form.legalName} onChange={e => set('legalName', e.target.value)} placeholder={t('Celé právní jméno', 'Full legal name')} />
             </div>
             <div className="field">
-              <label className="field-label">{t('Obchodní název', 'Trading Name')}</label>
-              <input className="input" value={form.tradingName} onChange={e => set('tradingName', e.target.value)} placeholder={t('Nepovinné', 'Optional')} />
+              <label className="field-label" htmlFor="party-trading-name">{t('Obchodní název', 'Trading Name')}</label>
+              <input id="party-trading-name" className="input" value={form.tradingName} onChange={e => set('tradingName', e.target.value)} placeholder={t('Nepovinné', 'Optional')} />
             </div>
             <div className="field">
-              <label className="field-label">{t('DIČ', 'Tax ID')}</label>
-              <input className="input" value={form.taxId} onChange={e => set('taxId', e.target.value)} placeholder="e.g. CZ12345678" />
+              <label className="field-label" htmlFor="party-tax-id">{t('DIČ', 'Tax ID')}</label>
+              <input id="party-tax-id" className="input" value={form.taxId} onChange={e => set('taxId', e.target.value)} placeholder="e.g. CZ12345678" />
             </div>
             <div className="field">
-              <label className="field-label">{t('Registrační číslo', 'Registration Number')}</label>
-              <input className="input" value={form.registrationNumber} onChange={e => set('registrationNumber', e.target.value)} placeholder={t('IČO firmy', 'Company reg. number')} />
+              <label className="field-label" htmlFor="party-registration-number">{t('Registrační číslo', 'Registration Number')}</label>
+              <input id="party-registration-number" className="input" value={form.registrationNumber} onChange={e => set('registrationNumber', e.target.value)} placeholder={t('IČO firmy', 'Company reg. number')} />
             </div>
             {form.partyType === 'INDIVIDUAL' && <>
               <div className="field">
-                <label className="field-label">{t('Státní příslušnost', 'Nationality')}</label>
-                <input className="input" value={form.nationality} onChange={e => set('nationality', e.target.value)} placeholder="e.g. CZ" maxLength={2} />
+                <label className="field-label" htmlFor="party-nationality">{t('Státní příslušnost', 'Nationality')}</label>
+                <input id="party-nationality" className="input" value={form.nationality} onChange={e => set('nationality', e.target.value)} placeholder="e.g. CZ" maxLength={2} />
               </div>
               <div className="field">
-                <label className="field-label">{t('Datum narození', 'Date of Birth')}</label>
-                <input className="input" type="date" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} />
+                <label className="field-label" htmlFor="party-date-of-birth">{t('Datum narození', 'Date of Birth')}</label>
+                <input id="party-date-of-birth" className="input" type="date" value={form.dateOfBirth} onChange={e => set('dateOfBirth', e.target.value)} />
               </div>
             </>}
           </div>
@@ -121,41 +123,41 @@ export default function NewPartyPage() {
             <div className="card" style={{ padding: '20px' }}>
               <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Kontakt', 'Contact')}</div>
               <div className="field">
-                <label className="field-label">{t('E-mail *', 'Email *')}</label>
-                <input className="input" type="email" required value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" />
+                <label className="field-label" htmlFor="party-email">{t('E-mail *', 'Email *')}</label>
+                <input id="party-email" className="input" type="email" required value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@example.com" />
               </div>
               <div className="field">
-                <label className="field-label">{t('Telefon', 'Phone')}</label>
-                <input className="input" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+420 123 456 789" />
+                <label className="field-label" htmlFor="party-phone">{t('Telefon', 'Phone')}</label>
+                <input id="party-phone" className="input" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="+420 123 456 789" />
               </div>
             </div>
 
             <div className="card" style={{ padding: '20px' }}>
               <div style={{ fontWeight: 600, fontSize: '13px', marginBottom: '16px' }}>{t('Adresa', 'Address')}</div>
               <div className="field">
-                <label className="field-label">{t('Ulice', 'Street')}</label>
-                <input className="input" value={form.addressLine1} onChange={e => set('addressLine1', e.target.value)} placeholder={t('Ulice a číslo popisné', 'Street and number')} />
+                <label className="field-label" htmlFor="party-address-line1">{t('Ulice', 'Street')}</label>
+                <input id="party-address-line1" className="input" value={form.addressLine1} onChange={e => set('addressLine1', e.target.value)} placeholder={t('Ulice a číslo popisné', 'Street and number')} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div className="field">
-                  <label className="field-label">{t('Město', 'City')}</label>
-                  <input className="input" value={form.addressCity} onChange={e => set('addressCity', e.target.value)} />
+                  <label className="field-label" htmlFor="party-address-city">{t('Město', 'City')}</label>
+                  <input id="party-address-city" className="input" value={form.addressCity} onChange={e => set('addressCity', e.target.value)} />
                 </div>
                 <div className="field">
-                  <label className="field-label">{t('PSČ', 'Postal Code')}</label>
-                  <input className="input" value={form.addressPostal} onChange={e => set('addressPostal', e.target.value)} />
+                  <label className="field-label" htmlFor="party-address-postal">{t('PSČ', 'Postal Code')}</label>
+                  <input id="party-address-postal" className="input" value={form.addressPostal} onChange={e => set('addressPostal', e.target.value)} />
                 </div>
               </div>
               <div className="field">
-                <label className="field-label">{t('Kód země', 'Country Code')}</label>
-                <input className="input" value={form.addressCountry} onChange={e => set('addressCountry', e.target.value)} maxLength={2} placeholder="CZ" />
+                <label className="field-label" htmlFor="party-address-country">{t('Kód země', 'Country Code')}</label>
+                <input id="party-address-country" className="input" value={form.addressCountry} onChange={e => set('addressCountry', e.target.value)} maxLength={2} placeholder="CZ" />
               </div>
             </div>
           </div>
         </div>
 
         {error && (
-          <div className="card" style={{ padding: '12px 16px', color: 'var(--red)', marginTop: '16px', fontSize: '13px' }}>
+          <div className="card" role="alert" style={{ padding: '12px 16px', color: 'var(--red)', marginTop: '16px', fontSize: '13px' }}>
             {error}
           </div>
         )}
@@ -165,11 +167,12 @@ export default function NewPartyPage() {
             {t('Zrušit', 'Cancel')}
           </Link>
           <button type="submit" className="btn btn-primary" disabled={saving}>
-            <Save size={13} />
+            <Save size={13} aria-hidden="true" />
             {saving ? t('Vytvářím…', 'Creating…') : t('Vytvořit subjekt', 'Create Party')}
           </button>
         </div>
       </form>
     </div>
+    </AuthGuard>
   )
 }

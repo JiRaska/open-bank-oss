@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.6...statement-service-v0.8.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **statement-service:** add sourceService to outbox events for audit attribution ([#5392](https://github.com/JiRaska/open-bank-oss/issues/5392)) ([a77c8f5](https://github.com/JiRaska/open-bank-oss/commit/a77c8f51f338597494d63e6dd56e24377a7b1945)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.5...statement-service-v0.8.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **statement:** track scheduled close liveness ([#5357](https://github.com/JiRaska/open-bank-oss/issues/5357)) ([78adec3](https://github.com/JiRaska/open-bank-oss/commit/78adec3f5ab86d8e912a510592e772f8b90b8964))
+
+## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.4...statement-service-v0.8.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **libs-domain:** read markFailed's persisted status instead of predicting it ([#5203](https://github.com/JiRaska/open-bank-oss/issues/5203)) ([14fae69](https://github.com/JiRaska/open-bank-oss/commit/14fae6995e78bfa47f18aba75a6da056b2f62a7a)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.3...statement-service-v0.8.4) (2026-08-10)
 
 

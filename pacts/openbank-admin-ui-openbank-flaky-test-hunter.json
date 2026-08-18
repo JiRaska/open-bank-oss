@@ -1,0 +1,55 @@
+{
+  "consumer": {
+    "name": "openbank-admin-ui"
+  },
+  "interactions": [
+    {
+      "description": "admit the bounded flaky-test workflow",
+      "providerStates": [
+        {
+          "name": "an administrator may admit a flaky-test workflow"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Authorization": "Bearer pact-admin-token"
+        },
+        "matchingRules": {
+          "header": {
+            "Authorization": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "Bearer [A-Za-z0-9._-]+"
+                }
+              ]
+            }
+          }
+        },
+        "method": "POST",
+        "path": "/api/v1/flaky-test-hunter/check/trigger-async"
+      },
+      "response": {
+        "body": {
+          "workflowId": "flaky-test-check-operator_manual-2026-08-18"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 202
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-flaky-test-hunter"
+  }
+}

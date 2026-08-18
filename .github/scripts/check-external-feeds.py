@@ -41,6 +41,17 @@
 #        with the first and the probe would keep passing against a URL the service does not use —
 #        the same vacuous shape as deriving both halves of a pact from one annotation.
 #
+#        A feed that also has an in-cluster liveness registration (#4743/#4943's
+#        `FeedFetchRecorder`, registered under a `const val FEED_NAME` beside the feed's
+#        `@Scheduled` class) declares that file+const under `kotlin_liveness`, and this DRIFT half
+#        asserts the two names agree. ADR-0237 point 2 keeps the CI probe (this file, falsifying
+#        the URL from outside GitHub's runners) and the in-cluster gauge (measuring freshness from
+#        inside the cluster) deliberately SEPARATE mechanisms — they measure different things and
+#        folding them would silently reverse that decision. But they are only talking about the
+#        SAME feed if the name string matches, and nothing enforced that before this: #4943 kept
+#        `FEED_NAME = "cnb-daily-fixing"` equal to `FEEDS[...]['name']` by hand and said so in a
+#        comment. A comment is not a check — this derives the assertion instead of trusting it.
+#
 #   2. LIVENESS, online — this half NEVER blocks a PR; it escalates to an issue.
 #        Fetch each declared feed and assert its SHAPE, not merely its status code. A 200 proves
 #        a server answered; it does not prove the answer is the feed. ČNB's own 404 page is a
@@ -69,6 +80,7 @@ import argparse
 import pathlib
 import re
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 
@@ -142,6 +154,17 @@ FEEDS = [
             "The statutory ČNB fixing. `FxRevaluationService` marks every foreign position to it "
             "(ADR-0046); with no rate the revaluation skips the leg and posts nothing."
         ),
+        # The in-cluster liveness twin (#4743/#4943): `CnbRateIngestionScheduler` registers a
+        # `FeedFetchRecorder` under this constant, and `openbank_feed_fetch_total{feed=...}` /
+        # `openbank_workflow_last_success_age_seconds{workflow="feed-<name>"}` are only comparable
+        # to THIS entry's verdict if the two names actually match.
+        "kotlin_liveness": {
+            "file": (
+                "openbank-fx-service/src/main/kotlin/com/openbank/fx/infrastructure/"
+                "schedule/CnbRateIngestionScheduler.kt"
+            ),
+            "const": "FEED_NAME",
+        },
     },
 ]
 
@@ -266,6 +289,60 @@ def check_drift(root, resolved):
         if url not in seen_excused:
             problems.append(
                 f"DRIFT stale NOT_PROBED entry: {url} ({reason}) is no longer in any scanned YAML",
+            )
+    return problems
+
+
+_KOTLIN_CONST = re.compile(r'const\s+val\s+(\w+)\s*=\s*"([^"]*)"')
+
+
+def extract_kotlin_const(text, const_name):
+    """Pull `const val <const_name> = "value"` out of Kotlin source text.
+
+    Returns None when the constant is absent — never an empty string, so a genuinely blank
+    declaration (`const val FEED_NAME = ""`) is still distinguishable from "not found here".
+    Deliberately a plain regex over the source text, not a real Kotlin parse: the one thing this
+    needs to survive is a companion object's formatting, not arbitrary Kotlin.
+    """
+    for name, value in _KOTLIN_CONST.findall(text):
+        if name == const_name:
+            return value
+    return None
+
+
+def check_kotlin_feed_names(root, feeds=None):
+    """A declared feed's CI name and its in-cluster liveness name must be the same string.
+
+    Narrower than folding the two mechanisms together (ADR-0237 point 2 keeps them separate on
+    purpose — see the module docstring). This only asserts the two lanes are talking about the
+    SAME feed: `FEEDS[...]['name']` here vs the `const val FEED_NAME` the Kotlin scheduler
+    registers its `FeedFetchRecorder` under. A feed with no `kotlin_liveness` entry is skipped —
+    not every declared feed has an in-cluster liveness registration (yet), and this check has
+    nothing to compare for those.
+    """
+    problems = []
+    for feed in feeds if feeds is not None else FEEDS:
+        kl = feed.get("kotlin_liveness")
+        if not kl:
+            continue
+        path = pathlib.Path(root) / kl["file"]
+        if not path.exists():
+            problems.append(
+                f"DRIFT {feed['name']}: kotlin_liveness file does not exist: {kl['file']}",
+            )
+            continue
+        value = extract_kotlin_const(path.read_text(encoding="utf-8"), kl["const"])
+        if value is None:
+            problems.append(
+                f"DRIFT {feed['name']}: no `const val {kl['const']}` found in {kl['file']} — the "
+                f"CI probe and the in-cluster feed liveness gauge can no longer be checked for "
+                f"agreement",
+            )
+        elif value != feed["name"]:
+            problems.append(
+                f"DRIFT {feed['name']}: FEEDS declares {feed['name']!r} but {kl['file']}'s "
+                f"`{kl['const']}` is {value!r} — the CI probe and the in-cluster feed liveness "
+                f"gauge would be naming two different feeds",
             )
     return problems
 
@@ -414,7 +491,41 @@ def self_test():
         print(f"{'pass' if ok else 'FAIL'}  {name}" + ("" if ok else f"  (got {code}, want {want})"))
         failures += 0 if ok else 1
 
-    total = len(cases) + 2 + len(triage_cases)
+    # kotlin_liveness name-consistency: the two lanes (this file's FEEDS, the in-cluster
+    # `FeedFetchRecorder`'s `const val FEED_NAME`) must be checked for agreement, not just
+    # assumed by hand as #4943's own comment did. Falsify both ways — the agreeing case must
+    # pass, and each disagreement shape (renamed const, missing const, missing file) must be
+    # reported as DRIFT.
+    kotlin_cases = [
+        ("agreeing const passes clean", 'const val FEED_NAME = "cnb-daily-fixing"', True, True),
+        ("renamed const is reported as DRIFT", 'const val FEED_NAME = "cnb-fixing-renamed"', True, False),
+        ("const absent from the file is reported as DRIFT", 'const val OTHER_NAME = "cnb-daily-fixing"', True, False),
+        ("missing kotlin file is reported as DRIFT", None, False, False),
+    ]
+    for name, kotlin_source, write_file, should_pass in kotlin_cases:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            if write_file:
+                (root / "Scheduler.kt").write_text(kotlin_source, encoding="utf-8")
+            fake_feeds = [
+                {
+                    "name": "cnb-daily-fixing",
+                    "kotlin_liveness": {"file": "Scheduler.kt", "const": "FEED_NAME"},
+                },
+            ]
+            problems = check_kotlin_feed_names(str(root), feeds=fake_feeds)
+            ok = (not problems) == should_pass
+            print(f"{'pass' if ok else 'FAIL'}  {name}" + ("" if ok else f"  (got {problems!r})"))
+            failures += 0 if ok else 1
+
+    # A feed with no kotlin_liveness entry must be skipped, not flagged — not every declared
+    # feed has an in-cluster registration.
+    skip_problems = check_kotlin_feed_names(".", feeds=[{"name": "no-liveness-yet"}])
+    ok = skip_problems == []
+    print(f"{'pass' if ok else 'FAIL'}  a feed with no kotlin_liveness entry is skipped" + ("" if ok else f"  (got {skip_problems!r})"))
+    failures += 0 if ok else 1
+
+    total = len(cases) + 2 + len(triage_cases) + len(kotlin_cases) + 1
     print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 3
 
@@ -436,6 +547,7 @@ def main():
     problems = []
     resolved = load_feed_urls(args.root, problems)
     problems += check_drift(args.root, resolved)
+    problems += check_kotlin_feed_names(args.root)
 
     if problems:
         print("\n".join(problems))

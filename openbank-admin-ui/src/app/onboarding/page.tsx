@@ -89,6 +89,7 @@ const STAGE_COLOR: Record<Stage, string> = {
 
 export default function OnboardingPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   // funnel KPI
   const [counts, setCounts] = useState<FunnelCounts>({})
@@ -274,7 +275,8 @@ export default function OnboardingPage() {
                 </tr>
               )}
               {!loading && records.map(r => (
-                <tr key={r.partyId} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}>
+                <tr key={r.partyId} tabIndex={0} aria-label={t(`Vybrat onboarding subjekt ${r.legalName ?? r.partyId}`, `Select onboarding party ${r.legalName ?? r.partyId}`)} style={{ cursor: 'pointer' }} onClick={() => setSelected(r)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r) } }}>
                   <td style={{ fontWeight: 500 }}>{r.legalName ?? <span style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>—</span>}</td>
                   <td style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-secondary)' }}>{r.email ?? '—'}</td>
                   <td>
@@ -293,7 +295,7 @@ export default function OnboardingPage() {
                       ? <span style={{ color: 'var(--green)', fontSize: '12px' }}>✓ {r.deviceCount}</span>
                       : <span style={{ color: 'var(--text-muted)', fontSize: '12px' }}>—</span>}
                   </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.updatedAt).toLocaleDateString()}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(r.updatedAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <span style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px' }}>
                       {t('Detail', 'Detail')} <ChevronRight size={12} />
@@ -342,6 +344,8 @@ function RecordDrawer({
   stageLabel: (s: string) => string
   t: (cs: string, en: string) => string
 }) {
+  const { language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const stageColor = STAGE_COLOR[record.funnelStage as Stage] ?? 'var(--text-muted)'
 
   return (
@@ -390,8 +394,8 @@ function RecordDrawer({
           <DrawerRow label={t('Stav KYC', 'KYC status')} value={record.kycStatus?.replace('_', ' ') ?? '—'} />
           <DrawerRow label={t('KYC případ', 'KYC case ID')} value={record.kycCaseId ? record.kycCaseId.slice(0, 8) + '…' : '—'} mono />
           <DrawerRow label={t('SCA zapsáno', 'SCA enrolled')} value={record.scaEnrolled ? `✓ (${record.deviceCount} ${t('zařízení', 'device(s)')})` : '—'} />
-          <DrawerRow label={t('Vytvořeno', 'Created')} value={new Date(record.createdAt).toLocaleString()} />
-          <DrawerRow label={t('Aktualizováno', 'Updated')} value={new Date(record.updatedAt).toLocaleString()} />
+          <DrawerRow label={t('Vytvořeno', 'Created')} value={new Date(record.createdAt).toLocaleString(dateLocale)} />
+          <DrawerRow label={t('Aktualizováno', 'Updated')} value={new Date(record.updatedAt).toLocaleString(dateLocale)} />
         </div>
 
         {/* Links */}

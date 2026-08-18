@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.4](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.3...security-scanner-v0.7.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** add sourceService to ICT incident events ([#5381](https://github.com/JiRaska/open-bank-oss/issues/5381)) ([cc78dbe](https://github.com/JiRaska/open-bank-oss/commit/cc78dbe7d972957068794cacdd8e7fe6c08cd1fb)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.2...security-scanner-v0.7.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** delete the openbank.security.scan.event outbox, which never had a writer ([#4940](https://github.com/JiRaska/open-bank-oss/issues/4940)) ([9d1d095](https://github.com/JiRaska/open-bank-oss/commit/9d1d0954c418722adc1beb712956209d98eb6a0c))
+
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.1...security-scanner-v0.7.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **security-scanner:** wire outboxDispatched into SecurityOutboxDispatcher ([#5195](https://github.com/JiRaska/open-bank-oss/issues/5195)) ([779cc0f](https://github.com/JiRaska/open-bank-oss/commit/779cc0f2033ebcec35428f1401734e819efeca34))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.0...security-scanner-v0.7.1) (2026-08-16)
 
 

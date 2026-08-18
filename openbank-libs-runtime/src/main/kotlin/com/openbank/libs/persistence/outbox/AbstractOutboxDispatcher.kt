@@ -61,14 +61,22 @@ abstract class AbstractOutboxDispatcher {
     /**
      * `service` tag for [DomainMetrics.outboxDispatched] / `.outboxDead` (#5049). Defaults to a
      * kebab-case derivation of the concrete class's simple name — `PartyOutboxDispatcher`
-     * becomes `party` — which was verified (2026-08-16) to reproduce the `service` string every
-     * one of the 31 sibling [AbstractOutboxBacklogGauge] subclasses already hardcodes, so the
-     * outbox-dispatch and outbox-backlog panels of the same dashboard share one label
-     * vocabulary. Three dispatchers whose derivation would silently disagree with their own
-     * gauge override it explicitly: `CardOutboxDispatcher` (`card-issuance`, not `card`),
-     * `TppOutboxDispatcher` (`tpp-registry`, not `tpp`), `DomesticPaymentOutboxDispatcher`
-     * (`domestic`, not `domestic-payment`). A new dispatcher whose class name does not already
-     * match its own gauge's `service` must override this the same way.
+     * becomes `party` — chosen (2026-08-16) to reproduce the `service` string most sibling
+     * [AbstractOutboxBacklogGauge] subclasses already hardcode, so the outbox-dispatch and
+     * outbox-backlog panels of the same dashboard share one label vocabulary. Three dispatchers
+     * whose derivation would silently disagree with their own gauge override it explicitly:
+     * `CardOutboxDispatcher` (`card-issuance`, not `card`), `TppOutboxDispatcher`
+     * (`tpp-registry`, not `tpp`), `DomesticPaymentOutboxDispatcher` (`domestic`, not
+     * `domestic-payment`). A new dispatcher whose class name does not already match its own
+     * gauge's `service` must override this the same way.
+     *
+     * **Not CI-enforced (#5128 finding 5/8).** Nothing compares this derivation against the
+     * fleet's actual gauge labels, so agreement rests on the 3 overrides above staying complete
+     * and correct by hand — a prior version of this comment claimed a specific verified count of
+     * sibling gauges, which itself went stale (grep patterns for a hand-written class hierarchy
+     * are fragile across formatting styles). Verify directly instead of trusting a number here:
+     * `grep -rl ': AbstractOutboxBacklogGauge' --include='*.kt' .` for the gauge side,
+     * [deriveServiceName] for the dispatcher side.
      *
      * **`this::class.java.simpleName` is NOT the class you wrote (issue #5143).** This getter is
      * inherited from the abstract base, so `this` at the call site is Quarkus Arc's generated
@@ -84,7 +92,14 @@ abstract class AbstractOutboxDispatcher {
      * immune only by coincidence (they exist for a naming disagreement, not this). See
      * [deriveServiceName] for the fix.
      */
-    protected open val service: String get() = deriveServiceName(this::class.java.simpleName)
+    // Lazy, not a plain val: it must still read `this::class.java.simpleName` at first access
+    // (Arc's proxy is only fully constructed by then), but every subsequent outbox row on every
+    // scheduled tick reuses the cached result instead of recompiling deriveServiceName's Regex
+    // and re-walking the class name (#5128 finding 6) — the value cannot change for the life of
+    // the bean, so recomputing it per-row was pure waste on a fleet-wide hot path.
+    protected open val service: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        deriveServiceName(this::class.java.simpleName)
+    }
 
     /**
      * Metrics facade, **constructor**-injected — matches [AbstractOutboxBacklogGauge]'s existing

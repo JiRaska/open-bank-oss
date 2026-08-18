@@ -63,6 +63,7 @@ const WORKSPACE_ICONS: Record<string, ElementType> = {
 
 export default function DashboardPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data: session } = useSession()
   const [statuses, setStatuses] = useState<SvcStatus[]>([])
   const [loading, setLoading] = useState(true)
@@ -159,7 +160,7 @@ export default function DashboardPage() {
           <div className={styles.headerActions}>
           {lastRefresh && (
             <span className={styles.lastRefresh}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">

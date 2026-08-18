@@ -12,7 +12,12 @@ import java.util.UUID
 
 class OutboxDispatchTest {
 
-    /** Minimal in-memory repository recording the dispatcher's bookkeeping calls. */
+    /** Minimal in-memory repository recording the dispatcher's bookkeeping calls.
+     *
+     * `markFailed` computes and RETURNS the resulting [OutboxStatus] the same way every real
+     * `<Service>OutboxRepositoryImpl` does — [OutboxFailurePolicy.statusAfterFailure] over the
+     * row's pre-failure `attemptCount + 1` — so these tests exercise [OutboxDispatch] reading that
+     * return value back, not a value it recomputed itself (#5128 finding 3). */
     private class FakeRepo(private val rows: List<OutboxEntry>) : OutboxRepository {
         val sent = mutableListOf<UUID>()
         val failed = mutableListOf<Pair<UUID, String>>()
@@ -20,8 +25,10 @@ class OutboxDispatchTest {
         override suspend fun markSent(eventId: UUID, sentAt: Instant) {
             sent += eventId
         }
-        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
+        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus {
             failed += eventId to error
+            val entry = rows.first { it.eventId == eventId }
+            return OutboxFailurePolicy.statusAfterFailure(entry.attemptCount + 1)
         }
     }
 
@@ -149,8 +156,8 @@ class OutboxDispatchTest {
 
         val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { } }
 
-        assertThat(result.dispatchedCount).isEqualTo(2)
-        assertThat(result.deadCount).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isEqualTo(2)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
         assertThat(result.outcomes).allMatch { it is OutboxDispatchOutcome.Dispatched }
         assertThat(result.outcomes.map { it.entry.eventId }).containsExactly(rows[0].eventId, rows[1].eventId)
     }
@@ -163,8 +170,8 @@ class OutboxDispatchTest {
 
         val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { error("kafka down") } }
 
-        assertThat(result.dispatchedCount).isZero()
-        assertThat(result.deadCount).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
         val outcome = result.outcomes.single() as OutboxDispatchOutcome.Failed
         assertThat(outcome.terminal).isFalse()
     }
@@ -177,8 +184,8 @@ class OutboxDispatchTest {
 
         val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { error("still failing") } }
 
-        assertThat(result.dispatchedCount).isZero()
-        assertThat(result.deadCount).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isEqualTo(1)
         val outcome = result.outcomes.single() as OutboxDispatchOutcome.Failed
         assertThat(outcome.terminal).isTrue()
     }
@@ -198,12 +205,40 @@ class OutboxDispatchTest {
 
         // This is the falsifying assertion: a no-op/wrong wiring that always reports
         // dispatchedCount == claimed.size, or deadCount == failedCount, would fail here.
-        assertThat(result.dispatchedCount).isEqualTo(1)
-        assertThat(result.deadCount).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isEqualTo(1)
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isEqualTo(1)
         assertThat(result.outcomes.filterIsInstance<OutboxDispatchOutcome.Failed>()).hasSize(2)
         assertThat(
             result.outcomes.filterIsInstance<OutboxDispatchOutcome.Failed>().count { !it.terminal },
         ).isEqualTo(1)
+    }
+
+    @Test
+    fun `terminal is read from markFailed's return value, not recomputed independently`() {
+        // Falsifying test for #5128 finding 3: a repository whose markFailed applies a DIFFERENT
+        // policy than OutboxFailurePolicy.statusAfterFailure(attemptCount + 1) -- e.g. a lower
+        // maxAttempts -- must have that DISAGREEMENT show up in the outcome. Before the fix,
+        // OutboxDispatch recomputed the terminal flag itself and this test would report
+        // `terminal = false` (attemptCount + 1 = 1, nowhere near DEFAULT_MAX_ATTEMPTS) even though
+        // the repository just persisted DEAD.
+        val row = entry("low-tolerance", attemptCount = 0)
+        val repo = object : OutboxRepository {
+            override suspend fun listProcessable(limit: Int) = listOf(row)
+            override suspend fun markSent(eventId: UUID, sentAt: Instant) = Unit
+            override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
+                // This repository's own policy parks a row DEAD after just ONE failure -- nothing
+                // OutboxDispatch could derive from entry.attemptCount + 1 under the shared default
+                // policy.
+                OutboxStatus.DEAD
+        }
+
+        val result = runBlocking { OutboxDispatch.dispatchOnce(repo) { error("poison") } }
+
+        val outcome = result.outcomes.single() as OutboxDispatchOutcome.Failed
+        assertThat(outcome.terminal)
+            .describedAs("must reflect the DEAD status markFailed actually returned")
+            .isTrue()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isEqualTo(1)
     }
 
     @Test
@@ -218,7 +253,7 @@ class OutboxDispatchTest {
         // The breaker aborts before the first row's publish is even attempted (#4005) — no
         // outcome at all, not a Failed(terminal = false).
         assertThat(result.outcomes).isEmpty()
-        assertThat(result.dispatchedCount).isZero()
-        assertThat(result.deadCount).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Dispatched }).isZero()
+        assertThat(result.outcomes.count { it is OutboxDispatchOutcome.Failed && it.terminal }).isZero()
     }
 }

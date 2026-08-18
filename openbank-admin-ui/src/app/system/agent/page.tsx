@@ -9,6 +9,7 @@ import { Bot, Play, ChevronDown, ChevronRight, Zap, CheckCircle2, XCircle, Refre
 import { cn } from '@/lib/utils'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface ToolDef {
   name: string
@@ -76,26 +77,22 @@ export default function AgentPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <PageHeader
+        breadcrumb={<div className="breadcrumb">
             <span>OpenBank</span>
             <span className="breadcrumb-sep">/</span>
             <span>{t('Systém', 'System')}</span>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">Agent (MCP)</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Bot size={18} style={{ color: 'var(--accent)' }} />
-            {t('Agent služba', 'Agent Service')}
-          </h1>
-          <p className="page-subtitle">{t('MCP server zpřístupňující nástroje OpenBank AI agentům · JSON-RPC 2.0 přes HTTP', 'MCP server exposing OpenBank tools to AI agents · JSON-RPC 2.0 over HTTP')}</p>
-        </div>
-        <button className="btn btn-secondary" onClick={loadTools} disabled={loading}>
+          </div>}
+        title={t('Agent služba', 'Agent Service')}
+        subtitle={t('MCP server zpřístupňující nástroje OpenBank AI agentům · JSON-RPC 2.0 přes HTTP', 'MCP server exposing OpenBank tools to AI agents · JSON-RPC 2.0 over HTTP')}
+        icon={<Bot aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<button className="btn btn-secondary" onClick={loadTools} disabled={loading}>
           <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
           {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        </button>}
+      />
 
       {/* Server info chips */}
       {serverInfo && (
@@ -382,6 +379,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
                     <span style={{ color: 'var(--text-tertiary)', fontWeight: 400 }}>— {prop.description}</span>
                   </label>
                   <input
+                    aria-label={t(`${name} parametr`, `${name} parameter`)}
                     className="input"
                     type="text"
                     value={args[name] ?? ''}

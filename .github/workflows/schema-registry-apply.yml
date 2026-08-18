@@ -1,0 +1,69 @@
+# -----------------------------------------------------------------------------
+# Apply a committed event schema to Apicurio (ADR-0260 D2, #1916 Phase 1 pilot).
+#
+# ADR-0260 designates the COMMITTED openbank-contracts/<service>/schema/*.schema.json file as
+# the event-schema axis's source of truth — Apicurio is a DERIVED artifact this workflow applies
+# to it idempotently on merge to main, the same relationship ci.yml already has between
+# openapi.yaml and whatever consumes it. Nobody registers a schema by hand against the live
+# registry; the NetworkPolicy (openbank-infra/gitops/components/apicurio/network-policies.yaml)
+# restricts write access to the CI service account for exactly that reason.
+#
+# INERT BY DEFAULT, same shape as _service-ci.yml's PACT_BROKER_URL gating: Apicurio has no
+# public ingress (same ADR-0056 reasoning as the Pact Broker), so this step only ever does
+# anything real on the self-hosted pool with APICURIO_REGISTRY_URL configured as a repo variable.
+# An unset var is a clean no-op — the apply-event-schema.py script itself treats it that way —
+# so this workflow is safe to merge before that variable exists; it starts applying schemas the
+# day someone sets it, with no further code change.
+#
+# SCOPED TO THE PILOT TOPIC ONLY. Phase 1 (#1916) is a single-topic observe-only pilot
+# (openbank-document-service / openbank.documents.document.event) — this workflow's path filter
+# and its one explicit `apply` step are deliberately not generic over "any *.schema.json file
+# under openbank-contracts/". Widening it to the whole fleet is Phase 4 of ADR-0260 and needs the
+# money-path FULL_TRANSITIVE handling this workflow does not attempt.
+#
+# NOT YET VALIDATED AGAINST A LIVE REGISTRY. This workflow and apply-event-schema.py were built
+# read-only against the cluster — kubectl port-forward + a GET confirmed Apicurio is reachable
+# and holds zero artifacts, but nothing has POSTed to it. The first real run needs either this
+# push trigger to fire (once merged, with APICURIO_REGISTRY_URL set) or a manual
+# workflow_dispatch, watched for a non-2xx Apicurio response the self-test cannot simulate.
+# -----------------------------------------------------------------------------
+name: Schema registry apply (document-service pilot)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "openbank-contracts/openbank-document-service/schema/document-event.schema.json"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: schema-registry-apply-document-event-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: apply document-event.schema.json
+    # Same lane as the Pact Broker publish step in _service-ci.yml: Apicurio has no public
+    # ingress, only the in-cluster ARC runner resolves its cluster-DNS service name. A
+    # GitHub-hosted runner could not reach it even with the URL set, so this job does not
+    # branch on APICURIO_REGISTRY_URL for runs-on — it always requests the self-hosted pool,
+    # and the script itself no-ops cleanly when the var is unset (dry, no-op, exit 0).
+    runs-on: openbank-build
+    timeout-minutes: 5
+    env:
+      APICURIO_REGISTRY_URL: ${{ vars.APICURIO_REGISTRY_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Self-test the applier (falsifiable request construction, no network)
+        run: python3 .github/scripts/apply-event-schema.py --self-test
+
+      - name: Apply openbank.documents.document.event schema
+        run: |
+          python3 .github/scripts/apply-event-schema.py \
+            --schema-file openbank-contracts/openbank-document-service/schema/document-event.schema.json \
+            --topic openbank.documents.document.event \
+            --compatibility BACKWARD_TRANSITIVE

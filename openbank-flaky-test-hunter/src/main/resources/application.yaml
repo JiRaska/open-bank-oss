@@ -93,6 +93,9 @@ quarkus:
       check-cron: "0 0 5 31 2 ?"
 
 openbank:
+  api:
+    # Major matches the served /api/v1 path and openapi.yaml (ADR-0048).
+    version: 1
   temporal:
     enabled: ${TEMPORAL_ENABLED:false}
     server-url: ${TEMPORAL_HOST:temporal-frontend.temporal:7233}
@@ -111,6 +114,9 @@ openbank:
     check-cron: ${FLAKY_TEST_HUNTER_CHECK_CRON:0 30 6 ? * SUN}
     github-api-url: ${GITHUB_API_URL:https://api.github.com}
     github-repo: ${GITHUB_REPO:JiRaska/open-bank-oss}
+    # Optional (Optional<String>, no default): absent until openbank/flaky-test-hunter is seeded in
+    # OpenBao, and the writer fails closed on a blank value (see GitHubProposalAdapter).
+    github-token: ${FLAKY_TEST_HUNTER_GITHUB_TOKEN:}
     llm-gateway-url: ${LLM_GATEWAY_URL:http://litellm.ai-platform:4000}
     # Filesystem path to the monorepo checkout this agent reads */src/test/kotlin/**/*.kt,
     # .github/scripts/*.sh CI guard scripts, and */build/test-results/test/*.xml JUnit reports

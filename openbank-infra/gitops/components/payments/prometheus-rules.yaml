@@ -199,3 +199,79 @@ spec:
           annotations:
             summary: "domestic-payment outbox backlog stuck"
             description: "domestic-payment outbox has >100 unrelayed rows for >15m — payment events are not being dispatched."
+---
+# Fraud scoring across all four scored rails (#4221). One document rather than one per rail: the
+# series carry `rail=` and `service=` labels, so the rule set is DERIVED from the labels the
+# adapters emit instead of being a hand-kept list that reads as full coverage when it is short.
+# fx-service lives in the `fx` namespace, not `payments` — a PrometheusRule's namespace does not
+# scope which series its expressions see, so the rail belongs here with its siblings.
+#
+# Why these expressions and not a rate over an error counter: fraud scoring was completely dead for
+# the entire life of the deployment (`fraud_scores` held zero rows) and no signal anywhere said so.
+# An alert on the synthetic counter alone cannot fix that — Micrometer does not create a counter
+# until its first increment and a pod restart resets it — so the standing question "is scoring
+# degraded right now" is answered by a gauge read from adapter state. See FraudScoringMetrics, and
+# FraudScoringMetricsTest, which asserts these exact series against a real Prometheus scrape.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-fraud-scoring-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: fraud-scoring
+spec:
+  groups:
+    - name: openbank.fraud-scoring.availability
+      rules:
+        - alert: FraudScoringDegraded
+          # 1 = the last attempt on this pod returned a verdict the adapter invented because
+          # fraud-service was unreachable. Fail-open is deliberate (the verdict is observed, never
+          # enforced), so this is not a payment incident — it is "the control is not running".
+          expr: openbank_fraud_scoring_degraded == 1
+          for: 10m
+          labels:
+            severity: warning
+            service: '{{ $labels.service }}'
+          annotations:
+            summary: "Fraud scoring degraded on the {{ $labels.rail }} rail"
+            description: >-
+              {{ $labels.service }} has been returning SYNTHETIC fraud verdicts for >10m — payments on
+              the {{ $labels.rail }} rail are completing unscored. The adapter fails open by design, so
+              nothing is blocked and no error rate rises; this gauge is the only signal. Check
+              fraud-service in the `fraud` namespace and the pod's FRAUD_SERVICE_URL.
+        - alert: FraudScoringNeverAttempted
+          # -1, the boot value, is a distinct state from a healthy 0 on purpose. This is the alert
+          # that would have fired on the original defect: every consumer resolved fraud-service to
+          # localhost, so scoring never happened, and "no fraud found" was indistinguishable from
+          # "no fraud scoring". A rail with genuinely no traffic for an hour is the false positive
+          # to expect here — which is itself worth knowing on a payment rail.
+          expr: openbank_fraud_scoring_degraded == -1
+          for: 1h
+          labels:
+            severity: warning
+            service: '{{ $labels.service }}'
+          annotations:
+            summary: "{{ $labels.service }} has never scored a payment for fraud since it started"
+            description: >-
+              The fraud-scoring gauge on {{ $labels.service }} ({{ $labels.rail }}) has read
+              NEVER_ATTEMPTED for >1h. Either the rail has taken no traffic at all, or the scoring
+              call site is not being reached. Cross-check row growth in `fraud_scores`.
+        - alert: FraudScoringMostlySynthetic
+          # The counters exist at 0.0 from the first scrape (registered eagerly, not on first
+          # increment), so this ratio is well-defined from boot rather than absent until a failure.
+          expr: |
+            sum by (service, rail) (rate(openbank_fraud_scoring_outcomes_total{result="synthetic"}[30m]))
+              /
+            clamp_min(sum by (service, rail) (rate(openbank_fraud_scoring_outcomes_total[30m])), 1e-9)
+              > 0.5
+          for: 15m
+          labels:
+            severity: warning
+            service: '{{ $labels.service }}'
+          annotations:
+            summary: "Over half of {{ $labels.rail }} fraud scores are synthetic"
+            description: >-
+              {{ $value | humanizePercentage }} of fraud-scoring attempts on {{ $labels.service }}
+              returned an invented verdict over the last 30m — a flapping fraud-service or an open
+              circuit breaker, rather than a clean outage.

@@ -37,11 +37,11 @@ data class EventAddress(
  *
  * **Why a table and not a derivation.** The sibling sink derives the service from the topic's
  * domain segment (`openbank.<domain>.…` -> `openbank-<domain>-service`) and that is right for its
- * purpose, but it is WRONG for nine of the twenty-one topics audited here — `openbank.cards.events`
+ * purpose, but it is WRONG for eight of the twenty topics audited here — `openbank.cards.events`
  * is produced by card-issuance-service, `openbank.payments.swift.event` by swift-service,
- * `openbank.customer.audit` by customer-edge, `openbank.security.*` by security-scanner, and
- * `accounts`/`transactions`/`documents` are plural where the module is singular. A derivation that
- * is wrong nine times out of twenty-one does not under-attribute: it writes a plausible,
+ * `openbank.customer.audit` by customer-edge, `openbank.security.ict.incident` by security-scanner,
+ * and `accounts`/`transactions`/`documents` are plural where the module is singular. A derivation
+ * that is wrong eight times out of twenty does not under-attribute: it writes a plausible,
  * confident, FALSE service name into a tamper-evident evidentiary record, which is strictly worse
  * than the `"unknown"` it replaces. So every value here is verified against the module that
  * actually declares the outgoing channel, and [AttributionSource] keeps a derived value
@@ -69,7 +69,6 @@ object TopicAttribution {
         "openbank.customer.audit" to "customer-edge",
         "openbank.clearing.batch.event" to "clearing-service",
         "openbank.security.ict.incident" to "security-scanner",
-        "openbank.security.scan.event" to "security-scanner",
         "openbank.cards.events" to "card-issuance-service",
         "openbank.dispute.events" to "dispute-service",
         "openbank.domestic.payment.events" to "domestic-payment",
@@ -81,6 +80,14 @@ object TopicAttribution {
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
         "openbank.lending.events" to "lending-service",
+        // Issue #5338: audit-service was not subscribed to this topic at all (absent from both
+        // this table and application.yaml's topics list), so SCA device enrollment
+        // (DEVICE_ENROLLED) was never audited — a real PSD2/SCA gap, since sca-service is
+        // money-path. PR #5337 adds "sourceService" to the enroll payload so this row resolves
+        // AttributionSource.EVENT rather than TOPIC once it merges; until then the topic-derived
+        // value below is still correct (ScaService.kt's outbox payload sets no source field yet,
+        // and "sca-service" is what it will say when it does).
+        "openbank.sca.events" to "sca-service",
     )
 
     /** Topics with a verified producer entry. Visible for the coverage test. */

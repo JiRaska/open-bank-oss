@@ -82,7 +82,7 @@ class LendingOutboxDispatcherTest {
         val poisoned = entry()
         coEvery { repo.claimProcessable(any(), any()) } returns listOf(poisoned)
         coEvery { publisher.publish(poisoned) } throws IllegalStateException("broker unavailable")
-        coJustRun { repo.markFailed(any(), any(), any()) }
+        coEvery { repo.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
 
         LendingOutboxDispatcher(repo, publisher, dispatchEnabled = true, metrics = mockk(relaxed = true)).dispatch()
 

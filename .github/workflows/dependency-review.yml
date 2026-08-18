@@ -10,6 +10,12 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  # Read-only, for the "Assert the dependency diff had a valid basis" step: it queries the
+  # Checks API (`commits/{sha}/check-runs`, issue #5066) instead of the Actions "list workflow
+  # runs" endpoint, and that call needs `checks: read` explicitly once any `permissions:` key
+  # is declared here (an unlisted scope defaults to none, not "whatever GITHUB_TOKEN would
+  # otherwise get").
+  checks: read
 
 jobs:
   dependency-review:
@@ -18,7 +24,10 @@ jobs:
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
     # became queryable ~24 min after this job started (GitHub indexes the submitted graph
     # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
-    # slow queue away from a spurious red on an honest PR. 35 leaves real headroom.
+    # slow queue away from a spurious red on an honest PR. 35 leaves real headroom, and the
+    # last step's own retry loop below (issue #5066) borrows from that headroom rather than
+    # adding its own minutes: worst case measured so far is ~9 min, well inside the ~11 min
+    # of slack 35 already carries over the 24 min baseline.
     # Only dependency-touching PRs wait at all; the rest finish in ~7 s (retry disarmed).
     timeout-minutes: 35
     steps:
@@ -130,23 +139,53 @@ jobs:
       # Only armed on dependency-touching PRs: with no Gradle submission in flight there is no
       # Gradle graph on either side and nothing to assert.
       #
-      # Deliberately checks the submission RUN, not snapshot queryability. GitHub indexes a
-      # submitted graph some seconds after the API call returns, so asserting the snapshot
-      # itself would flake; asserting the run catches the case that actually caused #2833
-      # (no submission was ever scheduled for that SHA) and accepts the narrow window where a
-      # run has succeeded but is not yet indexed.
-      #
       # Last step in the job on purpose — nothing runs after it, so failing here costs no
       # downstream work.
+      #
+      # ── QUERY MECHANISM (issue #5066, second fix — read this before touching `count()`) ──
+      #
+      # #4397 already replaced a `status=success` query param (proven unusable: it answered
+      # total_count 0 for a run whose own JSON read conclusion=success) with a client-side
+      # `conclusion=="success"` filter over `GET .../workflows/dependency-submission.yml/runs
+      # ?head_sha=<sha>`. That fix was necessary but not sufficient: #5066 measured a
+      # dependency-submission run that succeeded at 15:08:22Z still answering ZERO runs from
+      # THAT SAME endpoint at 15:26:34Z (18+ minutes later), with a plain re-run of this job
+      # finding it at ~15:35Z. Nothing was wrong with the filter this time — the endpoint
+      # itself ("List workflow runs for a workflow", filtered by `head_sha`) is backed by a
+      # search index GitHub documents as eventually consistent, and under load that lag is
+      # not the "a few seconds" the design assumed; it can run into double-digit minutes.
+      #
+      # The fix is to stop asking that endpoint. `GET /repos/{owner}/{repo}/commits/{sha}
+      # /check-runs` is a DIFFERENT backend — the Checks API, which is what actually paints
+      # the green/red dots on a PR's own "Checks" tab in something close to real time — and it
+      # answers the identical question (did the job that submits the graph succeed for this
+      # exact SHA) without going through the laggy search index at all. Query it by SHA and
+      # match the CHECK RUN name, which for a workflow_run's job is the job's own `name:`
+      # field with no workflow-name prefix — confirmed against a live run of
+      # dependency-submission.yml's `submit` job, whose check run is literally named
+      # "Submit fleet dependency graph" (see that job's `name:` in dependency-submission.yml).
+      #
+      # This is defense in depth, not a proof the Checks API can never itself lag — kept as a
+      # short bounded retry (5 attempts, linear backoff, ~5 min worst case) so a much smaller
+      # residual delay still resolves before this step gives up. That budget is small next to
+      # the ~11 min of headroom timeout-minutes already carries (see the job header), and it
+      # is far below the double-digit-minute lag that made the OLD endpoint unusable — if the
+      # Checks API turns out to share that failure mode, the fix is a workflow_run trigger on
+      # dependency-submission.yml completing (auto-retry-cancelled.yml already listens to that
+      # workflow's completion event, so the pattern is proven in this repo) rather than a
+      # longer poll here.
       - name: Assert the dependency diff had a valid basis
         if: ${{ success() && steps.deps.outputs.changed == 'true' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Must equal dependency-submission.yml's `submit` job `name:` exactly (see that
+          # file). Not the workflow's top-level `name:` — a check run's `.name` is the JOB
+          # name only, GitHub never prefixes it with the workflow name in this field.
+          SUBMIT_JOB_NAME: "Submit fleet dependency graph"
         run: |
           set -euo pipefail
-          runs_api="repos/${GITHUB_REPOSITORY}/actions/workflows/dependency-submission.yml/runs"
 
           mb="$(gh api "repos/${GITHUB_REPOSITORY}/compare/${BASE_SHA}...${HEAD_SHA}" \
                   --jq '.merge_base_commit.sha' 2>/dev/null || true)"
@@ -155,26 +194,44 @@ jobs:
             exit 0
           fi
 
-          # `status=success` is NOT a usable filter on this endpoint: measured on the real API,
-          # `?head_sha=<sha>&status=success` answers total_count 0 for a run whose own JSON reads
-          # status=completed, conclusion=success, while the identical query WITHOUT the filter
-          # answers 1. So this step failed PRs for a condition that was satisfied — #4397 had a
-          # successful submission 22 minutes before the assertion ran and was still told there
-          # was none. Filter on `conclusion` client-side instead, which is the field that
-          # actually carries the verdict.
+          # Checks API, not the Actions "list workflow runs" endpoint — see the header note
+          # above for why (issue #5066). `per_page=100` is generous headroom: this only ever
+          # returns check runs for ONE commit, and a SHA is re-checked at most a handful of
+          # times (submission itself, plus any manual re-runs).
           count() {
-            gh api "${runs_api}?head_sha=$1&per_page=100" \
-              --jq '[.workflow_runs[]|select(.conclusion=="success")]|length' 2>/dev/null || echo ""
+            # shellcheck disable=SC2016  # $name is jq's own --arg binding, not a shell var
+            gh api "repos/${GITHUB_REPOSITORY}/commits/$1/check-runs?per_page=100" \
+              --jq --arg name "${SUBMIT_JOB_NAME}" \
+              '[.check_runs[] | select(.name == $name and .conclusion == "success")] | length' \
+              2>/dev/null || echo ""
           }
-          base_runs="$(count "${mb}")"
-          head_runs="$(count "${HEAD_SHA}")"
+
+          # Bounded retry, defense in depth against residual Checks-API propagation lag —
+          # see the header note for why this is expected to be minutes, not the 18-27+ min
+          # observed against the old endpoint. Only retries a genuine zero; an API read
+          # failure (empty string from count()) still exits via the warning path below on
+          # the last attempt, unchanged from before #5066.
+          delays=(0 15 30 60 90)
+          for delay in "${delays[@]}"; do
+            if [ "${delay}" -gt 0 ]; then
+              echo "Basis not yet visible via the Checks API — retrying in ${delay}s (issue #5066)."
+              sleep "${delay}"
+            fi
+            base_runs="$(count "${mb}")"
+            head_runs="$(count "${HEAD_SHA}")"
+            if [ -n "${base_runs}" ] && [ -n "${head_runs}" ] \
+               && [ "${base_runs}" -gt 0 ] && [ "${head_runs}" -gt 0 ]; then
+              break
+            fi
+          done
+
           if [ -z "${base_runs}" ] || [ -z "${head_runs}" ]; then
-            echo "::warning title=basis unverified::Could not query dependency-submission runs; skipping the assertion."
+            echo "::warning title=basis unverified::Could not query dependency-submission check runs; skipping the assertion."
             exit 0
           fi
 
-          echo "merge-base ${mb}: ${base_runs} successful submission run(s)"
-          echo "head ${HEAD_SHA}: ${head_runs} successful submission run(s)"
+          echo "merge-base ${mb}: ${base_runs} successful submission check-run(s)"
+          echo "head ${HEAD_SHA}: ${head_runs} successful submission check-run(s)"
 
           fail=0
           if [ "${base_runs}" -eq 0 ]; then
@@ -182,7 +239,7 @@ jobs:
             fail=1
           fi
           if [ "${head_runs}" -eq 0 ]; then
-            echo "::error title=Dependency review had no head graph::No successful dependency-submission run exists for the head ${HEAD_SHA}. Check the Dependency submission workflow for this PR — if it failed, the Gradle half of this review is vacuous. See issue #2833."
+            echo "::error title=Dependency review had no head graph::No successful dependency-submission run exists for the head ${HEAD_SHA} after retrying for up to ~5 minutes. Check the Dependency submission workflow for this PR — if it failed, the Gradle half of this review is vacuous. See issues #2833 and #5066."
             fail=1
           fi
           [ "${fail}" -eq 0 ] || exit 1

@@ -6,6 +6,7 @@
 import { useState, useEffect } from 'react'
 import { Network, RefreshCw, Play, Pause, ArrowRight, ArrowLeft, BookOpen } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
@@ -130,23 +131,17 @@ export default function LineageFlowPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Datová lineage', 'Data Lineage')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Network size={18} style={{ color: 'var(--accent)' }} />
-            {t('Tok datové lineage', 'Data Lineage Flow')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Kdo produkuje data pro koho — deklarovaná governance lineage (ADR-0071), odvozená z governance.yaml každé služby, animovaná jako tok producent → konzument.',
+          </>}
+        title={t('Tok datové lineage', 'Data Lineage Flow')}
+        subtitle={t('Kdo produkuje data pro koho — deklarovaná governance lineage (ADR-0071), odvozená z governance.yaml každé služby, animovaná jako tok producent → konzument.',
                'Who produces data for whom — the declared data-governance lineage (ADR-0071), derived from each service’s governance.yaml, animated as producer → consumer flow.')}
-          </p>
-        </div>
-      </div>
+        icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {unavailable ? (
         <DataUnavailable kind={unavailable.kind} service="governance" feature={t('datová lineage', 'data lineage')} dense />
@@ -300,7 +295,11 @@ export default function LineageFlowPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {selectedSvc.lineage!.upstream!.map((u, i) => (
                           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '6px', fontSize: '12px', background: 'var(--surface)', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border)' }}>
-                            <span style={{ fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => known.has(u.serviceName) && setSelected(u.serviceName)}>{prettyName(u.serviceName)}</span>
+                            <button type="button" disabled={!known.has(u.serviceName)} aria-label={known.has(u.serviceName)
+                              ? t(`Vybrat ${prettyName(u.serviceName)}`, `Select ${prettyName(u.serviceName)}`)
+                              : t(`${prettyName(u.serviceName)} není načtená`, `${prettyName(u.serviceName)} is not loaded`)}
+                              style={{ fontWeight: 500, color: 'var(--text-secondary)', cursor: known.has(u.serviceName) ? 'pointer' : 'default', opacity: known.has(u.serviceName) ? 1 : 0.7, background: 'none', border: 0, padding: 0, font: 'inherit', textAlign: 'left' }}
+                              onClick={() => known.has(u.serviceName) && setSelected(u.serviceName)}>{prettyName(u.serviceName)}</button>
                             <span style={{ fontSize: '10px', color: REL_COLOR[u.relationType] }}>{relLabel(u.relationType, t)}</span>
                           </div>
                         ))}
@@ -313,7 +312,11 @@ export default function LineageFlowPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                         {selectedSvc.lineage!.downstream!.map((dn, i) => (
                           <div key={i} style={{ display: 'flex', justifyContent: 'space-between', gap: '6px', fontSize: '12px', background: 'var(--surface)', padding: '4px 8px', borderRadius: '4px', border: '1px solid var(--border)' }}>
-                            <span style={{ fontWeight: 500, color: 'var(--text-secondary)', cursor: 'pointer' }} onClick={() => known.has(dn.serviceName) && setSelected(dn.serviceName)}>{prettyName(dn.serviceName)}</span>
+                            <button type="button" disabled={!known.has(dn.serviceName)} aria-label={known.has(dn.serviceName)
+                              ? t(`Vybrat ${prettyName(dn.serviceName)}`, `Select ${prettyName(dn.serviceName)}`)
+                              : t(`${prettyName(dn.serviceName)} není načtená`, `${prettyName(dn.serviceName)} is not loaded`)}
+                              style={{ fontWeight: 500, color: 'var(--text-secondary)', cursor: known.has(dn.serviceName) ? 'pointer' : 'default', opacity: known.has(dn.serviceName) ? 1 : 0.7, background: 'none', border: 0, padding: 0, font: 'inherit', textAlign: 'left' }}
+                              onClick={() => known.has(dn.serviceName) && setSelected(dn.serviceName)}>{prettyName(dn.serviceName)}</button>
                             <span style={{ fontSize: '10px', color: REL_COLOR[dn.relationType] }}>{relLabel(dn.relationType, t)}</span>
                           </div>
                         ))}

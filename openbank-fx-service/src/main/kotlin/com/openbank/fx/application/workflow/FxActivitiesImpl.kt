@@ -131,7 +131,14 @@ open class FxActivitiesImpl(
                 counterpartyId = null,
             ),
         )
-        if (outcome.verdict != FraudVerdict.ALLOW) {
+        if (outcome.synthetic) {
+            // #4221: a conversion that was never scored is not a conversion that scored clean.
+            log.warnf(
+                "Fraud scoring UNAVAILABLE for conversion %s — synthetic ALLOW, this conversion carries " +
+                    "no fraud verdict (see openbank_fraud_scoring_degraded{service=\"fx\"})",
+                conversionId,
+            )
+        } else if (outcome.verdict != FraudVerdict.ALLOW) {
             log.infof(
                 "Fraud SHADOW verdict %s (score=%d, rules=%s) for conversion %s — observed, not enforced",
                 outcome.verdict,

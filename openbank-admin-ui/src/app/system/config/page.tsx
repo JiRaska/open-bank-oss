@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { Shield, RefreshCw, Clock, Zap, ChevronDown, ChevronRight, Info, Circle, Loader2 } from 'lucide-react'
 import { fetchAllServiceConfigSnapshots } from '@/lib/api'
 import type { ServiceConfigSnapshot } from '@/types'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 const POLL_INTERVAL = 15_000
 
@@ -17,7 +18,8 @@ export default function ServiceConfigPage() {
   const [snapshots, setSnapshots] = useState<ServiceConfigSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   const refresh = useCallback(async () => {
     try {
@@ -50,27 +52,21 @@ export default function ServiceConfigPage() {
 
   return (
     <div>
-      {/* Page header */}
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <PageHeader
+        breadcrumb={<div className="breadcrumb">
             <span>OpenBank</span>
             <span className="breadcrumb-sep">/</span>
             <span>{t('Systém', 'System')}</span>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Konfigurace', 'Configuration')}</span>
-          </div>
-          <h1 className="page-title">{t('Konfigurace služeb', 'Service Configuration')}</h1>
-          <p className="page-subtitle">
-            {t('Živé resilience politiky načtené z každé služby přes', 'Live resilience policies fetched from each service via')}{' '}
-            <code style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px', background: 'var(--surface-3)', padding: '1px 5px', borderRadius: '3px', border: '1px solid var(--border)' }}>/api/v1/config</code>.
-            {' '}{t('Automatická obnova každých', 'Auto-refreshes every')} {POLL_INTERVAL / 1000}s.
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          </div>}
+        title={t('Konfigurace služeb', 'Service Configuration')}
+        icon={<Shield aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        subtitle={t('Živé resilience politiky načtené z každé služby přes', 'Live resilience policies fetched from each service via') + ' /api/v1/config. ' + t('Automatická obnova každých', 'Auto-refreshes every') + ` ${POLL_INTERVAL / 1000}s.`}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {lastRefresh.toLocaleTimeString()}
+              {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           <button
@@ -85,9 +81,8 @@ export default function ServiceConfigPage() {
             <RefreshCw size={12} className={loading ? 'spinning' : ''} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
-
+        </div>}
+      />
       {/* Status summary */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <StatusPill color="#059669" bg="#ecfdf5" count={upCount} label={t('V pořádku', 'Healthy')} />

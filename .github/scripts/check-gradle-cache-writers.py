@@ -94,6 +94,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Restores fleet-lint's home and re-downloads only the runtime-only artifacts "
         "`assemble` needs beyond it.",
     ),
+    "evals-fraud-review.yml::fraud-review-pack": (
+        "read-only",
+        "Scoped to one service's test classes; resolves a small subset of what fleet-lint "
+        "already restores fleet-wide, so it never needed a fresh entry of its own. Same "
+        "reasoning as dependency-submission.yml's own demotion above.",
+    ),
     "security.yml::codeql": (
         "writes-on-main",
         "Left as-is deliberately. Its java-kotlin leg documents a 25-30 min cold penalty and "

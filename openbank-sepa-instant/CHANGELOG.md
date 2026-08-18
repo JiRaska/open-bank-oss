@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.6...sepa-instant-v0.7.7) (2026-08-17)
+
+
+### Bug Fixes
+
+* **domestic-payment:** make a synthetic fraud verdict distinguishable from a real one ([#4221](https://github.com/JiRaska/open-bank-oss/issues/4221) layers 2+3) ([#4411](https://github.com/JiRaska/open-bank-oss/issues/4411)) ([6265ea8](https://github.com/JiRaska/open-bank-oss/commit/6265ea869275f6722b937860f5dcd03d3674d5d7))
+* **sepa-instant:** emit paymentProcessingDuration on terminal transitions ([#5213](https://github.com/JiRaska/open-bank-oss/issues/5213)) ([6c04bec](https://github.com/JiRaska/open-bank-oss/commit/6c04bec1bfaf5b35cbeff011a8a62c8d5423add4)), closes [#5049](https://github.com/JiRaska/open-bank-oss/issues/5049)
+
 ## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.5...sepa-instant-v0.7.6) (2026-08-02)
 
 

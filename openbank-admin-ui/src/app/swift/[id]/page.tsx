@@ -12,6 +12,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { readStashedRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface SwiftMessage {
   id: string
@@ -67,32 +68,18 @@ export default function SwiftDetailPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span>
-            <span className="breadcrumb-sep">/</span>
-            <Link href="/swift" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('SWIFT zprávy', 'SWIFT')}</Link>
-            <span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            {message?.messageType && <span className="mono" style={{ fontSize: '18px', color: 'var(--accent)' }}>{message.messageType}</span>}
-            {message?.status && (
-              <span className="pill" style={{ background: `${STATUS_COLOR[message.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[message.status] ?? 'var(--text-muted)' }}>
-                {message.status}
-              </span>
-            )}
-          </h1>
-          <p className="page-subtitle">{t('Detail SWIFT zprávy — ISO 20022', 'SWIFT message detail — ISO 20022')}</p>
-        </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <Link href="/swift" className="btn btn-secondary"><ArrowLeft size={13} /> {t('Zpět', 'Back')}</Link>
+      <PageHeader
+        title={message?.messageType ?? t('SWIFT zpráva', 'SWIFT message')}
+        subtitle={t('Detail SWIFT zprávy — ISO 20022', 'SWIFT message detail — ISO 20022')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/swift" style={{ color: 'var(--text-tertiary)', textDecoration: 'none' }}>{t('SWIFT zprávy', 'SWIFT')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current mono" style={{ fontSize: '12px' }}>{id.slice(0, 12)}…</span></div>}
+        actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {message?.status && <span className="pill" style={{ background: `${STATUS_COLOR[message.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[message.status] ?? 'var(--text-muted)' }}>{message.status}</span>}
+          <Link href="/swift" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
           <button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !message ? (
         <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>

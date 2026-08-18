@@ -13,8 +13,15 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 `openbank-security-scanner` is a platform-level probe that runs every 30 minutes and checks
 all deployed services for: reachability, missing OWASP security headers, sensitive info
 exposure on the management port, OpenAPI spec exposure, and unauthenticated actuator endpoints.
-Results are published to Kafka (`openbank.security.scan.event`). DORA-grade critical findings
-go to `openbank.security.ict.incident`.
+Results are held in memory and served over REST (`GET /api/v1/security/report`). DORA-grade
+critical findings go to Kafka on `openbank.security.ict.incident` via a direct emitter.
+
+`openbank.security.scan.event` and the transactional outbox behind it were removed in #4709:
+they were fully provisioned — port, entity, repository, dispatcher, gauge, publisher, topic,
+KafkaUser, mTLS and matching audit-side ACLs — and nothing ever constructed a message. Measured
+before removal: 0 rows in `security_outbox` on the live database, end offset 0 on the topic, and
+0 of 1979 `audit_entries` rows attributed to security-scanner. The service persists nothing: its
+database now holds Flyway history only.
 
 **This threat model covers the network-reachability grant in PR #1811 fix**: the scanner is
 granted ingress from the `security-scanner` namespace into all 27 scan-target namespaces on
@@ -29,9 +36,11 @@ network path to any target; the NPs dropped every probe silently.
                                     +--> mgmt:8085  /q/health/ready   (each of 27 targets)
                                     +--> api:<port> (security-headers check, OpenAPI, actuators)
                                     |
-                                    +--> [Postgres: scan_results, security_outbox]
-                                    +--> [Kafka outbox] --> openbank.security.scan.event
-                                    +--> [Kafka outbox] --> openbank.security.ict.incident
+                                    +--> [in-memory report] --> GET /api/v1/security/report
+                                    +--> [Kafka direct emitter] --> openbank.security.ict.incident
+
+  (No datastore in this flow. Scan results and ICT incidents live in ConcurrentHashMaps and are
+   lost on pod restart; the CNPG Postgres holds flyway_schema_history and nothing else.)
 ```
 
 - **No OIDC credentials** in the scanner pod (no client_id/secret, OIDC disabled).

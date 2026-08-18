@@ -12,8 +12,10 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
+import { caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
+import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
+import { PageHeader } from '@/components/ui/PageHeader'
 
-type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED'
 type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
 
 interface ThreadEntry {
@@ -73,19 +75,6 @@ export default function IaopsCaseThreadPage() {
     [locale],
   )
 
-  const statusLabel = useCallback(
-    (status: CaseStatus): string => {
-      switch (status) {
-        case 'OPEN': return t('Otevřený', 'Open')
-        case 'CONVERGING': return t('Konverguje', 'Converging')
-        case 'CONTESTED': return t('Sporný', 'Contested')
-        case 'SYNTHESIZED': return t('Syntetizovaný', 'Synthesized')
-        case 'CLOSED': return t('Uzavřený', 'Closed')
-      }
-    },
-    [t],
-  )
-
   const load = useCallback(async () => {
     setLoading(true)
     setUnavailable(null)
@@ -122,19 +111,13 @@ export default function IaopsCaseThreadPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '900px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '20px' }}>
-        <div className="breadcrumb">
-          <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-          <Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <Link href="/iaops/cases" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('Swarm case', 'Swarm cases')}</Link>
-          <span className="breadcrumb-sep">/</span>
-          <span className="breadcrumb-current">{caseId}</span>
-        </div>
-        <Link href="/iaops/cases" style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginTop: '10px', fontSize: '12px', color: 'var(--text-secondary)', textDecoration: 'none' }}>
-          <ArrowLeft size={13} /> {t('Zpět na seznam case', 'Back to case list')}
-        </Link>
-      </div>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><Link href="/iaops/cases" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('Swarm case', 'Swarm cases')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{caseId}</span></div>}
+        icon={<GitMerge size={20} aria-hidden="true" />}
+        title={caseId}
+        subtitle={t('Detail sdíleného case vlákna; data jsou pouze pro čtení.', 'Shared case thread detail; data is read-only.')}
+        actions={<Link href="/iaops/cases" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na seznam case', 'Back to case list')}</Link>}
+      />
 
       {loading && !thread ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
@@ -144,21 +127,22 @@ export default function IaopsCaseThreadPage() {
       ) : thread ? (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px', flexWrap: 'wrap' }}>
-            <h1 style={{ fontFamily: 'var(--font-mono)', fontSize: '18px', fontWeight: 800, color: 'var(--text-primary)', margin: 0 }}>
-              {thread.caseId}
-            </h1>
             {(() => {
               const visual = statusVisual(thread.status)
               const Icon = visual.icon
+              const presentation = caseStatusPresentation(thread.status, language)
               return (
-                <span style={{
-                  display: 'inline-flex', alignItems: 'center', gap: '5px',
-                  fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '10px',
-                  background: visual.bg, color: visual.fg,
-                }}>
-                  <Icon size={12} />
-                  {statusLabel(thread.status)}
-                </span>
+                <div>
+                  <span style={{
+                    display: 'inline-flex', alignItems: 'center', gap: '5px',
+                    fontSize: '11px', fontWeight: 700, padding: '4px 12px', borderRadius: '10px',
+                    background: visual.bg, color: visual.fg,
+                  }}>
+                    <Icon size={12} />
+                    {presentation.label}
+                  </span>
+                  <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-tertiary)' }}>{presentation.detail}</div>
+                </div>
               )
             })()}
           </div>
@@ -265,7 +249,7 @@ export default function IaopsCaseThreadPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <Sparkles size={14} style={{ color: 'var(--accent-text)' }} />
                       <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)' }}>
-                        {t('Koordinátor syntetizoval návrh', 'Coordinator synthesized a proposal')}
+                        {t('Návrh zaznamenán ve vlákně', 'Proposal recorded in the thread')}
                       </span>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)' }}>{entry.proposalType ?? ''}</span>
                       <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-tertiary)' }}>{fmt(entry.atEpochMs)}</span>
@@ -274,7 +258,7 @@ export default function IaopsCaseThreadPage() {
                       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '8px 0 0', lineHeight: 1.5 }}>{entry.summary}</p>
                     )}
                     <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
-                      {t('Otevřít HITL frontu ke schválení', 'Open the HITL queue for approval')}
+                      {t('Procházet HITL frontu', 'Browse the HITL queue')}
                     </Link>
                   </div>
                 )

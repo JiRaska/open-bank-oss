@@ -1,7 +1,7 @@
 # security-scanner banking-domain namespace (ADR-0037: domain = namespace). App
 # plane. Holds security-scanner-service plus its single-owner CNPG Postgres.
 # The scanner performs periodic health + CVE probes against the fleet services
-# and publishes findings on openbank.security.scan.event (Kafka).
+# and publishes DORA ICT incidents on openbank.security.ict.incident (Kafka).
 apiVersion: v1
 kind: Namespace
 metadata:

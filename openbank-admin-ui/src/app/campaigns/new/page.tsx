@@ -575,6 +575,7 @@ export default function NewCampaignPage() {
           </div>
           <input
             id="c-name"
+            aria-label={t('Název kampaně', 'Campaign name')}
             className="input w-full"
             style={{ fontSize: '1.5rem', fontWeight: 600, padding: '0.7rem 0.9rem' }}
             placeholder={t('Pojmenujte kampaň', 'Name this campaign')}
@@ -583,6 +584,7 @@ export default function NewCampaignPage() {
           />
           <input
             id="c-goal"
+            aria-label={t('Cíl kampaně', 'Campaign goal')}
             className="input w-full"
             style={{ marginTop: '0.75rem' }}
             placeholder={t(
@@ -609,6 +611,8 @@ export default function NewCampaignPage() {
                   type="button"
                   data-segment={ref}
                   data-selected={active ? 'true' : 'false'}
+                  aria-pressed={active}
+                  aria-label={t(`Vybrat publikum ${s.name}`, `Select ${s.name} audience`)}
                   onClick={() => {
                     setSegment(ref)
                     previewReach(ref)
@@ -662,6 +666,7 @@ export default function NewCampaignPage() {
               type="button"
               data-entry-pick="MANUAL"
               data-selected={entryMode === 'MANUAL' ? 'true' : 'false'}
+              aria-pressed={entryMode === 'MANUAL'}
               onClick={() => chooseEntryMode('MANUAL')}
               className="rounded-lg border p-3 text-left text-sm"
               style={entryMode === 'MANUAL' ? { borderColor: 'var(--accent)', boxShadow: '0 0 0 1px var(--accent)' } : undefined}
@@ -675,6 +680,7 @@ export default function NewCampaignPage() {
               type="button"
               data-entry-pick="SCHEDULE"
               data-selected={entryMode === 'SCHEDULE' ? 'true' : 'false'}
+              aria-pressed={entryMode === 'SCHEDULE'}
               onClick={() => chooseEntryMode('SCHEDULE')}
               disabled={cadences.length === 0}
               className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"
@@ -689,6 +695,7 @@ export default function NewCampaignPage() {
               type="button"
               data-entry-pick="TRIGGER"
               data-selected={entryMode === 'TRIGGER' ? 'true' : 'false'}
+              aria-pressed={entryMode === 'TRIGGER'}
               onClick={() => chooseEntryMode('TRIGGER')}
               disabled={triggers.length === 0}
               className="rounded-lg border p-3 text-left text-sm disabled:opacity-40"

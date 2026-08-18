@@ -9,6 +9,7 @@ import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 import { svcUrl } from '@/lib/services/bff'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import { edgeGeometry, mixHex, pathId, type Pt, type Half } from '@/components/topology/geometry'
 import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
@@ -322,8 +323,11 @@ function TierChip({ pos, color, label, active, dim, faded, onClick, onEnter, onL
   const { cx, cy, w } = pos
   const x = cx - w / 2, y = cy - CHIP_H / 2
   return (
-    <g opacity={dim ? 0.25 : 1} style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
-      onClick={onClick} onMouseEnter={onEnter} onMouseLeave={onLeave}>
+    <g role="button" tabIndex={0} aria-label={label} opacity={dim ? 0.25 : 1}
+      style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
+      onClick={onClick}
+      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() } }}
+      onFocus={onEnter} onMouseEnter={onEnter} onMouseLeave={onLeave}>
       <rect x={x} y={y} width={w} height={CHIP_H} rx={CHIP_H / 2}
         fill={active ? color : 'var(--surface)'} stroke={color} strokeWidth={active ? 1.8 : 1.3}
         strokeDasharray={faded ? '4,3' : undefined} opacity={faded ? 0.75 : 1} filter="url(#node-shadow)" />
@@ -554,20 +558,16 @@ export default function ServiceMapPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Mapa služeb', 'Service Map')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Network size={18} style={{ color: 'var(--accent)' }} />
-            {t('Mapa architektury služeb', 'Service Architecture Map')}
-          </h1>
-          <p className="page-subtitle">{t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}</p>
-        </div>
-      </div>
+          </>}
+        title={t('Mapa architektury služeb', 'Service Architecture Map')}
+        subtitle={t(`Animovaná mapa toku dat napříč ${SERVICES.length} službami, infrastrukturou a 3. stranami · sync i async · najeďte myší na uzel pro zvýraznění cesty`, `Animated data-flow map across ${SERVICES.length} services, infrastructure and 3rd parties · sync and async · hover a node to highlight its path`)}
+        icon={<Network aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       <CatalogDriftBanner present={CATALOG_PRESENT} />
 
@@ -735,10 +735,12 @@ export default function ServiceMapPage() {
                     const label = svc.name.replace(/ Service$/, '')
                     const { w: bw, h: bh } = brickSize(degrees[svc.id] ?? 0)
                     return (
-                      <g key={svc.id}
+                      <g key={svc.id} role="button" tabIndex={0} aria-label={label}
                         style={{ cursor: 'pointer', transition: 'opacity 0.15s' }}
                         opacity={emphasized ? 1 : 0.25}
                         onClick={() => setSelected(s => s === svc.id ? null : svc.id)}
+                        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === svc.id ? null : svc.id) } }}
+                        onFocus={() => setHovered(svc.id)}
                         onMouseEnter={() => setHovered(svc.id)}
                         onMouseLeave={() => setHovered(h => h === svc.id ? null : h)}>
                         <LegoBrick cx={p.cx} cy={p.cy} color={svc.color} degree={degrees[svc.id] ?? 0} selected={isSelected} />

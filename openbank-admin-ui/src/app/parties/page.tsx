@@ -11,6 +11,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { Can } from '@/components/auth/AuthGuard'
 
 const PAGE_SIZE = 25
 
@@ -47,6 +48,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 export default function PartiesPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   // ── list mode (no search term) ──────────────────────────────────────────────
   const [parties, setParties]         = useState<Party[]>([])
@@ -155,18 +157,22 @@ export default function PartiesPage() {
             <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-          <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
-            <Plus size={13} aria-hidden="true" /> {t('Nový subjekt', 'New Party')}
-          </Link>
+          <Can permission="parties:create">
+            <Link href="/parties/new" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', textDecoration: 'none' }}>
+              <Plus size={13} aria-hidden="true" /> {t('Nový subjekt', 'New Party')}
+            </Link>
+          </Can>
         </div>}
       />
 
       {/* Search toolbar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: '360px' }}>
-          <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <Search size={14} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <input
+            id="party-search"
             className="input"
+            aria-label={t('Vyhledat subjekt podle jména', 'Search parties by name')}
             style={{ paddingLeft: '32px', width: '100%' }}
             placeholder={t('Hledat podle jména (min. 2 znaky)…', 'Search by name (min. 2 chars)…')}
             value={search}
@@ -253,7 +259,7 @@ export default function PartiesPage() {
                       {p.kycStatus?.replace('_', ' ')}
                     </span>
                   </td>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString()}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px' }}>{new Date(p.createdAt).toLocaleDateString(dateLocale)}</td>
                   <td>
                     <Link href={`/parties/${p.id}`} style={{ color: 'var(--accent)', display: 'flex', alignItems: 'center', gap: '2px', fontSize: '12px', textDecoration: 'none' }}>
                       {t('Detail', 'View')} <ChevronRight size={12} />

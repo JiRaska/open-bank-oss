@@ -30,13 +30,17 @@ summary: "Every Kafka topic is documented in AsyncAPI 3.0 under openbank-contrac
   registration + enforcement, not provisioning.)*
 - **Consumer SDK generation** from specs — ⬜ Pending.
 
-**Open question, not yet decided by this ADR.** The Decision below says message schemas
-may be "Avro or JSON Schema" and deliberately does not pick one. Choosing between them —
-and choosing how an existing live topic migrates from hand-built JSON to a registered,
-enforced schema without breaking in-flight consumers on a rolling deploy — is a decision
-this ADR still owes, not an implementation detail. It should be settled here (or in a
-successor ADR) before the first schema is registered, because the first one registered
-sets the fleet pattern. Tracked in #1916.
+**Open question, resolved by ADR-0260 (2026-08-16).** The Decision below said message schemas
+may be "Avro or JSON Schema" and deliberately did not pick one. ADR-0260 picks **JSON Schema**
+(the outbox's `TEXT` payload column makes a binary format materially more expensive to adopt for
+no additional compatibility benefit), sets BACKWARD_TRANSITIVE as the fleet-wide compatibility
+floor and FULL_TRANSITIVE for money-path topics, and designates the committed
+`openbank-contracts/<service>/schema/<event>.schema.json` file — not the Apicurio-assigned
+registry version — as the event-schema axis's source of truth. The first schema under that
+answer is registered (observe-only, Phase 1) for `openbank-document-service` /
+`openbank.documents.document.event` in the same PR that added this note. Tracked in #1916; see
+ADR-0260 for the full decision and the phased rollout it leaves unbuilt (producer-side
+enforcement, the header-discriminator gap, money-path rollout).
 
 ## Context
 
@@ -75,6 +79,13 @@ Scale: **36 distinct topics** (34 with an in-tree producer) and **71 `eventType`
 nearest thing to a compatibility check is `check-event-schema-compat.py`, which diffs Kotlin
 data-class constructors at build time and says so itself — it cannot see a payload, so nothing
 validates one at runtime.
+
+*Re-measured 2026-08-16 (ADR-0260 prep): `check-event-contract-coverage.py` now counts
+**43 producer:topic pairs**, of which 8 carry an AsyncAPI contract and 35 are grandfathered —
+this line drifts as parallel PRs land contracts, and the script itself, not this paragraph, is
+the current source of truth. Apicurio confirmed live (port-forward + registry search) still
+holds zero registered artifacts of any format — the runtime-enforcement gap this table
+describes has not moved.*
 
 So the runtime half of this ADR exists and the contract half does not. Every Kafka event on this
 platform is raw, unversioned JSON.

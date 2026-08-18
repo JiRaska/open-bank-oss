@@ -382,6 +382,13 @@ class AuthorizeInterceptor {
 
     private fun extractResource(ctx: InvocationContext, annotation: Authorize, expr: String): ResourceRef? {
         if (!expr.startsWith("#")) return null
+        if ('@' in expr) {
+            val parts = expr.split('@')
+            if (parts.size != 2 || parts.any { !it.startsWith("#") }) return null
+            val name = extractResource(ctx, annotation, parts[0]) ?: return null
+            val version = extractResource(ctx, annotation, parts[1]) ?: return null
+            return name.copy(id = "${name.id}@${version.id}")
+        }
         // "#param" -> whole parameter; "#param.field" -> one property of that parameter
         // (ADR-0206), resolved via the parameter's own primary-constructor properties —
         // one level deep only, no nested paths.

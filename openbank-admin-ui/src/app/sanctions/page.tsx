@@ -86,12 +86,12 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
     <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', padding: '12px', background: 'var(--surface-2)', borderRadius: '8px', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Čas', 'Time')}</span>
-        <select value={hour} onChange={e => setHour(+e.target.value)}
+        <select id={`sanctions-cron-${list.id}-hour`} aria-label={t('Hodina spouštění', 'Run hour')} value={hour} onChange={e => setHour(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {Array.from({length:24},(_,i)=>i).map(h => <option key={h} value={h}>{String(h).padStart(2,'0')}</option>)}
         </select>
         <span style={{ color: 'var(--text-tertiary)', fontSize: '13px' }}>:</span>
-        <select value={minute} onChange={e => setMinute(+e.target.value)}
+        <select id={`sanctions-cron-${list.id}-minute`} aria-label={t('Minuta spouštění', 'Run minute')} value={minute} onChange={e => setMinute(+e.target.value)}
           style={{ padding: '4px 8px', borderRadius: '5px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)', fontSize: '12px' }}>
           {[0,5,10,15,20,25,30,35,40,45,50,55].map(m => <option key={m} value={m}>{String(m).padStart(2,'0')}</option>)}
         </select>
@@ -99,7 +99,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
       <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexWrap: 'wrap' }}>
         <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontWeight: 600, minWidth: '40px' }}>{t('Dny', 'Days')}</span>
         {DAYS.map(d => (
-          <button key={d} onClick={() => toggleDay(d)}
+          <button key={d} type="button" aria-pressed={days.includes(d)} aria-label={t(`Den ${DAY_LABELS_CS[d]}`, `${DAY_LABELS_EN[d]} day`)} onClick={() => toggleDay(d)}
             style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, cursor: 'pointer', border: '1px solid',
               background: days.includes(d) ? 'var(--accent)' : 'var(--surface)',
               color: days.includes(d) ? 'white' : 'var(--text-secondary)',
@@ -125,7 +125,9 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   onRefresh: (listType: string) => void
   onSave: (id: string, patch: Partial<SanctionsList>) => void
 }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [expanded, setExpanded] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
 
@@ -148,8 +150,8 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
         <div style={{ textAlign: 'right', fontSize: '11px', color: 'var(--text-tertiary)' }}>
           {list.lastUpdatedAt ? (
             <>
-              <div style={{ color: 'var(--success-text)', fontWeight: 600 }}>{list.lastEntryCount?.toLocaleString()} {t('záznamů', 'entries')}</div>
-              <div>{new Date(list.lastUpdatedAt).toLocaleString('cs-CZ')}</div>
+              <div style={{ color: 'var(--success-text)', fontWeight: 600 }}>{list.lastEntryCount?.toLocaleString(numberLocale)} {t('záznamů', 'entries')}</div>
+              <div>{new Date(list.lastUpdatedAt).toLocaleString(dateLocale)}</div>
             </>
           ) : <div>{t('Nikdy nestaženo', 'Never downloaded')}</div>}
         </div>
@@ -182,6 +184,8 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
 
 export default function SanctionsPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = numberLocale
   const [tab, setTab] = useState<'checks'|'search'|'lists'>('checks')
   const [checks, setChecks] = useState<SanctionCheck[]>([])
   const [lists, setLists] = useState<SanctionsList[]>([])
@@ -538,7 +542,7 @@ export default function SanctionsPage() {
               <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
                 <div style={{ position: 'relative', flex: 1 }}>
                   <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')}
+                  <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat jméno, status, seznam…', 'Search name, status, list…')} aria-label={t('Hledat sankční kontroly', 'Search sanctions checks')}
                     style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                       border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
@@ -599,7 +603,7 @@ export default function SanctionsPage() {
                           </span>
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>
-                          {c.checkedAt ? new Date(c.checkedAt).toLocaleString('cs-CZ') : '—'}
+                          {c.checkedAt ? new Date(c.checkedAt).toLocaleString(dateLocale) : '—'}
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px' }}>
                           {c.reviewedBy ? (
@@ -651,10 +655,10 @@ export default function SanctionsPage() {
                                 <>
                                   <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                      <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                      <label htmlFor="sanctions-review-status" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                         {t('Nový stav', 'New status')}
                                       </label>
-                                      <select value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
+                                      <select id="sanctions-review-status" value={reviewStatus} onChange={e => setReviewStatus(e.target.value as ReviewStatus)}
                                         style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
                                         <option value="CLEAR">{t('CLEAR — falešná shoda', 'CLEAR — false positive')}</option>
                                         <option value="WHITELISTED">{t('WHITELISTED — trvale povoleno', 'WHITELISTED — permanently allowed')}</option>
@@ -664,10 +668,10 @@ export default function SanctionsPage() {
                                     </div>
                                   </div>
                                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                    <label htmlFor="sanctions-review-note" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                                       {t('Odůvodnění *', 'Rationale *')}
                                     </label>
-                                    <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
+                                    <textarea id="sanctions-review-note" value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={2}
                                       placeholder={t('Proč je toto rozhodnutí správné — jde o auditní stopu.', 'Why this decision is correct — this is the audit trail.')}
                                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', resize: 'vertical' }} />
                                   </div>
@@ -731,7 +735,7 @@ export default function SanctionsPage() {
                               {a.action}{a.makerId ? ` — ${t('žádá', 'asked by')} ${a.makerId}` : ''}
                             </div>
                             <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>
-                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString('cs-CZ')}` : ''}
+                              {a.id}{a.createdAt ? ` · ${new Date(a.createdAt).toLocaleString(dateLocale)}` : ''}
                             </div>
                           </div>
                           <button onClick={() => setDecideId(a.id)}
@@ -744,7 +748,7 @@ export default function SanctionsPage() {
                     </div>
                   )}
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <input value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
+                    <input id="sanctions-approval-id" aria-label={t('ID žádosti', 'Approval id')} value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
                       style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
                         fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                     <button onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()}
@@ -769,28 +773,28 @@ export default function SanctionsPage() {
               <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Manuální prověření entity', 'Manual entity screening')}</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Jméno / Název *', 'Name / Entity *')}</label>
-                  <input value={searchName} onChange={e => setSearchName(e.target.value)} placeholder={t('Celé jméno nebo název organizace', 'Full name or organisation name')}
+                  <label htmlFor="sanctions-search-name" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Jméno / Název *', 'Name / Entity *')}</label>
+                  <input id="sanctions-search-name" value={searchName} onChange={e => setSearchName(e.target.value)} placeholder={t('Celé jméno nebo název organizace', 'Full name or organisation name')}
                     onKeyDown={e => e.key === 'Enter' && handleScreen()}
                     style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Typ entity', 'Entity type')}</label>
-                    <select value={searchType} onChange={e => setSearchType(e.target.value as 'INDIVIDUAL'|'ORGANIZATION')}
+                    <label htmlFor="sanctions-search-type" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Typ entity', 'Entity type')}</label>
+                    <select id="sanctions-search-type" value={searchType} onChange={e => setSearchType(e.target.value as 'INDIVIDUAL'|'ORGANIZATION')}
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }}>
                       <option value="INDIVIDUAL">{t('Fyzická osoba', 'Individual')}</option>
                       <option value="ORGANIZATION">{t('Organizace', 'Organisation')}</option>
                     </select>
                   </div>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Datum narození', 'Date of birth')}</label>
-                    <input value={searchDob} onChange={e => setSearchDob(e.target.value)} type="date"
+                    <label htmlFor="sanctions-search-dob" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Datum narození', 'Date of birth')}</label>
+                    <input id="sanctions-search-dob" value={searchDob} onChange={e => setSearchDob(e.target.value)} type="date"
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)' }} />
                   </div>
                   <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Státní příslušnost', 'Nationality')}</label>
-                    <input value={searchNationality} onChange={e => setSearchNationality(e.target.value.toUpperCase().slice(0,2))}
+                    <label htmlFor="sanctions-search-nationality" style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('Státní příslušnost', 'Nationality')}</label>
+                    <input id="sanctions-search-nationality" value={searchNationality} onChange={e => setSearchNationality(e.target.value.toUpperCase().slice(0,2))}
                       placeholder="CZ" maxLength={2}
                       style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} />
                   </div>
@@ -843,7 +847,7 @@ export default function SanctionsPage() {
                                 {!lst.enabled && <span style={{ fontSize: '9px', fontWeight: 700, color: 'var(--text-tertiary)', background: 'var(--surface-4)', padding: '1px 4px', borderRadius: '3px' }}>{t('vyp.', 'off')}</span>}
                               </div>
                               <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)', marginTop: '2px' }}>
-                                {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString()} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
+                                {lst.lastEntryCount ? `${lst.lastEntryCount.toLocaleString(numberLocale)} ${t('zázn.', 'entries')}` : t('nestaženo', 'not synced')}
                               </div>
                             </div>
                           </label>

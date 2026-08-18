@@ -27,6 +27,24 @@
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
+  name: agent-redis-ingress-allow-list
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: platform
+    openbank.io/derived: gen-network-policies
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: agent-redis
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
   name: agent-service-ingress-allow-list
   namespace: platform
   labels:

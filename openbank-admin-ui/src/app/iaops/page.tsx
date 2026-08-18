@@ -20,10 +20,12 @@ import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
 import type { AgentFinding } from '@/components/agent/AgentInsightsPanel'
 import { AgentPortrait, getAgentPersona } from '@/components/agent/AgentIdentity'
 import { AgentMeshExplainer } from '@/components/agent/AgentMeshExplainer'
+import { PageHeader } from '@/components/ui/PageHeader'
 import styles from './IAOps.module.css'
 
 // ── Types (mirror /api/iaops/governance) ───────────────────────────────────
 type DStatus = 'built' | 'partial' | 'planned'
+type PhaseStatus = 'complete' | 'active' | 'blocked' | 'planned'
 
 interface Agent {
   id: string; plane: string; charter: string; owns: string[]; skills: string[]
@@ -32,9 +34,11 @@ interface Agent {
 }
 interface Decision { id: string; title: string; status: DStatus; detail: string }
 interface Compliance { framework: string; requirement: string; control: string; status: DStatus }
+interface PhaseRoadmap { number: number; status: PhaseStatus; title: string; outcome: string }
 interface GovData {
   adrRef: string; adrStatus: string; phase: number; totalPhases: number; phaseLabel: string
   enforcement: string; policyDefault: string; agentsActing: number
+  phaseRoadmap: PhaseRoadmap[]
   chartersAvailable: boolean; agentCount: number; agents: Agent[]
   toolTiers: Record<string, string[]>
   decisions: Decision[]; decisionSummary: { built: number; partial: number; planned: number; total: number }
@@ -144,6 +148,7 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
@@ -235,34 +240,25 @@ function IAOpsContent() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
 
-      {/* Header */}
-      <div style={{ marginBottom: '24px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">IAOps</span>
-          </div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', margin: '8px 0 4px', letterSpacing: '-0.03em' }}>
-            {t('IAOps — governance AI', 'IAOps — AI Governance')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            {t(
-              'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
-              'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
-            )}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString()}</span>}
+      <PageHeader
+        icon={<Bot size={20} aria-hidden="true" />}
+        title={t('IAOps — governance AI', 'IAOps — AI Governance')}
+        subtitle={t(
+          'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
+          'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
+        )}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">IAOps</span></div>}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString(dateLocale)}</span>}
           <button onClick={load} disabled={loading}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
               fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {loading && !data ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '40px', color: 'var(--text-tertiary)' }}>
@@ -355,7 +351,7 @@ function IAOpsContent() {
             {/* What / Why / How */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '14px', marginTop: '16px' }}>
               {[
-                { h: t('Co děláme', 'What we run'), b: t('Dvě populace agentů na jednom řízeném základu: control (dohled — AML/sankce/GDPR, jen návrhy) a development (jeden agent na doménu, otevírá PR, nemerguje).', 'Two agent populations on one governed substrate: control (oversight — AML/sanctions/GDPR, proposals only) and development (one agent per domain, opens PRs, never merges).') },
+                { h: t('Co děláme', 'What we run'), b: t('Dohledové agenty a frontu pro lidské rozhodnutí. Vývojové PR workflow je další řízený krok — jeho stav ukazuje roadmapa níže.', 'Oversight agents and a queue for human decisions. Development PR workflow is the next governed step — its status is shown in the roadmap below.') },
                 { h: t('Proč', 'Why'), b: t('Regulace (EU AI Act, DORA, GDPR, PCI) vyžaduje human oversight, záznamy a logování. Tyto kontroly nejsou ergonomie, jsou to compliance.', 'Regulation (EU AI Act, DORA, GDPR, PCI) mandates human oversight, record-keeping and logging. These controls are not ergonomics — they are the compliance surface.') },
                 { h: t('Jak', 'How'), b: t('Každá akce agenta projde stejnými branami jako člověk: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.', 'Every agent action passes the same gates as a human: charter (agents.yaml) → OPA policy → required approvals → AI-attributed audit. Deny-by-default.') },
               ].map(x => (
@@ -366,6 +362,36 @@ function IAOpsContent() {
               ))}
             </div>
           </div>
+
+          <Card>
+            <SectionTitle icon={<GitBranch size={16} />}
+              sub={t('Schválená governance roadmapa: změna fáze vyžaduje nezávisle ověřené provozní důkazy. Tato stránka je transparentní plán, ne živá runtime atestace.', 'Governance-approved roadmap: a phase change requires independently verified operational evidence. This page is a transparent plan, not a live runtime attestation.')}>
+              {t('Jak bezpečně roste autonomie', 'How autonomy safely grows')}
+            </SectionTitle>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px' }}>
+              {(data.phaseRoadmap ?? []).map(item => {
+                const tone: Record<PhaseStatus, { bg: string; border: string; text: string }> = {
+                  complete: { bg: '#ecfdf5', border: '#a7f3d0', text: '#047857' },
+                  active: { bg: '#eef2ff', border: '#c7d2fe', text: '#4338ca' },
+                  blocked: { bg: '#fff7ed', border: '#fed7aa', text: '#c2410c' },
+                  planned: { bg: '#f8fafc', border: '#cbd5e1', text: '#475569' },
+                }
+                const color = tone[item.status]
+                const label: Record<PhaseStatus, string> = {
+                  complete: t('uzavřeno', 'completed'), active: t('aktuální', 'current'),
+                  blocked: t('kritéria nesplněna', 'criteria unmet'), planned: t('plánováno', 'planned'),
+                }
+                return <div key={item.number} style={{ padding: '13px', borderRadius: '10px', border: `1px solid ${color.border}`, background: color.bg }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '8px', alignItems: 'center', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '12px', color: 'var(--text-primary)' }}>{t('Fáze', 'Phase')} {item.number}</strong>
+                    <span style={{ color: color.text, fontSize: '10px', fontWeight: 800 }}>{label[item.status]}</span>
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '5px' }}>{item.title}</div>
+                  <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>{item.outcome}</p>
+                </div>
+              })}
+            </div>
+          </Card>
 
           {/* Tool tiers — what MCP/the bot can & cannot do */}
           {Object.keys(data.toolTiers).length > 0 && (
@@ -511,10 +537,9 @@ function IAOpsContent() {
                           {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
                         </span>
                         {isFinopsAgent && (
-                          <button onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
-                            style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '8px', border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
-                            {t('Spustit analýzu', 'Trigger Analysis')}
-                          </button>
+                          <span role="status" style={{ fontSize: '10px', fontWeight: 650, padding: '3px 8px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}>
+                            {t('Analýza zatím není připojená k HITL backendu', 'Analysis is not connected to the HITL backend yet')}
+                          </span>
                         )}
                       </div>
 
@@ -595,17 +620,14 @@ function IAOpsContent() {
             icon={<AlertOctagon size={16} />}
             title={t('Cost anomálie', 'Cost Anomalies')}
             subtitle={t(
-              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Agent navrhuje, schvaluje člověk — HITL backend přijde v P4 (tlačítka zatím logují do konzole).',
-              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). The agent proposes; a human approves — HITL backend arrives in P4 (buttons currently log to console).',
+              'Aktivní FinOps anomálie z Alertmanageru (D1–D5 detektory, ADR-0112). Tento přehled je pouze pro čtení: anomálie zatím nevytvářejí návrhy ve schvalovací frontě.',
+              'Active FinOps anomalies from Alertmanager (D1–D5 detectors, ADR-0112). This view is read-only: anomalies do not yet create proposals in the approval queue.',
             )}
             findings={costAnomalies.map(a => toAgentFinding(a, t))}
             emptyMessage={t(
               'Žádné aktivní cost anomálie — Alertmanager nedosažitelný nebo žádné finops-agent alerty.',
               'No active cost anomalies — Alertmanager unreachable or no finops-agent alerts firing.',
             )}
-            onApprove={id => console.log('HITL approve', id)}
-            onReject={id => console.log('HITL dismiss', id)}
-            decideLabels={{ approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Dismiss') }}
           />
 
           {/* ── D. AI audit trail ── */}
@@ -666,6 +688,7 @@ function IAOpsContent() {
             </SectionTitle>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <textarea
+                aria-label={t('Popis alertu pro RCA', 'Alert description for RCA')}
                 value={rcaAsk}
                 onChange={e => setRcaAsk(e.target.value)}
                 disabled={rcaLoading}

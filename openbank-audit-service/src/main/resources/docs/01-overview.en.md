@@ -48,7 +48,6 @@ The aggregate id and type are derived from the inbound payload (`accountId` → 
 | Record a balance change | Kafka `openbank.balance.events` | consume |
 | Record a party / KYC / consent event | Kafka `openbank.party.events`, `openbank.kyc.events`, `openbank.consent.events` | consume |
 | Retrieve the audit trail for an aggregate | `GET /api/v1/audit/entries/{aggregateId}` | serve |
-| Re-emit recorded events downstream | `audit_outbox` → Kafka (dispatcher) | produce (see [02](./02-architecture.md)) |
 
 ## Callers
 

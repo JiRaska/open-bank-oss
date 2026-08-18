@@ -145,8 +145,14 @@ class StandingOrderExecutionSweepIT {
             .describedAs("the due order must be executed exactly once by the sweep")
             .isEqualTo(1)
         assertThat(reloaded.status)
-            .describedAs("a ONCE order is COMPLETED after its single execution")
-            .isEqualTo(StandingOrderStatus.COMPLETED)
+            .describedAs(
+                "the sweep only SCHEDULES the attempt — dispatch is off in this profile, so the " +
+                    "payment was never actually confirmed. Staying ACTIVE (not COMPLETED) here is " +
+                    "the fix for the #3931-class defect where a ONCE order completed before its " +
+                    "payment was even attempted, so a failed one-off silently ended up COMPLETED " +
+                    "with zero money moved.",
+            )
+            .isEqualTo(StandingOrderStatus.ACTIVE)
         assertThat(reloaded.lastExecutionDate)
             .describedAs("the execution is stamped with the date it was due")
             .isEqualTo(today)

@@ -44,27 +44,74 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, pathlib, re
-          services = (os.environ.get("OVERRIDE") or "openbank-product-catalog").split()
-          matrix = []
+          # The declared v1 scope (ADR-0243, issue #3348). Kept as a named constant so the
+          # summary can say what the run was SUPPOSED to measure, not only what it did.
+          DECLARED = ["openbank-product-catalog"]
+          override = (os.environ.get("OVERRIDE") or "").split()
+          services = override or list(DECLARED)
+          matrix, skipped = [], []
           for svc in services:
               app = pathlib.Path(svc) / "src/main/resources/application.yaml"
               script = pathlib.Path(svc) / "src/test/k6" / f"{svc.replace('openbank-','').replace('-service','')}-smoke.js"
               if not app.is_file():
-                  print(f"::warning::perf-gate: {svc} skipped — no application.yaml")
+                  skipped.append((svc, "no application.yaml"))
                   continue
               if not script.is_file():
-                  print(f"::warning::perf-gate: {svc} skipped — no k6 script at {script}")
+                  skipped.append((svc, f"no k6 script at `{script}`"))
                   continue
               raw = app.read_text()
               port = re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M)
               db = re.search(r"(?:jdbc:)?(?:vertx-reactive:)?postgresql://[^/]+/([A-Za-z0-9_]+)", raw)
               if not port or not db:
-                  print(f"::warning::perf-gate: {svc} skipped — cannot derive port/DB")
+                  skipped.append((svc, "cannot derive port/DB"))
                   continue
               matrix.append({"service": svc, "port": int(port.group(1)), "db": db.group(1)})
+          for svc, why in skipped:
+              print(f"::warning::perf-gate: {svc} EXCLUDED — {why}")
+          print(f"perf-gate: {len(matrix)} service(s); {len(skipped)} excluded")
+
+          # A run's CONCLUSION is not a coverage statement. The fuzz lane proved it (#4695):
+          # its first-ever green had fuzzed ONE service because of a dispatch override, and
+          # read identically to a full pass. perf-gate carries the same two shapes — a
+          # `services:` input silently REPLACES the declared scope, and every candidate can be
+          # dropped by a `continue`, leaving a zero-length matrix that produces no jobs and no
+          # failure. "Latency was within budget" means nothing without the denominator, so it
+          # is printed where a reader lands.
+          denom = len(services)
+          summary = [
+              "## Performance gate scope",
+              "",
+              f"**{len(matrix)} of {denom} requested service(s) actually measured.**",
+              "",
+          ]
+          if override:
+              summary += [
+                  f"> ⚠️ **Scope was OVERRIDDEN by dispatch input** — this run does NOT measure "
+                  f"the declared v1 scope (`{' '.join(DECLARED)}`). "
+                  f"Requested: `{' '.join(override)}`",
+                  "",
+              ]
+              print(
+                  "::warning::perf-gate: scope OVERRIDDEN by dispatch input "
+                  f"({len(matrix)} of {denom} requested service(s)) — this run is not a coverage measurement"
+              )
+          if skipped:
+              summary += ["| Excluded | Why |", "|---|---|"]
+              summary += [f"| `{svc}` | {why} |" for svc, why in skipped]
+              summary += [""]
+          summary += ["Measured: " + (", ".join(f"`{m['service']}`" for m in matrix) or "_none_")]
+          with open(os.environ.get("GITHUB_STEP_SUMMARY", os.devnull), "a") as fh:
+              fh.write("\n".join(summary) + "\n")
+
+          # An empty scope must never read as a pass. A zero-length matrix runs no jobs and the
+          # workflow succeeds having measured nothing — the exact shape this repo keeps
+          # rediscovering. Fail here, where the reason is still in hand.
+          if not matrix:
+              print("::error::perf-gate: derived scope is EMPTY — nothing would be measured")
+              raise SystemExit(1)
+
           with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
               fh.write("matrix=" + json.dumps(matrix) + "\n")
-          print(f"perf-gate: {len(matrix)} service(s)")
           PY
 
   perf:

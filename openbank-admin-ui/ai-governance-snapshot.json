@@ -5,6 +5,38 @@
   "totalPhases": 5,
   "phaseLabel": "Read-only oversight active — HITL proposal queue live; HolmesGPT + copilot deployed (proposal-only, no autonomous state-changing action)",
   "agentsActing": 0,
+  "phaseRoadmap": [
+    {
+      "number": 1,
+      "status": "complete",
+      "title": "Safety foundations",
+      "outcome": "Deny-by-default charters, policy gate, identity binding and audit are enforced."
+    },
+    {
+      "number": 2,
+      "status": "active",
+      "title": "Read-only oversight and human queue",
+      "outcome": "Agents prepare evidence and proposals; a human makes every disposition."
+    },
+    {
+      "number": 3,
+      "status": "blocked",
+      "title": "One non-money development agent",
+      "outcome": "Needs a deployed development agent with a real, policy-gated PR path and recorded human merge."
+    },
+    {
+      "number": 4,
+      "status": "blocked",
+      "title": "Expanded development, including money-path work",
+      "outcome": "Needs phase-3 proof plus enforced two-person review and a threat model for every money-path contribution."
+    },
+    {
+      "number": 5,
+      "status": "planned",
+      "title": "Independently verifiable provenance",
+      "outcome": "Needs asymmetric third-party-verifiable audit anchors and AI attribution in release evidence."
+    }
+  ],
   "decisions": [
     {
       "id": "D1",
@@ -314,7 +346,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "2a3de286ec8d3a89"
+        "sha256": "8535fbf8aa2a09ab"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

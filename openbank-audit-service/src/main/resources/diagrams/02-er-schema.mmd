@@ -23,19 +23,3 @@ erDiagram
     char prev_hash "64 chars — SHA-256 of previous entry"
     char record_hash "64 chars — SHA-256(prev_hash | evidential fields)"
   }
-
-  AUDIT_OUTBOX {
-    bigserial id PK
-    uuid event_id UK "NOT NULL"
-    uuid aggregate_id "NOT NULL"
-    varchar event_type "NOT NULL"
-    text payload "NOT NULL"
-    varchar status "NOT NULL"
-    integer attempt_count "DEFAULT 0"
-    timestamptz sent_at
-    text last_error
-    timestamptz created_at "NOT NULL DEFAULT NOW()"
-    timestamptz updated_at "NOT NULL DEFAULT NOW()"
-  }
-
-  AUDIT_ENTRIES ||--o{ AUDIT_OUTBOX : "relayed via outbox"

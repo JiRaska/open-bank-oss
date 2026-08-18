@@ -12,6 +12,7 @@ import Link from 'next/link'
 import { cookies } from 'next/headers'
 import { ChevronLeft, ShieldCheck, Radio, FileText } from 'lucide-react'
 import { loadComplianceCatalog, type ControlStatus, type ComplianceControl } from '@/lib/governance/compliance'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,20 +41,16 @@ export default async function ControlTowerPage() {
   if (!catalog) {
     return (
       <div>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
+        <DocsPageHeader
+          crumbs={<>
               <span>OpenBank</span><span className="breadcrumb-sep">/</span>
               <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
               <span className="breadcrumb-sep">/</span>
               <span className="breadcrumb-current">{t('Control Tower', 'Control Tower')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
-              {t('Compliance Control Tower', 'Compliance Control Tower')}
-            </h1>
-          </div>
-        </div>
+          </>}
+          title={t('Compliance Control Tower', 'Compliance Control Tower')}
+          icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        />
         <div className="card" style={{ padding: '24px' }}>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
             {t(
@@ -80,30 +77,24 @@ export default async function ControlTowerPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <Link href="/docs" style={{ color: 'inherit', textDecoration: 'none' }}>Docs</Link>
             <span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Control Tower', 'Control Tower')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
-            {t('Compliance Control Tower', 'Compliance Control Tower')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Compliance Control Tower', 'Compliance Control Tower')}
+        subtitle={t(
               `Regulace → kontrola → důkaz. ${totalEnforced}/${catalog.controls.length} kontrol vynuceno. Kontroly s odznakem LIVE čtou stav z reálných manifestů, ne z tvrzení.`,
               `Regulation → control → evidence. ${totalEnforced}/${catalog.controls.length} controls enforced. Controls badged LIVE read their status from real manifests, not from a claim.`,
             )}
-          </p>
-        </div>
-        <Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        actions={<Link href="/docs" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
           <ChevronLeft size={14} />
           {t('Zpět na dokumentaci', 'Back to docs')}
-        </Link>
-      </div>
+        </Link>}
+      />
 
       {/* Per-framework coverage */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '10px', marginBottom: '24px' }}>

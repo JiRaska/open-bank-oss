@@ -18,7 +18,7 @@ import {
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
   Megaphone,
   Target,
-  Share2,
+  Share2, Bug,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -67,7 +67,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payments:view' },
   { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payments:view' },
-  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'payments:view' },
+  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
   { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payments:view' },
   { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'payments:view' },
   { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view' },
@@ -119,6 +119,7 @@ const platformNav: NavItem[] = [
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
   { nameCs: 'IAOps',    nameEn: 'IAOps',    href: '/iaops',    icon: Bot,        permission: 'system:view' },
+  { nameCs: 'Flaky testy', nameEn: 'Flaky Tests', href: '/iaops/flaky-test-hunter', icon: Bug, permission: 'system:view' },
   { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
   { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },
   { nameCs: 'Observability', nameEn: 'Observability', href: '/observability', icon: Activity, permission: 'system:view' },
@@ -156,7 +157,7 @@ const ALL_NAV: NavItem[] = [
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
-export function Sidebar() {
+export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
   const { data: session } = useSession()
   const { t, language } = useLanguage()
@@ -202,7 +203,7 @@ export function Sidebar() {
   }, [])
 
   return (
-    <aside className={styles.sidebar}>
+    <aside id="admin-sidebar" aria-label={t('Hlavní navigace', 'Main navigation')} className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}>
       {/* Brand */}
       <div className={styles.brand}>
         <div className={styles.brandLockup}>
@@ -245,7 +246,7 @@ export function Sidebar() {
 
       {/* Footer */}
       <div className={styles.footer}>
-        <div className={styles.footerVersion}>OpenBank v2.0</div>
+        <div className={styles.footerVersion}>{t('OpenBank Admin portál', 'OpenBank Admin Portal')}</div>
         <div className={styles.footerScope}>EBA · PSD2 · CNB · GDPR</div>
       </div>
     </aside>

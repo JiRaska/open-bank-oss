@@ -4,8 +4,9 @@
 'use client'
 
 import Link from 'next/link'
-import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText } from 'lucide-react'
+import { Bluetooth, ShieldCheck, Radio, KeyRound, ScanLine, Info, Circle, CheckCircle, ArrowLeftRight, EyeOff, Hash, ScrollText, Printer } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
 const ACCENT = '#6366f1'
 const RECV = '#6366f1' // payee / bank A
@@ -17,24 +18,26 @@ export default function QrlessPayPage() {
   const { t } = useLanguage()
 
   return (
-    <div>
-      <div className="page-header">
-        <div className="breadcrumb">
+    <div className="qrlesspay-doc">
+      <DocsPageHeader
+        crumbs={<>
           <span>OpenBank</span><span className="breadcrumb-sep">/</span>
           <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
           <span className="breadcrumb-current">QRlessPay</span>
-        </div>
-        <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Bluetooth size={18} style={{ color: ACCENT }} />
-          {t('QRlessPay — platba poblíž bez QR', 'QRlessPay — QR-less proximity pay')}
-        </h1>
-        <p className="page-subtitle">
-          {t(
+        </>}
+        title={t('QRlessPay — platba poblíž bez QR', 'QRlessPay — QR-less proximity pay')}
+        subtitle={t(
             'Otevřený BLE profil pro platbu telefon-telefon bez skenování. Banka-agnostický, backend volitelný — cíl je standard (ČBA/EPC).',
             'Open BLE phone-to-phone profile for scan-less pay. Bank-agnostic, backend-optional — aimed at becoming a standard (ČBA/EPC).',
           )}
-        </p>
-      </div>
+        icon={<Bluetooth aria-hidden="true" size={18} style={{ color: ACCENT }} />}
+        actions={
+          <button type="button" className="qrlesspay-export-action" onClick={() => window.print()}>
+            <Printer size={14} aria-hidden="true" />
+            {t('Exportovat PDF', 'Export PDF')}
+          </button>
+        }
+      />
 
       {/* Status strip */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>

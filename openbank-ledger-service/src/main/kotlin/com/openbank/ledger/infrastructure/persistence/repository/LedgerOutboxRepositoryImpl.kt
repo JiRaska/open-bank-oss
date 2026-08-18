@@ -105,15 +105,19 @@ class LedgerOutboxRepositoryImpl(private val clock: Clock) :
         }.awaitSuspending()
     }
 
-    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant) {
+    override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
         Panache.withTransaction {
-            find("eventId", eventId).firstResult().invoke { e ->
+            find("eventId", eventId).firstResult().map { e ->
                 if (e != null) {
                     applyFailure(e, error, failedAt)
+                } else {
+                    // Row not found -- unreachable in practice (the dispatcher only calls
+                    // markFailed on a row it just claimed), but degrade gracefully rather than
+                    // throw out of a batch that is otherwise mid-flight (#5128 finding 3).
+                    OutboxStatus.FAILED
                 }
-            }.replaceWith(Unit)
+            }
         }.awaitSuspending()
-    }
 
     /**
      * Record a publish failure (ADR-0050 N5). Increments the attempt counter and, once the
@@ -121,7 +125,7 @@ class LedgerOutboxRepositoryImpl(private val clock: Clock) :
      * WARN an operator alert can hook — so a poison row can neither be retried forever nor
      * starve the batch.
      */
-    private fun applyFailure(e: LedgerOutboxEntity, error: String, at: Instant = Instant.now(clock)) {
+    private fun applyFailure(e: LedgerOutboxEntity, error: String, at: Instant = Instant.now(clock)): OutboxStatus {
         e.attemptCount += 1
         e.lastError = error.take(OutboxFailurePolicy.MAX_ERROR_LEN)
         e.updatedAt = at
@@ -137,6 +141,7 @@ class LedgerOutboxRepositoryImpl(private val clock: Clock) :
                 e.lastError,
             )
         }
+        return next
     }
 
     private fun OutboxMessage.toEntity() = LedgerOutboxEntity().also {

@@ -139,6 +139,38 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-08-17** — Recorded here only because #3931's threat-model-diff gate maps the whole
+  `openbank-infra/gitops/components/payments/network-policies.yaml` file to every money-path
+  service that lives in this directory, not to the specific block that changed. **No trust
+  boundary of this service's own changed**: the diff adds a `lending` ingress peer to
+  `transaction-service`'s block in that shared file only — this service's own ingress/egress
+  rules are byte-identical before and after. See
+  `docs/threat-models/openbank-transaction-service.md` §6 for the edge that actually changed.
+- **2026-08-09** — Fraud shadow scoring's fallback is now observable (#4221). **No new trust
+  boundary and no new caller**: the outbound edge to fraud-service (OIDC client-credentials + mTLS,
+  cluster-internal, shadow) is the same edge, and the verdict is still *observed, never enforced* —
+  the caller logs a non-ALLOW and proceeds identically either way. What changed is that a failure of
+  that edge is no longer indistinguishable from a clean payment.
+  - **The property at stake is detectability, not integrity.** `catch (Exception)` returned a
+    synthetic ALLOW down the same silent branch a real ALLOW takes, so fraud scoring being wholly
+    down and every payment being clean produced identical observable behaviour. A control nobody
+    can see fail is a control nobody knows they have lost.
+  - **Mitigation**: the synthetic answer is flagged on the outcome (`FraudScoreOutcome.synthetic`),
+    counted, and exported as the `openbank_fraud_scoring_degraded` gauge, where **`-1` means never
+    attempted** — deliberately distinct from a healthy `0`, because a counter that has never been
+    incremented is not created at all and an alert on it matches nothing, forever.
+  - **`Throwable`, not `Exception`**, and this is a real change in fault containment: a fault
+    crossing into a rest-client or fault-tolerance interceptor can surface as an `Error`, which the
+    previous `catch (Exception)` did not hold. An `Error` escaping here would propagate out of a
+    path whose entire contract is that it cannot affect the payment. Verified against `origin/main`:
+    a `NoClassDefFoundError` escapes the old catch and the containment test fails.
+    `CancellationException` is rethrown — cancelling the caller's coroutine is not a fraud-service
+    outage and must not be reported as one.
+  - **Fail-open is retained deliberately.** Failing closed would stop payments on a money-path rail
+    to protect a value nothing reads. Real enforcement is tracked separately (#4403); until then
+    this service must not pretend to have a fraud control it does not have.
+  - **Rollback**: revert the commit; the previous behaviour was a silent synthetic ALLOW.
+
 - **2026-08-08** — ADR-0248 #3: payment confirmation download. New endpoint `GET
   /api/v1/sepa-payments/{paymentId}/confirmation`, new outbound trust edge to
   `document-service` (STRIDE supplement §5b). Strictly additive and read-only — no change to

@@ -53,6 +53,7 @@ function PartyDetailPage() {
   const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
   const [party, setParty]     = useState<Party | null>(null)
   const [kyc, setKyc]         = useState<KycCase | null>(null)
@@ -84,7 +85,10 @@ function PartyDetailPage() {
 
   if (loading) return (
     <div>
-      <div className="page-header"><div><div className="skeleton" style={{ height: '24px', width: '200px' }} /></div></div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={<div className="skeleton" style={{ height: '24px', width: '200px' }} aria-label={t('Načítání detailu subjektu', 'Loading party detail')} />}
+      />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         {[1,2].map(i => <div key={i} className="card" style={{ padding: '20px', height: '200px' }}><div className="skeleton" style={{ height: '100%' }} /></div>)}
       </div>
@@ -93,9 +97,12 @@ function PartyDetailPage() {
 
   if (unavailable) return (
     <div>
-      <div className="page-header">
-        <button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} /> {t('Zpět', 'Back')}</button>
-      </div>
+      <PageHeader
+        icon={<Users size={18} aria-hidden="true" />}
+        title={t('Detail subjektu', 'Party detail')}
+        subtitle={t('Data subjektu nejsou v tomto prostředí dostupná.', 'Party data is unavailable in this environment.')}
+        actions={<button className="btn btn-secondary" onClick={() => router.back()}><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</button>}
+      />
       <DataUnavailable kind={unavailable.kind} service="Party-service" feature={t('Detail subjektu', 'Party detail')} lang={language} />
     </div>
   )
@@ -113,7 +120,7 @@ function PartyDetailPage() {
       <PageHeader
         icon={<Users size={18} aria-hidden="true" />}
         title={party.legalName}
-        subtitle={party.id}
+        subtitle={<span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{party.id}</span>}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{party.legalName}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
           <button className="btn btn-secondary" onClick={load}><RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}</button>
@@ -164,8 +171,8 @@ function PartyDetailPage() {
                 [t('Reg. číslo', 'Reg. Number'),          party.registrationNumber ?? '—'],
                 [t('Státní příslušnost', 'Nationality'),  party.nationality ?? '—'],
                 [t('Datum narození', 'Date of Birth'),    party.dateOfBirth ?? '—'],
-                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString()],
-                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString()],
+                [t('Vytvořeno', 'Created'),               new Date(party.createdAt).toLocaleString(dateLocale)],
+                [t('Aktualizováno', 'Updated'),           new Date(party.updatedAt).toLocaleString(dateLocale)],
               ].map(([label, value]) => (
                 <div key={label} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', borderBottom: '1px solid var(--border)', paddingBottom: '8px' }}>
                   <span style={{ color: 'var(--text-muted)' }}>{label}</span>
@@ -292,6 +299,7 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
   // A helper component outside the page needs its own language context (all admin-ui pages
   // are 'use client') — never reference the page's `t` out of scope (CLAUDE.md rule #4).
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [rows, setRows] = useState<NotificationSummary[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(0)
@@ -548,8 +556,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                     {row.status}
                   </span>
                 </td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString() : '—'}</td>
-                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString() : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.sentAt ? new Date(row.sentAt).toLocaleString(dateLocale) : '—'}</td>
+                <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{row.readAt ? new Date(row.readAt).toLocaleString(dateLocale) : '—'}</td>
               </tr>
             ))}
           </tbody>

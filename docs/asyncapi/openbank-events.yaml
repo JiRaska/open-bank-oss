@@ -1131,6 +1131,14 @@ components:
         occurredAt:
           type: string
           format: date-time
+        initiatedByPartyId:
+          type: string
+          format: uuid
+          description: >-
+            The authenticated caller who submitted this payment (from the JWT), or absent for a
+            payment created without one. Added #3994: AuditConsumer already reads this exact key
+            as its third-priority actor spelling (ADR-0021's transaction.initiated convention), so
+            no consumer change was needed to recover actor attribution for this event.
 
     DomesticPaymentStatusChangedPayload:
       type: object

@@ -8,9 +8,11 @@
 # since #2794 — a topic with no ACL is denied, not open, which is exactly how the six
 # subscriptions at the bottom of this list came to be receiving nothing (#3271).
 #
-# clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160
-# #996 triage): each was published with zero consumers since introduction — audit-service
-# is the sole intended consumer per the publishing services' own docs.
+# clearing.batch.event / security.ict.incident added (ADR-0160 #996 triage): each was
+# published with zero consumers since introduction — audit-service is the sole intended
+# consumer per the publishing services' own docs. security.scan.event was in this set too
+# and its ACL was removed in #4709: that topic never had a producer at all (end offset 0),
+# so the Read grant guarded a subscription that could not receive anything.
 #
 # dispute.events / statement.event / sanctions.screening.event added (#996 round 2) —
 # each publisher has its own mTLS KafkaUser with a Write ACL on its topic, which makes
@@ -96,12 +98,6 @@ spec:
         host: "*"
       - resource:
           type: topic
-          name: openbank.security.scan.event
-          patternType: literal
-        operations: [Read, Describe]
-        host: "*"
-      - resource:
-          type: topic
           name: openbank.dispute.events
           patternType: literal
         operations: [Read, Describe]
@@ -168,6 +164,18 @@ spec:
       - resource:
           type: topic
           name: openbank.sepa.payment.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Issue #5338: audit-service did not subscribe to this topic at all, so SCA device
+      # enrollment (DEVICE_ENROLLED) was never recorded in the audit trail -- a real PSD2/SCA
+      # compliance gap (sca-service is money-path, strong customer authentication). The
+      # KafkaTopic resource already exists (owned by onboarding, its other consumer,
+      # components/onboarding/kafka-topics.yaml) -- this is only the Read grant this
+      # KafkaUser needs.
+      - resource:
+          type: topic
+          name: openbank.sca.events
           patternType: literal
         operations: [Read, Describe]
         host: "*"

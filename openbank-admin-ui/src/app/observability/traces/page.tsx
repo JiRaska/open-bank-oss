@@ -15,6 +15,7 @@ import { Activity, RefreshCw, GitBranch, Clock, ChevronRight } from 'lucide-reac
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface TraceSummary {
   traceID: string
@@ -75,7 +76,8 @@ function fmtDuration(ms: number): string {
 }
 
 export default function TraceExplorerPage() {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [traces, setTraces] = useState<TraceSummary[] | null>(null)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -137,29 +139,16 @@ export default function TraceExplorerPage() {
   return (
     <AuthGuard permission="system:view">
       <div>
-        <div className="page-header">
-          <div>
-            <div className="breadcrumb">
-              <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-current">{t('Trasování', 'Tracing')}</span>
-            </div>
-            <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <GitBranch size={18} style={{ color: 'var(--accent)' }} />
-              {t('Trace Explorer', 'Trace Explorer')}
-            </h1>
-            <p className="page-subtitle">
-              {t(
-                'Sleduj jeden požadavek napříč službami — distribuované trasy z Tempa s časováním každého spanu.',
-                'Watch a single request hop across services — distributed traces from Tempo with per-span timing.',
-              )}
-            </p>
-          </div>
-          <button onClick={loadTraces} className="btn btn-secondary" disabled={loading}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <RefreshCw size={14} className={loading ? 'spin' : undefined} />
+        <PageHeader
+          icon={<GitBranch size={18} aria-hidden="true" />}
+          title={t('Trace Explorer', 'Trace Explorer')}
+          subtitle={t('Sleduj jeden požadavek napříč službami — distribuované trasy z Tempa s časováním každého spanu.', 'Watch a single request hop across services — distributed traces from Tempo with per-span timing.')}
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Trasování', 'Tracing')}</span></div>}
+          actions={<button onClick={loadTraces} className="btn btn-secondary" disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <RefreshCw size={14} aria-hidden="true" className={loading ? 'spin' : undefined} />
             {t('Obnovit', 'Refresh')}
-          </button>
-        </div>
+          </button>}
+        />
 
         {unavailable && !traces?.length ? (
           <DataUnavailable
@@ -271,7 +260,7 @@ export default function TraceExplorerPage() {
 
         {lastRefresh && (
           <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-            {t('Zdroj: Tempo · ', 'Source: Tempo · ')}{t('aktualizováno', 'updated')} {lastRefresh.toLocaleTimeString()}
+            {t('Zdroj: Tempo · ', 'Source: Tempo · ')}{t('aktualizováno', 'updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
           </div>
         )}
       </div>

@@ -74,7 +74,7 @@ class DomesticPaymentOutboxDispatcherTest {
         coEvery { eventPublisher.publish(failing) } throws RuntimeException("kafka down")
         coJustRun { eventPublisher.publish(healthy) }
         coJustRun { outboxRepository.markSent(any(), any()) }
-        coJustRun { outboxRepository.markFailed(any(), any(), any()) }
+        coEvery { outboxRepository.markFailed(any(), any(), any()) } returns OutboxStatus.FAILED
 
         dispatcher().dispatch()
 

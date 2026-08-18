@@ -22,6 +22,7 @@ const STATUS_PILL: Record<string, string> = {
 export default function LedgerPage() {
   const [fromDate, setFromDate] = useState(() => { const d = new Date(); d.setMonth(d.getMonth() - 1); return d.toISOString().slice(0, 10) })
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [toDate, setToDate]     = useState(() => new Date().toISOString().slice(0, 10))
   const [result, setResult]     = useState<CursorPage<JournalEntry> | null>(null)
   const [loading, setLoading]   = useState(false)
@@ -85,10 +86,10 @@ export default function LedgerPage() {
           borderRadius: '8px 8px 0 0',
           display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap',
         }}>
-          <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
-          <input type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
-          <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
-          <input type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
+          <label htmlFor="ledger-from-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Od', 'From')}</label>
+          <input id="ledger-from-date" type="date" className="input" style={{ width: '150px' }} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+          <label htmlFor="ledger-to-date" style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{t('Do', 'To')}</label>
+          <input id="ledger-to-date" type="date" className="input" style={{ width: '150px' }} value={toDate} onChange={e => setToDate(e.target.value)} />
           <button className="btn btn-primary" onClick={search} disabled={loading}>
             <Search size={13} />
             {loading ? t('Načítání…', 'Loading…') : t('Načíst záznamy', 'Load Entries')}
@@ -140,13 +141,11 @@ export default function LedgerPage() {
                 const isOpen = expanded === entry.id
                 return (
                   <>
-                    <tr
-                      key={entry.id}
-                      style={{ cursor: 'pointer' }}
-                      onClick={() => setExpanded(isOpen ? null : entry.id)}
-                    >
+                    <tr key={entry.id}>
                       <td style={{ color: 'var(--text-tertiary)', paddingLeft: '14px' }}>
-                        {isOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                        <button type="button" className="btn btn-ghost" style={{ padding: '3px' }} aria-label={isOpen ? t('Skrýt řádky deníku', 'Hide journal lines') : t('Zobrazit řádky deníku', 'Show journal lines')} aria-expanded={isOpen} aria-controls={`ledger-entry-${entry.id}`} onClick={() => setExpanded(isOpen ? null : entry.id)}>
+                          {isOpen ? <ChevronDown size={13} aria-hidden="true" /> : <ChevronRight size={13} aria-hidden="true" />}
+                        </button>
                       </td>
                       <td><span className="mono" style={{ fontSize: '12px', fontWeight: 500 }}>{entry.entryNumber ?? '—'}</span></td>
                       <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
@@ -172,7 +171,7 @@ export default function LedgerPage() {
                     {isOpen && (
                       <tr key={`${entry.id}-exp`}>
                         <td colSpan={8} style={{ padding: 0, background: 'var(--surface-2)' }}>
-                          <div style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
+                          <div id={`ledger-entry-${entry.id}`} style={{ padding: '12px 20px 12px 50px', borderBottom: '2px solid var(--accent-border)' }}>
                             <div style={{ fontSize: '11px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-tertiary)', marginBottom: '8px' }}>
                               {t('Řádky deníku', 'Journal Lines')}
                             </div>
@@ -202,11 +201,11 @@ export default function LedgerPage() {
                                       </span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0', textAlign: 'right' }}>
-                                      <span className="mono">{Number(line.amount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                      <span className="mono">{Number(line.amount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td style={{ padding: '6px 12px 6px 0' }}><span className="tag">{line.currencyCode}</span></td>
                                     <td style={{ padding: '6px 12px 6px 0', textAlign: 'right' }}>
-                                      <span className="mono">{Number(line.baseAmount).toLocaleString('en-US', { minimumFractionDigits: 2 })}</span>
+                                      <span className="mono">{Number(line.baseAmount).toLocaleString(numberLocale, { minimumFractionDigits: 2 })}</span>
                                     </td>
                                     <td style={{ padding: '6px 0' }}><span className="tag">{line.baseCurrencyCode}</span></td>
                                   </tr>
