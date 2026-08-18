@@ -1,5 +1,119 @@
 # Changelog
 
+## [0.158.14](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.13...admin-ui-v0.158.14) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize operator timestamps ([#5452](https://github.com/JiRaska/open-bank-oss/issues/5452)) ([38a01c8](https://github.com/JiRaska/open-bank-oss/commit/38a01c855945d4577afda0b255ca6ee49ea40249))
+
+## [0.158.13](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.12...admin-ui-v0.158.13) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize lending values ([#5449](https://github.com/JiRaska/open-bank-oss/issues/5449)) ([fd43c7d](https://github.com/JiRaska/open-bank-oss/commit/fd43c7dbd3ecf320768b31ded5f64fcb290553d6))
+
+## [0.158.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.11...admin-ui-v0.158.12) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize operator dates ([e4e1054](https://github.com/JiRaska/open-bank-oss/commit/e4e105452e348039e7f3e446bdc7f8fb0a43f13f))
+
+## [0.158.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.10...admin-ui-v0.158.11) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize fx values ([#5440](https://github.com/JiRaska/open-bank-oss/issues/5440)) ([0a9c052](https://github.com/JiRaska/open-bank-oss/commit/0a9c052e812cd7f5974619f03dd2de37ca590501))
+
+## [0.158.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.9...admin-ui-v0.158.10) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize product catalog values ([c841eef](https://github.com/JiRaska/open-bank-oss/commit/c841eef9c02291dd67ae9e1edd61d15e5d0368bd))
+
+## [0.158.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.8...admin-ui-v0.158.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize ledger amounts ([88f6776](https://github.com/JiRaska/open-bank-oss/commit/88f67768ad3dc4ada60e7884c0cf2cb889d0bafa))
+
+## [0.158.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.7...admin-ui-v0.158.8) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize account detail values ([f756b1f](https://github.com/JiRaska/open-bank-oss/commit/f756b1fe19aeaf3029b894f29b7a97cc53c88b03))
+* **admin-ui:** replace account action prompt ([e36c1dc](https://github.com/JiRaska/open-bank-oss/commit/e36c1dcc66088de472e8a86c5d19bfb2a305bc09))
+
+## [0.158.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.6...admin-ui-v0.158.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove fake IAOPS analysis trigger ([473286a](https://github.com/JiRaska/open-bank-oss/commit/473286aff4b8441beedaf745bb33b647d900f28a))
+
+## [0.158.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.5...admin-ui-v0.158.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** name oversight inputs ([49cef9b](https://github.com/JiRaska/open-bank-oss/commit/49cef9b1876347da836444959d2dc02d6a654192))
+
+## [0.158.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.4...admin-ui-v0.158.5) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** name operator form controls ([#5410](https://github.com/JiRaska/open-bank-oss/issues/5410)) ([f2ce0b7](https://github.com/JiRaska/open-bank-oss/commit/f2ce0b7ba9bce05b88f61a018bafda2989f697bb))
+
+## [0.158.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.3...admin-ui-v0.158.4) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** name operator search controls ([9463a41](https://github.com/JiRaska/open-bank-oss/commit/9463a4122348ae8e6a6aa93247232ed10246436e))
+
+## [0.158.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.2...admin-ui-v0.158.3) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label payment form controls ([c3bbca1](https://github.com/JiRaska/open-bank-oss/commit/c3bbca10690b3acef9a273928022c2d688a4c484))
+* **admin-ui:** label search controls ([140273a](https://github.com/JiRaska/open-bank-oss/commit/140273a6ed45a6941de8283b645fe75bb6723c9d))
+
+## [0.158.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.1...admin-ui-v0.158.2) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label product studio controls ([a18b3e1](https://github.com/JiRaska/open-bank-oss/commit/a18b3e1b766c32cab92d4ddbb364c9b371313b0d))
+
+## [0.158.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.158.0...admin-ui-v0.158.1) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label product catalog fields ([922a3b7](https://github.com/JiRaska/open-bank-oss/commit/922a3b7ccc3aaddd5dd2634edd7843118ed11de8))
+
+## [0.158.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.11...admin-ui-v0.158.0) (2026-08-17)
+
+
+### Features
+
+* **admin-ui:** migrate lending compliance pack header to shared PageHeader ([#5324](https://github.com/JiRaska/open-bank-oss/issues/5324)) ([d0ad763](https://github.com/JiRaska/open-bank-oss/commit/d0ad76377342bd287b2dcfb97b39be42b77a8435))
+
+## [0.157.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.10...admin-ui-v0.157.11) (2026-08-17)
+
+
+### Bug Fixes
+
+* **admin-ui:** label segment draft fields ([c857bd8](https://github.com/JiRaska/open-bank-oss/commit/c857bd8e10389e9d2b907fa5cbea1165a6de7836))
+
 ## [0.157.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.157.9...admin-ui-v0.157.10) (2026-08-17)
 
 
