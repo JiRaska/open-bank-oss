@@ -54,7 +54,10 @@ dependencies {
     // Micrometer rather than from this test's idea of them. Runtime already ships the registry via
     // quarkus-micrometer-registry-prometheus; only the compile classpath needs it. Same version and
     // same rationale as openbank-libs-runtime's WorkflowLivenessMetricNamingTest.
-    testImplementation("io.micrometer:micrometer-registry-prometheus:1.14.5")
+    // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH DoS; the 1.14.x line has no
+    // fix). This literal, not quarkus-bom's own constraint, is what dependency-review scans on
+    // the test classpath — same root cause as openbank-libs-runtime's pin. Issue #5482.
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     testImplementation(libs.testcontainers)
