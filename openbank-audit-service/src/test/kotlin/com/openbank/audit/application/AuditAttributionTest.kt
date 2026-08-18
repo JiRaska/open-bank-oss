@@ -88,6 +88,25 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `document-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's document-service fix: DocumentGenerated and
+        // SignatureCeremonyCompleted (both objectMapper.writeValueAsString) now carry
+        // "sourceService". Before this, EventAttribution's `openbank.documents.document.event` ->
+        // `document-service` entry already resolved these rows correctly, but as TOPIC-sourced —
+        // and this topic IS in audit-service's consumed-topics list today, so this is a live
+        // attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"documentId":"${UUID.randomUUID()}","sourceService":"document-service"}""",
+            EventAddress(topic = "openbank.documents.document.event"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("document-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `security-scanner's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's security-scanner fix: IctIncidentService's hand-built
         // ict-incident-events-out payload (its ONLY live event producer — the outbox apparatus

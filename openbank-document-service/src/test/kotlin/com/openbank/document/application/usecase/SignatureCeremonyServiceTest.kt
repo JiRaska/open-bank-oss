@@ -131,6 +131,9 @@ class SignatureCeremonyServiceTest {
             service.recordDecision(ceremony.id, "party-1", SignerStatus.SIGNED, "evidence-1")
 
             AuditEventTime.assertRecordedAsEventTime(savedMsg.captured.payload, FIXED_NOW)
+            // Issue #3994/#5256: read by AuditConsumer.resolveSourceService as the strongest
+            // (EVENT-sourced) attribution.
+            assertThat(savedMsg.captured.payload).contains("\"sourceService\":\"document-service\"")
         }
 
     @Test
