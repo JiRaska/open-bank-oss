@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.165.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.8...admin-ui-v0.165.9) (2026-08-18)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify expandable card state ([#5558](https://github.com/JiRaska/open-bank-oss/issues/5558)) ([53474fb](https://github.com/JiRaska/open-bank-oss/commit/53474fbed7ac7948471cb959220b90845d8e4c24))
+
 ## [0.165.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.165.7...admin-ui-v0.165.8) (2026-08-18)
 
 
