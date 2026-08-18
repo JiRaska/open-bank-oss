@@ -39,6 +39,16 @@ describe('hasPermission', () => {
     expect(hasPermission([ROLES.KYC_OPENER], 'kyc:approve')).toBe(false)
   })
 
+  it('matches party-service PII read roles without widening the backend gate', () => {
+    expect(hasPermission([ROLES.ADMIN], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.VIEWER], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.KYC], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.COMPLIANCE], 'parties:view')).toBe(false)
+    expect(hasPermission([ROLES.KYC_OPENER], 'parties:view')).toBe(false)
+    expect(hasPermission([ROLES.KYC_REVIEWER], 'parties:view')).toBe(false)
+  })
+
   it('admits the supervisor to payment approval and audit reading, not to creation', () => {
     expect(hasPermission([ROLES.SUPERVISOR], 'payments:approve')).toBe(true)
     expect(hasPermission([ROLES.SUPERVISOR], 'audit:view')).toBe(true)

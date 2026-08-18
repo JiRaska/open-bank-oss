@@ -5,19 +5,21 @@
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
-import jakarta.inject.Inject
 import org.jboss.logging.Logger
 
 /**
  * Shared outbox dispatch loop (ADR-0049 D3 / ADR-0050 N1).
  *
- * A concrete subclass binds the service's [OutboxRepository] and [OutboxEventPublisher] ports:
+ * A concrete subclass binds the service's [OutboxRepository] and [OutboxEventPublisher] ports
+ * and threads `metrics: DomainMetrics` through to the super constructor (mirrors
+ * [AbstractOutboxBacklogGauge], #5128 finding 2):
  * ```
  * @ApplicationScoped
  * class AuditOutboxDispatcher(
  *     private val repository: AuditOutboxRepository,
  *     private val publisher: AuditOutboxEventPublisher,
- * ) : AbstractOutboxDispatcher() {
+ *     metrics: DomainMetrics,
+ * ) : AbstractOutboxDispatcher(metrics) {
  *     override val outboxRepository: OutboxRepository get() = repository
  *     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
  *
@@ -100,20 +102,30 @@ abstract class AbstractOutboxDispatcher {
     }
 
     /**
-     * Metrics facade, deliberately **field**-injected rather than threaded through the
-     * constructor (contrast [AbstractOutboxBacklogGauge], whose concrete subclasses already
-     * accept a `metrics: DomainMetrics` constructor parameter) so this change touches none of
-     * the ~34 concrete dispatchers' constructors (#5049).
-     *
-     * `null` means either "not CDI-managed" — every dispatcher unit test in the fleet
-     * (`AbstractOutboxDispatcherTest` included) constructs its dispatcher directly with `class
-     * Foo(...) : AbstractOutboxDispatcher()`, bypassing the container entirely — or a
-     * not-yet-resolved bean. [dispatchScheduledBatch] treats either as "skip metrics, never
-     * crash", the same graceful-degradation contract [DomainMetrics.reg] uses for a missing
-     * `MeterRegistry`. Visible to this package's tests via direct field assignment (protected).
+     * Metrics facade, **constructor**-injected — matches [AbstractOutboxBacklogGauge]'s existing
+     * pattern instead of the field-injection this class originally shipped with (#5128 finding 2).
+     * Field injection (`@Inject protected var metrics: DomainMetrics? = null`) on an *abstract*
+     * class extended by ~34 `@ApplicationScoped` subclasses across separate Gradle modules had no
+     * precedent elsewhere in the fleet and no test proving CDI actually resolves it across that
+     * module boundary — a silent-null risk if Arc's field discovery on an inherited superclass
+     * field ever behaved unexpectedly. Constructor injection instead fails FAST: a concrete
+     * subclass that doesn't pass `metrics` through to `super(metrics)` is a compile error, not a
+     * runtime maybe. See `PartyOutboxDispatcherCdiIT` (openbank-party-service) and
+     * `DocumentOutboxDispatcherCdiIT` (openbank-document-service) for the real-CDI proof — driven
+     * through a booted `@QuarkusTest` container, in two different Gradle modules — that this
+     * cross-module field injection actually resolved even before this change, and that
+     * constructor injection resolves it too.
      */
-    @Inject
-    protected var metrics: DomainMetrics? = null
+    protected lateinit var metrics: DomainMetrics
+
+    constructor(metrics: DomainMetrics) {
+        this.metrics = metrics
+    }
+
+    // Required by Quarkus CDI for proxy subclass generation — never called at runtime, and
+    // `metrics` is never read on this path (mirrors AbstractOutboxBacklogGauge's identical
+    // second constructor).
+    protected constructor()
 
     /**
      * Core dispatch loop. Call this from the concrete subclass's `@Scheduled` method.
@@ -122,16 +134,14 @@ abstract class AbstractOutboxDispatcher {
      * on the concrete override of [publishWithResilience] — so CDI proxying kicks in when the
      * `@Scheduled` method on the concrete bean calls through the proxy.
      */
-
     protected open suspend fun dispatchScheduledBatch() {
         val result = OutboxDispatch.dispatchOnce(outboxRepository) { entry ->
             publishWithResilience(entry)
         }
-        val m = metrics ?: return
         for (outcome in result.outcomes) {
             when (outcome) {
-                is OutboxDispatchOutcome.Dispatched -> m.outboxDispatched(service, outcome.entry.eventType)
-                is OutboxDispatchOutcome.Failed -> if (outcome.terminal) m.outboxDead(service)
+                is OutboxDispatchOutcome.Dispatched -> metrics.outboxDispatched(service, outcome.entry.eventType)
+                is OutboxDispatchOutcome.Failed -> if (outcome.terminal) metrics.outboxDead(service)
             }
         }
     }

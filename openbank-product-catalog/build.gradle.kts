@@ -137,26 +137,10 @@ tasks.withType<Test> {
     // metadata between profile restarts, so Gradle's 512 MiB test-worker default exhausts the
     // heap before the standalone boot proofs execute. This changes test infrastructure only.
     maxHeapSize = "1536m"
-    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
 
-    // Pact Broker verification (ADR-0092): forward the broker config CI passes with `-D`.
-    // Without this the properties reach the Gradle daemon and stop there, so the @PactBroker
-    // provider test is @EnabledIfSystemProperty(pactbroker.url)-skipped and pact-jvm logs
-    // "Skipping publishing of verification results ... not 'true'" — even on a main push where
-    // the workflow set PUBLISH_RESULTS=true. That is exactly how this module ended up with a
-    // broker version carrying no branch and no verification result, leaving its consumers
-    // permanently UNVERIFIED and undeployable (issue #3285).
-    listOf(
-        "pactbroker.url",
-        "pactbroker.auth.username",
-        "pactbroker.auth.password",
-        "pactbroker.enablePending",
-        "pactbroker.providerBranch",
-        "pact.verifier.publishResults",
-        "pact.provider.version",
-        "pact.provider.branch",
-        "pact.provider.tag",
-    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    // Pact rootDir + Pact Broker property forwarding centralised into
+    // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
+    // (ADR-0250 Phase 2, issue #4414) — only the maxHeapSize override above is service-specific.
 }
 
 // Coverage floor (ADR-0020, ratchet-only — sweep #466: this module previously had NO

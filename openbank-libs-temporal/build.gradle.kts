@@ -51,7 +51,11 @@ dependencies {
     // quarkus-bom:3.33.2 ships. @ConfigMapping/@WithDefault (io.smallrye.config) arrive
     // transitively from quarkus-arc.
     compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
-    compileOnly("io.micrometer:micrometer-core:1.14.5")
+    // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH DoS, no fix in the 1.14.x
+    // line). Same rationale as openbank-libs-runtime's pin — this module has no Quarkus platform
+    // BOM either, so this literal (not quarkus-bom:3.38.0's own micrometer-core:1.17.0
+    // constraint) is what real services never see but dependency-review does. Issue #5482.
+    compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
 
     // isTransitive = false on purpose. This module imports no Quarkus platform BOM, so a
@@ -82,7 +86,8 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
-    testImplementation("io.micrometer:micrometer-core:1.14.5")
+    // Kept in sync with the compileOnly pin above — CVE-2026-40984, issue #5482.
+    testImplementation("io.micrometer:micrometer-core:1.17.0")
     // TemporalClientProducerLazinessTest constructs the producer; its `by lazy` delegate is a
     // synthetic class referencing io.temporal.client.WorkflowClient, which must be LOADABLE
     // (not connectable) at construction. Same isTransitive = false rationale as above — and
