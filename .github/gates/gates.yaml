@@ -2307,6 +2307,8 @@ gates:
     name: "Kafka-using service has KAFKA_BOOTSTRAP_SERVERS wired in its Deployment (issue #4701, enforced)"
     group: data
     mode: enforced
+    rationale: "A service whose outbox producer reads KAFKA_BOOTSTRAP_SERVERS falls through to SmallRye's bare localhost:9092 default when its Deployment omits the env var — the pod stays Ready and only the reactive-messaging channel's own readiness probe (or a hand-read log) shows the outbox dispatcher parking every event DEAD after retry exhaustion (#4701)."
+    review_after: "2027-02-19"
     min_subjects: 30   # 42 Kafka-using services checked today (2026-08-19)
     selftest: |
       python3 .github/scripts/check-kafka-deployment-wiring.py --selftest
@@ -2326,6 +2328,8 @@ gates:
     name: "Flyway migration version must not regress against main's commit order (issue #5628, enforced)"
     group: data
     mode: enforced
+    rationale: "A migration whose PR merges after a higher-numbered sibling has already been applied live crashes the service on every boot ('Detected resolved migration not applied to database: N') — each PR's own CI ran green against its own base and could not see the other, per this repo's own 'PR green is about the base, not main' trap (#5628, security-scanner's 4h+ outage)."
+    review_after: "2027-02-19"
     min_subjects: 250   # 350 migrations across 53 services checked today (2026-08-19)
     selftest: |
       python3 .github/scripts/check-flyway-version-commit-order.py --selftest
