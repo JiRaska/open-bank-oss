@@ -65,8 +65,10 @@ follow-up flip, not bundled here (see ADR-0155; also note `rules.yaml`'s `cleari
 | **R**epudiation | No record of who approved a gated settlement | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals batch/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
 | **D**oS | Flooding `POST /batches/{id}/settle` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/clearing/approvals` lists every pending four-eyes request with its `makerId` and age | Same role gate as `decide` (`@RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)` + OPA `@Authorize(action="clearingBatch.approval.read")`); verified with a real `opa eval` that `clearingBatch.approval.read` resolves `allow=true` for ROLE_OPERATOR/ROLE_ADMIN/ROLE_PAYMENTS via the existing `operator-clearing-write` prefix rule and `allow=false` for ROLE_VIEWER — no rules.yaml change needed. The payload carries approval metadata only — action, resource id and who asked — never batch contents. Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/clearing/approvals/{id} → Redis
+**DFD update:** adds `Operator (checker) → GET /api/v1/clearing/approvals → Redis
+(approval:*)` and `Operator (checker) → PATCH /api/v1/clearing/approvals/{id} → Redis
 (approval:*)` alongside the existing `settle` edge; the maker's retry reuses the existing DFD
 edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
@@ -95,3 +97,16 @@ not change any existing request's outcome until explicitly flipped.
   request in this PR; flipping it is a tracked follow-up. No DB schema change (Redis,
   TTL-bounded); rollback = revert the commit (or leave `authz.four-eyes.enforce=false`, its
   default).
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `clearingBatch.settle`/`clearingBatch.triggerCycle` four-eyes decision parked at 202 was
+  discoverable only by whoever had been handed its approval id out of band — the ceremony
+  completed only if the two operators were already talking, and the 24h Redis TTL then expired
+  the request silently otherwise (issue #5679, mirroring sanctions #3472, lending, ledger and
+  balance). Added `GET /api/v1/clearing/approvals` (§4a new I row); no new trust boundary
+  crossed — same `RedisApprovalStore`, same role gate shape as the existing decide endpoint,
+  additive-only OpenAPI change (1.2.0 -> 1.3.0, ADR-0048). Verified with a real `opa eval`
+  against the regenerated `clearing-opa-bundle.yaml` that the existing `operator-clearing-write`
+  prefix rule (ROLE_OPERATOR/ROLE_ADMIN/ROLE_PAYMENTS) already covers the new
+  `clearingBatch.approval.read` action with no `rules.yaml` change — unlike balance-service
+  (#5690), which needed a `role_action_matrix` entry because its authz shape is matrix-based
+  rather than prefix-based.
