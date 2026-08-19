@@ -395,6 +395,27 @@ gates:
     run: |
       python3 .github/scripts/check-network-policy-code-edges.py
 
+  # Two implementations of the production-readiness scorecard both ship — the Python one via
+  # build-push-admin-ui.sh, the Node one via `prebuild`/admin-ui-deploy.yml, because the admin-ui
+  # build image has no python3. They drifted to 20-of-44 services scored differently (17 GO vs
+  # 11 GO for the same repo on the same day), each side carrying corrections the other lacked,
+  # and nothing compared them. The equivalence is what gets enforced, since the duplicate cannot
+  # be deleted and hand-auditing it is exactly what failed. ENFORCED.
+  - id: readiness-collectors-agree
+    name: "prod-readiness collectors agree (Python vs Node, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Two implementations of the readiness scorecard both ship and cannot be merged into one
+      (no python3 in the admin-ui build image); they had already drifted to 20 of 44 services
+      scored differently, so their equivalence is enforced rather than hand-audited.
+    review_after: 2027-02-19
+    selftest: |
+      python3 .github/scripts/check-readiness-collectors-agree.py --self-test
+    min_subjects: 40   # 44 services scored today (2026-08-19)
+    run: |
+      python3 .github/scripts/check-readiness-collectors-agree.py
+
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
