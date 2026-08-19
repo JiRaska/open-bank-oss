@@ -2472,6 +2472,17 @@ readiness_attestations:
   ref_must_resolve_to: >
     a URL, a #issue, an existing repo path, or runbook-NNNN matching docs/runbooks/NNNN-*.md.
     An entry whose ref resolves to nothing is treated as absent — a sentence is not evidence.
+  exercise_attestation_keys: [restore_drill, dr_drill]
+  exercise_ref_rule: >
+    restore_drill and dr_drill assert that an EXERCISE happened on a date, so a runbook-NNNN
+    ref is rejected for them (gate readiness-attestation-format, R7): a runbook is the plan,
+    undated and byte-identical whether or not anyone ever ran it. Cite the drill record — an
+    entry in docs/bcp/dr-test-log.md or docs/bcp/chaos-test-log.md dated the same day, a run
+    URL, or a #issue — and a drill-log ref whose log carries no entry for that date is
+    rejected too, because a log the attestation names but never received the record is the
+    same silence as no evidence. Measured 2026-08-19 (#5673): the fleet's only drill
+    attestation cited runbook-0003, which is the PostgreSQL 16->18 major-upgrade procedure,
+    and it was raising a money-path readiness dimension from 2 to 3. ADR-0242, ADR-0253.
   enforcement: >
     AUTHORING defects FAIL the build (missing field, non-date, future date, unknown service,
     unknown attestation key, unresolvable ref): each is introduced and fixable by the PR that

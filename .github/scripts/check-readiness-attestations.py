@@ -78,6 +78,31 @@ KNOWN_KEYS = {
 
 REQUIRED_FIELDS = ("date", "ttl_days", "by", "ref")
 
+# Keys that assert an EXERCISE HAPPENED on a date, as opposed to a property that holds.
+# For these a runbook is not evidence: a runbook is the plan, undated and unchanged
+# whether or not anyone ever executed it, so citing one says "we know how to do this",
+# which is precisely the claim ADR-0242 says the estate must stop counting as a drill.
+# Measured 2026-08-19: the fleet's ONLY drill attestation was
+# `ledger.restore_drill … ref: runbook-0003`, and runbook-0003 is the PostgreSQL 16->18
+# major-upgrade procedure — not a restore, not a drill, and dated nowhere. It raised a
+# money-path readiness dimension from 2 to 3 on that basis.
+EXERCISE_KEYS = {"restore_drill", "dr_drill"}
+
+# A drill log entry is the durable artifact: `## YYYY-MM-DD — <scenario>` in one of these.
+DRILL_LOGS = ("docs/bcp/dr-test-log.md", "docs/bcp/chaos-test-log.md")
+
+# Exercise attestations that predate this rule and still cite a runbook. Shrink-only and
+# checked BOTH WAYS: a new one fails, and an entry that healed is reported so the list
+# cannot rot into a permanent exemption. Key: "<service>.<attestation key>".
+EXERCISE_REF_DEBT = {
+    "ledger.restore_drill": (
+        "#5673 — cites runbook-0003 (a PG major-upgrade procedure) for a 2026-07-26 "
+        "restore drill that has no entry in docs/bcp/dr-test-log.md. Left in place rather "
+        "than deleted because the drill may genuinely have happened; the attestant must "
+        "either log it with measured RTO/RPO or drop the claim."
+    ),
+}
+
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISSUE_RE = re.compile(r"^#\d+$")
 RUNBOOK_RE = re.compile(r"^runbook-(\d+)$")
@@ -144,6 +169,20 @@ def yaml_pairs(text: str) -> set[tuple[str, str]] | None:
         if isinstance(entries, dict)
         for key in entries
     }
+
+
+def drill_log_records(repo: pathlib.Path, ref: str, date: str) -> bool:
+    """True when `ref` is a drill log that actually carries an entry for `date`.
+
+    The point is the artifact, not the citation: a log the attestation names but that
+    never got the entry is the same silence as no evidence at all.
+    """
+    if ref.rstrip("/") not in DRILL_LOGS:
+        return True  # not a drill log; other rules judge it
+    path = repo / ref.rstrip("/")
+    if not path.is_file():
+        return False
+    return re.search(rf"^##\s+{re.escape(date)}\b", path.read_text(encoding="utf-8"), re.MULTILINE) is not None
 
 
 def ref_resolves(repo: pathlib.Path, ref: str) -> bool:
@@ -272,6 +311,27 @@ def check(
             )
             continue
 
+        # R7 -- an EXERCISE key must cite evidence the exercise happened, not the procedure
+        # for it. A runbook is undated and identical whether or not anyone ever ran it.
+        if key in EXERCISE_KEYS:
+            debt_key = f"{svc}.{key}"
+            cites_runbook = bool(RUNBOOK_RE.match(f["ref"]))
+            if cites_runbook and debt_key not in EXERCISE_REF_DEBT:
+                errors.append(
+                    f"{where}: `{debt_key}` cites {f['ref']!r} -- a runbook is the PLAN, not "
+                    f"evidence anyone executed it, and it carries no date to compare against "
+                    f"{f['date']}. Cite the drill record instead: an entry in "
+                    f"{' or '.join(DRILL_LOGS)} dated {f['date']}, the run URL, or a #issue"
+                )
+                continue
+            if not drill_log_records(repo, f["ref"], f["date"]):
+                errors.append(
+                    f"{where}: `{debt_key}` cites {f['ref']!r}, which carries no `## {f['date']}` "
+                    f"entry -- the log it names never got the record, so the attestation is "
+                    f"backed by nothing a reader can check"
+                )
+                continue
+
         # Freshness. Exact calendar arithmetic, deliberately: the collector approximates a
         # month as 30 days, which lets a TTL run a day or two past its own expiry.
         age = (today - date).days
@@ -296,6 +356,21 @@ def check(
                 f"derived score then"
             )
 
+    # The debt list is checked the other way too: an entry that healed must leave, or the
+    # exemption silently becomes permanent and reads as a discharged obligation.
+    # Only against the real file: the self-test's fixtures are single-entry synthetic
+    # documents, and asking them about fleet-wide debt would make every unrelated case red.
+    live = {
+        f"{r['service']}.{r['key']}"
+        for r in records
+        if r["key"] in EXERCISE_KEYS and RUNBOOK_RE.match(r["fields"].get("ref", ""))
+    }
+    for stale in sorted(set(EXERCISE_REF_DEBT) - live) if file_rel == FILE_REL else []:
+        errors.append(
+            f"{file_rel}: `{stale}` is in EXERCISE_REF_DEBT but no longer cites a runbook "
+            f"-- remove the entry from check-readiness-attestations.py"
+        )
+
     return (errors, warnings, len(records))
 
 
@@ -316,8 +391,31 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             True,
         ),
         (
-            "TRUE ENTRY citing a runbook must not be flagged",
+            # This line used to be the gate's own proof that a runbook is acceptable
+            # evidence for a drill. It is not (R7) — it is the fleet's one baselined debt,
+            # and the case now tests the EXEMPTION, not the rule.
+            "BASELINED DEBT: ledger.restore_drill's runbook ref is exempt, not endorsed",
             "ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
+            "clean",
+            True,
+        ),
+        (
+            "R7: an exercise attestation citing a runbook fails for anyone not baselined",
+            "consent:\n  dr_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
+            "error",
+            True,
+        ),
+        (
+            "R7: a drill log that never got the entry is not evidence",
+            ("consent:\n  dr_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, "
+             "ref: docs/bcp/dr-test-log.md }\n"),
+            "error",
+            True,
+        ),
+        (
+            "R7 TRUE ENTRY: a drill log carrying that exact date is evidence",
+            ("consent:\n  dr_drill: { date: 2026-06-30, ttl_days: 180, by: jiri, "
+             "ref: docs/bcp/dr-test-log.md }\n"),
             "clean",
             True,
         ),
@@ -440,6 +538,9 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
         (tmp / "openbank-consent-service").mkdir()
         (tmp / "docs/runbooks").mkdir(parents=True)
         (tmp / "docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md").write_text("x")
+        (tmp / "docs/bcp").mkdir(parents=True)
+        (tmp / "docs/bcp/dr-test-log.md").write_text(
+            "# DR Test Log\n\n## 2026-06-30 — table-top\n- **Type**: table-top\n")
         rel = "att.yaml"
 
         for name, body, expect, expect_one in cases:
