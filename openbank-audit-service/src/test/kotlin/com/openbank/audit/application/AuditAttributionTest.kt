@@ -69,6 +69,133 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `card-issuance-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's card-issuance-service fix: CardEvent (CardIssued/CardStatusChanged/
+        // CardLimitsChanged/CardControlsChanged, serialised via ObjectMapper.writeValueAsString in
+        // CardService.outboxMessage) now carries "sourceService" on the base sealed class. Before
+        // this, EventAttribution's `openbank.cards.events` -> `card-issuance-service` entry already
+        // resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"card.status_changed.v1","cardId":"${UUID.randomUUID()}",""" +
+                """"sourceService":"card-issuance-service"}""",
+            EventAddress(topic = "openbank.cards.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("card.status_changed.v1")
+        assertThat(entry.captured.sourceService).isEqualTo("card-issuance-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `consent-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's consent-service fix: every ConsentEvents.kt class (ConsentGranted,
+        // ConsentRevoked, ConsentExpired, ConsentRejected, SuppressionCreated, SuppressionRevoked)
+        // now carries "sourceService" — a serialised data class (ConsentRepositoryImpl.outboxMessage
+        // calls objectMapper.writeValueAsString(event) directly, no hand-built map). Before this,
+        // EventAttribution's `openbank.consent.events` -> `consent-service` entry already resolved
+        // these rows correctly, but as TOPIC-sourced rather than the producer's own claim — and this
+        // topic IS in audit-service's consumed-topics list today, so this is a live attribution
+        // upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"aggregateId":"${UUID.randomUUID()}","eventType":"ConsentGranted",""" +
+                """"sourceService":"consent-service"}""",
+            EventAddress(topic = "openbank.consent.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("ConsentGranted")
+        assertThat(entry.captured.sourceService).isEqualTo("consent-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `fx-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's fx-service fix: FxConversionExecuted (FxService.settle, serialised
+        // via objectMapper.writeValueAsString) now carries "sourceService". Before this,
+        // EventAttribution's `openbank.fx.conversion.completed` -> `fx-service` entry already
+        // resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        // fx-service is a money-path service (rules.yaml: money_path_services).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"conversionId":"${UUID.randomUUID()}","sourceService":"fx-service"}""",
+            EventAddress(topic = "openbank.fx.conversion.completed"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("fx-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `sepa-instant's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's sepa-instant fix: KafkaSctInstEventPublisher.publish builds a
+        // hand-built map (not a serialised data class), now including "sourceService" alongside
+        // "type"/"paymentId"/"occurredAt". Before this, EventAttribution's
+        // `openbank.sepa.instant.events` -> `sepa-instant` entry already resolved these rows
+        // correctly, but as TOPIC-sourced — and this topic IS in audit-service's consumed-topics
+        // list today, so this is a live attribution upgrade. sepa-instant is a money-path service
+        // (rules.yaml: money_path_services).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"type":"SctInstPaymentSubmitted","paymentId":"${UUID.randomUUID()}",""" +
+                """"sourceService":"sepa-instant"}""",
+            EventAddress(topic = "openbank.sepa.instant.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sepa-instant")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `balance-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's balance-service fix: BalanceEvent now carries "sourceService" on the
+        // serialised event (same idiom as its existing actorId/actorType, #3994's original fix) for
+        // all six publish sites (BalanceService's hold/credit/debit, LedgerProjectionService, and
+        // ValueDateRollScheduler). Before this, EventAttribution's `openbank.balance.events` ->
+        // `balance-service` entry already resolved these rows correctly, but as TOPIC-sourced
+        // rather than the producer's own claim — and this topic IS in audit-service's
+        // consumed-topics list today, so this is a live attribution upgrade.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventId":"${UUID.randomUUID()}","eventType":"BALANCE_UPDATED",""" +
+                """"sourceService":"balance-service"}""",
+            EventAddress(topic = "openbank.balance.events"),
+        )
+
+        assertThat(entry.captured.eventType).isEqualTo("BALANCE_UPDATED")
+        assertThat(entry.captured.sourceService).isEqualTo("balance-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `sepa-payment's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256's sepa-payment fix: SepaPaymentCreatedEvent and
+        // SepaPaymentStatusChangedEvent (KafkaSepaPaymentEventPublisher.paymentCreatedPayload /
+        // statusChangedPayload, both objectMapper.writeValueAsString) now carry "sourceService".
+        // Before this, EventAttribution's `openbank.sepa.payment.events` -> `sepa-payment` entry
+        // already resolved these rows correctly, but as TOPIC-sourced — and this topic IS in
+        // audit-service's consumed-topics list today, so this is a live attribution upgrade.
+        // sepa-payment is a money-path service (rules.yaml: money_path_services).
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"paymentId":"${UUID.randomUUID()}","status":"SETTLED",""" +
+                """"sourceService":"sepa-payment"}""",
+            EventAddress(topic = "openbank.sepa.payment.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sepa-payment")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
     fun `dispute-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's dispute-service fix: DisputeService's hand-built outbox payloads
         // (dispute.opened / dispute.resolved / dispute.remediation_requested) and

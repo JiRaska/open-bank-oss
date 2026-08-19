@@ -106,6 +106,32 @@ spec:
               value: http://tempo.observability.svc:4317
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # Kafka producer -> Strimzi tls:9093 (mTLS, issue #4701). Wires the env vars
+            # billing-service's own application.yaml has read since ADR-0248 shipped the
+            # outbox producer -- this Deployment never supplied them, so every publish
+            # attempt fell through SmallRye's connector default of localhost:9092.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: billing-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             # OPA sidecar is deployed (ADR-0034 Phase 5, issue #266). AUTHZ_ENFORCE=true
             # enables the @Authorize HTTP interceptor to enforce decisions from
             # data.openbank.rest.allow. RBAC via OIDC remains the outer gate; OPA is the
@@ -140,6 +166,12 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -229,6 +261,12 @@ spec:
         - name: opa-bundle
           configMap:
             name: billing-opa-bundle
+        - name: kafka-keystore
+          secret:
+            secretName: billing-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
 ---
 apiVersion: v1
 kind: Service

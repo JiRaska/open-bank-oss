@@ -35,6 +35,9 @@ object OversightWebhook {
         NotificationTemplate.KYC_REJECTED,
         NotificationTemplate.ACCOUNT_FROZEN,
         NotificationTemplate.CONSENT_REVOKED,
+        // ADR-0232 delegated-access grant pulled back — same risk shape as CONSENT_REVOKED
+        // (an access grant ending), not a routine lifecycle step like OFFERED/ACCEPTED.
+        NotificationTemplate.DELEGATION_REVOKED,
     )
 
     fun isOversight(template: NotificationTemplate): Boolean = template in OVERSIGHT_TEMPLATES
@@ -44,6 +47,7 @@ object OversightWebhook {
         NotificationTemplate.KYC_REJECTED -> "🚫" // 🚫
         NotificationTemplate.ACCOUNT_FROZEN -> "❄️" // ❄️
         NotificationTemplate.CONSENT_REVOKED -> "🔓" // 🔓
+        NotificationTemplate.DELEGATION_REVOKED -> "🔒" // 🔒
         else -> "ℹ️" // ℹ️
     }
 

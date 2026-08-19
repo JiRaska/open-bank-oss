@@ -59,13 +59,15 @@ import javax.crypto.spec.SecretKeySpec
 @IfBuildProperty(name = "openbank.analytics.worm.backend", stringValue = "s3")
 open class S3WormArchive : WormArchive {
 
+    // eu-north-1 is the estate region (ADR-0175 §Decision 1); every bucket in the account is
+    // eu-north-1, and application.yaml's committed default agrees with this one (issue #3962).
     @ConfigProperty(
         name = "openbank.analytics.worm.s3.endpoint",
-        defaultValue = "https://s3.eu-central-1.amazonaws.com",
+        defaultValue = "https://s3.eu-north-1.amazonaws.com",
     )
     lateinit var endpoint: String
 
-    @ConfigProperty(name = "openbank.analytics.worm.s3.region", defaultValue = "eu-central-1")
+    @ConfigProperty(name = "openbank.analytics.worm.s3.region", defaultValue = "eu-north-1")
     lateinit var region: String
 
     @ConfigProperty(name = "openbank.analytics.worm.s3.bucket", defaultValue = "openbank-analytics-worm")

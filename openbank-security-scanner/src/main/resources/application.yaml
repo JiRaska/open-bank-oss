@@ -71,6 +71,18 @@ quarkus:
     migrate-at-start: true
     connect-retries: 10
     connect-retries-interval: 2S
+    # V4__drop_security_outbox.sql (#4940) merged after V5__create_ict_incidents.sql (#4939)
+    # was already applied to the live database, so the deployed history has 2/3/5 applied
+    # but never 4 — a lower-numbered migration landed after a higher one was already the
+    # applied head. Flyway's default outOfOrder=false refuses to apply it and validate()
+    # fails every boot with "Detected resolved migration not applied to database: 4"
+    # (#5628, CrashLoopBackOff since ~16:47Z). Renumbering V4 would edit an already-merged
+    # migration filename, which the db-migration gate correctly and deliberately blocks (it
+    # can't know from git history alone whether a merged migration was ever applied to a
+    # live DB). out-of-order is the standard Flyway mechanism for exactly this shape — a
+    # late-merged, never-applied migration with a lower version than the current head —
+    # and needs no file edits.
+    out-of-order: true
   hibernate-orm:
     database:
       generation: none

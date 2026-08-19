@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.8.0...sepa-instant-v0.8.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sepa-instant:** add sourceService to published events for audit attribution ([#5389](https://github.com/JiRaska/open-bank-oss/issues/5389)) ([6069ce0](https://github.com/JiRaska/open-bank-oss/commit/6069ce0fd301e4aba5d36ad1fd418e2d027225b5))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.7...sepa-instant-v0.8.0) (2026-08-18)
 
 

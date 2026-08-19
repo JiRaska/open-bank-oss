@@ -991,6 +991,26 @@ class NotificationConsumer @Inject constructor(
                     "<p><b>${vars.v("ctaText")}</b></p>" +
                     "<p style=\"font-size:small;color:#666\">You are receiving this because you opted in to " +
                     "marketing emails. Manage your preferences in the app.</p>"
+            NotificationTemplate.DELEGATION_OFFERED ->
+                "You have a delegated access offer to review" to
+                    "<h2>Delegated Access Offer</h2><p>Someone has offered you delegated access to their " +
+                    "<b>${vars.v("resourceType")}</b>. Open the OpenBank app to accept or decline.</p>"
+            NotificationTemplate.DELEGATION_ACCEPTED ->
+                "Your delegated access offer was accepted" to
+                    "<h2>Offer Accepted</h2><p>Your delegated access offer for your " +
+                    "<b>${vars.v("resourceType")}</b> was accepted and is now active.</p>"
+            NotificationTemplate.DELEGATION_DECLINED ->
+                "Your delegated access offer was declined" to
+                    "<h2>Offer Declined</h2><p>Your delegated access offer for your " +
+                    "<b>${vars.v("resourceType")}</b> was declined. No access was granted.</p>"
+            NotificationTemplate.DELEGATION_REVOKED ->
+                "Your delegated access was revoked" to
+                    "<h2>Access Revoked</h2><p>Delegated access to a <b>${vars.v("resourceType")}</b> " +
+                    "granted to you has been revoked. You can no longer act on it.</p>"
+            NotificationTemplate.DELEGATION_EXPIRED ->
+                "A delegated access grant has expired" to
+                    "<h2>Grant Expired</h2><p>A delegated access grant for a <b>${vars.v("resourceType")}</b> " +
+                    "has reached the end of its validity period and is no longer active.</p>"
         }
 }
 

@@ -1,7 +1,7 @@
 ---
 date: 2026-08-03
 decision-status: proposed
-delivery-status: planned
+delivery-status: shipped
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +11,18 @@ summary: "Every domain @Scheduled job and external feed registers the shared wor
 ---
 
 # ADR-0237 — Scheduler and external-feed liveness heartbeat
+
+**Delivery note (2026-08-19).** Shipped, and the gap this note closes is the one ADR-0253 names:
+the status said `planned` while every point of the decision was live and one of them had been
+blocking every PR for weeks. Evidence: `scheduler-liveness-adoption` is `mode: enforced` in
+`.github/gates/gates.yaml` and its `BASELINE` list is **empty** — no legacy scheduler is exempted,
+so D1 coverage is complete fleet-wide (63 `registerWorkflowLiveness` call sites under
+`openbank-*/src/main`); D2's feed split ships as `FeedFetchMetrics.FRESHNESS_WORKFLOW_PREFIX`
+(`feed-`) with `check-external-feeds.py` gating it; D3's staleness rules are deployed in
+`prometheus-rules-workflow-liveness.yaml` via the `observability-components` ArgoCD app, with the
+boot-seed amendment applied (#4208); D5's per-service rollout is done. What is *not* claimed here:
+that any alert has yet fired in anger — that is ADR-0253's evidence-of-effect question, and the
+new `adr-delivery-evidence` gate is this ADR's own answer to how the drift went unseen.
 
 ## Context
 

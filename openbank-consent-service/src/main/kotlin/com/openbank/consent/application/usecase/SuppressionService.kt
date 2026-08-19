@@ -55,6 +55,7 @@ class SuppressionService(private val suppressions: SuppressionRepository, privat
                 reason = suppression.reason,
                 source = suppression.source,
                 occurredAt = now.toInstant(),
+                sourceService = "consent-service",
             ),
         )
     }
@@ -72,6 +73,7 @@ class SuppressionService(private val suppressions: SuppressionRepository, privat
                 scope = revoked.scope,
                 value = revoked.value,
                 occurredAt = revoked.revokedAt!!.toInstant(),
+                sourceService = "consent-service",
             ),
         )
     }
