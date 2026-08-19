@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "d833cb08df3e9bef"
+    openbank.tech/policy-checksum: "d79061eab6ab1c12"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1283,6 +1283,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

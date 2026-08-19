@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fraud-service
     app.kubernetes.io/part-of: fraud
   annotations:
-    openbank.tech/policy-checksum: "547a4cf5d3d0fd7f"
+    openbank.tech/policy-checksum: "0f4cd0af45c217ef"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1326,6 +1326,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

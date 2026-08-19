@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-issuance-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "5df2c9d7b10e223b"
+    openbank.tech/policy-checksum: "473ddb3cd3ac21ac"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1300,6 +1300,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

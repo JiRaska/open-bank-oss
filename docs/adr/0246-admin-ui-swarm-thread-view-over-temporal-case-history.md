@@ -1,7 +1,8 @@
 ---
 date: 2026-08-05
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — the backend read model and REST surface are live; the admin-ui half of the thread view is the remainder"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "The admin-ui swarm thread view is a read-only projection of Temporal c
 ---
 
 # ADR-0246 — Admin-ui swarm thread view over Temporal case history
+
+**Delivery note (2026-08-19).** The backend half is live on `main` while this ADR read `delivery-status: planned`: `CaseThread` (*"Read model for the ADR-0246 swarm thread view (Phase 2, #4185)"*), `CaseThreadProjection` (*"Pure projection from persistence rows to the ADR-0246 thread view"*) and `CaseCoordinatorResource`'s ADR-0246 thread endpoint, in `openbank-case-coordinator-agent`. The admin-ui rendering this ADR is named for is the remaining half, which is why this is `partial` and not `shipped`. Found by the code->ADR evidence read described in #5708.
+
 
 ## Context
 

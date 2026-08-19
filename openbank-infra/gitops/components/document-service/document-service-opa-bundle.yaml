@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: document-service
     app.kubernetes.io/part-of: documents
   annotations:
-    openbank.tech/policy-checksum: "9127410f253e5573"
+    openbank.tech/policy-checksum: "3ffef2929f3415b9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -962,6 +962,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

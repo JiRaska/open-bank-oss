@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: copilot-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "32a7daf2799d4cbb"
+    openbank.tech/policy-checksum: "43d40923d88ff48a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1369,6 +1369,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

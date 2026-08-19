@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "4e5912b506ae0d06"
+    openbank.tech/policy-checksum: "0abbbe4ed712e13f"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1289,6 +1289,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

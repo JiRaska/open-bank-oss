@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: pid-service
     app.kubernetes.io/part-of: pid
   annotations:
-    openbank.tech/policy-checksum: "5aeabb3d31f495ed"
+    openbank.tech/policy-checksum: "b5fd99734fbf0969"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1333,6 +1333,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

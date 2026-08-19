@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: domestic-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "4df6772b6e63a410"
+    openbank.tech/policy-checksum: "b057d6e6947c9174"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1322,6 +1322,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold
