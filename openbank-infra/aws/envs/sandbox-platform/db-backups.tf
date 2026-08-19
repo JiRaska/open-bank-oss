@@ -251,6 +251,13 @@ locals {
     # have no recovery point at all — the #1444 failure mode, caught this time by
     # check-db-backup-associations.py before the cluster ever existed rather than days after.
     copilot = { namespace = "platform", sa = "copilot-db" }
+    # engagement-db was the last cluster in the fleet with NO backup at all — no
+    # barmanObjectStore, therefore no archive attempt, therefore no alert. The loud version of
+    # this (campaign-db, above) failed for ~48h and was visible the whole time; the silent
+    # version is worse and had been true since the cluster was created. Enumerated from the
+    # `kind: Cluster` manifests rather than from the rollout comments in this file, which have
+    # asserted "all remaining clusters" incorrectly three times now (#1444).
+    engagement = { namespace = "engagement", sa = "engagement-db" }
   }
 }
 
