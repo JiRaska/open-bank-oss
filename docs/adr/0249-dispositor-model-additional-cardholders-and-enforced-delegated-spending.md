@@ -1,7 +1,8 @@
 ---
 date: 2026-08-08
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "Disponent model: a delegate may SPEND — an additional card in their 
 ---
 
 # ADR-0249 — Dispositor model: additional cardholders and enforced delegated spending
+
+**Delivery note (2026-08-19).** Live on `main` while this ADR read `delivery-status: planned`: **20 production Kotlin file(s)** across `openbank-card-issuance-service`, `openbank-customer-edge`, `openbank-delegation-service` cite this ADR, naming its decision clause(s) `D1`, `D2`, `D3`, `D4`, `D5` rather than referencing it as prior art. Found by the code->ADR evidence read described in #5708 (the inverse of the ADR->path probe #5669 deliberately rejected). `decision-status` is unchanged; the unbuilt remainder is triaged in #5708.
+
 
 Relates: ADR-0232 (delegated access), ADR-0021 (SCA settlement gate),
 ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0133 (tamper-evident audit),
