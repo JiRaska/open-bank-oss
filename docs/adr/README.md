@@ -240,19 +240,19 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0229](0229-roles-single-source-persona-ia.md) | Roles single source of truth and persona-driven information architecture | Proposed | Planned | authz,admin-ui,governance | — |
 | [0230](0230-backoffice-hybrid-consoles.md) | Backoffice hybrid consoles for lending, fraud and SDD | Proposed | Planned | admin-ui,lending,fraud | — |
 | [0231](0231-backoffice-identity-admin-no-mock.md) | Backoffice identity administration, no mock data in production UI, entity navigation standard | Proposed | Planned | admin-ui,governance,security-ops | — |
-| [0232](0232-delegated-access-customer-to-party-sharing-with-granular-capabilities.md) | Delegated access: customer-to-party sharing with granular capabilities | Proposed | Planned | authz,accounts,sca,compliance | — |
+| [0232](0232-delegated-access-customer-to-party-sharing-with-granular-capabilities.md) | Delegated access: customer-to-party sharing with granular capabilities | Proposed | Partial | authz,accounts,sca,compliance | — |
 | [0233](0233-agent-as-delegation-grantee-bounded-agentic-allowance.md) | Agent as delegation grantee: bounded agentic allowance | Proposed | Planned | ai-agents,authz,sca,payments | — |
 | [0234](0234-identity-aware-edge-gate-for-internal-tool-uis.md) | Identity-aware edge gate for internal tool UIs | Accepted | Partial | authn,networking,observability,admin-ui | — |
 | [0235](0235-continuous-ai-assurance.md) | Continuous AI assurance — adversarial gate, conformity-as-code, and beyond-phase-5 roadmap | Proposed | Planned | ai-agents,governance,compliance | — |
 | [0236](0236-deployed-main-drift-watch.md) | Deployed == main drift watch | Accepted | Shipped | gitops,observability,ci | — |
-| [0237](0237-scheduler-feed-liveness-heartbeat.md) | Scheduler and external-feed liveness heartbeat | Proposed | Planned | observability,ci,governance | — |
+| [0237](0237-scheduler-feed-liveness-heartbeat.md) | Scheduler and external-feed liveness heartbeat | Proposed | Shipped | observability,ci,governance | — |
 | [0238](0238-copilot-conversation-memory-two-tiers-explicit-only.md) | Copilot conversation memory: two tiers, explicit only | Proposed | Planned | ai-agents,privacy-gdpr,database | — |
 | [0239](0239-delivery-outcome-events-for-notification-requests.md) | Delivery-outcome events for notification requests | Proposed | Planned | notifications,kafka,api-contract,privacy-gdpr | — |
 | [0240](0240-campaign-conversion-attribution-product-event.md) | Campaign conversion attribution: a product event correlated to the goal | Proposed | Planned | notifications,analytics,privacy-gdpr | — |
 | [0241](0241-alert-hygiene-zero-standing-critical-alerts.md) | Alert hygiene: zero standing critical alerts | Proposed | Planned | observability,governance,resilience | — |
 | [0242](0242-quarterly-dr-and-chaos-drill-with-measured-rto-rpo.md) | Quarterly DR and chaos drill with measured RTO/RPO | Proposed | Planned | resilience,governance,ci | — |
 | [0243](0243-k6-performance-gate-as-ci-advisory-check.md) | k6 performance gate as CI advisory check | Proposed | Shipped | ci,testing,observability | — |
-| [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Proposed | Planned | ai-agents,architecture,resilience,governance | — |
+| [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Proposed | Partial | ai-agents,architecture,resilience,governance | — |
 | [0245](0245-campaign-conversion-as-an-observed-product-event.md) | Campaign conversion as an observed product event | Proposed | Planned | analytics,kafka,privacy-gdpr,admin-ui | — |
 | [0246](0246-admin-ui-swarm-thread-view-over-temporal-case-history.md) | Admin-ui swarm thread view over Temporal case history | Proposed | Planned | ai-agents,admin-ui,observability,governance | — |
 | [0247](0247-fraud-hold-as-a-party-level-adverse-state.md) | Fraud hold as a party-level adverse state | Proposed | Planned | fraud,privacy-gdpr,kafka | — |
@@ -261,7 +261,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0250](0250-decouple-the-main-push-service-build-from-the-pact-broker-runner-pool.md) | Decouple the main-push service build from the Pact Broker runner pool | Accepted | Partial | ci,finops,capacity,testing | — |
 | [0251](0251-independent-model-review-of-money-path-and-governance-prs.md) | Independent model review of money-path and governance PRs | Proposed | Planned | ci,governance,ai-agents,compliance | — |
 | [0252](0252-synthetic-customer-fleet.md) | Synthetic customer fleet and journey-based production assurance | Accepted | Partial | testing,observability,notifications,compliance | openbank-app |
-| [0253](0253-evidence-of-effect-a-control-must-be-able-to-show-it-carried-work.md) | Evidence of effect: a control must be able to show it carried work | Proposed | Planned | observability,testing,governance,architecture | — |
+| [0253](0253-evidence-of-effect-a-control-must-be-able-to-show-it-carried-work.md) | Evidence of effect: a control must be able to show it carried work | Proposed | Partial | observability,testing,governance,architecture | — |
 | [0254](0254-ci-gate-estate-integrity.md) | CI gate estate integrity: ruleset parity, advisory-finding staleness, and incident coverage | Accepted | Shipped | ci,governance | — |
 | [0255](0255-ci-gate-observability.md) | CI/QG observability: a read-only health snapshot, an admin-ui panel, and a ClickHouse/Grafana historical trend | Accepted | Partial | ci,governance,observability | — |
 | [0256](0256-perpetual-kyc-event-driven-re-screening-between-periodic-reviews.md) | Perpetual KYC: event-driven re-screening between periodic reviews | Proposed | Planned | kyc,aml-sanctions,kafka,ai-agents | — |
