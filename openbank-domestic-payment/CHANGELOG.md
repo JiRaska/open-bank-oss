@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.15.0...domestic-payment-v0.16.0) (2026-08-19)
+
+
+### Features
+
+* **domestic-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5692](https://github.com/JiRaska/open-bank-oss/issues/5692)) ([73b584e](https://github.com/JiRaska/open-bank-oss/commit/73b584e972ddb73270cb0af9ab1722ac66996eb7))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.2...domestic-payment-v0.15.0) (2026-08-18)
 
 

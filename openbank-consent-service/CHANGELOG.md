@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.1...consent-service-v0.18.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **consent:** map SuppressionEntity to the columns V6 actually created ([#5711](https://github.com/JiRaska/open-bank-oss/issues/5711)) ([87473a5](https://github.com/JiRaska/open-bank-oss/commit/87473a5f2189093d819a1bd8b4808f288d192e33))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.0...consent-service-v0.18.1) (2026-08-18)
 
 

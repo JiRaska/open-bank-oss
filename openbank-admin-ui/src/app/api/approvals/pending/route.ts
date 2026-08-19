@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'swift' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'swift' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -42,6 +42,10 @@ type SanctionsApproval = LendingApproval
 
 // transaction-service serves the same libs `PendingApproval` shape too (#5679).
 type TransactionApproval = LendingApproval
+// fx-service serves the same libs `PendingApproval` shape (issue #5679, money-path first per
+// that issue's own ordering). Before this, an `fx.convert` four-eyes decision parked at 202
+// was discoverable only by whoever had been handed its id out of band.
+type FxApproval = LendingApproval
 
 // domestic-payment-service serves the same libs `PendingApproval` shape (issue #5679, money-path
 // first per that issue's own ordering). Before this, a `domestic-payment.transitionStatus`
@@ -155,6 +159,28 @@ async function clearingPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function fxPending(headers: HeadersInit): Promise<SourceResult> {
+  // k8s workload is `fx-service` (with the `-service` suffix, unlike sepa-instant) — see
+  // src/app/api/svc/[service]/[...path]/route.ts's SERVICE_MAP for the canonical key and
+  // openbank-infra/gitops/components/fx-service/fx-service.yaml for the `fx` namespace.
+  // fx-service also sits on the FinOps off-hours scaledown allowlist (see app/api/fx/rates'
+  // discovery-based handling), so a scaled-to-zero fx-service surfaces here as 'unavailable'
+  // (a fetch failure caught below), same as any other down source — the inbox does not need
+  // to distinguish scale-to-zero from genuinely down.
+  const res = await fetch(serverSvcUrl('fx-service', 'fx', 8119, '/api/v1/fx/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as FxApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'fx' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 async function swiftPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(serverSvcUrl('swift-service', 'payments', 8122, '/api/v1/swift/approvals', { limit: '50' }), {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
@@ -197,16 +223,17 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, swift, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, swift, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
     domesticPaymentPending(headers).catch(() => unavailable),
     clearingPending(headers).catch(() => unavailable),
+    fxPending(headers).catch(() => unavailable),
     swiftPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...swift.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...swift.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -216,6 +243,7 @@ export async function GET() {
       transaction: transaction.state,
       'domestic-payment': domesticPayment.state,
       clearing: clearing.state,
+      fx: fx.state,
       swift: swift.state,
       agent: agent.state,
     },

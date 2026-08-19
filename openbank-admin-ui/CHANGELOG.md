@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.170.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.169.0...admin-ui-v0.170.0) (2026-08-19)
+
+
+### Features
+
+* **clearing:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5693](https://github.com/JiRaska/open-bank-oss/issues/5693)) ([dc25d40](https://github.com/JiRaska/open-bank-oss/commit/dc25d40b3de7f3f0460800c05e50eb24347a17ad))
+* **domestic-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5692](https://github.com/JiRaska/open-bank-oss/issues/5692)) ([73b584e](https://github.com/JiRaska/open-bank-oss/commit/73b584e972ddb73270cb0af9ab1722ac66996eb7))
+
 ## [0.169.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.168.0...admin-ui-v0.169.0) (2026-08-19)
 
 
