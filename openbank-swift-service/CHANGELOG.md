@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.8.0...swift-service-v0.9.0) (2026-08-19)
+
+
+### Features
+
+* **swift:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5696](https://github.com/JiRaska/open-bank-oss/issues/5696)) ([9824471](https://github.com/JiRaska/open-bank-oss/commit/98244714c936eae8f713cbe6c3b462dc19e5b573))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.6...swift-service-v0.8.0) (2026-08-18)
 
 
