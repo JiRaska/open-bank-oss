@@ -53,14 +53,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 UI_DIR="$REPO_ROOT/openbank-admin-ui"
 SCAN_ROOT="${MERMAID_SCAN_ROOT:-$REPO_ROOT}"
 
-ensure_deps() {
-  if node -e "require.resolve('mermaid',{paths:['$UI_DIR']});require.resolve('jsdom',{paths:['$UI_DIR']})" \
-      >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "[mermaid-parses] installing openbank-admin-ui deps (npm ci — jsdom is a devDependency)"
-  ( cd "$UI_DIR" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null )
-}
+# Shared with governance-manifest, and shared deliberately: both gates run in the `lint` shard,
+# which run-gates.py executes concurrently, and two simultaneous `npm ci` calls in one directory
+# destroy each other's node_modules. See the helper's header.
+# shellcheck source=.github/scripts/ensure-admin-ui-deps.sh
+source "$SCRIPT_DIR/ensure-admin-ui-deps.sh"
+
+ensure_deps() { ensure_admin_ui_deps "mermaid-parses"; }
 
 run_check() {
   UI_DIR="$UI_DIR" SCAN_ROOT="$SCAN_ROOT" node --input-type=module <<'NODE'
