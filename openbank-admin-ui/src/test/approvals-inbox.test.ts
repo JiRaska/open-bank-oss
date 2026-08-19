@@ -33,7 +33,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(res.status).toBe(401)
   })
 
-  it('merges lending, sanctions, transaction, domestic-payment, fx and agent queues into canonical items, sorted by proposedAt', async () => {
+  it('merges lending, sanctions, transaction, domestic-payment, clearing, fx and agent queues into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) {
         return Promise.resolve(new Response(JSON.stringify([
@@ -44,6 +44,11 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       if (url.includes('sanctions')) {
         return Promise.resolve(new Response(JSON.stringify([
           { id: 'S-1', action: 'sanctions.clear', resourceId: 'hit-9', makerId: 'analyst.c', createdAt: '2026-07-29T12:00:00Z' },
+        ]), { status: 200 }))
+      }
+      if (url.includes('clearing')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { id: 'C-1', action: 'clearingBatch.settle', resourceId: 'batch-7', makerId: 'operator.d', createdAt: '2026-07-29T11:00:00Z' },
         ]), { status: 200 }))
       }
       if (url.includes('transaction')) {
@@ -71,13 +76,16 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
-    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'D-1', 'F-1', 'S-1', 'P-1', 'T-1', 'L-2'])
+    // D-1 and C-1 both sit at 11:00, so their relative order is the stable-sort's concat order
+    // (domestic-payment before clearing in route.ts); F-1 is 11:30 and orders on its own.
+    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'D-1', 'C-1', 'F-1', 'S-1', 'P-1', 'T-1', 'L-2'])
     expect(body.items[0]).toMatchObject({ domain: 'lending', action: 'lending.writeoff', maker: 'officer.a' })
     expect(body.items[1]).toMatchObject({ domain: 'domestic-payment', action: 'domestic-payment.transitionStatus', maker: 'operator.d' })
-    expect(body.items[2]).toMatchObject({ domain: 'fx', action: 'fx.convert', maker: 'trader.d' })
-    expect(body.items[3]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
-    expect(body.items[4]).toMatchObject({ domain: 'agent', action: 'agent.research' })
-    expect(body.items[5]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
+    expect(body.items[2]).toMatchObject({ domain: 'clearing', action: 'clearingBatch.settle', maker: 'operator.d' })
+    expect(body.items[3]).toMatchObject({ domain: 'fx', action: 'fx.convert', maker: 'trader.d' })
+    expect(body.items[4]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
+    expect(body.items[5]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+    expect(body.items[6]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
   })
 
   // The regression this file exists to prevent, stated as a test for the transaction slice of
@@ -130,6 +138,23 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources['domestic-payment']).toBe('ok')
   })
 
+  // Same regression, clearing's side (issue #5679): clearing-service has served
+  // ApprovalStore.decide since ADR-0155 but never the pending list, so a parked
+  // `clearingBatch.settle`/`clearingBatch.triggerCycle` decision was invisible on the one
+  // screen built to show parked decisions.
+  it('reads the clearing queue at all — an unread source is indistinguishable from an empty one', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      seen.push(String(url))
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(seen.some(u => u.includes('/api/v1/clearing/approvals'))).toBe(true)
+    expect(body.sources.clearing).toBe('ok')
+  })
+
   // Same regression, fx side (issue #5679): fx-service has served ApprovalStore.decide since
   // ADR-0155 but never the pending list, so a parked `fx.convert` four-eyes decision was
   // invisible on the one screen built to show parked decisions.
@@ -151,12 +176,12 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       if (url.includes('lending')) return Promise.reject(new Error('lending down'))
       if (url.includes('sanctions')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       if (url.includes('transaction')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
-      if (url.includes('proposals')) {
-        return Promise.resolve(new Response(JSON.stringify([
-          { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
-        ]), { status: 200 }))
-      }
-      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 })) // domestic-payment, fx
+      if (url.includes('domestic-payment')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      if (url.includes('clearing')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      if (url.includes('fx/approvals')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      return Promise.resolve(new Response(JSON.stringify([
+        { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
+      ]), { status: 200 }))
     })
     vi.stubGlobal('fetch', mock)
 
@@ -187,6 +212,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.sanctions).toBe('ok')
     expect(body.sources.transaction).toBe('ok')
     expect(body.sources['domestic-payment']).toBe('ok')
+    expect(body.sources.clearing).toBe('ok')
     expect(body.sources.fx).toBe('ok')
     expect(body.sources.agent).toBe('ok')
   })
@@ -205,6 +231,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.sanctions).toBe('unavailable')
     expect(body.sources.transaction).toBe('unavailable')
     expect(body.sources['domestic-payment']).toBe('unavailable')
+    expect(body.sources.clearing).toBe('unavailable')
     expect(body.sources.fx).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })
