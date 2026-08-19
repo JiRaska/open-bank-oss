@@ -35,15 +35,32 @@ spec:
             summary: "transaction outbox backlog stuck"
             description: "transaction-service outbox has >100 unrelayed rows for >15m — payment events are not being dispatched."
         - alert: TransactionSagaStuck
-          # A saga stuck >5m = payment is in a terminal-unknown state.
-          expr: openbank_transaction_sagas_stuck_total > 0
+          # A saga stuck past its expected completion = payment in a terminal-unknown state.
+          #
+          # This rule spent its whole life unable to fire (#5733): it was written against
+          # `openbank_transaction_sagas_stuck_total`, which nothing has ever emitted. It loaded,
+          # promtool accepted it, Alertmanager routed it, and Prometheus reported it `inactive`
+          # forever -- indistinguishable from a correctly-quiet critical alert. It now reads the
+          # gauge TransactionStrandedGauge actually publishes.
+          #
+          # Age, not count: a wedged saga answered 2xx, emitted no error span, took normal latency
+          # and sits on a healthy pod, so age is the only layer at which it differs from a healthy
+          # one -- the same reason DomesticPaymentStrandedBeforeClearing is written this way
+          # (#3273). The `> 300` IS the "stuck >5m" the old comment claimed, expressed against a
+          # series that exists; `for: 5m` then requires it to persist rather than catching one
+          # slow saga mid-flight.
+          #
+          # PENDING only. PROCESSING is mid-saga and legitimately takes seconds to low minutes;
+          # holding both to a 5m bound would page on normal traffic, and holding both to the
+          # loosest bound is the same as not alerting on PENDING at all.
+          expr: max(openbank_transactions_non_terminal_oldest_age_seconds{status="PENDING"}) > 300
           for: 5m
           labels:
             severity: critical
             service: transaction
           annotations:
             summary: "Payment sagas are stuck in transaction-service"
-            description: "{{ $value }} payment saga(s) have been in an incomplete state for >5m — manual triage required."
+            description: "Oldest PENDING payment saga is {{ $value | humanizeDuration }} old (>5m) — manual triage required."
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule

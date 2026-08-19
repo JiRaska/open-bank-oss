@@ -30,35 +30,36 @@
 # Usage:  source "$(dirname "$0")/ensure-admin-ui-deps.sh"; ensure_admin_ui_deps "<label>"
 
 ensure_admin_ui_deps() {
-  local label="${1:-deps}"
-  local script_dir repo_root ui_dir lock waited
+  local label="${1:-deps}" script_dir repo_root ui_dir lock marker waited
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   repo_root="$(cd "$script_dir/../.." && pwd)"
   ui_dir="$repo_root/openbank-admin-ui"
   lock="$ui_dir/.node_modules.gate-lock"
+  # A COMPLETION marker, not a resolve check. npm writes node_modules progressively, so a waiter
+  # that probes with require.resolve can see a half-installed tree as ready and then fail on a
+  # package npm has not unpacked yet — which is how the first version of this helper still let the
+  # two gates trip over each other, just later and less obviously (the gate reported UNFALSIFIED,
+  # not a clean failure). The marker is written only after `npm ci` returns 0.
+  marker="$ui_dir/node_modules/.openbank-gate-deps-ok"
 
-  _deps_present() {
-    node -e "for (const m of ['yaml','zod','mermaid','jsdom']) require.resolve(m,{paths:['$ui_dir']})" \
-      >/dev/null 2>&1
-  }
-
-  if _deps_present; then return 0; fi
+  if [ -f "$marker" ]; then return 0; fi
 
   waited=0
-  # 600s: a cold `npm ci` here is ~50s, so this only trips when the holder died mid-install.
+  # 900s: a cold `npm ci` here is ~50s, so this only trips when the holder died mid-install.
   while ! mkdir "$lock" 2>/dev/null; do
-    if [ "$waited" -ge 600 ]; then
+    if [ "$waited" -ge 900 ]; then
       echo "[$label] stale lock at $lock after ${waited}s — removing and retrying" >&2
       rm -rf "$lock"
       continue
     fi
     sleep 2
     waited=$((waited + 2))
-    if _deps_present; then return 0; fi
+    if [ -f "$marker" ]; then return 0; fi
   done
   trap 'rm -rf "$lock"' EXIT
 
-  if _deps_present; then
+  # Re-check under the lock: the holder we queued behind has usually just finished.
+  if [ -f "$marker" ]; then
     rm -rf "$lock"
     trap - EXIT
     return 0
@@ -69,6 +70,7 @@ ensure_admin_ui_deps() {
   # A half-written tree left by a killed peer makes npm ci itself fail, so clear it first.
   rm -rf "$ui_dir/node_modules"
   ( cd "$ui_dir" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null )
+  touch "$marker"
 
   rm -rf "$lock"
   trap - EXIT

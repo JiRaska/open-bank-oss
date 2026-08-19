@@ -23,6 +23,10 @@ import java.util.UUID
  * a required field is logged and skipped, never crashes the consumer) and delegates to an
  * idempotent use case, so a deterministic downstream failure for one account never wedges delivery
  * for every subsequent one.
+ *
+ * Delivery failures are split by kind (#5698) — see [withBoundedRetry]. A deterministic failure for
+ * one account is still acked; a transient one is retried and then rethrown, so it dead-letters
+ * instead of vanishing.
  */
 @ApplicationScoped
 class AnnualFeeSummaryReadyConsumer(
@@ -52,20 +56,33 @@ class AnnualFeeSummaryReadyConsumer(
         }
 
         try {
-            deliveryUseCase.deliverAnnualStatement(cmd)
-        } catch (e: Exception) {
-            // Poison-pill safety: statement delivery is best-effort event-driven work, so a
-            // deterministic downstream failure for ONE account (e.g. no PUBLISHED template) must
-            // not throw out of the stream and, under smallrye-kafka's default fail-strategy, wedge
-            // delivery for EVERY subsequent account. Log and ack; a missed statement is
-            // re-triggerable by billing-service re-draining its outbox, not a money error.
-            log.errorf(
-                e,
-                "Annual statement delivery failed for account %s year %d; skipping (event acked).",
-                cmd.accountId,
-                cmd.year,
-            )
+            withBoundedRetry(log, "Annual statement delivery for account ${cmd.accountId} year ${cmd.year}") {
+                deliveryUseCase.deliverAnnualStatement(cmd)
+            }
+        } catch (e: IllegalStateException) {
+            ackDeterministic(e, cmd)
+        } catch (e: IllegalArgumentException) {
+            ackDeterministic(e, cmd)
         }
+        // Anything else has already been retried and is deliberately NOT caught: it propagates so
+        // smallrye-kafka can dead-letter the record rather than acking work that never happened.
+    }
+
+    /**
+     * Ack a failure that is a property of THIS account rather than of the infrastructure — e.g. no
+     * PUBLISHED template for the statement. Statement delivery is best-effort event-driven work, so
+     * such an event must not throw out of the stream and, under smallrye-kafka's default
+     * fail-strategy, wedge delivery for EVERY subsequent account; and a retry or a DLQ cannot help,
+     * since the next delivery fails identically. A missed statement is re-triggerable by
+     * billing-service re-draining its outbox, not a money error.
+     */
+    private fun ackDeterministic(e: RuntimeException, cmd: AnnualFeeSummaryReadyCommand) {
+        log.errorf(
+            e,
+            "Annual statement delivery failed deterministically for account %s year %d; skipping (event acked).",
+            cmd.accountId,
+            cmd.year,
+        )
     }
 
     // ReturnCount: deliberate -- each required field is validated independently (poison-pill
