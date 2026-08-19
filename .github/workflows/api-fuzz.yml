@@ -248,6 +248,22 @@ jobs:
               echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
             done
 
+            # Compile BEFORE the readiness clock starts. The 180s budget below was being spent
+            # on the Gradle build, not on the Quarkus boot: measured on run 32288156614,
+            # `starting quarkusDev` was echoed at 18:43:10 and quarkusDev's first log line landed
+            # at 18:45:38 — 148 of the 180 seconds gone to configuration and compilation, leaving
+            # the application ~32s before teardown killed it. It never had a chance, and the job
+            # reported "failed to boot" about a service that had not finished starting.
+            #
+            # Services with a warm build cache passed; the ones without did not, which is why the
+            # same service flips between runs. Doing the compile as its own step makes the wait
+            # measure what it claims to measure, and a slow BUILD now shows up as a slow build.
+            echo "==> [${svc}] compiling (outside the readiness budget)"
+            BUILD_START=$SECONDS
+            ./gradlew ":${svc}:quarkusGenerateCode" ":${svc}:classes" \
+              --console=plain --quiet >> "fuzz-reports/${svc}-boot.log" 2>&1 || true
+            echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s"
+
             echo "==> [${svc}] starting quarkusDev"
             ./gradlew ":${svc}:quarkusDev" \
               -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
