@@ -62,6 +62,19 @@ interface PartyRepository {
     /** Count parties in a given [status]. Used for funnel KPI tiles (ADR-0068). */
     suspend fun countByStatus(status: PartyStatus): Long
 
+    /**
+     * Parties still `PENDING_KYC` that were created before [cutoff] — the onboarding funnel's
+     * stalled tail (#5698).
+     *
+     * A party is `PENDING_KYC` from creation until kyc-service opens and clears its case, so a
+     * *young* one is the normal state and only age makes it a defect. Deliberately counts the
+     * SYMPTOM rather than reconciling parties against kyc cases: every cause lands here — the
+     * `PARTY_CREATED` event lost before a case was ever opened (the #5698 incident), kyc-service
+     * unreachable, a case opened but stuck awaiting a reviewer — whereas a party-to-case
+     * reconciler would see only the first, and would need a cross-service read to do it.
+     */
+    suspend fun countPendingKycOlderThan(cutoff: Instant): Long
+
     /** GDPR Art. 17 erasure: anonymize the party's personal data in place. */
     suspend fun anonymize(id: UUID)
 

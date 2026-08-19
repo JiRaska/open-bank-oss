@@ -82,6 +82,10 @@ class PartyRepositoryImpl(
     override suspend fun countByStatus(status: PartyStatus): Long =
         Panache.withSession { count("status", status.name) }.awaitSuspending()
 
+    override suspend fun countPendingKycOlderThan(cutoff: Instant): Long = Panache.withSession {
+        count("status = ?1 and createdAt < ?2", PartyStatus.PENDING_KYC.name, cutoff)
+    }.awaitSuspending()
+
     // ADR-0055 bounded name search, extended by ADR-0228 D1 to the business keys a backoffice
     // operator actually holds: email, phone, tax id and company registration number alongside
     // legal/trading name. Case-insensitive substring over all six (lower(...) + the V7

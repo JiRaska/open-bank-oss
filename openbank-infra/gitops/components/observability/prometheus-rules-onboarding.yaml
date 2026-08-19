@@ -64,6 +64,33 @@ spec:
           annotations:
             summary: "Parties are being created but no accounts are opening"
             description: "openbank_parties_created_total rose over the last hour while openbank_accounts_created_total did not — new customers are registering but the PARTY_CREATED → account.created pipeline is not producing accounts. This is the onboarding outage signature (party-service → Kafka → account-service). Check the party-events consumer lag, the DLQ (PartyEventDeadLettered), and account-service's dependencies (sanctions-service, product-catalog)."
+        - alert: OnboardingStalledInStage
+          # The gap the three rules above cannot cover, and #5698 proved it: a party created on
+          # 2026-08-19 never got a KYC case because the consumer ACKED the failure. Every signal
+          # here stayed silent, by construction —
+          #   PartyEventDeadLettered:              the event was acked, so it never reached the DLQ;
+          #   OnboardingAccountsNotFollowingParties: other parties opened accounts in the same hour,
+          #                                        so the fleet-wide disparity never appeared;
+          #   KafkaConsumerGroupLagStuck:          an acked message is not lag.
+          # Ten of 73 sandbox parties were stuck this way, the oldest for ten weeks, and the first
+          # thing to notice was a customer saying their account did not work.
+          #
+          # A swallowed failure leaves NO error to count — no exception, no lag, no DLQ row, no
+          # failed request — so the only observable is the entity still sitting in the stage. Hence
+          # a census gauge (party-service refreshes it every 5m) rather than a rate.
+          #
+          # `stage` is a label so a second stalled stage (an account stuck PENDING_ACTIVATION, a
+          # signature ceremony never completed) reuses this rule as-is. The gauge only counts
+          # entities past that stage's own age threshold (party: 24h), so in-flight onboarding is
+          # already excluded and `> 0` is the correct trigger — no arbitrary count threshold that
+          # would let a small number hide.
+          expr: openbank_onboarding_stalled > 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Onboarding stalled in stage {{ $labels.stage }} ({{ $value }} stuck)"
+            description: "{{ $value }} entity(ies) have been stuck in onboarding stage {{ $labels.stage }} past its age threshold. Nothing failed loudly — this is the shape where a handler acked work it did not do (#5698), a dependency was briefly down, or a case is waiting on a reviewer who never came. For party-pending-kyc: list parties in PENDING_KYC older than 24h and check whether each has a kyc case at all; a party with no case never had one opened and needs the event replaying, while a party with an open case is waiting on review."
         - alert: KafkaConsumerGroupLagStuck
           # General event-bus safety net — the config comment on the Kafka Exporter calls
           # consumer-group lag "the single most useful event-bus health signal" and until now NO

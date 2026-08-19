@@ -368,6 +368,32 @@ class DomainMetrics {
         }
     }
 
+    /**
+     * Publishes `openbank.onboarding.stalled{stage=…}` — entities that entered an onboarding stage
+     * and have not left it within the stage's own expected window.
+     *
+     * WHY A GAUGE AND NOT AN ERROR RATE (#5698). A stalled onboarding produces no error to count:
+     * the event that should have advanced it was ACKED, so there is no exception, no consumer lag,
+     * no DLQ row and no failed request. The only observable is the entity still sitting in the
+     * stage, which is why the signal has to be a periodic census of the state itself. Ten of 73
+     * sandbox parties sat in `PENDING_KYC` — the oldest for ten weeks — and the first thing to
+     * notice was a human reporting that an account did not work.
+     *
+     * The stage is a tag rather than a metric name so a second stalled stage (an account stuck in
+     * `PENDING_ACTIVATION`, a signature ceremony never completed) reuses the same alert shape.
+     *
+     * @param stage the onboarding stage entities are stuck in, e.g. `party-pending-kyc`
+     * @param stalled cheap supplier of the current aged count
+     */
+    fun registerOnboardingStalled(stage: String, stalled: () -> Number) {
+        reg()?.let { r ->
+            Gauge.builder("openbank.onboarding.stalled", stalled) { it.invoke().toDouble() }
+                .tag("stage", stage)
+                .strongReference(true)
+                .register(r)
+        }
+    }
+
     // ── Workflow liveness (ADR-0160 mechanism 3) ────────────────────────────────
 
     /**
