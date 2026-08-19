@@ -250,7 +250,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0239](0239-delivery-outcome-events-for-notification-requests.md) | Delivery-outcome events for notification requests | Proposed | Planned | notifications,kafka,api-contract,privacy-gdpr | — |
 | [0240](0240-campaign-conversion-attribution-product-event.md) | Campaign conversion attribution: a product event correlated to the goal | Proposed | Planned | notifications,analytics,privacy-gdpr | — |
 | [0241](0241-alert-hygiene-zero-standing-critical-alerts.md) | Alert hygiene: zero standing critical alerts | Proposed | Planned | observability,governance,resilience | — |
-| [0242](0242-quarterly-dr-and-chaos-drill-with-measured-rto-rpo.md) | Quarterly DR and chaos drill with measured RTO/RPO | Proposed | Planned | resilience,governance,ci | — |
+| [0242](0242-quarterly-dr-and-chaos-drill-with-measured-rto-rpo.md) | Quarterly DR and chaos drill with measured RTO/RPO | Proposed | Partial | resilience,governance,ci | — |
 | [0243](0243-k6-performance-gate-as-ci-advisory-check.md) | k6 performance gate as CI advisory check | Proposed | Shipped | ci,testing,observability | — |
 | [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Proposed | Partial | ai-agents,architecture,resilience,governance | — |
 | [0245](0245-campaign-conversion-as-an-observed-product-event.md) | Campaign conversion as an observed product event | Proposed | Planned | analytics,kafka,privacy-gdpr,admin-ui | — |
