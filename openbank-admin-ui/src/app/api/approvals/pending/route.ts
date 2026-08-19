@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'agent'
+  domain: 'lending' | 'sanctions' | 'ledger' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -39,6 +39,11 @@ type LendingApproval = {
 // reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
 // built to show parked decisions.
 type SanctionsApproval = LendingApproval
+
+// ledger-service serves the same libs `PendingApproval` shape (issue #5679, money-path first
+// per that issue's own ordering). Before this, a `ledger.reverse` four-eyes decision parked at
+// 202 was discoverable only by whoever had been handed its id out of band.
+type LedgerApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -90,6 +95,21 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function ledgerPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('ledger-service', 'ledger', 8101, '/api/v1/journals/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as LedgerApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'ledger' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -117,15 +137,16 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, agent] = await Promise.all([
+  const [lending, sanctions, ledger, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
+    ledgerPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...ledger.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
-    sources: { lending: lending.state, sanctions: sanctions.state, agent: agent.state },
+    sources: { lending: lending.state, sanctions: sanctions.state, ledger: ledger.state, agent: agent.state },
   })
 }
