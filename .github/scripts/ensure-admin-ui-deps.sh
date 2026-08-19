@@ -37,9 +37,36 @@ ensure_admin_ui_deps() {
   ui_dir="$repo_root/openbank-admin-ui"
   lock="$ui_dir/.node_modules.gate-lock"
 
+  # RESOLVABLE IS NOT IMPORTABLE, and the difference is what took the lint shard red on main
+  # (2026-08-19). `require.resolve` finds mermaid's package entry and says nothing about whether
+  # importing it works: mermaid.core.mjs imports `es-toolkit/compat`, and against a tree where that
+  # dependency is missing its `exports` map the import dies with
+  #   ERR_UNSUPPORTED_DIR_IMPORT: Directory import '.../es-toolkit/compat' is not supported
+  # while every `require.resolve` above still succeeds. The gate then reported UNFALSIFIED — its
+  # self-test could not run — which is the correct verdict and gave no clue that the cause was a
+  # half-right node_modules rather than the checker.
+  #
+  # So the probe now asks the question the gates actually ask: can these modules be IMPORTED, from
+  # the directory the gates import them from. A tree that fails this is reinstalled from the
+  # lockfile below instead of being trusted because the paths exist.
   _deps_present() {
-    node -e "for (const m of ['yaml','zod','mermaid','jsdom']) require.resolve(m,{paths:['$ui_dir']})" \
-      >/dev/null 2>&1
+    ( cd "$ui_dir" && node --input-type=module -e "
+        for (const m of ['yaml', 'zod', 'mermaid', 'jsdom']) { await import(m) }
+      " ) >/dev/null 2>&1
+  }
+
+  # Printed on the failure path only, and printed rather than inferred: the last time this broke,
+  # three plausible causes (node version, npm flags, a nested duplicate) were indistinguishable
+  # from the log, and the next run should answer that instead of the next person guessing again.
+  _deps_diagnose() {
+    ( cd "$ui_dir" && node --input-type=module -e "
+        import { createRequire } from 'node:module';
+        const require = createRequire(process.cwd() + '/');
+        const v = (m) => { try { return require(m + '/package.json').version } catch { return 'ABSENT' } };
+        console.error('[deps] node=' + process.version + ' mermaid=' + v('mermaid') +
+                      ' es-toolkit=' + v('es-toolkit') + ' jsdom=' + v('jsdom'));
+        try { await import('mermaid') } catch (e) { console.error('[deps] mermaid import: ' + e.code + ' ' + e.message.split('\n')[0]) }
+      " ) 2>&1 || true
   }
 
   if _deps_present; then return 0; fi
@@ -64,6 +91,8 @@ ensure_admin_ui_deps() {
     return 0
   fi
 
+  echo "[$label] openbank-admin-ui deps are not importable — reinstalling. Current state:"
+  _deps_diagnose
   echo "[$label] installing openbank-admin-ui deps (npm ci, full — jsdom is a devDependency)"
   # npm ci verifies the committed lockfile's integrity hashes; never a loose `npm install`.
   # A half-written tree left by a killed peer makes npm ci itself fail, so clear it first.
@@ -72,4 +101,13 @@ ensure_admin_ui_deps() {
 
   rm -rf "$lock"
   trap - EXIT
+
+  # A reinstall that did not fix importability must say so HERE, next to the install that was
+  # supposed to fix it — otherwise the failure surfaces two gates later as an unfalsified verdict
+  # with no mention of dependencies at all, which is exactly how this cost an afternoon.
+  if ! _deps_present; then
+    echo "[$label] deps STILL not importable after a clean npm ci — this is not a stale tree:" >&2
+    _deps_diagnose >&2
+    return 1
+  fi
 }
