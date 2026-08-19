@@ -155,6 +155,15 @@ mp:
         # set via the gitops ConfigMap instead (issue #686).
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # ADR-0232 delegated-access lifecycle notifications (DelegationNotificationConsumer) — a
+      # second consumer of the topic account-service (enforcement projection) and audit-service
+      # (onBehalfOf trail) already read.
+      delegation-events-in:
+        connector: smallrye-kafka
+        # client.id / group.id / auto.offset.reset: same dotted-key YAML bug as above —
+        # set via the gitops ConfigMap instead (issue #686).
+        topic: openbank.delegation.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 
 # ADR-0155 four-eyes, opted into by opsmessage.compose (ADR-0176 D5). Default false, matching
 # every other four-eyes-wired service (lending, balance, sepa-payment, sepa-instant, account) —

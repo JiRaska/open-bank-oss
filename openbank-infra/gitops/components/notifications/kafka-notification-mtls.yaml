@@ -3,7 +3,7 @@
 # secret is projected into `notifications` via ExternalSecret (kafka-messaging-certs
 # ClusterSecretStore). The cluster-CA truststore is shared and also projected.
 #
-# ACLs: notification-service reads from two topics using two separate consumer
+# ACLs: notification-service reads from three topics using three separate consumer
 # groups, and — since ADR-0239 D2 — WRITES delivery outcomes onto one topic. That
 # Write grant is the whole of its producer surface; it is not a general producer.
 ---
@@ -37,6 +37,14 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # ADR-0232 delegated-access lifecycle notifications (DelegationNotificationConsumer) — a
+      # second consumer of the topic account-service and audit-service already read.
+      - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # ADR-0239 D2: emit delivery outcomes so a producer can tell an accepted handoff
       # from a delivered, suppressed or failed message (issue #3663).
       - resource:
@@ -54,6 +62,12 @@ spec:
       - resource:
           type: group
           name: notification-service-party
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: notification-service-delegation
           patternType: literal
         operations: [Read]
         host: "*"
