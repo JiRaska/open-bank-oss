@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.0...copilot-service-v0.12.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.2...copilot-service-v0.12.0) (2026-08-18)
 
 
