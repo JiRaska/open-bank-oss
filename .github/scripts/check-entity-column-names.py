@@ -150,7 +150,7 @@ def self_test() -> int:
         "    @Column(nullable = false)\n    lateinit var source: String\n",
     ]
     failures = 0
-    for (label, strategy, want_finding, want_subjects), body in zip(cases, bodies):
+    for (label, strategy, want_finding, want_subjects), body in zip(cases, bodies, strict=True):
         with tempfile.TemporaryDirectory() as tmp:
             repo = Path(tmp)
             module = repo / "openbank-probe-service"
