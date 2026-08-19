@@ -1,7 +1,8 @@
 ---
 date: 2026-08-11
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "KYC review turns event-driven: a sanctions-list refresh whose per-entr
 ---
 
 # ADR-0256 — Perpetual KYC: event-driven re-screening between periodic reviews
+
+**Delivery note (2026-08-19).** Live on `main` while this ADR read `delivery-status: planned`: **6 production Kotlin file(s)** across `openbank-party-service` cite this ADR, naming its decision clause(s) `D1` rather than referencing it as prior art. Found by the code->ADR evidence read described in #5708 (the inverse of the ADR->path probe #5669 deliberately rejected). `decision-status` is unchanged; the unbuilt remainder is triaged in #5708.
+
 
 ## Context
 

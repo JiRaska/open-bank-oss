@@ -36,7 +36,7 @@ graph TB
     uc[Application<br/>StandingOrderService<br/>StandingOrderUseCase]
     dom[Domain<br/>StandingOrder + state machine<br/>domain events]
     persist[Persistence<br/>StandingOrderRepositoryImpl<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>StandingOrderOutboxDispatcher<br/>@Scheduled every 5s]
+    outbox["Outbox<br/>StandingOrderOutboxDispatcher<br/>@Scheduled every 5s"]
     kpub[Kafka publisher<br/>KafkaStandingOrderOutboxEventPublisher]
     authz[Authz<br/>AuthzProducer → OPA PDP]
   end

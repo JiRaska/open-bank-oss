@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.17.0...transaction-service-v1.18.0) (2026-08-19)
+
+
+### Features
+
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
 ## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.4...transaction-service-v1.17.0) (2026-08-18)
 
 
