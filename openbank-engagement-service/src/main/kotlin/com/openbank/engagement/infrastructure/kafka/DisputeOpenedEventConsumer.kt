@@ -33,8 +33,9 @@ import java.util.UUID
  * fewer suppressed marketing surfaces rather than towards a state that can never be cleared, and
  * matching the existing FRAUD_HOLD/ARREARS shape rather than introducing a second one.
  *
- * Poison-pill safe: parse/handle failures are logged and swallowed so one bad event cannot wedge
- * the consumer group — dispute-service's outbox remains the source of truth and can be replayed.
+ * Poison-pill safe for a MALFORMED event: an unparseable payload or a missing partyId is logged and
+ * acked, because replaying it fails identically forever. A failure of the `adverseState` write is
+ * the opposite case and is retried, then rethrown for the DLQ — see [withBoundedRetry] (#5698).
  */
 @ApplicationScoped
 class DisputeOpenedEventConsumer(
@@ -44,27 +45,47 @@ class DisputeOpenedEventConsumer(
     private val log = Logger.getLogger(DisputeOpenedEventConsumer::class.java)
 
     @Incoming("dispute-events-in")
-    @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
+        val signal = parse(payload) ?: return
+        withBoundedRetry(log, "dispute exclusion for party ${signal.partyId} (${signal.eventType})") {
+            if (signal.opened) {
+                adverseState.setActive(signal.partyId, AdverseState.DISPUTE_OPENED, Instant.now())
+                log.infof("ADR-0220 D3.5: excluded party %s from targeting (dispute.opened)", signal.partyId)
+            } else {
+                adverseState.clearActive(signal.partyId, AdverseState.DISPUTE_OPENED)
+                log.infof(
+                    "ADR-0220 D3.5: lifted dispute exclusion for party %s (dispute.resolved)",
+                    signal.partyId,
+                )
+            }
+        }
+    }
+
+    /** Parsing + routing only — every outcome here is unretryable, so a null means "ack and move on". */
+    @Suppress("TooGenericExceptionCaught") // whatever Jackson or UUID.fromString throws, a malformed
+    // payload is the same unretryable poison pill.
+    private fun parse(payload: String): DisputeSignal? =
         try {
             val node = objectMapper.readTree(payload)
             val eventType = node.path("eventType").asText()
-            if (eventType != EVENT_OPENED && eventType != EVENT_RESOLVED) return
-
-            val partyId = node.path("partyId").asText(null)?.let(UUID::fromString) ?: run {
-                log.warnf("%s missing/unparseable partyId, skipping: %.300s", eventType, payload)
-                return
-            }
-            if (eventType == EVENT_OPENED) {
-                adverseState.setActive(partyId, AdverseState.DISPUTE_OPENED, Instant.now())
-                log.infof("ADR-0220 D3.5: excluded party %s from targeting (dispute.opened)", partyId)
+            if (eventType != EVENT_OPENED && eventType != EVENT_RESOLVED) {
+                null
             } else {
-                adverseState.clearActive(partyId, AdverseState.DISPUTE_OPENED)
-                log.infof("ADR-0220 D3.5: lifted dispute exclusion for party %s (dispute.resolved)", partyId)
+                val partyId = node.path("partyId").asText(null)?.let(UUID::fromString)
+                if (partyId == null) {
+                    log.warnf("%s missing/unparseable partyId, skipping: %.300s", eventType, payload)
+                    null
+                } else {
+                    DisputeSignal(partyId, eventType)
+                }
             }
         } catch (e: Exception) {
-            log.errorf(e, "Failed to handle dispute lifecycle event: %.300s", payload)
+            log.errorf(e, "Failed to parse dispute lifecycle event: %.300s", payload)
+            null
         }
+
+    private data class DisputeSignal(val partyId: UUID, val eventType: String) {
+        val opened: Boolean get() = eventType == EVENT_OPENED
     }
 
     private companion object {
