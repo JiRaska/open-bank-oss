@@ -342,13 +342,13 @@
         "technology",
         "governance"
       ],
-      "status": "partial",
+      "status": "live",
       "adr": [
         "ADR-0074"
       ],
       "gap": {
-        "cs": "Zahájeno u kritických flow: PIN klávesnice (číslice/delete/biometrika s contentDescription + Button rolí), stav PIN teček („N z 6 číslic“), hold-to-confirm tlačítko s semantics. Zbývá: program přes všech 42 obrazovek — TalkBack/VoiceOver průchod kritickými cestami, Dynamic Type, kontrasty, focus order, touch targets — cíl WCAG 2.2 AA.",
-        "en": "Started with the critical flows: the PIN pad (digits/delete/biometrics with contentDescription + Button role), the PIN dots state (\"N of 6 digits\"), the hold-to-confirm button semantics. Remaining: a program across all 42 screens — TalkBack/VoiceOver walkthroughs of critical paths, Dynamic Type, contrast, focus order, touch targets — targeting WCAG 2.2 AA."
+        "cs": "Plošný sweep proběhl (#439, #456), s mechanickou CI branou nad icon-only tap targety bez accessible name (#467, check-a11y-icon-taps.py). Issue #485's 4 mechanicky nechytitelné mezery jsou uzavřené (2026-08-18): (1) ~16 jasných dekorativních ikon dostalo contentDescription = null; (2) live regions (LiveRegionMode.Polite) na hero zůstatku, SCA/platebním stavu a streamované odpovědi copilota, s testy ověřujícími přítomnost i negativní kontrolou; (3) ObTheme teď čte LocalDensity.current.fontScale a násobí ho s brandingovým sliderem (ne přepis — OS nastavení platí vždy navíc), s 7 testy na tu matematiku; (4) ThemeSpecValidator.passesUiContrast běží i nad výchozím tématem appky — nález, že výchozí (green) i amber preset nesplňovaly pravidlo 3:1 (~2.60:1 a ~2.53:1), byl rovnou opraven ztmavením obou barev (#06A45E, #D3780D) stejným repair-walkem, jaký validátor používá pro vlastní/AI barvy, s re-generovanými screenshot goldeny. Zbývá: program přes zbylých obrazovek mimo kritické flow — TalkBack/VoiceOver průchod, focus order, touch targets — cíl WCAG 2.2 AA napříč celou appkou.",
+        "en": "A full sweep landed (#439, #456), with a mechanical CI gate over icon-only tap targets missing an accessible name (#467, check-a11y-icon-taps.py). Issue #485's 4 gaps that didn't reduce to a mechanical check are now closed (2026-08-18): (1) ~16 clear decorative icons got contentDescription = null; (2) live regions (LiveRegionMode.Polite) on the hero balance, SCA/payment status and the copilot's streamed reply, with tests asserting presence plus a negative control; (3) ObTheme now reads LocalDensity.current.fontScale and multiplies it with the branding slider (not an override — the OS setting always still applies on top), with 7 tests on that math; (4) ThemeSpecValidator.passesUiContrast now runs against the app's own default theme too — the finding that the default (green) and amber presets failed the 3:1 rule (~2.60:1 and ~2.53:1) was fixed directly by darkening both colors (#06A45E, #D3780D) via the same repair walk the validator already applies to custom/AI accents, with the affected screenshot goldens re-recorded. Remaining: a program across the screens outside the critical/audited flows — TalkBack/VoiceOver walkthroughs, focus order, touch targets — targeting WCAG 2.2 AA app-wide."
       }
     },
     {
@@ -373,8 +373,8 @@
   "summary": {
     "total": 18,
     "byStatus": {
-      "live": 13,
-      "partial": 5
+      "live": 14,
+      "partial": 4
     },
     "decisionMissing": []
   },
