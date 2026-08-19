@@ -493,6 +493,15 @@ fire from *outside* it, so they stay here:
   taxonomy and registry-guard suites fail on an "empty manifest" that reads exactly like a
   main-branch regression but is only a missing artifact. Full green = pretest + suite, not the
   suite alone.
+- **A bare `@` in an unquoted mermaid node label is a syntax error, and the error points at the
+  wrong text.** Mermaid 11 lexes `@` as the node-metadata shorthand (`id@{...}`), so
+  `outbox[Outbox<br/>Dispatcher<br/>@Scheduled every 5s]` fails to parse — while the caret in the
+  message lands on unrelated earlier text on the same line (`Hibernate Reactive / Panache`, which
+  is valid), sending you after the wrong token. Quote the label. Sibling: a literal `;` in a
+  `sequenceDiagram` message or `Note` is a statement separator — write `#59;`. Both render as a red
+  "Mermaid render failed" box in the Service Docs page, which nothing in CI loads: 40 of 248 blocks
+  across 21 services were broken that way, found only when someone opened one. Now enforced by the
+  `mermaid-parses` gate, which parses every block with admin-ui's own mermaid.
 
 ### Multi-agent / parallel work
 - **Commit and push early — a `/private/tmp` worktree can vanish mid-edit.** Several agent
