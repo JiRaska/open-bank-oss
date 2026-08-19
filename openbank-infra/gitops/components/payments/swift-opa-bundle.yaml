@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a41d4f3d0d202e38"
+    openbank.tech/policy-checksum: "cc40e28c89210505"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1299,6 +1299,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

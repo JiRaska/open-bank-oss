@@ -33,8 +33,8 @@ graph TB
     scanner[Application<br/>SecurityScannerService<br/>IctIncidentService]
     dom[Domain<br/>SecurityScanResult / PlatformSecurityReport<br/>IctIncident / SecurityFinding<br/>Severity / OwaspCategory / IncidentStatus]
     mem[In-memory stav<br/>ConcurrentHashMap<br/>lastResults / lastReport / incidenty]
-    emit[Kafka emitter<br/>@Channel ict-incident-events-out]
-    sched[Scheduler<br/>@Scheduled každých 30m]
+    emit["Kafka emitter<br/>@Channel ict-incident-events-out"]
+    sched["Scheduler<br/>@Scheduled každých 30m"]
   end
 
   sched --> scanner

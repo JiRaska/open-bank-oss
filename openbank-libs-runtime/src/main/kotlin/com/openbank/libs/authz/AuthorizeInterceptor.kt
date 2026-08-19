@@ -21,7 +21,9 @@ import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -307,9 +309,9 @@ class AuthorizeInterceptor {
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
-            val approval = runBlocking { store.find(approvalId) }
+            val approval = awaitOffEventLoop { store.find(approvalId) }
             if (approval.satisfies(annotation.action, resourceId, maker)) {
-                runBlocking { store.markExecuted(approvalId) }
+                awaitOffEventLoop { store.markExecuted(approvalId) }
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return ctx.proceed()
             }
@@ -322,7 +324,7 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = runBlocking { store.create(annotation.action, resourceId, maker) }
+        val pending = awaitOffEventLoop { store.create(annotation.action, resourceId, maker) }
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -443,4 +445,38 @@ private fun resolveResourceField(target: Any, fieldName: String, log: Logger): A
         ex.message,
     )
     null
+}
+
+/**
+ * Bridges a suspend [ApprovalStore] call to a synchronous result from inside
+ * [AuthorizeInterceptor]'s non-suspend `@AroundInvoke` method (issue #5631).
+ *
+ * A `suspend` REST resource method is, by default, dispatched on the Vert.x
+ * event-loop thread itself — the resource method's own suspension only happens
+ * *after* the interceptor chain (including [AuthorizeInterceptor]) has already
+ * run. Naively `runBlocking { store.find(...) }` on that same thread
+ * self-deadlocks against a reactive [com.openbank.libs.approval.impl.RedisApprovalStore]:
+ * Quarkus's per-request "duplicated context" is captured by whatever reactive
+ * call is made while it is current, and that call's completion is dispatched
+ * back onto THAT SAME context/thread — but this thread is the one parked
+ * inside `runBlocking`, so the callback that would unblock it can never run.
+ * This is not limited to the underlying I/O: `Vertx.executeBlocking` (an
+ * earlier version of this fix) moves the actual work to a worker thread but
+ * STILL explicitly propagates the calling duplicated context to its own
+ * `Future`, so blocking on `future.get()` reproduces the identical deadlock
+ * one hop later — measured directly (issue #5631): a Vert.x "Thread blocked"
+ * warning pointing at that bridge, same shape as the original bug.
+ *
+ * The fix that actually works is `withContext(Dispatchers.IO)`: a plain
+ * kotlinx-coroutines thread-pool hop that is NOT a Vert.x construct at all, so
+ * it carries no duplicated context to propagate. [block] resumes on a thread
+ * Vert.x has no thread-local context for; `Vertx.currentContext()` there is
+ * null, so the reactive redis call inside it completes without needing to
+ * round-trip back through the request's original (blocked) event-loop thread.
+ * This is exactly the pattern [OpaSidecarPolicyDecisionPoint.allow] already
+ * relies on for its own blocking HTTP call — which is why that PDP call never
+ * hit this bug.
+ */
+private fun <T> awaitOffEventLoop(block: suspend () -> T): T = runBlocking {
+    withContext(Dispatchers.IO) { block() }
 }

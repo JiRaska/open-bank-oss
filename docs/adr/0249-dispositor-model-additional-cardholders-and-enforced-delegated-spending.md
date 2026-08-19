@@ -1,7 +1,8 @@
 ---
 date: 2026-08-08
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,18 @@ summary: "Disponent model: a delegate may SPEND — an additional card in their 
 ---
 
 # ADR-0249 — Dispositor model: additional cardholders and enforced delegated spending
+
+**Delivery note (2026-08-19).** Live on `main` while this ADR read `delivery-status: planned`: **20 production Kotlin file(s)** across `openbank-card-issuance-service`, `openbank-customer-edge`, `openbank-delegation-service` cite this ADR, naming its decision clause(s) `D1`, `D2`, `D3`, `D4`, `D5` rather than referencing it as prior art. Found by the code->ADR evidence read described in #5708 (the inverse of the ADR->path probe #5669 deliberately rejected). `decision-status` is unchanged; the unbuilt remainder is triaged in #5708.
+
+**Per-clause verification (2026-08-19), against real commits/PRs/tests, not just citations.** D3 was already confirmed separately (PR #4196/#4177, merged 2026-08-09, 110 passing tests). This pass covers D1, D2, D4, D5:
+
+- **D1 (additional cardholder is a card)** — IMPLEMENTED. `POST` delegated-card issuance lands in PR #4194 (`25bd63177`, 2026-08-13): `Card.delegationGrantId`/`delegated`, the SCA-gated `cards.issue.delegated` route in `CustomerEdgeResource.kt`, and `DelegatedCardIssuanceTest.kt` (249 lines) + `DelegatedCardTest.kt` (448 lines). Not yet consumed by `openbank-app`: `composeApp/.../DelegationPreset.kt`'s own KDoc still says "no card is ISSUED to the delegate through this flow" and there is no app call to the delegated-card endpoint — backend-real, app-dormant.
+- **D2 (delegated card controls via `CardDelegationGuard`)** — IMPLEMENTED and wired end-to-end. Same PR #4194 adds the enforcement caller the ADR's own text had wrongly assumed didn't exist yet (`CardDelegationGuard` already had a resource caller; what was missing was the edge's enforcement path), plus revocation-blocks-the-card in `CardDelegationEventConsumer.kt`. `openbank-app` consumes it: `CardsScreen.kt`'s `card.canManageOwnCard` gates freeze/unfreeze on a shared card, and the `CARD_MANAGE` delegation preset (`CARD_VIEW` + `CARD_MANAGE_LIMITS`) is live in `DelegationPreset.kt`.
+- **D4 (SCA + audit on every grant, and notify on first use)** — PARTIAL. SCA is real (`scaCardGate(... "ISSUE_DELEGATED" ...)` in `CustomerEdgeResource.kt`) and delegated card issuance emits an audit event (`CUSTOMER_DELEGATED_CARD_ISSUED`). Grant lifecycle events (`DelegationOffered/Activated/Revoked/...`) publish through the outbox in `domain/event/DelegationEvents.kt`. But `SpendReservationService.kt` and `SpendReservationResource.kt` (the D3 reserve/confirm/release path) publish **no** outbox/audit event at all — the Consequences section's "every grant, reservation, confirmation and revocation is an audit event" is not true of reservations today. No code anywhere in `openbank-delegation-service` or `openbank-card-issuance-service` calls notification-service, so "the grantee's first use of a new authority notifies the grantor" is **not implemented** — grep for `notification-service`/`NotificationService` in both services returns nothing.
+- **D5 (no spend without a ceiling; no delegated PIN/PAN; no delegated ATM)** — IMPLEMENTED. `DelegationService.kt` refuses `ACCOUNT_INITIATE_PAYMENT` with no daily/monthly ceiling (tested in `DelegationServiceTest.kt`: "offer refuses ACCOUNT_INITIATE_PAYMENT with no cumulative ceiling at all", "a perTransactionLimit alone does not satisfy the D5 ceiling requirement"). PAN reveal stays holder-only per `36d5a661e`. No ATM/cash-withdrawal delegation exists anywhere in the codebase, which is D5's intended absence, not a gap.
+
+Net: `delivery-status: partial` is accurate and stays. D1/D2/D5 are solidly implemented with real tests; D2 and D3 are also live in `openbank-app`, D1 is not yet. D4 is the weak clause — SCA and grant-lifecycle audit are real, but reservation audit and the grantor-notification requirement are unbuilt. `decision-status` is left `proposed`, unchanged, per the ADR-0204/#5479 precedent that the two axes are independent.
+
 
 Relates: ADR-0232 (delegated access), ADR-0021 (SCA settlement gate),
 ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0133 (tamper-evident audit),

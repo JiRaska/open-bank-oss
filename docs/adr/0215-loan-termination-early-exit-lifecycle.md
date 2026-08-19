@@ -1,7 +1,8 @@
 ---
 date: 2026-07-29
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "Loans exit four lawful ways: statutory withdrawal (unwind), early repa
 ---
 
 # ADR-0215 — Loan termination and early-exit lifecycle
+
+**Delivery note (2026-08-19).** Live on `main` while this ADR read `delivery-status: planned`: **8 production Kotlin file(s)** across `openbank-lending-service`, `openbank-libs-domain` cite this ADR, naming its decision clause(s) `D1`, `D2`, `D4`, `D5` rather than referencing it as prior art. Found by the code->ADR evidence read described in #5708 (the inverse of the ADR->path probe #5669 deliberately rejected). `decision-status` is unchanged; the unbuilt remainder is triaged in #5708.
+
 
 ## Context
 

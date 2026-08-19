@@ -251,6 +251,7 @@ authz:
         - account.search
         - account.unfreeze
         - account.update
+        - balance.approval.decide
         - balance.credit
         - balance.debit
         - balance.hold

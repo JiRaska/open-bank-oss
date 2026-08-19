@@ -41,12 +41,12 @@ graph LR
 graph TB
   subgraph "openbank-notification-service (Quarkus)"
     direction TB
-    consumer[Consumer<br/>NotificationConsumer<br/>@Incoming notification-events-in]
+    consumer["Consumer<br/>NotificationConsumer<br/>@Incoming notification-events-in"]
     rest[REST<br/>NotificationResource<br/>DeviceResource<br/>DispatchControlResource]
     app[Application<br/>DispatchControlService<br/>OversightWebhook]
     dom[Domain<br/>Notification / DeviceToken<br/>DispatchControlSnapshot]
     persist[Persistence<br/>Notification/DeviceToken/Outbox repos<br/>Hibernate Reactive Panache]
-    outbox[Outbox<br/>NotificationOutboxDispatcher<br/>@Scheduled every 5s]
+    outbox["Outbox<br/>NotificationOutboxDispatcher<br/>@Scheduled every 5s"]
     pushrt[Push<br/>PushSenderRouter → Fcm/Apns]
     webhook[Webhook<br/>SlackOversightWebhookPublisher]
   end
@@ -113,7 +113,7 @@ sequenceDiagram
   else channel = PUSH
     C->>DB: SELECT active device_tokens for party
     C->>M: fan-out FCM/APNs per token
-    C->>DB: invalidate rejected tokens; status = SENT if any delivered else FAILED
+    C->>DB: invalidate rejected tokens#59; status = SENT if any delivered else FAILED
   else SMS / IN_APP
     Note over C: logged stub (no egress)
   end
