@@ -76,6 +76,32 @@ data:
           # stops biting, with nothing going red.
           input_cost_per_token: 0.0000002
           output_cost_per_token: 0.0000002
+      # Embedding route for the copilot's pgvector retrieval (ADR-0183 §3 / ADR-0265 slice 4).
+      # Embeddings go through the SAME gateway as chat, deliberately: routing them direct to the
+      # provider would open a second, un-audited egress next to the one ADR-0175 exists to control.
+      #
+      # bge-m3 on DeepInfra: 1024 dimensions, which is what the copilot migration's `vector(1024)`
+      # column is sized for. Changing this model to one of a different width needs a migration and a
+      # re-index — the adapter refuses a batch whose width disagrees rather than letting Postgres
+      # reject rows one at a time.
+      - model_name: BAAI/bge-m3
+        litellm_params:
+          model: deepinfra/BAAI/bge-m3
+          api_key: os.environ/DEEPINFRA_API_KEY
+          # Small ceiling and its own budget: indexing the help corpus is a few dozen chunks, and
+          # query embeddings are one short call per help search. If this ever burns 2 USD/day
+          # something is re-indexing in a loop, and the ceiling is the thing that catches it.
+          max_budget: 2
+          budget_duration: 1d
+          # DeepInfra's published price for bge-m3 ($0.010 per million input tokens). Declared, not
+          # inherited: an unpriced model costs every call $0, and a budget whose meter never moves
+          # cannot bite — measured on the DeepSeek route, which shipped exactly that way.
+          input_cost_per_token: 0.00000001
+          # Priced identically rather than zero. An embedding call returns no completion tokens, so
+          # this number never actually applies — but a literal 0.0 is indistinguishable from "no
+          # price declared", which is the state that made every DeepSeek call cost $0 and quietly
+          # voided three nested budgets. The gate rejects a zero for that reason, and it is right to.
+          output_cost_per_token: 0.00000001
     general_settings:
       # Virtual keys and every budget below persist here. Injected from the CNPG litellm-db-app
       # secret (components/ai-platform/postgres.yaml) — see the DATABASE_URL note in litellm.yaml
