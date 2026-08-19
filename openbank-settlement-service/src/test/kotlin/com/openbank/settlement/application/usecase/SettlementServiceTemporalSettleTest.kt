@@ -10,6 +10,7 @@ import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.support.RecordingSettlementMetrics
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -38,6 +39,7 @@ class SettlementServiceTemporalSettleTest {
 
     private lateinit var env: TestWorkflowEnvironment
     private lateinit var worker: Worker
+    private lateinit var metrics: RecordingSettlementMetrics
     private lateinit var service: SettlementService
 
     private companion object {
@@ -52,7 +54,8 @@ class SettlementServiceTemporalSettleTest {
         worker.registerActivitiesImplementations(RelaxedActivities())
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(repo, temporalConfig, env.workflowClient)
+        metrics = RecordingSettlementMetrics()
+        service = SettlementService(repo, temporalConfig, env.workflowClient, metrics)
     }
 
     @AfterEach

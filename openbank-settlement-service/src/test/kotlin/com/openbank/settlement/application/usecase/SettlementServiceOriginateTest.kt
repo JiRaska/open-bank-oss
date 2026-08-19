@@ -6,11 +6,14 @@ package com.openbank.settlement.application.usecase
 
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
+import com.openbank.settlement.application.port.out.OriginateOutcome
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.application.port.out.WorkflowStartOutcome
 import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.support.RecordingSettlementMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -40,6 +43,7 @@ class SettlementServiceOriginateTest {
 
     private lateinit var env: TestWorkflowEnvironment
     private lateinit var worker: Worker
+    private lateinit var metrics: RecordingSettlementMetrics
     private lateinit var service: SettlementService
 
     private companion object {
@@ -54,7 +58,8 @@ class SettlementServiceOriginateTest {
         worker.registerActivitiesImplementations(RelaxedActivities())
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(repo, temporalConfig, env.workflowClient)
+        metrics = RecordingSettlementMetrics()
+        service = SettlementService(repo, temporalConfig, env.workflowClient, metrics)
     }
 
     @AfterEach
@@ -110,6 +115,11 @@ class SettlementServiceOriginateTest {
 
         assertThat(result.id).isEqualTo(existing.id)
         coVerify(exactly = 0) { repo.create(any()) }
+        // The distinction the port exists for: an idempotent hit is a correct outcome and a
+        // DIFFERENT one from a fresh create. Counting both as "success" is how a no-op path
+        // becomes indistinguishable from a working one (ADR-0252 phase 0).
+        assertThat(metrics.originations).containsExactly(OriginateOutcome.IDEMPOTENT_HIT)
+        assertThat(metrics.workflowStarts).containsExactly(WorkflowStartOutcome.NOT_STARTED_TERMINAL)
     }
 
     /** Activities stub that never throws — originate coverage only exercises settle() dispatch. */

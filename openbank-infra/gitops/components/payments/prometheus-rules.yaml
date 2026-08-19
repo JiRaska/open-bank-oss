@@ -45,6 +45,81 @@ spec:
             summary: "Payment sagas are stuck in transaction-service"
             description: "{{ $value }} payment saga(s) have been in an incomplete state for >5m — manual triage required."
 ---
+# settlement-service emitted NO metric of any kind until #5705 — 20 Kotlin files, not one reference
+# to MeterRegistry — and had no PrometheusRule of its own. The only alert whose name contains
+# "Settlement" is ClearingSettlementWindowMissed below, which belongs to clearing-service and
+# queries a clearing series. So nothing could distinguish "settlement is running normally" from
+# "settlement has booked nothing for six hours": the pod is Ready, the namespace is scraped, and
+# the series did not exist.
+#
+# These alert on the SUCCESS STATE, not on an error rate. A settlement path that quietly does
+# nothing — a worker that never polls, an orchestrator that never starts a run — produces no
+# errors at all, so an error-rate alert is silent in exactly the outage that matters. That is the
+# lesson the disabled push adapter cost (ADR-0252 phase 0) and the one the dead schedulers cost
+# (#2148): alert on the absence of the thing that should be happening.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-settlement-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    prometheus: openbank
+spec:
+  groups:
+    - name: settlement
+      rules:
+        - alert: SettlementNoBookingsDuringBusinessHours
+          # `transitions_total{status="BOOKED"}` is what settlement-service observed itself commit.
+          # Deliberately not called "settled": whether money moved is a claim only the ledger can
+          # make, and naming a metric for more than it establishes is how an accepted push became
+          # a reported delivery.
+          expr: |
+            increase(openbank_settlement_transitions_total{service="settlement",status="BOOKED"}[2h]) == 0
+            and on() hour() >= 6 and on() hour() <= 18
+          for: 30m
+          labels:
+            severity: warning
+            service: settlement
+          annotations:
+            summary: "No settlement booked in 2h (business hours)"
+            description: >-
+              settlement-service has not committed a BOOKED transition in 2h during business hours.
+              A stalled Temporal worker or an orchestrator that never starts a run looks exactly
+              like this and produces no errors — check the worker is polling
+              (openbank_settlement_workflow_starts_total) before assuming there is simply no volume.
+        - alert: SettlementCompensationsSpiking
+          # Compensations have their own status values rather than folding into a failure count, so
+          # a burst of reversals is visible as itself — a debit that had to be unwound is a
+          # different operational event from a settlement that was rejected before moving anything.
+          expr: |
+            sum(increase(openbank_settlement_transitions_total{service="settlement",status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED"}[15m])) > 5
+          for: 10m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            summary: "Settlement compensations spiking"
+            description: >-
+              {{ $value }} compensating transitions in 15m. Each one means money was moved and then
+              unwound, so a downstream port (debit, credit or ledger) is failing mid-saga.
+        - alert: SettlementWorkflowStartsAllNoOps
+          # An idempotent no-op start is a CORRECT outcome and a different one from a real start.
+          # If every start becomes ALREADY_RUNNING, runs are being created and never completing —
+          # a state that a success rate reports as 100% healthy.
+          expr: |
+            sum(increase(openbank_settlement_workflow_starts_total{service="settlement",outcome="STARTED"}[1h])) == 0
+            and sum(increase(openbank_settlement_workflow_starts_total{service="settlement",outcome="ALREADY_RUNNING"}[1h])) > 0
+          for: 15m
+          labels:
+            severity: warning
+            service: settlement
+          annotations:
+            summary: "Every settlement workflow start is an idempotent no-op"
+            description: >-
+              settlement-service started no new workflow run in 1h while still receiving retries
+              for in-flight ones — runs are being created and not completing.
+---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:

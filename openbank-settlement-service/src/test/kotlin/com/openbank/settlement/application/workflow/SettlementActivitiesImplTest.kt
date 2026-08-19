@@ -10,9 +10,11 @@ import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
+import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.support.RecordingSettlementMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -36,6 +38,8 @@ class SettlementActivitiesImplTest {
     private val ledgerPort: LedgerPort = mockk(relaxed = true)
     private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
 
+    private lateinit var metrics: RecordingSettlementMetrics
+
     private lateinit var activities: SettlementActivitiesImpl
 
     private fun settlement(id: UUID, status: SettlementStatus) = Settlement(
@@ -53,7 +57,9 @@ class SettlementActivitiesImplTest {
     fun setUp() {
         // TestableActivities overrides runOnVertxContext to run synchronously — the production impl
         // needs a real Vert.x context (VertxContextSupport), which a plain unit test does not have.
-        activities = TestableActivities(settlementRepository, debitPort, creditPort, ledgerPort, auditPublisher)
+        metrics = RecordingSettlementMetrics()
+        activities =
+            TestableActivities(settlementRepository, debitPort, creditPort, ledgerPort, auditPublisher, metrics)
         coEvery { settlementRepository.updateStatus(any(), any()) } answers {
             settlement(firstArg(), secondArg())
         }
@@ -133,6 +139,33 @@ class SettlementActivitiesImplTest {
         coVerify(exactly = 0) { debitPort.debit(any()) }
         coVerify(exactly = 0) { creditPort.credit(any()) }
         coVerify { settlementRepository.updateStatus(id, SettlementStatus.REJECTED) }
+        assertThat(metrics.transitions).containsExactly(SettlementStatus.REJECTED)
+    }
+
+    @Test
+    fun `every saga transition is counted, compensations included`() {
+        // settlement-service emitted no metric of any kind before #5705, so there was no series
+        // that could tell "running normally" from "has booked nothing for six hours". The
+        // compensating transitions get their own status values rather than folding into a failure
+        // count — a reversal is a distinct thing to alert on from a rejection.
+        val id = UUID.randomUUID()
+        activities.debitPayer(id)
+        activities.creditPayee(id)
+        activities.bookToLedger(id)
+        activities.reverseBookToLedger(id)
+        activities.reverseCredit(id)
+        activities.reverseDebit(id)
+        activities.rejectSettlement(id)
+
+        assertThat(metrics.transitions).containsExactly(
+            SettlementStatus.DEBITED,
+            SettlementStatus.CREDITED,
+            SettlementStatus.BOOKED,
+            SettlementStatus.LEDGER_REVERSED,
+            SettlementStatus.CREDITED_REVERSED,
+            SettlementStatus.REVERSED,
+            SettlementStatus.REJECTED,
+        )
     }
 
     @Test
@@ -158,6 +191,7 @@ private class TestableActivities(
     creditPort: CreditPort,
     ledgerPort: LedgerPort,
     auditPublisher: AuditEventPublisher,
-) : SettlementActivitiesImpl(settlementRepository, debitPort, creditPort, ledgerPort, auditPublisher) {
+    metrics: SettlementMetricsPort,
+) : SettlementActivitiesImpl(settlementRepository, debitPort, creditPort, ledgerPort, auditPublisher, metrics) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }

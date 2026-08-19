@@ -10,6 +10,7 @@ import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
+import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
@@ -39,6 +40,7 @@ open class SettlementActivitiesImpl(
     private val creditPort: CreditPort,
     private val ledgerPort: LedgerPort,
     private val auditPublisher: AuditEventPublisher,
+    private val metrics: SettlementMetricsPort,
 ) : SettlementActivities {
 
     private val log = Logger.getLogger(SettlementActivitiesImpl::class.java)
@@ -112,6 +114,10 @@ open class SettlementActivitiesImpl(
      * event is reconstructable on its own (Art. 17), without a join back to the settlements table.
      */
     private suspend fun audit(operation: String, settlement: Settlement, result: AuditResult = AuditResult.SUCCESS) {
+        // Counted here rather than at each call site: every transition this saga performs already
+        // funnels through audit(), compensations included, so a transition cannot be added without
+        // also being counted. The metric records the status the row was just moved TO.
+        metrics.recordTransition(settlement.status)
         auditPublisher.publish(
             AuditEvent(
                 actorId = "settlement-service",

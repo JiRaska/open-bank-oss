@@ -6,6 +6,7 @@ package com.openbank.settlement.application.usecase
 
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.support.RecordingSettlementMetrics
 import io.mockk.coEvery
 import io.mockk.mockk
 import io.temporal.client.WorkflowClient
@@ -28,7 +29,8 @@ class SettlementServiceSettleTest {
     @Test
     fun `settle throws when the settlement does not exist`() {
         val workflowClient: WorkflowClient = mockk(relaxed = true)
-        val service = SettlementService(repo, temporalConfig, workflowClient)
+        val metrics = RecordingSettlementMetrics()
+        val service = SettlementService(repo, temporalConfig, workflowClient, metrics)
         val id = UUID.randomUUID()
         coEvery { repo.findById(id) } returns null
 

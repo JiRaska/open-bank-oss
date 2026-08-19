@@ -7,7 +7,10 @@ package com.openbank.settlement.application.usecase
 import com.openbank.libs.temporal.TemporalConfig
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
+import com.openbank.settlement.application.port.out.OriginateOutcome
+import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
+import com.openbank.settlement.application.port.out.WorkflowStartOutcome
 import com.openbank.settlement.application.workflow.SettlementWorkflow
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
@@ -27,6 +30,7 @@ class SettlementService(
     private val settlementRepository: SettlementRepository,
     private val temporalConfig: TemporalConfig,
     private val workflowClient: WorkflowClient,
+    private val metrics: SettlementMetricsPort,
     private val clock: Clock,
 ) : SettlementUseCase {
 
@@ -35,10 +39,12 @@ class SettlementService(
         settlementRepository: SettlementRepository,
         temporalConfig: TemporalConfig,
         workflowClient: WorkflowClient,
+        metrics: SettlementMetricsPort,
     ) : this(
         settlementRepository,
         temporalConfig,
         workflowClient,
+        metrics,
         Clock.systemUTC(),
     )
 
@@ -53,7 +59,13 @@ class SettlementService(
         // retried request resolves to the same row (the UUID primary key is the hard duplicate
         // guard even under a concurrent double-submit).
         val id = UUID.nameUUIDFromBytes("settlement:${command.idempotencyKey}".toByteArray())
-        val settlement = settlementRepository.findById(id) ?: createPending(command, id)
+        val existing = settlementRepository.findById(id)
+        if (existing != null) {
+            // A correct outcome and a DIFFERENT one from a fresh create. A shift in this ratio means
+            // callers are retrying, which a success rate cannot show.
+            metrics.recordOriginated(OriginateOutcome.IDEMPOTENT_HIT)
+        }
+        val settlement = existing ?: createPending(command, id)
 
         // (Re)start the settlement whenever it is not yet terminal: a fresh PENDING, OR an orphaned
         // PENDING left behind if a prior request created the row but failed before/while starting
@@ -62,6 +74,7 @@ class SettlementService(
         if (settlement.status == SettlementStatus.PENDING) {
             settle(settlement.id)
         } else {
+            metrics.recordWorkflowStart(WorkflowStartOutcome.NOT_STARTED_TERMINAL)
             log.infof("Settlement %s already %s; returning without re-settling", id, settlement.status)
         }
         return settlement
@@ -82,12 +95,14 @@ class SettlementService(
         )
         return try {
             settlementRepository.create(settlement).also {
+                metrics.recordOriginated(OriginateOutcome.CREATED)
                 log.infof("Originated settlement %s (%s %s)", it.id, it.amount, it.currency)
             }
         } catch (ex: Exception) {
             // Lost a concurrent same-key create race: the UUID primary key rejected the duplicate.
             // The winner's row exists — return it (idempotent), don't surface a 500.
             settlementRepository.findById(id)?.also {
+                metrics.recordOriginated(OriginateOutcome.CONCURRENT_RACE)
                 log.infof(
                     "Concurrent create for idempotencyKey '%s' (%s); using the winner's row",
                     command.idempotencyKey.sanitizeForLog(),
@@ -122,7 +137,9 @@ class SettlementService(
         )
         try {
             WorkflowClient.start(stub::settle, settlementId)
+            metrics.recordWorkflowStart(WorkflowStartOutcome.STARTED)
         } catch (alreadyRunning: WorkflowExecutionAlreadyStarted) {
+            metrics.recordWorkflowStart(WorkflowStartOutcome.ALREADY_RUNNING)
             // Idempotent: the settlement workflow for this id is already in flight (a retry of
             // an orphaned PENDING). Nothing to do — Temporal owns its lifecycle from here.
             log.infof(
