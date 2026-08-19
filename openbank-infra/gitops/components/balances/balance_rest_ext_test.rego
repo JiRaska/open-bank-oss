@@ -31,6 +31,7 @@ rules_mock := {
 		"balance.debit",
 		"balance.initialize",
 		"balance.reconciliation.run",
+		"balance.approval.decide",
 	]}}},
 	"money_path_services": [],
 	"money_path_action_prefixes": {},
@@ -74,6 +75,22 @@ test_edge_may_not_run_reconciliation_despite_matrix_grant if {
 		with data.rules as rules_mock
 }
 
+# Regression for the money-path authz gap found by PR #5686's OPA verification: real OPA
+# evaluation (not just the CI unit tests) showed balance.approval.decide resolving allow=false
+# for a real OPERATOR because the action was missing from rules.yaml's role_action_matrix — the
+# four-eyes checker endpoint (ApprovalResource.decide) 403'd for every operator in an
+# AUTHZ_ENFORCE=true environment. Fixed by adding the matrix grant; this asserts the fix AND
+# that it does not reopen the edge-escalation gap the rest of this file exists to prevent.
+test_edge_may_not_decide_approval_despite_matrix_grant if {
+	rest.allow == false with input as {"principal": edge, "action": "balance.approval.decide"}
+		with data.rules as rules_mock
+}
+
+test_prohibition_fires_for_edge_on_approval_decide if {
+	rest.prohibited with input as {"principal": edge, "action": "balance.approval.decide"}
+		with data.rules as rules_mock
+}
+
 test_prohibition_fires_for_edge_on_write if {
 	rest.prohibited with input as {"principal": edge, "action": "balance.credit"}
 		with data.rules as rules_mock
@@ -107,6 +124,13 @@ test_operator_may_credit if {
 	decision.allow == true
 	"operator-balance-write" in rest.allowed_reasons with input as {"principal": operator, "action": "balance.credit"}
 		with data.rules as rules_mock
+}
+
+test_operator_may_decide_approval if {
+	decision := rest.allow with input as {"principal": operator, "action": "balance.approval.decide"}
+		with data.rules as rules_mock
+	decision.allow == true
+	decision.reason == "matrix-allows"
 }
 
 test_supervisor_may_set_overdraft_limit if {
