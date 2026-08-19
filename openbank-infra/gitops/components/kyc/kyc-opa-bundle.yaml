@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyc-service
     app.kubernetes.io/part-of: kyc
   annotations:
-    openbank.tech/policy-checksum: "36619134e8d81025"
+    openbank.tech/policy-checksum: "8f8be46808c5e724"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1363,6 +1363,7 @@ data:
             - sepaPayment.handleReturn
             - sepaPayment.transitionStatus
             - settlement.create
+            - swift.approval.decide
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

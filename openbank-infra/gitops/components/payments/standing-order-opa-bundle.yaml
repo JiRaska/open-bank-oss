@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: standing-order-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "d2dc7f34692d768d"
+    openbank.tech/policy-checksum: "7338b84ec0ac6269"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1373,6 +1373,7 @@ data:
             - sepaPayment.handleReturn
             - sepaPayment.transitionStatus
             - settlement.create
+            - swift.approval.decide
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

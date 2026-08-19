@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "e45f9fff60e5b399"
+    openbank.tech/policy-checksum: "1176c7b50e4dab7a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1479,6 +1479,7 @@ data:
             - sepaPayment.handleReturn
             - sepaPayment.transitionStatus
             - settlement.create
+            - swift.approval.decide
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

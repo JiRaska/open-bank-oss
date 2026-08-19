@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tpp-registry-service
     app.kubernetes.io/part-of: tpp-registry
   annotations:
-    openbank.tech/policy-checksum: "0f721db9ec4019f8"
+    openbank.tech/policy-checksum: "10e47d7993727153"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1342,6 +1342,7 @@ data:
             - sepaPayment.handleReturn
             - sepaPayment.transitionStatus
             - settlement.create
+            - swift.approval.decide
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
