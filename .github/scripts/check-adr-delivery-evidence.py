@@ -164,7 +164,7 @@ def check(root):
                 f"obligation."
             )
 
-    for number, reason in sorted(EXCEPTIONS.items()):
+    for number in sorted(EXCEPTIONS):
         if number not in planned:
             stale.append(
                 f"ADR-{number} is no longer delivery-status: planned — remove its EXCEPTIONS entry."
