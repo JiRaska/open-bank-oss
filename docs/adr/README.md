@@ -219,9 +219,9 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0208](0208-admin-ui-consolidation-a-primitive-layer-one-status-vocabulary-and-an-interactive-flow-explainer.md) | Admin UI consolidation: a primitive layer, one status vocabulary, and an interactive flow explainer | Proposed | Planned | admin-ui,architecture,governance | — |
 | [0209](0209-crm-and-campaign-sequencing-prerequisites-first-slice-and-what-must-not-start-yet.md) | CRM and campaign sequencing: prerequisites, first slice, and what must not start yet | Proposed | Partial | governance,architecture,ml,analytics | — |
 | [0210](0210-customer-360-as-a-query-over-the-analytics-silver-layer.md) | Customer 360 as a query over the analytics silver layer | Accepted | Shipped | analytics,architecture,privacy-gdpr,admin-ui | — |
-| [0211](0211-loan-origination-orchestration.md) | Loan origination orchestration: persisted state machine with durable timers, not a BPM suite | Proposed | Planned | lending,architecture,resilience | — |
-| [0212](0212-jurisdictional-credit-compliance-packs.md) | Jurisdictional credit compliance packs as versioned effective-dated data | Proposed | Planned | lending,compliance,product-catalog | — |
-| [0213](0213-deterministic-credit-policy-decision-engine.md) | Deterministic credit policy decision engine: versioned decision tables, fail-closed, explainable | Proposed | Planned | lending,compliance,architecture | — |
+| [0211](0211-loan-origination-orchestration.md) | Loan origination orchestration: persisted state machine with durable timers, not a BPM suite | Proposed | Partial | lending,architecture,resilience | — |
+| [0212](0212-jurisdictional-credit-compliance-packs.md) | Jurisdictional credit compliance packs as versioned effective-dated data | Proposed | Partial | lending,compliance,product-catalog | — |
+| [0213](0213-deterministic-credit-policy-decision-engine.md) | Deterministic credit policy decision engine: versioned decision tables, fail-closed, explainable | Proposed | Partial | lending,compliance,architecture | — |
 | [0214](0214-credit-lifecycle-audit-evidence.md) | Credit lifecycle audit evidence and reconstruction | Proposed | Planned | lending,audit,privacy-gdpr | — |
 | [0215](0215-loan-termination-early-exit-lifecycle.md) | Loan termination and early-exit lifecycle | Proposed | Planned | lending,compliance | — |
 | [0216](0216-ai-act-high-risk-credit-compliance.md) | EU AI Act high-risk compliance for credit AI systems | Proposed | Planned | lending,ml,compliance,ai-agents | — |
