@@ -3063,6 +3063,26 @@ gates:
     run: |
       bash .github/scripts/check-governance-manifest.sh
 
+  # Every ```mermaid block must parse with the mermaid the admin-ui Service Docs viewer
+  # renders with. A block that does not parse is a red "Mermaid render failed: Parse error"
+  # box on the page — measured 2026-08-19, 40 of 248 blocks across 21 services were in that
+  # state and only a human opening the page ever found out. Rides `lint` because it resolves
+  # mermaid + jsdom from openbank-admin-ui/node_modules, so it shares the npm ci the
+  # governance-manifest gate above already pays for; 2.5s once the modules are warm.
+  # NOT an admin-ui vitest test: `ui-build` fires on openbank-admin-ui/ paths, and a broken
+  # diagram arrives in a DOCS-only PR that touches none of them — the #4083 absent-job shape.
+  - id: mermaid-parses
+    name: "every mermaid block parses in the renderer admin-ui uses (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A mermaid block that does not parse renders as a red error box in the admin-ui Service Docs page and nothing else in CI looks at that page — 40 of 248 blocks across 21 services were broken when this was written, found only because a human opened one."
+    review_after: "2027-02-19"
+    selftest: bash .github/scripts/check-mermaid-parses.sh --self-test
+    selftest_expect: pass
+    min_subjects: 150   # 248 mermaid blocks today (2026-08-19)
+    run: |
+      bash .github/scripts/check-mermaid-parses.sh
+
   # The other half of check-gate-script-registration.py, which says in its own header that it
   # answers "is anything wired to this script" and deliberately not "can that invocation run".
   # A gate written as an inline step in ci.yml inherits its host job's conditions instead of
