@@ -3004,7 +3004,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-b8b8d7a2
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-fde280a9
 
           imagePullPolicy: IfNotPresent
           ports:
