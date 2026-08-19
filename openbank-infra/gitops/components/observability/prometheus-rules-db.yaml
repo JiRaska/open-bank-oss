@@ -131,6 +131,39 @@ spec:
           annotations:
             summary: "Postgres WAL archiving failing on {{ $labels.namespace }}/{{ $labels.pod }}"
             description: "archive_command has been failing for >15m — backups/PITR are not durable. Blocks safe pg_upgrade (runbook 0003)."
+        - alert: PostgresNoRecoveryPoint
+          # The gap PostgresWALArchiveFailing above structurally CANNOT cover. That alert fires on
+          # archiver FAILURES, and a database with no barmanObjectStore never fails: CNPG's
+          # wal-archive is a no-op with a success exit code, so engagement-db sat at
+          # archived_count=12, failed_count=0 and ContinuousArchiving=True with ZERO objects in any
+          # bucket — for the entire life of the cluster (2026-08-19). Postgres, Kubernetes and this
+          # alert set all agreed it was healthy. The only thing that disagreed was `aws s3 ls`.
+          #
+          # firstRecoverabilityPoint is the field that cannot be faked by a no-op: it is set when a
+          # BASE backup exists, and WAL archiving alone never sets it. So this catches both the
+          # never-configured case and the "archiving works but nobody ever took a base backup" one,
+          # which is the state a cluster sits in for hours after backup is first switched on.
+          #
+          # Scoped to the PRIMARY, and that is load-bearing: the metric is per-instance and a
+          # replica legitimately reports 0. Unfiltered, this expression matches 19 healthy replicas
+          # and pages for every one of them. Verified in both directions against the live sandbox
+          # (2026-08-19): primaries with a recovery point = 54, replicas without = 19, primaries
+          # without = 0 — so today's silence is a measured zero, not a join that never matches.
+          #
+          # NOT paired with a backup-staleness alert, deliberately:
+          # cnpg_collector_last_available_backup_timestamp reported swift-service-db as 37.7h stale
+          # while its ScheduledBackup had completed 13h earlier, so any threshold under ~48h fires
+          # on healthy clusters. That metric's semantics need establishing before an alert rests on
+          # it (issue filed).
+          expr: |
+            cnpg_collector_first_recoverability_point == 0
+              and on(namespace, pod) cnpg_pg_replication_in_recovery == 0
+          for: 30m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Postgres has NO recovery point on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "This primary has no first recoverability point — no base backup exists, so the database cannot be restored to any moment. WAL archiving alone is not a backup. Check `kubectl get cluster -n {{ $labels.namespace }}` for a barmanObjectStore, then force a base backup with an on-demand `kind: Backup`. Verify by listing the destination in S3, never by reading ContinuousArchiving (runbook 0003)."
         - alert: PostgresLowCacheHitRatio
           expr: |
             sum by (namespace, pod) (rate(cnpg_pg_stat_database_blks_hit[10m]))
