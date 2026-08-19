@@ -286,6 +286,39 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   never by grepping quoted field names; and treat "no hits" over a codebase with two idioms as a
   fact about the probe. Same shape as the Pact bullet below on grepping `src/test` for the word
   "contract".
+- **A consumer that rethrows does NOT dead-letter unless that channel configures it — SmallRye's
+  default `failure-strategy` is `fail`, which STOPS the channel.** Measured 2026-08-19: 44 incoming
+  channels fleet-wide, **4** had a DLQ. So the #5698 sweep, which converted ~30 consumers from
+  catch-and-ack to retry-then-rethrow across a dozen services, was on its way to trading silent data
+  loss for a halted consumer — the exact outcome the original swallow comments were written to avoid
+  — while every KDoc in it said "the connector dead-letters". Wire the DLQ in the same change that
+  introduces the rethrow: `failure-strategy`, an **explicit per-service topic**, the `KafkaTopic` CR
+  (topics are not auto-created) and the KafkaUser Write ACL. All four, or the rethrow wedges on the
+  DLQ send instead (#5745, #5751).
+  Two traps inside that. **The topic key is dotted, and the sibling bullet above applies** — but the
+  conclusion the fleet drew from it was wrong. Several services carried a comment asserting an
+  explicit DLQ topic was impossible *because* SmallRye quotes dotted leaf keys; true premise, wrong
+  conclusion. Measured through the real `YamlConfigSource`: the dotted one-liner
+  (`dead-letter-queue.topic: x`) is inert, the **nested** form resolves fine —
+  ```yaml
+  dead-letter-queue:
+    topic: openbank.dlq.<service>.<channel>
+  ```
+  the same idiom already used for `value: deserializer:`. That false constraint suppressed the correct
+  fix fleet-wide, and left transaction-service's money-path `payment-scheme-accepted` carrying the
+  inert form — correct in the deployed pod only because its msg-override ConfigMap supplied the value,
+  wrong locally and in every test. And **the implicit topic name is derived from the CHANNEL name,
+  which repeats across services**: account-service and card-issuance-service both consume
+  `delegation-events-in` with no override, so they already dead-letter into one shared topic and any
+  alert scoped to one counts the other's records (#5752).
+- **A comment asserting current CONFIGURATION goes stale exactly like a report asserting current
+  remote state.** Two agents in one session measured "this channel has no DLQ", wrote it into a KDoc,
+  and were falsified within the hour by the PR that wired it — the same shape as the `NotificationOutcomeConsumer`
+  KDoc they had just corrected for claiming a failure was "bounded and visible" when `PENDING` is also
+  what an in-flight outcome shows. Write the **mechanism the code controls** ("the record is nacked;
+  the connector's configured `failure-strategy` decides what follows") and let `application.yaml` answer
+  what the value is today. A comment that names a config value is a claim with a shelf life, and nothing
+  re-checks it.
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
