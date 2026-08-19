@@ -206,6 +206,13 @@ gates:
     name: "ADR delivery-status is not contradicted by an enforced gate (ADR-0253)"
     group: gitops
     mode: enforced
+    rationale: >-
+      DIGEST.md is what a reviewer, an auditor or an agent reads instead of the 1.6 MB ADR
+      fleet, and check-adr-registry.sh validates its schema, not the truth of the value —
+      `planned` over shipped code is a well-formed lie. It happened twice unseen (#5602;
+      ADR-0237 sat `planned` while its own adoption gate was enforced).
+    review_after: "2027-02-19"
+    min_subjects: 100   # 147 enforced gates in the manifest today (2026-08-19)
     selftest: |
       python3 .github/scripts/check-adr-delivery-evidence.py --self-test
     run: |

@@ -62,8 +62,11 @@ import pathlib
 import re
 import sys
 
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gatelib
+
 ADR_RE = re.compile(r"ADR-(\d{4})")
-PLACEHOLDER_RE = re.compile(r"\b(tbd|todo|fixme|xxx|reason|placeholder)\b", re.I)
+PLACEHOLDER_RE = re.compile(r"\b(tbd|todo|fixme|xxx|reason|placeholder)\b", re.IGNORECASE)
 MIN_REASON = 40
 
 # ADR number -> why an enforced gate may cite it while it is still `planned`.
@@ -274,6 +277,11 @@ def main():
         return self_test()
 
     errors, stale = check(args.root)
+    # Declare the corpus unconditionally, failure path included: a gate that examines
+    # nothing passes everything, and this one's corpus is the enforced-gate set.
+    gatelib.subjects(
+        len([g for g in load_gates(pathlib.Path(args.root)) if g["mode"] == "enforced"]),
+        "enforced gates in the manifest")
     for e in errors:
         print(f"ERROR:   {e}", file=sys.stderr)
     for s in stale:
