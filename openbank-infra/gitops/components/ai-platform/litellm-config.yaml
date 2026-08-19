@@ -85,6 +85,17 @@ data:
       # upstream provider key — so the DeepInfra key lives only here, never in an agent pod (ADR-0175).
       master_key: os.environ/LITELLM_MASTER_KEY
     litellm_settings:
+      # LLM observability (ADR-0031 D7). Server-side, so every caller already routed through this
+      # gateway is traced with no application change and no second SDK in ~34 services — and a
+      # service that bypasses the gateway is absent from the traces, which is itself the signal
+      # ADR-0175 wants. Prompts and completions land in the in-cluster Langfuse; nothing is sent to
+      # a SaaS.
+      #
+      # `failure_callback` is not a duplicate of `success_callback`: without it a provider outage is
+      # invisible in Langfuse, and the trace view then shows a quiet, healthy-looking gateway during
+      # exactly the incident someone is opening it to investigate.
+      success_callback: ["langfuse"]
+      failure_callback: ["langfuse"]
       # Fail fast to the caller's deterministic fallback rather than hanging an agent's Temporal
       # activity; the agents already treat a null/again response as "no model".
       request_timeout: 60
