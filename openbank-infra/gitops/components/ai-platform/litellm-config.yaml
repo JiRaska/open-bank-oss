@@ -56,6 +56,26 @@ data:
           # number is auditable and a gate can check it.
           input_cost_per_token: 0.00000059
           output_cost_per_token: 0.00000079
+      # Content-safety classifier (ADR-0031 guardrails). Groq serves Llama Guard 4 on the same key
+      # already projected here, so this adds a route and no new provider, no new secret and no GPU.
+      # Callers send `meta-llama/llama-guard-4-12b` verbatim (copilot `content-safety.model`).
+      #
+      # Its budget is deliberately NOT shared with the chat routes above. A guardrail that stops
+      # classifying because a chat loop burned the day's ceiling is a control outage caused by
+      # unrelated traffic — and it degrades to `unavailable`, which on a fail-open surface means
+      # every message afterwards is unclassified. Small ceiling, but its own.
+      - model_name: meta-llama/llama-guard-4-12b
+        litellm_params:
+          model: groq/meta-llama/llama-guard-4-12b
+          api_key: os.environ/GROQ_API_KEY
+          max_budget: 3
+          budget_duration: 1d
+          # Groq's published price for llama-guard-4-12b: $0.20 per million tokens both directions.
+          # Declared rather than inherited, for the reason the routes above document: a version bump
+          # that drops the built-in entry silently costs every call at $0 and every budget below
+          # stops biting, with nothing going red.
+          input_cost_per_token: 0.0000002
+          output_cost_per_token: 0.0000002
     general_settings:
       # Virtual keys and every budget below persist here. Injected from the CNPG litellm-db-app
       # secret (components/ai-platform/postgres.yaml) — see the DATABASE_URL note in litellm.yaml

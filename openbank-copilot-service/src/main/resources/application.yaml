@@ -84,6 +84,22 @@ copilot:
   guardrail:
     # block (default) stops the turn on a prompt-injection hit; advisory only audits (ADR-0089 D3).
     mode: ${COPILOT_GUARDRAIL_MODE:block}
+  # Model-based content safety (Llama Guard via the LiteLLM gateway, ADR-0031 guardrails / ADR-0174).
+  # Complements the deterministic prompt-injection guard above; neither replaces the other.
+  # Disabled by default so no environment silently starts calling a classifier on upgrade — when
+  # disabled every classification reports `unavailable`, never `safe`, so the state is visible in
+  # openbank_guardrail_classifications{decision="unavailable"} instead of looking clean.
+  content-safety:
+    enabled: ${COPILOT_CONTENT_SAFETY_ENABLED:false}
+    # In-cluster gateway; the provider key never reaches this pod (ADR-0175).
+    endpoint: ${COPILOT_CONTENT_SAFETY_ENDPOINT:}
+    model: ${COPILOT_CONTENT_SAFETY_MODEL:meta-llama/llama-guard-4-12b}
+    api-key: ${COPILOT_CONTENT_SAFETY_API_KEY:}
+    # What an UNAVAILABLE verdict means on THIS surface. false for customer help: refusing to answer
+    # a balance question because a classifier is unreachable is worse than answering it, and the
+    # injection guard + OPA tool gate + SCA still stand between the customer and any action. Flip to
+    # true on any state-changing surface.
+    fail-closed: ${COPILOT_CONTENT_SAFETY_FAIL_CLOSED:false}
   # The ModelGateway seam is constant; only the backend changes per environment (ADR-0089 D6).
   #   sandbox    -> public free / mock provider (synthetic data only)
   #   production -> in-cluster vLLM or EU zero-retention (deferred, FinOps ADR-0027)
