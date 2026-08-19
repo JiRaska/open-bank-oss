@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.24.0...notification-service-v0.25.0) (2026-08-19)
+
+
+### Features
+
+* **notification:** wire ADR-0232 delegation lifecycle into notifications ([#5661](https://github.com/JiRaska/open-bank-oss/issues/5661)) ([b89e1fb](https://github.com/JiRaska/open-bank-oss/commit/b89e1fb52f64d0d417726c1b14ef6b4c172194a6))
+
 ## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.23.3...notification-service-v0.24.0) (2026-08-18)
 
 
