@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.11.1...fx-service-v0.12.0) (2026-08-19)
+
+
+### Features
+
+* **fx:** expose pending four-eyes approvals via approval inbox ([#5695](https://github.com/JiRaska/open-bank-oss/issues/5695)) ([81c159c](https://github.com/JiRaska/open-bank-oss/commit/81c159ce49cb4671e03171a3e2ccec1068cb3929))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.11.0...fx-service-v0.11.1) (2026-08-18)
 
 
