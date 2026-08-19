@@ -28,8 +28,10 @@ import java.util.UUID
  * coarse "as of the last stage change" signal, not a continuously fresh DPD feed. Good enough for
  * a targeting exclusion; do not read it as a live delinquency metric.
  *
- * Poison-pill safe: parse/handle failures are logged and swallowed so one bad event cannot wedge
- * the consumer group — lending-service's outbox remains the source of truth and can be replayed.
+ * Poison-pill safe for a MALFORMED event: an unparseable payload, a missing partyId or a missing
+ * daysPastDue is logged and acked, because replaying it fails identically forever. A failure of the
+ * `adverseState` write is the opposite case and is retried, then rethrown for the DLQ — see
+ * [withBoundedRetry] (#5698).
  */
 @ApplicationScoped
 class LendingArrearsEventConsumer(
@@ -39,32 +41,44 @@ class LendingArrearsEventConsumer(
     private val log = Logger.getLogger(LendingArrearsEventConsumer::class.java)
 
     @Incoming("lending-events-in")
-    @Suppress("TooGenericExceptionCaught") // poison-pill safety, same convention as
-    // MarketingConsentEventConsumer/PartyEventConsumer across the fleet.
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
-            if (node.path("eventType") // topic carries only loan.stage_changed today, but check
-                    .asText() != "loan.stage_changed"
-            ) {
-                return
-            }
-            val partyId = node.path("partyId").asText(null)?.let(UUID::fromString) ?: run {
-                log.warnf("loan.stage_changed missing/unparseable partyId, skipping: %.300s", payload)
-                return
-            }
-            val daysPastDue = node.path("daysPastDue").asInt(-1)
-            if (daysPastDue < 0) {
-                log.warnf("loan.stage_changed missing/unparseable daysPastDue, skipping: %.300s", payload)
-                return
-            }
-            if (daysPastDue > 0) {
-                adverseState.setActive(partyId, AdverseState.ARREARS, Instant.now())
+        val signal = parse(payload) ?: return
+        withBoundedRetry(log, "arrears exclusion for party ${signal.partyId} (dpd=${signal.daysPastDue})") {
+            if (signal.daysPastDue > 0) {
+                adverseState.setActive(signal.partyId, AdverseState.ARREARS, Instant.now())
             } else {
-                adverseState.clearActive(partyId, AdverseState.ARREARS)
+                adverseState.clearActive(signal.partyId, AdverseState.ARREARS)
             }
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to handle loan.stage_changed event: %.300s", payload)
         }
     }
+
+    /** Parsing + routing only — every outcome here is unretryable, so a null means "ack and move on". */
+    // TooGenericExceptionCaught: whatever Jackson or UUID.fromString throws, a malformed payload is
+    // the same unretryable poison pill. ReturnCount: one guard per required field reads far better
+    // than folding four conditions together.
+    @Suppress("TooGenericExceptionCaught", "ReturnCount")
+    private fun parse(payload: String): ArrearsSignal? {
+        val node = try {
+            objectMapper.readTree(payload)
+        } catch (e: Exception) {
+            log.errorf(e, "Failed to parse loan.stage_changed event: %.300s", payload)
+            return null
+        }
+        // topic carries only loan.stage_changed today, but check
+        if (node.path("eventType").asText() != "loan.stage_changed") return null
+
+        val partyId = runCatching { node.path("partyId").asText(null)?.let(UUID::fromString) }.getOrNull()
+        if (partyId == null) {
+            log.warnf("loan.stage_changed missing/unparseable partyId, skipping: %.300s", payload)
+            return null
+        }
+        val daysPastDue = node.path("daysPastDue").asInt(-1)
+        if (daysPastDue < 0) {
+            log.warnf("loan.stage_changed missing/unparseable daysPastDue, skipping: %.300s", payload)
+            return null
+        }
+        return ArrearsSignal(partyId, daysPastDue)
+    }
+
+    private data class ArrearsSignal(val partyId: UUID, val daysPastDue: Int)
 }

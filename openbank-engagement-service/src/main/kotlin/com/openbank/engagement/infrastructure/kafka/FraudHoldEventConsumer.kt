@@ -21,8 +21,10 @@ import java.util.UUID
  * fraud-service's side (its own scheduled sweep, no manual clear), so this consumer must honour
  * `active: false` and actually clear the state rather than only ever setting it.
  *
- * Poison-pill safe: parse/handle failures are logged and swallowed so one bad event cannot wedge
- * the consumer group — fraud-service's outbox remains the source of truth and can be replayed.
+ * Poison-pill safe for a MALFORMED event: an unparseable payload or a missing partyId is logged and
+ * acked, because replaying it fails identically forever. A failure of the `adverseState` write is
+ * the opposite case and is retried, then rethrown for the DLQ — see [withBoundedRetry] (#5698).
+ * Losing this signal silently is the worst of the four: it is the fraud-hold marketing exclusion.
  */
 @ApplicationScoped
 class FraudHoldEventConsumer(
@@ -32,22 +34,34 @@ class FraudHoldEventConsumer(
     private val log = Logger.getLogger(FraudHoldEventConsumer::class.java)
 
     @Incoming("fraud-hold-events-in")
-    @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
-            val partyId = node.path("partyId").asText(null)?.let(UUID::fromString) ?: run {
-                log.warnf("fraud.hold_changed missing/unparseable partyId, skipping: %.300s", payload)
-                return
-            }
-            val active = node.path("active").asBoolean(false)
-            if (active) {
-                adverseState.setActive(partyId, AdverseState.FRAUD_HOLD, Instant.now())
+        val signal = parse(payload) ?: return
+        withBoundedRetry(log, "fraud-hold exclusion for party ${signal.partyId} (active=${signal.active})") {
+            if (signal.active) {
+                adverseState.setActive(signal.partyId, AdverseState.FRAUD_HOLD, Instant.now())
             } else {
-                adverseState.clearActive(partyId, AdverseState.FRAUD_HOLD)
+                adverseState.clearActive(signal.partyId, AdverseState.FRAUD_HOLD)
             }
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to handle fraud.hold_changed event: %.300s", payload)
         }
     }
+
+    /** Parsing only — every outcome here is unretryable, so a null means "ack and move on". */
+    @Suppress("TooGenericExceptionCaught") // whatever Jackson or UUID.fromString throws, a malformed
+    // payload is the same unretryable poison pill.
+    private fun parse(payload: String): FraudHoldSignal? =
+        try {
+            val node = objectMapper.readTree(payload)
+            val partyId = node.path("partyId").asText(null)?.let(UUID::fromString)
+            if (partyId == null) {
+                log.warnf("fraud.hold_changed missing/unparseable partyId, skipping: %.300s", payload)
+                null
+            } else {
+                FraudHoldSignal(partyId, node.path("active").asBoolean(false))
+            }
+        } catch (e: Exception) {
+            log.errorf(e, "Failed to parse fraud.hold_changed event: %.300s", payload)
+            null
+        }
+
+    private data class FraudHoldSignal(val partyId: UUID, val active: Boolean)
 }
