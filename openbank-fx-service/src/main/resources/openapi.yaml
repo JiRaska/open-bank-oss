@@ -5,10 +5,10 @@ info:
   title: FX Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). The note here used to describe the
   # 1.2 -> 1.3 bump and was never updated through four more; it now records the CURRENT one.
-  # Minor bump (1.6 -> 1.7): additive only — an optional `asOf` query parameter on
-  # GET /rates/{base}/{quote} plus response fields the service has always served and this spec did
-  # not declare (bidRate/askRate/validFrom/validTo). No breaking change (#3921).
-  version: 1.7.0
+  # Minor bump (1.7 -> 1.8): additive only — GET /fx/approvals (the checker's queue, issue #5679)
+  # plus two additive fields on ApprovalResponse (makerId, createdAt), and a shared
+  # ApprovalResponse schema now $ref'd from PATCH /approvals/{id} too. No breaking change.
+  version: 1.8.0
   description: >-
     Foreign exchange rates and currency conversion. On convert, the converting party's name is
     synchronously screened against the sanctions lists (ADR-0032): a clean party settles the
@@ -243,6 +243,38 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/fx/approvals:
+    get:
+      tags: [FX]
+      summary: >-
+        List pending four-eyes approvals, oldest first — the checker's queue (ADR-0227 D2).
+        Without it a decision parked at 202 is discoverable only by whoever was handed its id.
+      description: >-
+        PENDING maker-checker approvals on `fx.convert`, oldest first. The read side of the
+        unified approval inbox — deciding stays on PATCH /api/v1/fx/approvals/{id}. Requires
+        ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/fx/approvals/{id}:
     patch:
       tags: [FX]
@@ -266,10 +298,16 @@ paths:
       responses:
         '200':
           description: The decided approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
         '404':
           $ref: '#/components/responses/NotFound'
         '403':
-          $ref: '#/components/responses/Forbidden'
+          description: >-
+            The caller is the maker of this approval. Segregation of duties is enforced in
+            RedisApprovalStore.decide, not per-service.
 
 components:
   responses:
@@ -426,3 +464,36 @@ components:
           type: string
         message:
           type: string
+
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record (ADR-0155). `makerId` is the principal that requested the
+        gated action; a DIFFERENT principal must decide it — enforced in
+        RedisApprovalStore.decide, so the queue is readable by anyone who may decide, including
+        the maker (seeing a request is not authority over it).
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+          description: The value the maker replays as the X-Approval-Id header once approved.
+        action:
+          type: string
+          example: fx.convert
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, EXECUTED]
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          description: >-
+            Request time. The store expires a PENDING approval after 24h, so age is the only
+            visible sign of one about to lapse.
+        decidedBy:
+          type: string
+          nullable: true

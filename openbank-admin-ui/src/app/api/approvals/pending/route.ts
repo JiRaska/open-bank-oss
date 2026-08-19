@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'agent'
+  domain: 'lending' | 'sanctions' | 'fx' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -39,6 +39,11 @@ type LendingApproval = {
 // reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
 // built to show parked decisions.
 type SanctionsApproval = LendingApproval
+
+// fx-service serves the same libs `PendingApproval` shape (issue #5679, money-path first per
+// that issue's own ordering). Before this, an `fx.convert` four-eyes decision parked at 202
+// was discoverable only by whoever had been handed its id out of band.
+type FxApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -90,6 +95,28 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function fxPending(headers: HeadersInit): Promise<SourceResult> {
+  // k8s workload is `fx-service` (with the `-service` suffix, unlike sepa-instant) — see
+  // src/app/api/svc/[service]/[...path]/route.ts's SERVICE_MAP for the canonical key and
+  // openbank-infra/gitops/components/fx-service/fx-service.yaml for the `fx` namespace.
+  // fx-service also sits on the FinOps off-hours scaledown allowlist (see app/api/fx/rates'
+  // discovery-based handling), so a scaled-to-zero fx-service surfaces here as 'unavailable'
+  // (a fetch failure caught below), same as any other down source — the inbox does not need
+  // to distinguish scale-to-zero from genuinely down.
+  const res = await fetch(serverSvcUrl('fx-service', 'fx', 8119, '/api/v1/fx/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as FxApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'fx' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -117,15 +144,16 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, agent] = await Promise.all([
+  const [lending, sanctions, fx, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
+    fxPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...fx.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
-    sources: { lending: lending.state, sanctions: sanctions.state, agent: agent.state },
+    sources: { lending: lending.state, sanctions: sanctions.state, fx: fx.state, agent: agent.state },
   })
 }
