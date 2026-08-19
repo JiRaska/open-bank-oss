@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.168.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.167.0...admin-ui-v0.168.0) (2026-08-19)
+
+
+### Features
+
+* **admin-ui:** federate the sanctions four-eyes queue into the approval inbox ([#5680](https://github.com/JiRaska/open-bank-oss/issues/5680)) ([4d3e213](https://github.com/JiRaska/open-bank-oss/commit/4d3e2132ba9a3ff552e331ba42158063a9170540))
+
 ## [0.167.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.166.6...admin-ui-v0.167.0) (2026-08-18)
 
 

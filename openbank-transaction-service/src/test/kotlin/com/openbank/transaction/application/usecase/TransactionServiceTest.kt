@@ -38,6 +38,7 @@ import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.UUID
 
 class TransactionServiceTest {
@@ -50,7 +51,27 @@ class TransactionServiceTest {
 
     private lateinit var service: TransactionService
 
-    private val clock: Clock = Clock.systemUTC()
+    /**
+     * FIXED, and that is the whole point. Six tests below build a requested value date as
+     * `today.plusMonths(1)`, and [SettlementDateResolver] rolls a requested date to a business day
+     * (FOLLOWING). Under a system clock this file is a calendar time-bomb in two directions:
+     *
+     *  - the two tests that assert the requested date survives verbatim fail whenever today + 1
+     *    month lands on a weekend or holiday — on 2026-08-19 that was Saturday 2026-09-19, and
+     *    `a SEPA settlement booked as TRANSFER still honours the requested value date` and
+     *    `a domestic payment leaving the bank still honours the resolver` both went red;
+     *  - the four that assert the same-day branch (`isEqualTo(today)`) are exposed whenever
+     *    *today itself* is not a business day, i.e. every weekend run.
+     *
+     * Nothing here was wrong on the day it was written; the test simply asked the calendar a
+     * different question each morning. Path-scoped CI hid it — the module builds only when
+     * something touches it, so the failure surfaced on an unrelated docs-only PR.
+     *
+     * 2026-01-06 is a Tuesday, 09:00Z = 10:00 Europe/Prague (before the 16:00 cut-off), and
+     * 2026-02-06 is a Friday. Both ends of every `plusMonths(1)` below are business days by
+     * construction, on every future run.
+     */
+    private val clock: Clock = Clock.fixed(Instant.parse("2026-01-06T09:00:00Z"), ZoneOffset.UTC)
     private var lastSaved: Transaction? = null
 
     @BeforeEach
@@ -65,12 +86,16 @@ class TransactionServiceTest {
         every {
             workflowClient.newWorkflowStub(PaymentWorkflow::class.java, any<WorkflowOptions>())
         } returns workflowStub
+        // The clock is passed EXPLICITLY: the @Inject constructor defaults to Clock.systemUTC(),
+        // so a fixed clock held only by the test would describe a different day from the one the
+        // service resolves settlement dates against — expectations and subject must share it.
         service = TransactionService(
             transactionRepository,
             eventPublisher,
             fxRatePort,
             temporalConfig,
             workflowClient,
+            clock,
         )
     }
 
