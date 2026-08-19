@@ -265,8 +265,25 @@ jobs:
             echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s"
 
             echo "==> [${svc}] starting quarkusDev"
+            # FORCE the credentials this job actually created the container with, rather than
+            # trusting the service to pick them up from an env var. The fleet convention is
+            # `password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}`, and the job env supplies
+            # POSTGRES_PASSWORD — but openbank-settlement-service names its expressions
+            # QUARKUS_DATASOURCE_USERNAME/PASSWORD instead, so POSTGRES_PASSWORD never reached it
+            # and Flyway died on `FATAL: password authentication failed for user
+            # "openbank_settlement"` after a 237s compile (run 32289597634). Only 3 of ~50
+            # services use that spelling, which is exactly why an assumption about it is worth
+            # nothing: this is the third naming convention this lane assumed and did not have
+            # (#5714 was the username expression and the six differently-named worker properties).
+            #
+            # System properties sit above application.yaml in SmallRye's ordinal chain, so they
+            # win over any `${...:default}` expression whatever it is spelled. username/password
+            # live on `quarkus.datasource`, above both `reactive:` and `jdbc:`, so one pair of
+            # overrides covers the reactive datasource and the Flyway/Agroal one together.
             ./gradlew ":${svc}:quarkusDev" \
               -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+              -Dquarkus.datasource.username="${DBUSER}" \
+              -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
               "${WORKER_FLAGS[@]}" \
               -Dquarkus.console.basic=true \
               --console=plain --quiet \
