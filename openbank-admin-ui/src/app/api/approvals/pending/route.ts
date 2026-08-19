@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -39,6 +39,9 @@ type LendingApproval = {
 // reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
 // built to show parked decisions.
 type SanctionsApproval = LendingApproval
+
+// transaction-service serves the same libs `PendingApproval` shape too (#5679).
+type TransactionApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -90,6 +93,21 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('transaction-service', 'transaction', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as TransactionApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'transaction' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -117,15 +135,16 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, agent] = await Promise.all([
+  const [lending, sanctions, transaction, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
+    transactionPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
-    sources: { lending: lending.state, sanctions: sanctions.state, agent: agent.state },
+    sources: { lending: lending.state, sanctions: sanctions.state, transaction: transaction.state, agent: agent.state },
   })
 }
