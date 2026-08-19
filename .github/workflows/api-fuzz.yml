@@ -260,13 +260,35 @@ jobs:
             # Readiness = the main HTTP socket answers anything (000 = conn
             # refused). /q/* may live on the management port in prod profiles;
             # here only socket-open matters before pointing schemathesis at it.
+            #
+            # The wait deliberately does NOT use $DEV_PID as a liveness proxy. `./gradlew` is a
+            # launcher: it hands the build to the Gradle daemon and the client can exit while
+            # quarkusDev keeps running under the daemon. `kill -0 $DEV_PID || break` therefore
+            # aborted the wait on a service that was booting perfectly well — a race, which is why
+            # the same service passed one run and "failed to boot" the next. Measured on run
+            # 32284304038: openbank-domestic-payment logged `Listening on: http://localhost:8116`
+            # at 18:21:52, ~34s into a 180s budget, and the job still reported
+            # "failed to boot"; its boot log ends one second later, when teardown killed it. Its
+            # artifact contains no error of any kind. openbank-settlement-service is the same
+            # shape, one step earlier — it was still pulling a Dev Services LGTM container
+            # (46 mentions in 137 lines) when the wait gave up.
+            #
+            # So the loop now runs its full budget and reports what it actually observed. A
+            # genuinely dead JVM costs the remaining wait instead of exiting early — the right
+            # trade against silently mislabelling a healthy service, which is the failure this
+            # lane exists to avoid making. WAITED is printed so a slow boot is visible as a slow
+            # boot rather than inferred from a timestamp in an artifact.
             UP=0
+            WAITED=0
             for i in $(seq 1 90); do
               code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
               if [ "$code" != "000" ]; then UP=1; break; fi
-              kill -0 "$DEV_PID" 2>/dev/null || break
+              WAITED=$((WAITED + 2))
               sleep 2
             done
+            if [ "$UP" = "1" ]; then
+              echo "==> [${svc}] answered after ${WAITED}s"
+            fi
             if [ "$UP" != "1" ]; then
               echo "::error::[${svc}] failed to boot — see ${svc}-boot.log artifact"
               tail -50 "fuzz-reports/${svc}-boot.log" || true
