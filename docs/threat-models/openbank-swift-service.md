@@ -82,10 +82,12 @@ residual risk below).
 | **T**ampering | A stale, already-consumed, or unrelated `X-Approval-Id` is replayed to unlock a different send | `AuthorizeInterceptor` requires the approval's `action` + `makerId` to match the CURRENT request (there is no `resourceId` to also match here — see residual risk), `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated send | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/swift/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_PAYMENTS` + `@Authorize(action = "swift.approval.read")`; the payload carries approval metadata only — the action name, the resource id (always `null` here, see §4a) and who asked — never message/BIC/amount details. Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `POST /api/v1/swift` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/swift/approvals/{id} → Redis (approval:*)`
-alongside the existing `POST /api/v1/swift` edge; the maker's retry reuses the existing DFD edge.
+**DFD update:** adds `Operator (checker) → GET /api/v1/swift/approvals → Redis (approval:*)` and
+`Operator (checker) → PATCH /api/v1/swift/approvals/{id} → Redis (approval:*)` alongside the
+existing `POST /api/v1/swift` edge; the maker's retry reuses the existing DFD edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
 not change any existing request's outcome until explicitly flipped.
@@ -159,3 +161,43 @@ not change any existing request's outcome until explicitly flipped.
   behavior change to any existing request in this PR; flipping it is a tracked follow-up. No DB
   schema change (Redis, TTL-bounded); rollback = revert the commit (or leave
   `authz.four-eyes.enforce=false`, its default).
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `swift.send`
+  four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
+  id out of band — the ceremony completed only if the two operators were already talking, and the
+  24h Redis TTL then expired the request silently otherwise (issue #5679, mirroring sanctions
+  #3472, ledger, domestic-payment and sepa-instant). Added `GET /api/v1/swift/approvals` (§4a new
+  I row); additive-only OpenAPI change (1.2.0 -> 1.3.0, ADR-0048).
+  - **Checked the existing decide endpoint's own authz posture while here** (verify-by-effect, not
+    by appearance): `opa eval` against the real `rest.rego` + `swift_rest_ext.rego` +
+    `rules-opa-data.yaml` bundle showed `swift.approval.decide` resolving **`allow=false` for a
+    real ROLE_OPERATOR** — the action was entirely absent from `rules.yaml`'s
+    `role_action_matrix` (present for the sibling `sepaPayment.approval.decide`, absent for this
+    service's own decide action since the four-eyes gate was wired on 2026-07-08) and
+    `swift_rest_ext.rego`'s own `operator-swift-write` rule only ever covers `send`/`acknowledge`/
+    `reject`, never `approval.decide`. The decide endpoint has therefore been 403ing every
+    operator in any `AUTHZ_ENFORCE=true` environment since it shipped — same shape as the
+    balance-service gap found by #5686/#5690 and the sepa-instant gap found by #5694. **Fixed** by
+    adding the matrix grant (mirroring `sepaPayment.approval.decide`'s entry) to both
+    `role_action_matrix.ROLE_OPERATOR` and `shared_m2m_matrix_write_grants.declared`, then
+    regenerating `rules-opa-data.yaml` and every service's OPA bundle (a `role_action_matrix` edit
+    restamps the fleet). Verified with `opa eval` (loaded so `data.rules.*` actually resolves —
+    the bundle's own `rules/data.yaml` layout, not a bare directory named `rules`, which silently
+    drops the prefix and would have made the "before" reading a false positive too):
+    `swift.approval.decide` now resolves `allow=true`/`reason=matrix-allows` for ROLE_OPERATOR,
+    and a non-operator role (`ROLE_KYC_OPENER`) still resolves `allow=false`. The new `GET`
+    (`swift.approval.read`) needed no matrix entry — `operator-read-any` in base `rest.rego`
+    already grants any `ROLE_OPERATOR`/`ROLE_ADMIN` action ending in `.read`, confirmed the same
+    way.
+  - **Known residual, not fixed here**: `matrix-allows` is role-only, and the deployed realm
+    template gives `service-account-openbank-edge` `ROLE_OPERATOR` in at least one environment
+    (see root `CLAUDE.md`'s realm-drift note) — the same exposure balance-service closed with a
+    per-service `prohibited` rule in `balance_rest_ext.rego`. `swift_rest_ext.rego`'s own header
+    already documents that a repo-wide sweep found no in-repo REST client or Kafka consumer
+    calling `openbank-swift-service` at all today, so there is no verified in-repo M2M caller to
+    scope a prohibition against; `rules.yaml`'s `shared_m2m_write_prohibition.deferred` already
+    lists `operator-swift-write: "no identity-scoped rule; callers unverified"` for the same
+    reason. Building a new prohibition mechanism was out of scope for this PR's mirrored fix;
+    tracked as follow-up under issue #5679's own money-path-first ordering.
+  - **Rollback:** revert both commits independently — the matrix grant only changes an OPA
+    `allow` decision (advisory in this environment, `authz.four-eyes.enforce=false`), and the new
+    `GET` is additive.

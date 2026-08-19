@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -63,6 +63,11 @@ type ClearingApproval = LendingApproval
 // per that issue's own ordering). Before this, a `ledger.reverse` four-eyes decision parked at
 // 202 was discoverable only by whoever had been handed its id out of band.
 type LedgerApproval = LendingApproval
+
+// swift-service serves the same libs `PendingApproval` shape (issue #5679, money-path first
+// per that issue's own ordering). Before this, a `swift.send` four-eyes decision parked at 202
+// was discoverable only by whoever had been handed its id out of band.
+type SwiftApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -196,6 +201,21 @@ async function ledgerPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function swiftPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('swift-service', 'payments', 8122, '/api/v1/swift/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as SwiftApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'swift' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -223,7 +243,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -231,9 +251,10 @@ export async function GET() {
     clearingPending(headers).catch(() => unavailable),
     fxPending(headers).catch(() => unavailable),
     ledgerPending(headers).catch(() => unavailable),
+    swiftPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -245,6 +266,7 @@ export async function GET() {
       clearing: clearing.state,
       fx: fx.state,
       ledger: ledger.state,
+      swift: swift.state,
       agent: agent.state,
     },
   })
