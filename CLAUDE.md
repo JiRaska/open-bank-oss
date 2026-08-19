@@ -142,6 +142,25 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `nonnull-jaxrs-param-ratchet`) — money-path fixed, the tail baselined (#3104, #3624). Counting
   trap: an outbound REST-client **`interface`** carries the identical annotation and is NOT a defect
   (the caller supplies the argument, compile-time checked), which is half of every naive grep.
+- **An entity property with no explicit `@Column(name = ...)` asks for a column no migration here
+  ever creates — and it is wrong for every MULTI-WORD property while right for every single-word
+  one, so the class reads as internally consistent.** Hibernate's implicit name is the property
+  name verbatim and Postgres folds an unquoted identifier to lower case, so `createdAt` resolves to
+  `createdat` while the migration wrote `created_at`. Only six services set
+  `physical-naming-strategy: CamelCaseToUnderscoresNamingStrategy`; in the other ~46 the name must
+  be spelled out. consent-service's `SuppressionEntity` had six of ten columns wrong, and
+  `GET /api/v1/suppressions/party/{partyId}` answered **500 on every call from the day it shipped**
+  (`SQLGrammarException: column se1_0.createdat does not exist (42703)`). Nothing could see it: the
+  unit tests mock the repository so no SQL is issued, health probes never touch the table so the pod
+  stays Ready, and the two sibling entities in the same package DO name their columns — so the file
+  next door looked like the convention was being followed. It took schemathesis fuzzing the running
+  service to find it. `check-entity-column-names.py` enforces it (gate `entity-column-names`).
+  Note what that gate must NOT do: deriving "does this column exist" from the DDL needs real parsing
+  (partitioned tables, custom enum types, ALTER/RENAME chains) and two attempts produced 12 and then
+  ~40 false findings against correct code — including all of sanctions-service, whose columns are
+  named explicitly in the Kotlin use-site form `@field:Column(name = ...)` that a `@Column`-only
+  regex cannot match. A gate that cries wolf about correct code is worth less than nothing, so it
+  checks the convention, which is fully decidable.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
@@ -286,6 +305,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   never by grepping quoted field names; and treat "no hits" over a codebase with two idioms as a
   fact about the probe. Same shape as the Pact bullet below on grepping `src/test` for the word
   "contract".
+
+- **A fuzz/DAST job list showing a service is NOT evidence the service was tested — read what each
+  job actually did.** The 2026-08-18 API-fuzz run reported 7 failures of 23 and exactly ONE was a
+  finding about an HTTP surface; the other six never sent a request, and both failure kinds render
+  identically in the job list. Two harness causes, both worth knowing: the datasource `username:`
+  in `application.yaml` is often a config EXPRESSION (`${POSTGRES_USER:openbank}`), and taken
+  verbatim into `docker run -e POSTGRES_USER=` / `pg_isready -U` it can never succeed — vop and
+  settlement had therefore NEVER been fuzzed; and six services register a Temporal worker at
+  `StartupEvent`, so with no Temporal present transaction-service failed to boot outright while
+  lending, sepa-payment and domestic-payment retried past the deadline. Every registrar carries a
+  disable switch but under a DIFFERENT name each (`openbank.transaction.worker.enabled`,
+  `openbank.sepa.worker.enabled`, … and lending's `lending.origination.worker.enabled`, not even
+  under `openbank.`), so the harness derives the property from each registrar's own
+  `@ConfigProperty` rather than listing six names. This matters beyond the lane: the `pentest`
+  attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
+  fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -441,6 +476,33 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
   carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
   say which realm you read.
+
+- **A backup that has never been configured reports the same "success" as one that works — CNPG's
+  archiver is a NO-OP with a success exit code when no `barmanObjectStore` exists, and both
+  `ContinuousArchiving=True ContinuousArchivingSuccess` and `pg_stat_archiver` agree with it.**
+  Measured on engagement-db 2026-08-19, before its backup landed: `archived_count=12`,
+  `failed_count=0`, last success two days earlier — and **zero objects in the bucket**, because
+  there was no bucket to write to. Every WAL sat `.done` in `archive_status/`. Nothing in
+  Kubernetes, in Postgres or in the alert set could distinguish "archived to S3" from "archived
+  to nowhere"; the only probe that separates them is `aws s3 ls <destinationPath>`. Same family as
+  the push adapter whose `PushResult.skipped()` carried `success = true` — a silent no-op sharing
+  a flag with real success — and the reason `cnpg-backup-declared-gate` exists at all: the enforced
+  sibling only inspects clusters that ALREADY declare a destination, so a database that never asked
+  is invisible to it. **Verify a backup by listing the objects, never by reading a condition.**
+- **WAL archiving is not a backup, and the cluster looks green in between.** A recovery point needs
+  a BASE backup plus WAL; with archiving freshly working and no base backup,
+  `ContinuousArchiving=True` while `firstRecoverabilityPoint` is empty — restoring is impossible and
+  the only field that says so is one nobody alerts on. After enabling backup on a cluster, force the
+  first base backup (an unmanaged `kind: Backup`) instead of waiting for the ScheduledBackup, and
+  assert `status.firstRecoverabilityPoint` is set.
+- **EKS Pod Identity credentials are injected at ADMISSION, so adding an association does nothing
+  for a pod that is already running — and CNPG's 30-minute grace period makes the fix cost minutes,
+  not seconds.** engagement-db-1 had been up 7 days when its association was created; WAL archiving
+  kept failing `barman-cloud-wal-archive: Unable to locate credentials, exit status 4` until the pod
+  was deleted and re-admitted (failures stopped at 17:14:30, first success from the new pod at
+  17:14:45). `terminationGracePeriodSeconds` is 1800 and the smart shutdown waits, so budget ~4
+  minutes of downtime for that single-instance restart, not 30 seconds. Distinct from #1759, where
+  the association existed and the agent merely missed injecting during a node roll.
 
 ### GitOps / Kubernetes / OPA policy bundles
 Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,
