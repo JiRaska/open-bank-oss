@@ -22,6 +22,10 @@ import java.util.UUID
  *
  * Poison-pill safe (an unparseable payload is logged and skipped, never crashes the consumer) and
  * idempotent (delegated to [OnboardingDocumentUseCase], which no-ops on replay).
+ *
+ * Issuance failures are split by kind (#5698) — see [withBoundedRetry]. A deterministic failure for
+ * one account is still acked, exactly as ADR-0086's off-the-money-path trade-off intends; a
+ * transient one is retried and then rethrown, so it dead-letters instead of vanishing.
  */
 @ApplicationScoped
 class AccountCreatedConsumer(
@@ -56,23 +60,39 @@ class AccountCreatedConsumer(
         }
 
         try {
-            onboardingUseCase.issueOnboardingDocument(
-                IssueOnboardingDocumentCommand(
-                    accountId = accountId,
-                    partyRef = partyId.toString(),
-                    productId = productId,
-                ),
-            )
-        } catch (e: Exception) {
-            // Poison-pill safety: onboarding is best-effort and off the money path (ADR-0086), so a
-            // deterministic downstream failure for ONE account (e.g. a documentTemplateCode with no
-            // PUBLISHED template) must not throw out of the stream and, under smallrye-kafka's default
-            // fail-strategy, wedge onboarding for EVERY subsequent account. Log and ack; a missed
-            // onboarding document is re-triggerable, not a money error. This deliberately trades
-            // at-least-once retry on a transient error for consumer liveness — a bounded retry / DLQ
-            // is a possible follow-up if transient-loss ever proves material.
-            log.errorf(e, "Onboarding-document issuance failed for account %s; skipping (event acked).", accountId)
+            withBoundedRetry(log, "Onboarding-document issuance for account $accountId") {
+                onboardingUseCase.issueOnboardingDocument(
+                    IssueOnboardingDocumentCommand(
+                        accountId = accountId,
+                        partyRef = partyId.toString(),
+                        productId = productId,
+                    ),
+                )
+            }
+        } catch (e: IllegalStateException) {
+            ackDeterministic(e, accountId)
+        } catch (e: IllegalArgumentException) {
+            ackDeterministic(e, accountId)
         }
+        // Anything else has already been retried and is deliberately NOT caught: it propagates so
+        // smallrye-kafka can dead-letter the record. Swallowing it acked an event that did no work,
+        // which is indistinguishable from success on every dashboard there is (#5698).
+    }
+
+    /**
+     * Ack a failure that is a property of THIS account rather than of the infrastructure — e.g. a
+     * product whose `documentTemplateCode` has no PUBLISHED template. Onboarding is best-effort and
+     * off the money path (ADR-0086), so such an event must not throw out of the stream and, under
+     * smallrye-kafka's default fail-strategy, wedge onboarding for EVERY subsequent account. It also
+     * cannot be fixed by a retry or by a DLQ: the next delivery fails identically. A missed
+     * onboarding document is re-triggerable, not a money error.
+     */
+    private fun ackDeterministic(e: RuntimeException, accountId: UUID) {
+        log.errorf(
+            e,
+            "Onboarding-document issuance failed deterministically for account %s; skipping (event acked).",
+            accountId,
+        )
     }
 
     private companion object {
