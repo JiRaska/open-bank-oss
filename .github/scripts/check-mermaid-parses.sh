@@ -62,23 +62,26 @@ source "$SCRIPT_DIR/ensure-admin-ui-deps.sh"
 ensure_deps() { ensure_admin_ui_deps "mermaid-parses"; }
 
 run_check() {
-  UI_DIR="$UI_DIR" SCAN_ROOT="$SCAN_ROOT" node --input-type=module <<'NODE'
+  # Run FROM the admin-ui directory and import by BARE SPECIFIER. Resolving to a file path and
+  # importing that instead (createRequire + pathToFileURL) works on some Node versions and not
+  # others: a path import bypasses the package's `exports` map, so mermaid's internal
+  # `es-toolkit/compat` becomes a directory import and the runner's Node rejects it with
+  # ERR_UNSUPPORTED_DIR_IMPORT — green locally, red in CI, which is the worst split there is.
+  ( cd "$UI_DIR" && SCAN_ROOT="$SCAN_ROOT" node --input-type=module <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { pathToFileURL } from 'node:url';
 
-const uiDir = process.env.UI_DIR;
 const scanRoot = process.env.SCAN_ROOT;
-const req = createRequire(path.join(uiDir, 'package.json'));
+const req = createRequire(path.join(process.cwd(), 'package.json'));
 
-const { JSDOM } = await import(pathToFileURL(req.resolve('jsdom')).href);
+const { JSDOM } = await import('jsdom');
 const dom = new JSDOM('<!doctype html><html><body></body></html>');
 globalThis.window = dom.window;
 globalThis.document = dom.window.document;
 
 const mermaidPkg = req('mermaid/package.json');
-const mermaid = (await import(pathToFileURL(req.resolve('mermaid')).href)).default;
+const mermaid = (await import('mermaid')).default;
 mermaid.initialize({ startOnLoad: false });
 
 // Skip trees that are not ours to lint. node_modules and build output carry vendored
@@ -130,6 +133,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 NODE
+  )
 }
 
 # --- falsification -----------------------------------------------------------------------
