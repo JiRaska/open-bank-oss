@@ -100,13 +100,26 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
     same job in a couple of seconds.
     """
     order: dict[pathlib.Path, int] = {}
-    try:
-        revs = subprocess.run(
-            ["git", "rev-list", "--reverse", "origin/main"],
-            cwd=REPO, capture_output=True, text=True, check=True,
-        ).stdout.splitlines()
-    except subprocess.CalledProcessError:
-        return order
+    # Resolve the mainline through several candidates, because CI does not have the one a
+    # developer's checkout does. `actions/checkout` fetches with a narrow refspec, so
+    # `refs/remotes/origin/main` frequently does NOT exist on a PR run even at fetch-depth: 0 --
+    # `git fetch origin main` there updates FETCH_HEAD and nothing else. The first version of this
+    # function caught the resulting CalledProcessError and returned an EMPTY map, which made the
+    # whole gate a silent no-op: no order, therefore no pairs to compare, therefore no violations,
+    # therefore green. It was only visible because the KNOWN_VIOLATIONS both-ways check then
+    # reported every baseline entry as stale -- the ratchet catching the checker, which is the
+    # single reason that idiom is worth its cost.
+    revs: list[str] = []
+    for ref in ("origin/main", "FETCH_HEAD", "main", "HEAD"):
+        try:
+            revs = subprocess.run(
+                ["git", "rev-list", "--reverse", ref],
+                cwd=REPO, capture_output=True, text=True, check=True,
+            ).stdout.splitlines()
+        except subprocess.CalledProcessError:
+            continue
+        if revs:
+            break
     position = {sha: i for i, sha in enumerate(revs)}
 
     wanted = {str(p.relative_to(REPO)) for p in paths}
@@ -240,6 +253,15 @@ def main() -> int:
         service = path.relative_to(REPO).parts[0]
         files_by_service.setdefault(service, []).append((path, version))
 
+    if all_files and not order:
+        # Never report "clean" from a scan that resolved nothing. A gate that cannot see its
+        # corpus must say so, not agree with it.
+        print("::error::could not resolve any migration's add-commit against the mainline "
+              "(no usable git history for origin/main, FETCH_HEAD, main or HEAD). The check did "
+              "not run -- this is a broken scan, not a clean result.")
+        gatelib.subjects(0, "migrations ordered")
+        return 1
+
     findings, used_baseline = find_violations(files_by_service, order)
 
     for key in sorted(set(KNOWN_VIOLATIONS) - used_baseline):
@@ -252,7 +274,10 @@ def main() -> int:
     total = sum(len(v) for v in files_by_service.values())
     for line in findings:
         print(line if args.enforce else line.replace("::error", "::warning", 1))
-    gatelib.subjects(total, "migrations checked")
+    # Count what was actually ORDERED, not what exists on disk: a scan that found every file
+    # and could order none of them is the exact silent-no-op above, and the min_subjects floor
+    # should catch it independently of the baseline check.
+    gatelib.subjects(len(order), "migrations ordered against mainline history")
     verdict = "clean." if not findings else f"{len(findings)} finding(s) above."
     print(f"check-flyway-version-commit-order: {total} migration(s) across "
           f"{len(files_by_service)} service(s) checked, {len(KNOWN_VIOLATIONS)} known baseline "
