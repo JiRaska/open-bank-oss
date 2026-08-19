@@ -56,6 +56,28 @@ enum class NotificationTemplate(val variables: Set<String>) {
      * discipline — a campaign supplies values, never free-form body text.
      */
     MARKETING_PRODUCT_OFFER(setOf("offerTitle", "offerText", "ctaText")),
+
+    // ── ADR-0232 delegated-access lifecycle — sent to the party actionable on each transition.
+    // `resourceType` is the only detail carried on `openbank.delegation.events` that is safe to
+    // put in a template: neither party's display name rides the wire (DelegationEvents.kt has no
+    // name field — delegation-service's own counterparty-names table is a read-model local to that
+    // service), so DelegationNotificationConsumer cannot render one without an extra cross-service
+    // call this fan-out deliberately does not make (see its KDoc).
+
+    /** A grantee has an offer waiting to accept or decline (DelegationOffered). */
+    DELEGATION_OFFERED(setOf("resourceType")),
+
+    /** The grantor's offer was accepted and the grant is now active (DelegationActivated). */
+    DELEGATION_ACCEPTED(setOf("resourceType")),
+
+    /** The grantee declined the grantor's offer (DelegationDeclined). */
+    DELEGATION_DECLINED(setOf("resourceType")),
+
+    /** The grantor revoked an active grant; the grantee's access ends now (DelegationRevoked). */
+    DELEGATION_REVOKED(setOf("resourceType")),
+
+    /** A grant's validity window ended on its own; sent to both parties (DelegationExpired). */
+    DELEGATION_EXPIRED(setOf("resourceType")),
     ;
 
     /** Keys in [vars] that this template does not accept. Empty = the request is well-formed. */
@@ -71,6 +93,8 @@ enum class NotificationTemplate(val variables: Set<String>) {
             OTP_CODE, PASSWORD_RESET, ACCOUNT_FROZEN, SCA_APPROVAL,
             KYC_APPROVED, KYC_REJECTED, KYC_DOCUMENT_REQUIRED,
             CONSENT_GRANTED, CONSENT_REVOKED,
+            DELEGATION_OFFERED, DELEGATION_ACCEPTED, DELEGATION_DECLINED,
+            DELEGATION_REVOKED, DELEGATION_EXPIRED,
             -> NotificationCategory.SECURITY
             TRANSACTION_COMPLETED, TRANSACTION_FAILED -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT
