@@ -50,7 +50,13 @@ class TransactionServiceTest {
 
     private lateinit var service: TransactionService
 
-    private val clock: Clock = Clock.systemUTC()
+    // Fixed instead of Clock.systemUTC(): several tests derive `requested = today.plusMonths(1)`
+    // and assert it passes through SettlementDateResolver UNCHANGED. That only holds when the
+    // resulting date is a CERTIS business day — on a real clock it silently flakes whenever
+    // `today.plusMonths(1)` lands on a weekend (or a CZK bank holiday), because the resolver
+    // correctly rolls a non-business-day value date forward (#5652). 2026-03-16 -> +1 month is
+    // 2026-04-16, a Thursday, clear of Easter (2026-04-03/04-06) and every other CERTIS holiday.
+    private val clock: Clock = Clock.fixed(Instant.parse("2026-03-16T09:00:00Z"), SettlementDateResolver.BANK_ZONE)
     private var lastSaved: Transaction? = null
 
     @BeforeEach
@@ -71,6 +77,7 @@ class TransactionServiceTest {
             fxRatePort,
             temporalConfig,
             workflowClient,
+            clock,
         )
     }
 
