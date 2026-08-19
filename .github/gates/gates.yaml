@@ -415,6 +415,35 @@ gates:
     min_subjects: 40   # 44 services scored today (2026-08-19)
     run: |
       python3 .github/scripts/check-readiness-collectors-agree.py
+  # A JPA property in a service with no physical-naming-strategy maps to a column that is the
+  # property name folded to lower case — `createdAt` -> `createdat` — while every migration in this
+  # repo writes `created_at`. The mapping is then wrong for every multi-word property and right for
+  # every single-word one, so the class looks internally consistent and reviews clean.
+  #
+  # consent-service's SuppressionEntity shipped that way: six of ten columns wrong, and
+  # GET /api/v1/suppressions/party/{partyId} answered 500 on EVERY call from the day it shipped.
+  # Nothing could see it — unit tests mock the repository so no SQL is issued, health probes do not
+  # touch the table, and the two sibling entities in the same package do name their columns. It was
+  # found by schemathesis fuzzing the running service, which is not a control that runs on a PR.
+  #
+  # Scope note: this enforces the CONVENTION (a multi-word property names its column), not a diff
+  # against the DDL. Deriving "does this column exist" needs real DDL parsing — partitioned tables,
+  # custom enum types, ALTER/RENAME chains — and two attempts at it produced 12 and then ~40 false
+  # findings against correct code. A gate that cries wolf gets ignored. ENFORCED.
+  - id: entity-column-names
+    name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      In a service with no physical-naming-strategy an implicit column name is the property name
+      folded to lower case, which no migration in this repo ever creates; the resulting 500 is
+      invisible to unit tests, health probes and review.
+    review_after: 2027-02-19
+    min_subjects: 100   # 147 entity classes in strategy-less services today (2026-08-19)
+    selftest: |
+      python3 .github/scripts/check-entity-column-names.py --self-test
+    run: |
+      python3 .github/scripts/check-entity-column-names.py
 
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
