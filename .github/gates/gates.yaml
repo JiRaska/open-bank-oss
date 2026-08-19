@@ -244,6 +244,41 @@ gates:
       # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
       python3 .github/scripts/check-litellm-model-costs.py --enforce
 
+  - id: untrusted-pg-extension
+    name: "an untrusted CREATE EXTENSION needs a CNPG Database resource (works local, crashloops deployed)"
+    group: data
+    mode: enforced
+    min_subjects: 1   # 1 untrusted CREATE EXTENSION site today (copilot V3, pgvector)
+    rationale: "A migration creating an untrusted extension passes every local path (all of which connect as superuser) and crashloops only in the cluster, where CNPG hands the app a non-superuser role — the diff gives no hint that the difference is the connecting role."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-untrusted-pg-extension.py --self-test
+    selftest_expect: pass
+    run: |
+      # Measured, not assumed (ADR-0265): against ghcr.io/cloudnative-pg/postgresql:18.1 the
+      # database OWNER gets 'permission denied to create extension "vector"' and the superuser
+      # gets CREATE EXTENSION. Every local path (Dev Services, PostgreSQLContainer, compose)
+      # connects as superuser, so this class of defect is green everywhere except the cluster.
+      # 8 self-test cases, both directions, including prose-in-a-comment near-misses.
+      python3 .github/scripts/check-untrusted-pg-extension.py --enforce
+
+  - id: litellm-config-revision
+    name: "a litellm-config change bumps the pod-roll annotation (an unrolled pod keeps its old model list)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    min_subjects: 1
+    rationale: "LiteLLM parses its config once at startup, so a route added without a pod roll answers 'model not found' while ArgoCD reports Synced and Healthy; the manifest asked for the bump in prose since #1919 and three routes in one week relied on someone remembering."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-litellm-config-revision.py --self-test
+    selftest_expect: pass
+    run: |
+      # LiteLLM parses --config once at startup, so a ConfigMap edit alone changes nothing while
+      # ArgoCD reports Synced and Healthy — the manifest has warned about this in prose since
+      # #1919, and prose is not a control. The self-test also asserts the annotation regex matches
+      # the REAL manifest, so the gate cannot pass by never reaching its subject.
+      python3 .github/scripts/check-litellm-config-revision.py --base "${PR_DIFF_BASE}" --enforce
+
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
     group: gitops
