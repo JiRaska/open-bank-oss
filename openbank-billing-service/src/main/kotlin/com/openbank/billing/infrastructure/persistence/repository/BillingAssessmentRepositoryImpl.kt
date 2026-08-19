@@ -10,6 +10,7 @@ import com.openbank.billing.domain.AssessedFee
 import com.openbank.billing.domain.BillingAssessment
 import com.openbank.billing.domain.PostingStatus
 import com.openbank.billing.infrastructure.outbox.AnnualFeeSummaryOutboxPayloads
+import com.openbank.billing.infrastructure.outbox.AssessedFeeOutboxPayloads
 import com.openbank.billing.infrastructure.persistence.entity.AssessedFeeEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingCycleAssessmentEntity
 import com.openbank.billing.infrastructure.persistence.entity.BillingOutboxEntity
@@ -327,31 +328,6 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
         private fun aggregateIdFor(accountId: String, year: Int): UUID =
             UUID.nameUUIDFromBytes("annual-fee-summary:$accountId:$year".toByteArray(StandardCharsets.UTF_8))
     }
-}
-
-/**
- * Serializes an [AssessedFeeEntity] into the two `billing_outbox` payload shapes (ADR-0143 steps
- * 2/2e). Split out of [BillingAssessmentRepositoryImpl] (detekt `TooManyFunctions`, threshold 11):
- * this is pure payload-mapping logic with no reactive/transactional concern of its own — the same
- * "mapper lives at file scope, not on the persistence class" convention this file already used for
- * [BillingCycleAssessmentEntity.toDomain]/[AssessedFeeEntity.toDomain] below.
- */
-private object AssessedFeeOutboxPayloads {
-
-    fun postIntent(fee: AssessedFeeEntity): String = "{\"schemaVersion\":1," +
-        "\"idempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
-        "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
-        "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
-        "\"description\":\"Fee charge: ${fee.feeName}\"}"
-
-    fun reversalIntent(fee: AssessedFeeEntity, reason: String): String = "{\"schemaVersion\":1," +
-        "\"idempotencyKey\":\"${fee.reversalIdempotencyKey()}\"," +
-        "\"originalIdempotencyKey\":\"${fee.idempotencyKey}\",\"cycleId\":\"${fee.cycleId}\"," +
-        "\"accountId\":\"${fee.accountId}\",\"feeId\":\"${fee.feeId}\"," +
-        "\"amount\":\"${fee.chargedAmount}\",\"currency\":\"${fee.currency}\"," +
-        "\"reason\":\"${reason.replace('\n', ' ').replace('\r', ' ').replace("\"", "'")}\"}"
-
-    private fun AssessedFeeEntity.reversalIdempotencyKey(): String = "fee-reversal-$cycleId-$accountId-$feeId-$currency"
 }
 
 private fun BillingCycleAssessmentEntity.toDomain(fees: List<AssessedFeeEntity>): BillingAssessment = BillingAssessment(

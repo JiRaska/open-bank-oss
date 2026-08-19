@@ -180,6 +180,18 @@ jobs:
             PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
             DB="$(grep -m1 -E 'postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
             DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
+            # The username is often a Quarkus config EXPRESSION, not a literal:
+            # `${POSTGRES_USER:openbank}` (vop) or `"${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"`
+            # (settlement). Taken verbatim, that string was handed to `docker run -e POSTGRES_USER=`
+            # and then to `pg_isready -U`, which can never succeed — so both services died on
+            # "postgres never became ready" and had NEVER been fuzzed, silently, while the job list
+            # showed them as covered. Resolve the expression to its default, which is exactly what
+            # the %dev profile resolves it to here (none of these vars are set in this job).
+            DBUSER="$(printf '%s' "$DBUSER" | tr -d "\"'" | sed -E 's/^\$\{[A-Za-z_][A-Za-z0-9_]*:?-?([^}]*)\}$/\1/')"
+            if [ -z "$DBUSER" ] || printf '%s' "$DBUSER" | grep -q '[^A-Za-z0-9_]'; then
+              echo "::error::[${svc}] could not resolve a usable datasource username from ${APP_YAML} (got '${DBUSER}') — skip"
+              OVERALL=1; continue
+            fi
             echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
 
             # Job-local postgres on the localhost:5432 the %dev profile
@@ -207,9 +219,39 @@ jobs:
             # Quarkus dev mode: %dev disables OIDC; Flyway migrates at start.
             # Kafka producers are lazy — no broker needed for the HTTP surface
             # (the transactional outbox keeps brokers out of the request path).
+            # Temporal worker OFF for the fuzz run. Six services register a Temporal worker at
+            # StartupEvent and there is no Temporal here, so the gRPC channel to
+            # temporal-frontend:7233 is refused: transaction-service failed outright
+            # ("Failed to start quarkus", Caused by StatusRuntimeException UNAVAILABLE) while
+            # lending, sepa-payment and domestic-payment retried past the boot deadline. Four
+            # money-path services were reported as fuzz failures for an absent dependency, which
+            # is not a finding about their HTTP surface — and it drowned the ONE real finding in
+            # the same run (consent-service, #5711).
+            #
+            # Every registrar already has the switch, because @QuarkusTest needs it too. What they
+            # do NOT have is a shared name for it: openbank.transaction.worker.enabled,
+            # openbank.domestic.worker.enabled, openbank.sepa.worker.enabled,
+            # openbank.campaign.worker.enabled, openbank.settlement.worker.enabled — and
+            # lending's is `lending.origination.worker.enabled`, not even under `openbank.`. So the
+            # property is DERIVED from the registrar's own @ConfigProperty rather than listed here;
+            # a hand-kept table of six names is the thing this repo keeps finding rotted.
+            # An ARRAY, not a string: an unquoted string here would rely on word splitting to
+            # become separate flags, which is the one shell behaviour that silently does the wrong
+            # thing the day a property name gains a space or the variable is empty.
+            # An ARRAY, not a string: an unquoted string at the use site would rely on word
+            # splitting to become separate flags, which is the one shell behaviour that silently
+            # does the wrong thing the day the variable is empty.
+            WORKER_FLAGS=()
+            WORKER_PROPS="$(grep -rhoE '"[A-Za-z0-9._-]*worker\.enabled"' "${svc}/src/main" 2>/dev/null | tr -d '"' | sort -u || true)"
+            for prop in ${WORKER_PROPS}; do
+              WORKER_FLAGS+=("-D${prop}=false")
+              echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
+            done
+
             echo "==> [${svc}] starting quarkusDev"
             ./gradlew ":${svc}:quarkusDev" \
               -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+              "${WORKER_FLAGS[@]}" \
               -Dquarkus.console.basic=true \
               --console=plain --quiet \
               > "fuzz-reports/${svc}-boot.log" 2>&1 &

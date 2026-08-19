@@ -31,7 +31,7 @@ graph LR
     K4[K4: zero K8s NetworkPolicy]
     K5[K5: GDPR anonymisation UUID leak]
     K6[K6: admin UI exposing full PII]
-    K7[K7: audit endpoint @PermitAll]
+    K7["K7: audit endpoint @PermitAll"]
   end
 
   subgraph LibsContrib["openbank-libs contribution"]

@@ -395,6 +395,56 @@ gates:
     run: |
       python3 .github/scripts/check-network-policy-code-edges.py
 
+  # Two implementations of the production-readiness scorecard both ship — the Python one via
+  # build-push-admin-ui.sh, the Node one via `prebuild`/admin-ui-deploy.yml, because the admin-ui
+  # build image has no python3. They drifted to 20-of-44 services scored differently (17 GO vs
+  # 11 GO for the same repo on the same day), each side carrying corrections the other lacked,
+  # and nothing compared them. The equivalence is what gets enforced, since the duplicate cannot
+  # be deleted and hand-auditing it is exactly what failed. ENFORCED.
+  - id: readiness-collectors-agree
+    name: "prod-readiness collectors agree (Python vs Node, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Two implementations of the readiness scorecard both ship and cannot be merged into one
+      (no python3 in the admin-ui build image); they had already drifted to 20 of 44 services
+      scored differently, so their equivalence is enforced rather than hand-audited.
+    review_after: 2027-02-19
+    selftest: |
+      python3 .github/scripts/check-readiness-collectors-agree.py --self-test
+    min_subjects: 40   # 44 services scored today (2026-08-19)
+    run: |
+      python3 .github/scripts/check-readiness-collectors-agree.py
+  # A JPA property in a service with no physical-naming-strategy maps to a column that is the
+  # property name folded to lower case — `createdAt` -> `createdat` — while every migration in this
+  # repo writes `created_at`. The mapping is then wrong for every multi-word property and right for
+  # every single-word one, so the class looks internally consistent and reviews clean.
+  #
+  # consent-service's SuppressionEntity shipped that way: six of ten columns wrong, and
+  # GET /api/v1/suppressions/party/{partyId} answered 500 on EVERY call from the day it shipped.
+  # Nothing could see it — unit tests mock the repository so no SQL is issued, health probes do not
+  # touch the table, and the two sibling entities in the same package do name their columns. It was
+  # found by schemathesis fuzzing the running service, which is not a control that runs on a PR.
+  #
+  # Scope note: this enforces the CONVENTION (a multi-word property names its column), not a diff
+  # against the DDL. Deriving "does this column exist" needs real DDL parsing — partitioned tables,
+  # custom enum types, ALTER/RENAME chains — and two attempts at it produced 12 and then ~40 false
+  # findings against correct code. A gate that cries wolf gets ignored. ENFORCED.
+  - id: entity-column-names
+    name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      In a service with no physical-naming-strategy an implicit column name is the property name
+      folded to lower case, which no migration in this repo ever creates; the resulting 500 is
+      invisible to unit tests, health probes and review.
+    review_after: 2027-02-19
+    min_subjects: 100   # 147 entity classes in strategy-less services today (2026-08-19)
+    selftest: |
+      python3 .github/scripts/check-entity-column-names.py --self-test
+    run: |
+      python3 .github/scripts/check-entity-column-names.py
+
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops
@@ -604,16 +654,21 @@ gates:
   # any gitops-scoped check and is written into the script header rather than left to be
   # discovered.
   #
-  # ADVISORY, not enforced, and the reason is specific rather than caution: enforcing it today
-  # would fail every PR on one open question — whether engagement-db should be backed up or is
-  # genuinely disposable — that is an owner's decision and not a contributor's to unblock. The
-  # exemption is an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`), deliberately
-  # not a list kept beside the manifests: a separate list drifts from what it describes and
-  # nothing notices, which is the defect this repo keeps re-finding.
+  # ENFORCED since 2026-08-19. It was advisory for one specific reason, written above: enforcing
+  # it would have failed every PR on a single open question — whether engagement-db should be
+  # backed up or is genuinely disposable — which is an owner's decision, not a contributor's to
+  # unblock. That question is now answered (backed up, same #863 pattern as the rest of the
+  # fleet), the gitops-visible count is 0, and an advisory gate that has correctly named the same
+  # cluster since 2026-08-16 with nothing happening is a finding nobody is required to read. The
+  # exemption remains an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`),
+  # deliberately not a list kept beside the manifests: a separate list drifts from what it
+  # describes and nothing notices, which is the defect this repo keeps re-finding. So a future
+  # genuinely-disposable database is still one annotation away from green, and that annotation
+  # sits on the thing it describes.
   - id: cnpg-backup-declared-gate
-    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (advisory)"
+    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     rationale: >-
       db-backup-association-gate only inspects clusters that already declare a
       barmanObjectStore, so a database that never asked to be backed up is invisible to it.
@@ -3094,6 +3149,26 @@ gates:
     min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
     run: |
       bash .github/scripts/check-governance-manifest.sh
+
+  # Every ```mermaid block must parse with the mermaid the admin-ui Service Docs viewer
+  # renders with. A block that does not parse is a red "Mermaid render failed: Parse error"
+  # box on the page — measured 2026-08-19, 40 of 248 blocks across 21 services were in that
+  # state and only a human opening the page ever found out. Rides `lint` because it resolves
+  # mermaid + jsdom from openbank-admin-ui/node_modules, so it shares the npm ci the
+  # governance-manifest gate above already pays for; 2.5s once the modules are warm.
+  # NOT an admin-ui vitest test: `ui-build` fires on openbank-admin-ui/ paths, and a broken
+  # diagram arrives in a DOCS-only PR that touches none of them — the #4083 absent-job shape.
+  - id: mermaid-parses
+    name: "every mermaid block parses in the renderer admin-ui uses (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A mermaid block that does not parse renders as a red error box in the admin-ui Service Docs page and nothing else in CI looks at that page — 40 of 248 blocks across 21 services were broken when this was written, found only because a human opened one."
+    review_after: "2027-02-19"
+    selftest: bash .github/scripts/check-mermaid-parses.sh --self-test
+    selftest_expect: pass
+    min_subjects: 150   # 248 mermaid blocks today (2026-08-19)
+    run: |
+      bash .github/scripts/check-mermaid-parses.sh
 
   # The other half of check-gate-script-registration.py, which says in its own header that it
   # answers "is anything wired to this script" and deliberately not "can that invocation run".
