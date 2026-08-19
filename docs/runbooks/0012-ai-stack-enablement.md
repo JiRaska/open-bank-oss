@@ -25,25 +25,27 @@ only proof is the manual check in step 4.
 
 ## 1. Seed the secrets (operator, break-glass)
 
-All values are generated locally; none is a third-party credential.
-
-```
-bao kv patch openbank/langfuse \
-  NEXTAUTH_SECRET=$(openssl rand -base64 32) \
-  SALT=$(openssl rand -base64 32) \
-  ENCRYPTION_KEY=$(openssl rand -hex 32) \
-  LANGFUSE_PUBLIC_KEY=pk-lf-$(uuidgen | tr 'A-Z' 'a-z') \
-  LANGFUSE_SECRET_KEY=sk-lf-$(uuidgen | tr 'A-Z' 'a-z') \
-  INIT_USER_EMAIL=<operator email> \
-  INIT_USER_PASSWORD=$(openssl rand -base64 24)
+```bash
+./openbank-infra/scripts/seed-ai-stack-secrets.sh
 ```
 
-`ENCRYPTION_KEY` must be exactly 64 hex chars — `-hex 32`, **not** `-base64`. Langfuse refuses to
-start otherwise, and on a fresh install that reads as a crashloop with one validation line buried in
-the first seconds of log.
+Idempotent: it seeds only what is missing, and `--rotate` regenerates the rest. All values are
+generated locally, none is a third-party credential, and none is ever echoed — the UI password is
+read out of OpenBao only when you ask for it, by the command the script prints.
 
-The guardrail and embedding routes reuse the copilot's **existing** LiteLLM virtual key
-(`litellm/KEY_COPILOT_SERVICE`); nothing new to seed for those.
+What it does that a hand-typed `bao kv patch` does not:
+
+- uses `kv patch`, not `kv put` — `put` replaces the whole secret and would drop the other fields;
+- generates `ENCRYPTION_KEY` as **64 hex chars** (`-hex 32`, *not* `-base64`); Langfuse refuses to
+  start on any other length, and on a fresh install that reads as a crashloop with one validation
+  line buried in the first seconds of log — the script also re-checks the **projected** length,
+  since that is what the pod actually receives;
+- refuses to continue if Langfuse is **already running** while the project keys are unseeded, which
+  is the unrecoverable ordering case in step 2;
+- checks that `litellm/KEY_COPILOT_SERVICE` exists — the guardrail and embedding routes reuse the
+  copilot's existing virtual key on purpose (a second copy is a second place to rot), and without it
+  both degrade **silently**;
+- forces the ESO sync and verifies the projection, rather than reporting that a pod exists.
 
 ## 2. Order matters in exactly one place
 

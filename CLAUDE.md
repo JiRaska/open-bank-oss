@@ -306,6 +306,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   and `McpEndpoint` do.
 
 ### Flyway
+- **An UNTRUSTED extension cannot be created by the role Flyway connects as — the migration is green
+  on every laptop and crashloops in the cluster.** Postgres splits extensions into trusted
+  (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `unaccent` — a database OWNER may create them) and untrusted
+  (`vector`, `postgis`, `postgres_fdw`, `plpython3u` — SUPERUSER only). Every local path connects as
+  superuser (Dev Services, `PostgreSQLContainer`, compose); CNPG hands the deployed app a
+  non-superuser role. Measured against the fleet's own image
+  (`ghcr.io/cloudnative-pg/postgresql:18.1`, pgvector 0.8.1 already bundled): as owner
+  `ERROR: permission denied to create extension "vector"`, as superuser `CREATE EXTENSION`, and as
+  owner against an already-installed one `NOTICE: … already exists, skipping`. That last line is why
+  the two halves compose — a CNPG `Database` resource (`spec.extensions[]`, applied by the operator
+  over its superuser connection) creates it, and `CREATE EXTENSION IF NOT EXISTS` in the migration
+  short-circuits before the permission check, which is what keeps local dev working. Both are
+  load-bearing: drop the resource and the deployed migration dies at line 1; drop the migration line
+  and every developer's database breaks. Enforced by `check-untrusted-pg-extension.py`
+  (`rules.yaml: postgres_extensions`).
 - **Never change a migration after it has been applied to a live DB** — Flyway checksums the whole
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.
 - **Committing migrations does not run them: `migrate-at-start` defaults to FALSE.**
