@@ -56,15 +56,41 @@ global_controls:
 # ---------------------------------------------------------------------------------------
 runtime:
   orchestration: temporal           # as-built: LIVE. temporal namespace up; agents are Temporal workflows.
-  reasoning:     langgraph          # as-built: NOT DEPLOYED. Activities are hand-written Kotlin; no langgraph.
-  guardrails:    [llama-guard, prompt-injection-filter]   # as-built: PARTIAL. PromptInjectionGuard.kt is real
-                                    # (copilot-service). llama-guard is NOT deployed — its only occurrences are
-                                    # inside the OPA bundles' embedded copy of THIS file, which is not evidence.
-  memory_rag:    pgvector           # as-built: NOT DEPLOYED. No pgvector, no embeddings, no RAG. The copilot's
-                                    # HelpKnowledgeBase is deterministic keyword scoring, by explicit choice.
-  observability: langfuse           # as-built: NOT DEPLOYED. OTel only.
-  identity:      spiffe-spire       # as-built: PARTIAL. AgentSvidVerifier.kt is real, but no SPIRE deployment
-                                    # exists; the live agent identity is OpenBao's pki-agent CA (ADR-0031 D3b).
+  # RENAMED from `langgraph` by ADR-0265. LangGraph is a Python library and this fleet is
+  # Kotlin/Quarkus with Temporal already owning durable execution; adopting it would have bought a
+  # graph abstraction at the price of a second language runtime, image, CI lane, dependency-scanning
+  # surface and threat model. So the DECLARATION was corrected to name what runs rather than the
+  # platform being bent to make a label true.
+  # as-built: PARTIAL. `openbank-libs-domain/.../reasoning/ReasoningGraph.kt` is real and tested —
+  # nodes, state-threaded edges, a step cap and a visit path, deterministic so it can run inside a
+  # Temporal workflow. Today's shipped agent loops are still the hand-written Kotlin ones
+  # (AgentChatService's bounded model-tool loop, the control-plane workflows' straight-line
+  # pipelines); migrating them onto the graph is tracked in #5671, and this line will say LIVE only
+  # once at least one shipped loop actually runs on it.
+  reasoning:     kotlin-graph-over-temporal
+  # as-built: LIVE as of ADR-0265 slice 2, both halves. PromptInjectionGuard.kt (deterministic
+  # patterns) has always been real; llama-guard is now served through the LiteLLM gateway and wired
+  # into copilot-service on both the input and the output side. It is OFF unless
+  # COPILOT_CONTENT_SAFETY_ENABLED is set, and when off every classification reports `unavailable`
+  # rather than `safe` — visible in openbank_guardrail_classifications{decision="unavailable"}.
+  guardrails:    [llama-guard, prompt-injection-filter]
+  # as-built: LIVE as of ADR-0265 slice 4 (executing ADR-0183). pgvector on the copilot's existing
+  # CNPG cluster, hybrid keyword + vector retrieval, embeddings through the same governed gateway.
+  # Off unless COPILOT_SEMANTIC_RETRIEVAL_ENABLED; the keyword scorer remains the fallback and every
+  # fallback is counted (openbank_copilot_retrieval_total{mode="keyword_only"}).
+  memory_rag:    pgvector
+  # as-built: LIVE as of ADR-0265 slice 3 — self-hosted Langfuse v2 in ai-platform, fed server-side
+  # by the LiteLLM callback, so every caller already routed through the gateway is traced with no
+  # application change. CAVEAT worth keeping in the declaration: ingestion has no telemetry of its
+  # own (Langfuse v2 exposes no Prometheus endpoint, LiteLLM's callback metrics are Enterprise), so
+  # a green pod is not evidence that traces are landing — runbook 0012 has the manual check, #5671
+  # tracks closing it.
+  observability: langfuse
+  identity:      spiffe-spire       # as-built: PARTIAL, and ADR-0265 deliberately did NOT change this.
+                                    # AgentSvidVerifier.kt is real, but no SPIRE deployment exists; the live
+                                    # agent identity is OpenBao's pki-agent CA (ADR-0031 D3b), which enforces
+                                    # the property SPIFFE stands for. Replacing a working mechanism to make a
+                                    # label true is the wrong trade; the label stays flagged instead.
 
 # Licensing note (ADR-0136, supersedes the ADR-0031 D8 separate-repo plan): the AI agent SERVICES are
 # AGPL-3.0-only + a parallel commercial licence, IN-REPO (not a separate repo); the rest of the platform is
