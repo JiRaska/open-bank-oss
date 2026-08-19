@@ -2,6 +2,7 @@
 date: 2026-08-19
 decision-status: proposed
 delivery-status: partial
+followup: "#5671 — reasoning graph and pgvector retrieval are unbuilt; Langfuse ingestion has no telemetry-based evidence and no retention policy yet"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
