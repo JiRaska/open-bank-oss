@@ -1,7 +1,8 @@
 ---
 date: 2026-07-31
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "none — the guards and the service are live; no payment service calls them, which is the tail"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,14 @@ summary: "Delegation service owns granular, SCA-bound grants over products (acco
 ---
 
 # ADR-0232 — Delegated access: customer-to-party sharing with granular capabilities
+
+**Delivery note (2026-08-19).** `openbank-delegation-service` is live at `version.txt` 0.7.0,
+deployed via `auto-deploy.yml`, carries `DelegationGrant`/`SpendCeilings`/`SpendReservation` and a
+threat model, and is listed money-path in `rules.yaml`. The amount-aware guards are now backed by
+the **enforced** `enforcement-reachability` gate (#3615). What is still unbuilt is the half that
+issue named: no payment service integrates delegation — a grep for `delegation` across
+`openbank-domestic-payment/src/main` and `openbank-sepa-payment/src/main` returns nothing, so the
+delegated money path is reachable in the service and not yet on the payment path.
 
 Relates: ADR-0034 (unified OPA), ADR-0072 (party identity), ADR-0094
 (EUDI hub), ADR-0118 (GDPR lifecycle), ADR-0126 (unified consent),

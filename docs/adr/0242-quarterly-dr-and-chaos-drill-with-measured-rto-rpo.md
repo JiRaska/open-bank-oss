@@ -1,7 +1,8 @@
 ---
 date: 2026-08-04
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5673 — the drill machinery exists but cannot run: no deploy-pool runner, and the one drill attestation is unevidenced"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,22 @@ summary: "Move from 'runbooks exist' to 'recovery is measured' by holding a quar
 ---
 
 # ADR-0242 — Quarterly DR and chaos drill with measured RTO/RPO
+
+**Delivery note (2026-08-19).** Partly built, and the parts disagree about what is true.
+`dr-restore-verify.yml` exists (dispatch-only, `docs/bcp/automated-dr-restore.md`) and correctly
+fails rather than skipping when a runner has no cluster access — its first dispatch reported
+`success` having restored nothing (#4026), which is the failure this ADR is about. It still
+cannot run: the deploy-pool self-hosted runner with kubectl + IRSA does not exist, and the
+restore step is a `# WIRING:` stub. The monthly chaos half (D2) has a procedure doc but no
+`chaos-drill.yml` and no `experiments/` schedules. Measured cadence (D1/D3) is therefore still
+unproven: `docs/bcp/dr-test-log.md`'s newest entry is 2026-06-30, a table-top with RTO and RPO
+both `N/A`.
+
+What this PR does deliver is the evidence rule the drills feed: `restore_drill`/`dr_drill`
+attestations may no longer cite a runbook, and a drill-log ref whose log has no entry for the
+attestation's date is rejected (gate `readiness-attestation-format` R7, ADR-0253). It found that
+the fleet's only drill attestation cited `runbook-0003` — the PostgreSQL 16->18 upgrade procedure
+— while raising a money-path readiness dimension from 2 to 3 (#5673).
 
 ## Context
 

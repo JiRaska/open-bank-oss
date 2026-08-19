@@ -1,7 +1,8 @@
 ---
 date: 2026-08-05
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "none — Phase 1 (CaseWorkflow + case schema) is live; the D7 oversight surface is ADR-0246, itself planned"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,14 @@ summary: "Real-time agent swarm = one Temporal case workflow per disposition tar
 ---
 
 # ADR-0244 — Agent swarm coordination via Temporal case workflows
+
+**Delivery note (2026-08-19).** Phase 1 is live and was never reflected here.
+`openbank-case-coordinator-agent` exists with `CaseWorkflow`/`CaseWorkflowImpl`/`CaseWorkerRegistrar`
+and a REST surface, is listed in `auto-deploy.yml`'s `ALL_SERVICES`, and the D3/D6/D9 governance
+schema (`case_classes`, `case_capabilities`) is validated by the **enforced** `agent-case-schema`
+gate. Unbuilt: the D7 oversight/review surface (ADR-0246, planned) — `rules.yaml` records that
+`openbank.delegation.events`' swarm counterpart publishes with no consumer, no topic declared under
+`openbank-infra/` and no KafkaUser, which is the honest boundary of this `partial`.
 
 ## Context
 
