@@ -1,7 +1,8 @@
 ---
 date: 2026-07-30
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5679 — 14 of 16 services expose no pending list, so the federated inbox cannot see them"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,22 @@ summary: "Sixteen per-service ApprovalResources become one canonical ApprovalIte
 ---
 
 # ADR-0227 — Unified approval inbox: one disposition point for human and agent proposals
+
+**Delivery note (2026-08-19).** Phase 1 exists and the ADR's premise about D1 is stale: the
+sixteen `ApprovalResource`s do **not** carry sixteen item shapes — they all sit on the shared
+`com.openbank.libs.approval.ApprovalStore` / `PendingApproval`, and `findPending` in
+libs-domain already documents itself as D2's read side. So D1 is effectively delivered, and the
+real gap is coverage of the *read*: measured 2026-08-19, only **2 of 16** services expose a
+pending-list `@GET` (sanctions #3472, lending), and the BFF route `/api/approvals/pending`
+federated only lending and the agent plane. Every money-path domain — ledger, transaction,
+sepa-payment, domestic-payment, balance, sepa-instant, fx, clearing, swift — is invisible to the
+supervisor screen, and an unread source renders identically to a source with nothing in it.
+
+This PR closes the smaller half of that: sanctions was already serving its queue and the inbox
+was not reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
+built to show parked decisions. The remaining fourteen need their list endpoint first (one PR
+per service, each an API change under ADR-0048); tracked in #5679. D3 (filters, risk
+bands) and D4 (SCA-bound disposal in the governed UI) are untouched.
 
 Relates: ADR-0155 (four-eyes mechanism), ADR-0223 D4 (four-eyes rollout),
 ADR-0224 D3 (action-class propose/dispose), ADR-0031 (agents propose, humans dispose).

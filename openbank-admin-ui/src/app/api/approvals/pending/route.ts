@@ -3,8 +3,8 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // ADR-0227 D2 (phase 1): the federated approval inbox read. One BFF route merges each
-// domain's pending queue — lending's maker-checker approvals plus the agent plane's
-// proposals — into one canonical item shape for the /approvals screen. Read-only by
+// domain's pending queue — lending's and sanctions' maker-checker approvals plus the agent
+// plane's proposals — into one canonical item shape for the /approvals screen. Read-only by
 // design: disposal happens in the governed per-domain decide flows (money-path disposal
 // additionally requires SCA, ADR-0227 D4 — that is the phase-2 design, deliberately NOT a
 // one-click button here).
@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'agent'
+  domain: 'lending' | 'sanctions' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -33,6 +33,12 @@ type LendingApproval = {
   makerId: string | null
   createdAt: string | null
 }
+
+// sanctions-service serves the same libs `PendingApproval` shape as lending — one contract,
+// two producers (ADR-0227 D1). It has served this list since #3472 and the inbox was not
+// reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
+// built to show parked decisions.
+type SanctionsApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -69,6 +75,21 @@ async function lendingPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('sanctions-service', 'sanctions', 8123, '/api/v1/sanctions/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as SanctionsApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'sanctions' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -96,11 +117,15 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, agent] = await Promise.all([
+  const [lending, sanctions, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
+    sanctionsPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
-  return NextResponse.json({ items, sources: { lending: lending.state, agent: agent.state } })
+  return NextResponse.json({
+    items,
+    sources: { lending: lending.state, sanctions: sanctions.state, agent: agent.state },
+  })
 }

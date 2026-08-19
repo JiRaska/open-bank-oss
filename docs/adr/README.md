@@ -235,7 +235,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0224](0224-human-operator-mcp-obo-channel.md) | Human-operator MCP channel: on-behalf-of token exchange with bounded role subsets | Accepted | Partial | authn,authz,ai-agents | — |
 | [0225](0225-mcp-policy-filtered-tools-list.md) | Policy-filtered MCP tool discovery | Accepted | Shipped | authz,ai-agents,security-ops | — |
 | [0226](0226-cross-channel-audit-correlation.md) | Cross-channel audit correlation: one identity, one trail | Accepted | Partial | audit,authz,admin-ui | — |
-| [0227](0227-unified-approval-inbox.md) | Unified approval inbox: one disposition point for human and agent proposals | Proposed | Planned | governance,admin-ui,authz | — |
+| [0227](0227-unified-approval-inbox.md) | Unified approval inbox: one disposition point for human and agent proposals | Proposed | Partial | governance,admin-ui,authz | — |
 | [0228](0228-unified-entity-resolution-search.md) | Unified entity resolution and global search for backoffice | Proposed | Planned | admin-ui,architecture,privacy-gdpr | — |
 | [0229](0229-roles-single-source-persona-ia.md) | Roles single source of truth and persona-driven information architecture | Proposed | Planned | authz,admin-ui,governance | — |
 | [0230](0230-backoffice-hybrid-consoles.md) | Backoffice hybrid consoles for lending, fraud and SDD | Proposed | Planned | admin-ui,lending,fraud | — |
