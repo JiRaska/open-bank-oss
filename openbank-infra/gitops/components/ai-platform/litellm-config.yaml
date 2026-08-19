@@ -64,18 +64,33 @@ data:
       # classifying because a chat loop burned the day's ceiling is a control outage caused by
       # unrelated traffic — and it degrades to `unavailable`, which on a fail-open surface means
       # every message afterwards is unclassified. Small ceiling, but its own.
+      #
+      # PROVIDER IS DEEPINFRA, NOT GROQ, AND THAT WAS MEASURED. Groq has DECOMMISSIONED every Llama
+      # Guard model — asked for one, its API answers:
+      #   {"message":"The model `meta-llama/llama-guard-4-12b` has been decommissioned and is no
+      #    longer supported", "code":"model_decommissioned"}
+      # and its live model list offers only `llama-prompt-guard-2-*` (an injection classifier that
+      # returns a label, not `safe`/`unsafe\nS2`) and `gpt-oss-safeguard-20b` (a policy-reasoning
+      # model that needs a system prompt this adapter deliberately never sends). Neither is a
+      # drop-in. DeepInfra serves `meta-llama/Llama-Guard-4-12B` — note the CASE, its API is
+      # case-sensitive — and returns exactly the expected shape, verified against the live provider
+      # from inside this pod before the route was written:
+      #   safe input   -> '\n\nsafe'
+      #   unsafe input -> '\n\nunsafe\nS2'
+      # Had this shipped as declared, the guardrail would have reported `unavailable` for every
+      # message, which on the fail-open help surface means silently unclassified traffic.
       - model_name: meta-llama/llama-guard-4-12b
         litellm_params:
-          model: groq/meta-llama/llama-guard-4-12b
-          api_key: os.environ/GROQ_API_KEY
+          model: deepinfra/meta-llama/Llama-Guard-4-12B
+          api_key: os.environ/DEEPINFRA_API_KEY
           max_budget: 3
           budget_duration: 1d
-          # Groq's published price for llama-guard-4-12b: $0.20 per million tokens both directions.
-          # Declared rather than inherited, for the reason the routes above document: a version bump
-          # that drops the built-in entry silently costs every call at $0 and every budget below
-          # stops biting, with nothing going red.
-          input_cost_per_token: 0.0000002
-          output_cost_per_token: 0.0000002
+          # DeepInfra's published price for Llama-Guard-4-12B ($0.18 per million tokens both
+          # directions). Declared rather than inherited, for the reason the routes above document:
+          # a version bump that drops the built-in entry silently costs every call $0 and every
+          # budget below stops biting, with nothing going red.
+          input_cost_per_token: 0.00000018
+          output_cost_per_token: 0.00000018
       # Embedding route for the copilot's pgvector retrieval (ADR-0183 §3 / ADR-0265 slice 4).
       # Embeddings go through the SAME gateway as chat, deliberately: routing them direct to the
       # provider would open a second, un-audited egress next to the one ADR-0175 exists to control.
@@ -86,7 +101,14 @@ data:
       # reject rows one at a time.
       - model_name: BAAI/bge-m3
         litellm_params:
-          model: deepinfra/BAAI/bge-m3
+          # `openai/` + api_base, NOT `deepinfra/`. LiteLLM has no embeddings mapping for the
+          # deepinfra provider prefix — measured in this pod, `litellm.embedding(model=
+          # 'deepinfra/BAAI/bge-m3')` raises "Unmapped LLM provider for this endpoint" while the
+          # CHAT routes above work fine under the same prefix. The OpenAI-compatible route to the
+          # same endpoint returns 1024-dim vectors with their `index` fields intact, which is what
+          # both the migration's vector(1024) column and the adapter's order check require.
+          model: openai/BAAI/bge-m3
+          api_base: https://api.deepinfra.com/v1/openai
           api_key: os.environ/DEEPINFRA_API_KEY
           # Small ceiling and its own budget: indexing the help corpus is a few dozen chunks, and
           # query embeddings are one short call per help search. If this ever burns 2 USD/day
