@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.10.0...billing-service-v0.10.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* **billing:** escape billing_outbox JSON payloads via Jackson, not string concat ([#5642](https://github.com/JiRaska/open-bank-oss/issues/5642)) ([acb86e6](https://github.com/JiRaska/open-bank-oss/commit/acb86e6a72a3fd59a87066846d781e10f140e206)), closes [#4701](https://github.com/JiRaska/open-bank-oss/issues/4701)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.9.1...billing-service-v0.10.0) (2026-08-18)
 
 
