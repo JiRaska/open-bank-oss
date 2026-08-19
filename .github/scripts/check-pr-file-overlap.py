@@ -91,6 +91,16 @@ SERIALIZED = (
     ".github/workflows/ci.yml",
     ".github/workflows/auto-deploy.yml",
     "openbank-infra/gitops/",
+    # ADR-0227 D2: "one BFF route merges each domain's pending queue" — every money-path
+    # service that federates into the admin-ui approval inbox appends itself to this one
+    # route (and its co-located test) by design, not by accident. Measured 2026-08-19: 9
+    # concurrently open PRs (transaction/balance/ledger/sepa-payment/domestic-payment/
+    # clearing/sepa-instant/fx/swift) all editing the same lines here; a merge-tree
+    # simulation confirmed the 2nd PR in any pair already conflicts. This is exactly the
+    # SHARED REGISTRY shape the rest of this list exists for — it was previously only
+    # reported as a plain (unescalated) overlap because these two paths were missing here.
+    "openbank-admin-ui/src/app/api/approvals/pending/route.ts",
+    "openbank-admin-ui/src/test/approvals-inbox.test.ts",
 )
 
 # An openapi.yaml overlap carries its own known failure — two PRs can claim the same
@@ -305,9 +315,15 @@ def self_test():
     d, a = classify(me, [dict(me)])
     check("PR reported as overlapping itself", not d and not a)
 
-    # 6. Directory-prefix serialization, and a NON-registry sibling that must stay ordinary.
+    # 6. Directory-prefix serialization, exact-path serialization (the approval-inbox BFF
+    #    route, ADR-0227 D2, added after the 9-PR #5684/#5686/#5690-5696 collision), and a
+    #    NON-registry sibling that must stay ordinary.
     check("gitops prefix not serialized",
           is_serialized("openbank-infra/gitops/components/payments/payments-services.yaml"))
+    check("approval-inbox route not serialized",
+          is_serialized("openbank-admin-ui/src/app/api/approvals/pending/route.ts"))
+    check("approval-inbox test not serialized",
+          is_serialized("openbank-admin-ui/src/test/approvals-inbox.test.ts"))
     check("ordinary path wrongly serialized",
           not is_serialized("openbank-x/src/main/kotlin/A.kt"))
 
