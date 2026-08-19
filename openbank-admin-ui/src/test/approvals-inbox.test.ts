@@ -33,7 +33,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(res.status).toBe(401)
   })
 
-  it('merges lending, sanctions and agent queues into canonical items, sorted by proposedAt', async () => {
+  it('merges lending, sanctions, sepaPayment and agent queues into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) {
         return Promise.resolve(new Response(JSON.stringify([
@@ -46,6 +46,11 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
           { id: 'S-1', action: 'sanctions.clear', resourceId: 'hit-9', makerId: 'analyst.c', createdAt: '2026-07-29T12:00:00Z' },
         ]), { status: 200 }))
       }
+      if (url.includes('sepa-payments/approvals') || url.includes('sepa-payment')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { id: 'SP-1', action: 'sepaPayment.transitionStatus', resourceId: 'payment-7', makerId: 'operator.d', createdAt: '2026-07-29T11:00:00Z' },
+        ]), { status: 200 }))
+      }
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
       ]), { status: 200 }))
@@ -54,10 +59,11 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
-    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'S-1', 'P-1', 'L-2'])
+    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'SP-1', 'S-1', 'P-1', 'L-2'])
     expect(body.items[0]).toMatchObject({ domain: 'lending', action: 'lending.writeoff', maker: 'officer.a' })
-    expect(body.items[1]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
-    expect(body.items[2]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+    expect(body.items[1]).toMatchObject({ domain: 'sepaPayment', action: 'sepaPayment.transitionStatus', maker: 'operator.d' })
+    expect(body.items[2]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
+    expect(body.items[3]).toMatchObject({ domain: 'agent', action: 'agent.research' })
   })
 
   // The regression this file exists to prevent, stated as a test: sanctions-service has served
@@ -77,10 +83,30 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.sanctions).toBe('ok')
   })
 
+  // Same regression, sepa-payment side (issue #5679): sepa-payment-service has served
+  // ApprovalStore.decide since ADR-0155 but never the pending list, so a parked
+  // `sepaPayment.transitionStatus` four-eyes decision was invisible on the one screen built to
+  // show parked decisions.
+  it('reads the sepaPayment queue at all — an unread source is indistinguishable from an empty one', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      seen.push(String(url))
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(seen.some(u => u.includes('/api/v1/sepa-payments/approvals'))).toBe(true)
+    expect(body.sources.sepaPayment).toBe('ok')
+  })
+
   it('degrades to the working half when one queue is down', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) return Promise.reject(new Error('lending down'))
       if (url.includes('sanctions')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      if (url.includes('sepa-payments/approvals') || url.includes('sepa-payment')) {
+        return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      }
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
       ]), { status: 200 }))
@@ -112,6 +138,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.items).toEqual([])
     expect(body.sources.lending).toBe('forbidden')
     expect(body.sources.sanctions).toBe('ok')
+    expect(body.sources.sepaPayment).toBe('ok')
     expect(body.sources.agent).toBe('ok')
   })
 
@@ -127,6 +154,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     expect(body.sources.lending).toBe('unavailable')
     expect(body.sources.sanctions).toBe('unavailable')
+    expect(body.sources.sepaPayment).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })
 })

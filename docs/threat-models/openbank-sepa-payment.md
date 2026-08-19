@@ -74,9 +74,11 @@ not bundled here (see ADR-0155).
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated transition | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/sepa-payments/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "sepaPayment.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never payment amount, IBAN or other payload content, which stay behind the existing read-role gate (I1 above). Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `PATCH /status` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/sepa-payments/approvals/{id} → Redis (approval:*)`
+**DFD update:** adds `Operator (checker) → GET /api/v1/sepa-payments/approvals → Redis (approval:*)`
+and `Operator (checker) → PATCH /api/v1/sepa-payments/approvals/{id} → Redis (approval:*)`
 alongside the existing `PATCH /status` edge; the maker's retry reuses the existing DFD edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
@@ -139,6 +141,17 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `sepaPayment.transitionStatus` four-eyes decision parked at 202 was discoverable only by
+  whoever had been handed its approval id out of band — the ceremony completed only if the two
+  operators were already talking, and the 24h Redis TTL then expired the request silently
+  otherwise (issue #5679, mirroring sanctions #3472). Added `GET /api/v1/sepa-payments/approvals`
+  (§4a new I row); no new trust boundary crossed — same `RedisApprovalStore`, same role gate
+  shape as the existing decide endpoint, additive-only OpenAPI change (1.6.0 -> 1.7.0, ADR-0048).
+  Verified via `opa eval` that both `sepaPayment.approval.read` (generic `operator-read-any`) and
+  the pre-existing `sepaPayment.approval.decide` (`role_action_matrix` + `operator-sepa-payment-write`)
+  already resolve `allow=true` for `ROLE_OPERATOR` under this service's live policy bundle — no
+  authorization gap, unlike the one #5679's balance-service slice found.
 - **2026-08-17** — Recorded here only because #3931's threat-model-diff gate maps the whole
   `openbank-infra/gitops/components/payments/network-policies.yaml` file to every money-path
   service that lives in this directory, not to the specific block that changed. **No trust
