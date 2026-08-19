@@ -128,6 +128,18 @@ copilot:
     # Backend API key for the openai-compat provider. Empty in dev; ESO/OpenBao in deploy.
     # Shared across backends — update OpenBao copilot-service/MODEL_API_KEY when switching providers.
     api-key: ${COPILOT_MODEL_API_KEY:}
+  # Hybrid retrieval over the help corpus (ADR-0183, ADR-0265 slice 4). Off by default: with it off
+  # the copilot keeps the keyword-only behaviour it has always had, and every retrieval increments
+  # openbank_copilot_retrieval_total{mode="keyword_only"} so the state is visible rather than assumed.
+  retrieval:
+    semantic-enabled: ${COPILOT_SEMANTIC_RETRIEVAL_ENABLED:false}
+    embedding-endpoint: ${COPILOT_EMBEDDING_ENDPOINT:}
+    embedding-model: ${COPILOT_EMBEDDING_MODEL:BAAI/bge-m3}
+    # MUST match the migration's vector(1024). A mismatch is caught in the adapter, not by the DB.
+    embedding-dimensions: ${COPILOT_EMBEDDING_DIMENSIONS:1024}
+    embedding-api-key: ${COPILOT_EMBEDDING_API_KEY:}
+    # Re-checks content hashes; embeds only what changed, so the steady-state cost is one query.
+    index-cron: ${COPILOT_INDEX_CRON:0 17 */6 * * ?}
   # OPA per-tool gate (ADR-0089 D3, ADR-0034). Off by default (advisory); flip to true in gitops
   # once copilot-opa-bundle.yaml is deployed and the sidecar is live (issue #998 advisory→enforce).
   opa:
@@ -165,6 +177,12 @@ authz:
     datasource:
       devservices:
         enabled: true
+        # pgvector is required by V3 (semantic retrieval). The default Dev Services image is stock
+        # postgres, which has no `vector` extension, so Flyway aborts at V3 and EVERY @QuarkusTest in
+        # this module reports as an error rather than a migration problem. In the deployed cluster
+        # the extension comes from the CNPG image plus the Database resource; under test it comes
+        # from this image, which is stock postgres plus pgvector and nothing else.
+        image-name: pgvector/pgvector:pg18
     # No broker under test: the PARTY_ERASED consumer is covered by a plain unit test, and a Kafka
     # Dev Services container would only slow every @QuarkusTest in this module down. health-enabled
     # false keeps the unreachable channel from failing readiness in the boot smoke test.

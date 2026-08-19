@@ -15,7 +15,7 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
     private lateinit var postgres: PostgreSQLContainer<*>
 
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        postgres = PostgreSQLContainer(PGVECTOR_IMAGE)
             .withDatabaseName("openbank_copilot")
             .withUsername("openbank")
             .withPassword("openbank")
@@ -36,3 +36,16 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
         if (::postgres.isInitialized) postgres.stop()
     }
 }
+
+/**
+ * Stock postgres plus pgvector, and nothing else — the V3 migration needs the `vector` extension or
+ * Flyway aborts and every @QuarkusTest in this module fails with what looks like a Quarkus startup
+ * error rather than a missing extension. `postgres:18-alpine` does not carry it. Same major version
+ * as before, so nothing else about these tests changes.
+ *
+ * DockerImageName.asCompatibleSubstituteFor is required: Testcontainers checks the image name
+ * against the module's expected one (`postgres`) and refuses an unrecognised repository outright.
+ */
+internal val PGVECTOR_IMAGE: org.testcontainers.utility.DockerImageName =
+    org.testcontainers.utility.DockerImageName.parse("pgvector/pgvector:pg18")
+        .asCompatibleSubstituteFor("postgres")
