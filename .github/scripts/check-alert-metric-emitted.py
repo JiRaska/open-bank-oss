@@ -84,9 +84,11 @@ EXTERNALLY_PROVIDED: dict[str, str] = {}
 # can only shrink. A NEW dead alert is not covered by any of these and fails immediately,
 # which is the whole point: this gate exists so the estate cannot acquire a fifth one
 # quietly.
+#
+# TransactionSagaStuck was the fourth entry and is NOT here: #5758 instruments the gauge it
+# always needed, so it is fixed rather than declared. That is the intended direction of travel
+# for the remaining three.
 KNOWN_DEAD: dict[str, str] = {
-    "TransactionSagaStuck#openbank_transaction_sagas_stuck_total":
-        "#5733 -- severity: critical, money-path; has never been able to fire.",
     "ClearingSettlementWindowMissed#openbank_clearing_settlements_completed_total":
         "#5733 -- also written as `increase(...) == 0`, blind to absence even once emitted.",
     "SwiftMtMessageProcessingStalled#openbank_swift_messages_processed_total":
@@ -248,7 +250,8 @@ def selftest() -> int:
     cases = [
         # (expr, expect_violation, why)
         ("increase(openbank_payments_submitted_total[1h]) == 0", False, "counter with code"),
-        ("openbank_transaction_sagas_stuck_total > 0", True, "the live #TransactionSagaStuck shape"),
+        ("openbank_transaction_sagas_stuck_total > 0", True,
+         "the shape #5758 fixed: an alert over a metric nothing emits"),
         ("openbank:llm_cost_usd_24h:total > 5", False, "produced by a recording rule"),
         ("sum(rate(kube_pod_status_ready[5m])) == 0", False, "non-openbank metric is out of scope"),
         ("histogram_quantile(0.99, openbank_payments_submitted_seconds_bucket) > 1", False,
@@ -266,14 +269,16 @@ def selftest() -> int:
             return 1
     # A baselined alert is spared; the SAME metric on a different alert is not -- otherwise
     # one debt entry would quietly cover every future rule that reuses the metric.
-    dead_rule = [{"file": "t", "group": "g", "alert": "TransactionSagaStuck",
-                  "expr": "openbank_transaction_sagas_stuck_total > 0", "severity": "critical"}]
+    dead_rule = [{"file": "t", "group": "g", "alert": "ClearingSettlementWindowMissed",
+                  "expr": "increase(openbank_clearing_settlements_completed_total[1h]) == 0",
+                  "severity": "warning"}]
     v, _, used_dead = evaluate(dead_rule, emitted, recorded)
     if v or not used_dead:
         print(f"selftest FAIL: KNOWN_DEAD entry not honoured (findings={len(v)}, used={used_dead})")
         return 1
     copycat = [{"file": "t", "group": "g", "alert": "SomeNewAlert",
-                "expr": "openbank_transaction_sagas_stuck_total > 0", "severity": "warning"}]
+                "expr": "increase(openbank_clearing_settlements_completed_total[1h]) == 0",
+                "severity": "warning"}]
     v2, _, _ = evaluate(copycat, emitted, recorded)
     if len(v2) != 1:
         print("selftest FAIL: baseline wrongly excused a DIFFERENT alert on the same metric.")
