@@ -1,7 +1,8 @@
 ---
 date: 2026-08-07
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — remaining slices triaged there; this ADR was found by the code->ADR evidence read, not by a gate"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,9 @@ summary: "Adds monthly statement, PAD Art. 5 annual fee statement, and payment c
 ---
 
 # ADR-0248 — Statement and payment confirmation document templates
+
+**Delivery note (2026-08-19).** Live on `main` while this ADR read `delivery-status: planned`: **41 production Kotlin file(s)** across `openbank-billing-service`, `openbank-document-service`, `openbank-domestic-payment`, `openbank-mcp-service` and others cite this ADR, naming its decision clause(s) `#3` rather than referencing it as prior art. Found by the code->ADR evidence read described in #5708 (the inverse of the ADR->path probe #5669 deliberately rejected). `decision-status` is unchanged; the unbuilt remainder is triaged in #5708.
+
 
 <!--
 Front-matter fields, enums and rules: docs/adr/SCHEMA.md. The number and title are
