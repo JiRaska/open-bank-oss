@@ -4,7 +4,7 @@
 
 'use client'
 import Link from 'next/link'
-import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature } from 'lucide-react'
+import { GitBranch, BookOpen, Network, FileCode, Shield, ShieldAlert, Cloud, ScrollText, ShieldCheck, LayoutGrid, Smartphone, Bluetooth, Fingerprint, FileSignature, Radar } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 
@@ -38,6 +38,17 @@ const sections: {
     ],
     badge: 'ADR-0074',
     color: '#7c3aed',
+  },
+  {
+    href: '/docs/sensors',
+    icon: <Radar size={22} />,
+    title: ['Senzory', 'Sensors'],
+    desc: [
+      'Které signály zařízení zákaznická aplikace čte a k čemu: pohyb a gesta, blízkost, prostředí, soukromí a zkratky — u každého use-case, vyvolání, místo v aplikaci a nastavení (ADR-0074)',
+      'Which device signals the customer app reads and what for: motion and gestures, proximity, environment, privacy and shortcuts — each with its use case, invocation, place in the app and setting (ADR-0074)',
+    ],
+    badge: 'ADR-0074 · 0095',
+    color: '#0891b2',
   },
   {
     href: '/docs/qrlesspay',
