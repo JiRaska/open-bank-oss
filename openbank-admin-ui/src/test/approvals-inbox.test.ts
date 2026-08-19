@@ -33,12 +33,17 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(res.status).toBe(401)
   })
 
-  it('merges lending and agent queues into canonical items, sorted by proposedAt', async () => {
+  it('merges lending, sanctions and agent queues into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) {
         return Promise.resolve(new Response(JSON.stringify([
           { id: 'L-2', action: 'lending.disburse', resourceId: 'loan-2', makerId: 'officer.b', createdAt: '2026-07-30T10:00:00Z' },
           { id: 'L-1', action: 'lending.writeoff', resourceId: 'loan-1', makerId: 'officer.a', createdAt: '2026-07-29T09:00:00Z' },
+        ]), { status: 200 }))
+      }
+      if (url.includes('sanctions')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { id: 'S-1', action: 'sanctions.clear', resourceId: 'hit-9', makerId: 'analyst.c', createdAt: '2026-07-29T12:00:00Z' },
         ]), { status: 200 }))
       }
       return Promise.resolve(new Response(JSON.stringify([
@@ -49,14 +54,33 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
-    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'P-1', 'L-2'])
+    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'S-1', 'P-1', 'L-2'])
     expect(body.items[0]).toMatchObject({ domain: 'lending', action: 'lending.writeoff', maker: 'officer.a' })
-    expect(body.items[1]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+    expect(body.items[1]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
+    expect(body.items[2]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+  })
+
+  // The regression this file exists to prevent, stated as a test: sanctions-service has served
+  // its pending list since #3472 and the inbox did not read it, so a parked `sanctions.clear`
+  // was invisible on the one screen built to show parked decisions. A source that is silently
+  // absent looks exactly like a source with nothing in it.
+  it('reads the sanctions queue at all — an unread source is indistinguishable from an empty one', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      seen.push(String(url))
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(seen.some(u => u.includes('/api/v1/sanctions/approvals'))).toBe(true)
+    expect(body.sources.sanctions).toBe('ok')
   })
 
   it('degrades to the working half when one queue is down', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) return Promise.reject(new Error('lending down'))
+      if (url.includes('sanctions')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       return Promise.resolve(new Response(JSON.stringify([
         { id: 'P-1', suggestedAction: 'agent.research', proposedBy: 'ui-assistant', proposedAt: '2026-07-30T08:00:00Z' },
       ]), { status: 200 }))
@@ -87,6 +111,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(res.status).toBe(200)
     expect(body.items).toEqual([])
     expect(body.sources.lending).toBe('forbidden')
+    expect(body.sources.sanctions).toBe('ok')
     expect(body.sources.agent).toBe('ok')
   })
 
@@ -101,6 +126,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     const body = await (await (await route()).GET()).json()
 
     expect(body.sources.lending).toBe('unavailable')
+    expect(body.sources.sanctions).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })
 })
