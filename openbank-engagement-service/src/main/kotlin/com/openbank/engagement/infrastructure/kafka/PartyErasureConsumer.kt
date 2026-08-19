@@ -20,27 +20,42 @@ import java.util.UUID
  * exclusion. Deliberately never cleared: there is no "un-erase" event anywhere in this fleet —
  * erasure is terminal, so once set this state is permanent for the party.
  *
- * Poison-pill safe: failures are logged and acked.
+ * Poison-pill safe for a MALFORMED event: an unparseable payload or a missing partyId is logged and
+ * acked, because replaying it fails identically forever. A failure of the `adverseState` write is
+ * the opposite case and is retried, then rethrown for the DLQ — see [withBoundedRetry] (#5698).
+ * There is no compensating path here at all: erasure is terminal and never re-derived, so a write
+ * that was acked without happening leaves the party permanently targetable with nothing to notice.
  */
 @ApplicationScoped
 class PartyErasureConsumer(private val adverseState: AdverseStateRepository, private val objectMapper: ObjectMapper) {
     private val log = Logger.getLogger(PartyErasureConsumer::class.java)
 
     @Incoming("party-events-in")
-    @Suppress("TooGenericExceptionCaught")
     suspend fun consume(payload: String) {
-        try {
-            val node = objectMapper.readTree(payload)
-            if (node.path("eventType").asText() != "PARTY_ERASED") return
-
-            val partyId = node.path("partyId").asText(null)?.let(UUID::fromString) ?: run {
-                log.warnf("PARTY_ERASED without valid partyId, skipping: %.300s", payload)
-                return
-            }
+        val partyId = parse(payload) ?: return
+        withBoundedRetry(log, "erasure exclusion for party $partyId") {
             adverseState.setActive(partyId, AdverseState.ERASURE_REQUESTED, Instant.now())
             log.infof("ADR-0220 D3.5: excluded party %s from targeting (PARTY_ERASED)", partyId)
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to handle PARTY_ERASED event: %.300s", payload)
         }
     }
+
+    /** Parsing + routing only — every outcome here is unretryable, so a null means "ack and move on". */
+    @Suppress("TooGenericExceptionCaught") // whatever Jackson or UUID.fromString throws, a malformed
+    // payload is the same unretryable poison pill.
+    private fun parse(payload: String): UUID? =
+        try {
+            val node = objectMapper.readTree(payload)
+            if (node.path("eventType").asText() != "PARTY_ERASED") {
+                null
+            } else {
+                node.path("partyId").asText(null)?.let(UUID::fromString)
+                    ?: run {
+                        log.warnf("PARTY_ERASED without valid partyId, skipping: %.300s", payload)
+                        null
+                    }
+            }
+        } catch (e: Exception) {
+            log.errorf(e, "Failed to parse PARTY_ERASED event: %.300s", payload)
+            null
+        }
 }

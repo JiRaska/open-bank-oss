@@ -7,10 +7,12 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.domain.model.AdverseState
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.util.UUID
 
 class LendingArrearsEventConsumerTest {
@@ -56,5 +58,23 @@ class LendingArrearsEventConsumerTest {
         ) // no daysPastDue
         coVerify(exactly = 0) { adverseState.setActive(any(), any(), any()) }
         coVerify(exactly = 0) { adverseState.clearActive(any(), any()) }
+    }
+
+    /** The #5698 half a malformed-payload test can never reach — the write must ESCAPE. */
+    @Test
+    fun `a transient write failure is retried and RETHROWN so the connector dead-letters`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { adverseState.setActive(any(), any(), any()) } throws TransientDbFailure()
+
+        assertThrows<TransientDbFailure> {
+            runBlocking {
+                consumer.consume(
+                    """{"eventType":"loan.stage_changed","loanId":"${UUID.randomUUID()}","partyId":"$partyId",""" +
+                        """"previousStage":"STAGE_1","newStage":"STAGE_2","daysPastDue":45}""",
+                )
+            }
+        }
+
+        coVerify(exactly = 3) { adverseState.setActive(partyId, AdverseState.ARREARS, any()) }
     }
 }
