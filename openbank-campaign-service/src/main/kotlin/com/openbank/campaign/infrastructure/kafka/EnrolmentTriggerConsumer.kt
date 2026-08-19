@@ -64,13 +64,14 @@ class EnrolmentTriggerConsumer(
      * or a Temporal outage meant the party was never enrolled and never would be — `reset: latest`
      * rules out replay and nothing in lag, the DLQ or any dashboard showed a thing.
      *
-     * **What a nack does on THESE two channels today.** `account-triggers-in` and
-     * `card-triggers-in` configure no `failure-strategy`, so SmallRye's default `fail` applies:
-     * the nack STOPS the channel rather than dead-lettering. That is deliberate and it is the
-     * lesser evil — a stopped channel is loud and recoverable, a silently un-enrolled party is
-     * neither — but it is a real trade, and this KDoc will not claim a dead-letter that does not
-     * exist. Wiring `failure-strategy` + an explicit DLQ topic + the `KafkaTopic` CR + the
-     * KafkaUser `Write` ACL for these channels is #5745 section B.
+     * **What the nack does next is the CONNECTOR's decision, not this class's.** The handler's
+     * contract ends at "the work did not happen, and the platform was told". What follows depends
+     * entirely on the channel's configured `failure-strategy`: `dead-letter-queue` parks the record
+     * on the channel's DLQ topic for replay, while SmallRye's default `fail` stops the channel
+     * instead. Both are better than an ack, which loses the party silently; they are not the same
+     * incident, so read the channel's config in `application.yaml` before predicting one.
+     * (#5751 wires `failure-strategy: dead-letter-queue` for `account-triggers-in` and
+     * `card-triggers-in`, with explicit `openbank.dlq.campaign.<channel>` topics.)
      */
     @Suppress("TooGenericExceptionCaught")
     private suspend fun handle(message: Message<String>, topic: String) {

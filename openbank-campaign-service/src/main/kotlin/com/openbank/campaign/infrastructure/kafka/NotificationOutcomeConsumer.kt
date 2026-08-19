@@ -45,11 +45,12 @@ class NotificationOutcomeConsumer(private val sendLog: SendLogRepository, privat
      * So a write failure is retried a bounded number of times by [EventRetry] and then RETHROWN.
      * A `suspend @Incoming` method that throws is nacked by the connector.
      *
-     * **What that does on `notification-outcomes-in` today: it stops the channel.** No
-     * `failure-strategy` is configured here, so SmallRye's default `fail` applies and there is no
-     * dead-letter topic to land in. That is the deliberate trade — a halted channel is loud and its
-     * backlog survives, where the ack was silent and the outcome did not — but nothing below
-     * dead-letters, and this KDoc will not say it does. Wiring the DLQ is #5745 section B.
+     * **What happens to the nacked record is the CONNECTOR's decision.** This class's contract
+     * ends at "the outcome was not applied, and the platform was told". The channel's configured
+     * `failure-strategy` decides the rest: `dead-letter-queue` parks it for replay, the default
+     * `fail` stops the channel instead. Either is louder than the ack it replaces — read
+     * `application.yaml` for what `notification-outcomes-in` does today rather than assuming.
+     * (#5751 wires it to `dead-letter-queue`, topic `openbank.dlq.campaign.notification-outcomes-in`.)
      */
     @Suppress("TooGenericExceptionCaught")
     @Incoming("notification-outcomes-in")

@@ -40,10 +40,13 @@ import java.util.UUID
  * onboarding read model after an Art. 17 erasure was executed everywhere else (a compliance breach,
  * not a stale tile), and a dropped KYC/SCA transition means the funnel never sees the party move.
  *
- * **None of these three channels configures a `failure-strategy`,** so SmallRye's default `fail`
- * applies and a nack STOPS the channel instead of dead-lettering. That is the deliberate trade —
- * a halted channel is loud and its backlog survives on the topic — but there is no DLQ behind
- * these three today and this KDoc does not pretend otherwise; wiring one is #5745 section B.
+ * **What becomes of a nacked record is the CONNECTOR's decision, not this class's.** The handler's
+ * contract ends at "the projection did not happen, and the platform was told". Each channel's
+ * configured `failure-strategy` decides the rest: `dead-letter-queue` parks the record on that
+ * channel's DLQ topic for replay, SmallRye's default `fail` stops the channel instead. Both beat an
+ * ack that loses an Art. 17 erasure silently, but they are different incidents — read
+ * `application.yaml` per channel rather than assuming either. (#5751 wires all three to
+ * `dead-letter-queue`, with explicit `openbank.dlq.onboarding.<channel>` topics.)
  */
 @ApplicationScoped
 class OnboardingEventConsumer(private val clock: Clock) {
