@@ -11,7 +11,6 @@ import com.openbank.libs.audit.AuditResult
 import com.openbank.libs.llm.ContentSafetyMetricsPort
 import com.openbank.libs.llm.ContentSafetyPort
 import jakarta.enterprise.context.ApplicationScoped
-import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 
@@ -41,19 +40,18 @@ import org.jboss.logging.Logger
  * as "degraded and allowed" rather than hiding inside an aggregate.
  */
 @ApplicationScoped
-class ContentSafetyGuard {
-
-    @Inject
-    lateinit var safety: ContentSafetyPort
-
-    @Inject
-    lateinit var auditPublisher: AuditEventPublisher
-
-    @Inject
-    lateinit var metrics: ContentSafetyMetricsPort
-
+class ContentSafetyGuard(
+    private val safety: ContentSafetyPort,
+    private val auditPublisher: AuditEventPublisher,
+    private val metrics: ContentSafetyMetricsPort,
+    // Constructor injection with NO Kotlin default. A `= false` here would generate a synthetic
+    // constructor, Arc would build the bean through it, and the @ConfigProperty would never be
+    // consulted — the flag would read `false` whatever the environment said, which for a
+    // fail-closed switch is the worst possible direction to be stuck in. Enforced by the
+    // `configproperty-kotlin-defaults` gate; the annotation's own defaultValue is the fallback.
     @ConfigProperty(name = "copilot.content-safety.fail-closed", defaultValue = "false")
-    var failClosed: Boolean = false
+    private val failClosed: Boolean,
+) {
 
     private val log = Logger.getLogger(ContentSafetyGuard::class.java)
 

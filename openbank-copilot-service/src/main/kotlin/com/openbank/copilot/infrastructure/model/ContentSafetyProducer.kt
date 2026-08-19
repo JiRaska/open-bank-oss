@@ -11,7 +11,6 @@ import com.openbank.libs.llm.LlamaGuardContentSafetyAdapter
 import com.openbank.libs.llm.LlmCallMetricsPort
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Produces
-import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.util.Optional
@@ -34,25 +33,22 @@ import java.util.Optional
  * `@ConfigProperty` throws SRCFG00040 at boot.
  */
 @ApplicationScoped
-class ContentSafetyProducer {
-
-    @Inject
-    lateinit var safetyMetrics: ContentSafetyMetricsPort
-
-    @Inject
-    lateinit var callMetrics: LlmCallMetricsPort
-
+class ContentSafetyProducer(
+    private val safetyMetrics: ContentSafetyMetricsPort,
+    private val callMetrics: LlmCallMetricsPort,
+    // No Kotlin defaults on any of these: a defaulted @ConfigProperty parameter makes Arc build the
+    // bean through a synthetic constructor and skip config entirely, so the guardrail would be
+    // permanently off no matter what the environment set (`configproperty-kotlin-defaults` gate).
     @ConfigProperty(name = "copilot.content-safety.enabled", defaultValue = "false")
-    var enabled: Boolean = false
-
+    private val enabled: Boolean,
+    // Optional<String>, not String: a missing plain-typed value throws SRCFG00040 at boot.
     @ConfigProperty(name = "copilot.content-safety.endpoint")
-    lateinit var endpoint: Optional<String>
-
+    private val endpoint: Optional<String>,
     @ConfigProperty(name = "copilot.content-safety.model", defaultValue = "meta-llama/llama-guard-4-12b")
-    lateinit var model: String
-
+    private val model: String,
     @ConfigProperty(name = "copilot.content-safety.api-key")
-    lateinit var apiKey: Optional<String>
+    private val apiKey: Optional<String>,
+) {
 
     private val log = Logger.getLogger(ContentSafetyProducer::class.java)
 

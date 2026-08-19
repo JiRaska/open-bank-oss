@@ -50,14 +50,8 @@ class ContentSafetyGuardTest {
         failClosed: Boolean,
         audit: RecordingAudit = RecordingAudit(),
         metrics: RecordingMetrics = RecordingMetrics(),
-    ): Triple<ContentSafetyGuard, RecordingAudit, RecordingMetrics> {
-        val g = ContentSafetyGuard()
-        g.safety = fixedPort(verdict)
-        g.auditPublisher = audit
-        g.metrics = metrics
-        g.failClosed = failClosed
-        return Triple(g, audit, metrics)
-    }
+    ): Triple<ContentSafetyGuard, RecordingAudit, RecordingMetrics> =
+        Triple(ContentSafetyGuard(fixedPort(verdict), audit, metrics, failClosed), audit, metrics)
 
     private fun unsafe(vararg codes: String) = ContentSafetyPort.SafetyVerdict(
         decision = ContentSafetyPort.Decision.UNSAFE,
@@ -141,13 +135,9 @@ class ContentSafetyGuardTest {
 
     @Test
     fun `the disabled port reports unavailable, so an unwired guardrail is never a clean bill`(): Unit = runBlocking {
-        val g = ContentSafetyGuard()
-        g.safety = ContentSafetyPort.DISABLED
         val audit = RecordingAudit()
         val metrics = RecordingMetrics()
-        g.auditPublisher = audit
-        g.metrics = metrics
-        g.failClosed = false
+        val g = ContentSafetyGuard(ContentSafetyPort.DISABLED, audit, metrics, failClosed = false)
 
         assertThat(g.checkUserInput("cust-1", "ahoj")).isFalse()
         assertThat(metrics.calls.single().decision).isEqualTo("unavailable")
