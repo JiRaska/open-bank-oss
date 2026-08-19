@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.38.0
+  version: 1.39.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -36,6 +36,20 @@ tags:
   - name: Cards
   - name: Lending
   - name: Delegation
+  - name: Pockets
+  - name: Fees
+  - name: Interest
+  - name: Consents
+  - name: Standing Orders
+  - name: Disputes
+  - name: KYC
+  - name: Payment Sessions
+  - name: SDD
+  - name: SEPA Instant
+  - name: SWIFT
+  - name: VoP
+  - name: Transfers
+  - name: Complaints
 
 paths:
   /feedback:
@@ -349,6 +363,185 @@ paths:
         '403':
           description: Not the owner
 
+  /accounts/{accountId}/pockets:
+    get:
+      tags: [Pockets]
+      summary: List the account's currency pockets (multi-currency wallet, ADR-0024)
+      operationId: listPockets
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Raw account-service passthrough
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pockets:
+                    type: array
+                    items: {$ref: '#/components/schemas/Pocket'}
+        '403':
+          description: Not the owner
+    post:
+      tags: [Pockets]
+      summary: Open a new currency pocket on the account
+      description: >-
+        Opens a pocket in the given currency, provided the account's product-catalog
+        multi-currency configuration permits it (checked against the currencies not already
+        held as an ACTIVE pocket). The catalog check fails open — an unreachable product-catalog
+        does not block opening — but an explicitly unsupported currency is rejected with 422.
+      operationId: addPocket
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [currencyCode]
+              properties:
+                currencyCode: {type: string, example: EUR, description: 'ISO 4217, case-insensitive (edge uppercases it)'}
+      responses:
+        '201':
+          description: Pocket opened
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pocket'}
+        '400':
+          description: Missing or malformed currencyCode
+        '403':
+          description: Not the owner
+        '422':
+          description: Currency not in the account's product-catalog supported set
+
+  /accounts/{accountId}/pockets/supported:
+    get:
+      tags: [Pockets]
+      summary: Currencies the account could still open a pocket in
+      description: >-
+        Product-catalog's multi-currency-supported set for the account's product, minus
+        currencies already held as an ACTIVE pocket. Fails open to the full product set if
+        the account's current pockets can't be read; an empty array if the product has no
+        multi-currency configuration at all.
+      operationId: supportedCurrencies
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Currencies the caller may still open, sorted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  currencies: {type: array, items: {type: string}, example: [EUR, USD]}
+        '403':
+          description: Not the owner
+
+  /accounts/{accountId}/pockets/{currency}:
+    delete:
+      tags: [Pockets]
+      summary: Close a currency pocket — only when its balance is zero
+      description: >-
+        `currency` is an ISO 4217 code, not an id (edge uppercases and validates it before
+        forwarding). Refused with 409 unless the pocket's booked and available balance are
+        both zero — closing a funded pocket would strand the money.
+      operationId: closePocket
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: currency, in: path, required: true, schema: {type: string}, example: EUR}
+      responses:
+        '200':
+          description: Pocket closed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pocket'}
+        '400':
+          description: currency is not a valid ISO 4217 code
+        '403':
+          description: Not the owner
+        '404':
+          description: No account or no such pocket
+        '409':
+          description: Pocket balance is not zero (pocket_not_empty)
+
+  /accounts/{accountId}/fees:
+    get:
+      tags: [Fees]
+      summary: The fee schedule that applies to the account's product
+      description: >-
+        Resolves the account's productId and proxies product-catalog's per-product fee
+        schedule. Fails soft to an empty array if the product can't be resolved or
+        product-catalog is unreachable — never surfaces an upstream error to the app.
+      operationId: getAccountFees
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Product fee schedule (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string}
+                    name: {type: string}
+                    type: {type: string}
+                    amount: {type: number}
+                    currency: {type: string}
+                    frequency: {type: string}
+                    description: {type: string, nullable: true}
+                    waivable: {type: boolean}
+                    waiveCondition: {type: string, nullable: true}
+        '403':
+          description: Not the owner
+
+  /accounts/{accountId}/interest:
+    get:
+      tags: [Interest]
+      summary: Effective interest rate and current accrual for the account
+      description: >-
+        Composed, not a raw proxy: combines interest-service's effective-rate lookup with its
+        accrual summary. A non-interest-bearing account, or one with no configured rate,
+        returns `{"eligible": false}` rather than an error — this is a fail-soft projection,
+        not a passthrough.
+      operationId: getAccountInterest
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Interest eligibility and, when eligible, the current accrual
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [eligible]
+                properties:
+                  eligible: {type: boolean}
+                  annualRatePercent: {type: string, description: 'nominal annual rate × 100, trailing zeros stripped', example: '4'}
+                  accruedAmount: {type: string, example: '12.34'}
+                  currency: {type: string, example: CZK}
+                  periodFrom: {type: string, format: date}
+                  periodTo: {type: string, format: date}
+        '403':
+          description: Not the owner
+
   /balances/{accountId}:
     get:
       tags: [Balances]
@@ -482,6 +675,69 @@ paths:
         '200':
           description: Count of notifications marked read
 
+  /notifications/{id}:
+    get:
+      tags: [Notifications]
+      summary: Read a single notification (party-scoped)
+      description: >-
+        notification-service's read is not itself party-scoped, so the edge fetches it and
+        compares the returned partyId to the JWT; a mismatch and a missing id both collapse to
+        the same 403 (no existence oracle). partyId and recipient are stripped from the response.
+      operationId: getNotification
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Notification detail, projected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  template: {type: string}
+                  subject: {type: string}
+                  body: {type: string}
+                  status: {type: string}
+                  readAt: {type: string, format: date-time, nullable: true}
+                  createdAt: {type: string, format: date-time}
+        '403':
+          description: Not found, or not the caller's notification
+
+  /notification-preferences:
+    get:
+      tags: [Notifications, Preferences]
+      summary: The caller's own notification channel preferences (party-scoped)
+      description: No stored row defaults to all channels enabled — this route never 404s.
+      operationId: getNotificationPreferences
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Notification preferences
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationPreferences'}
+    put:
+      tags: [Notifications, Preferences]
+      summary: Update the caller's own notification channel preferences (party-scoped)
+      operationId: setNotificationPreferences
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/NotificationPreferences'}
+      responses:
+        '200':
+          description: Updated notification preferences
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/NotificationPreferences'}
+
   /surfaces/{slot}:
     get:
       tags: [Engagement]
@@ -548,6 +804,112 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Profile'
+
+  /profile/consent:
+    patch:
+      tags: [Profile, Consents]
+      summary: Update the caller's marketing-communications consent (party-scoped)
+      description: >-
+        Updates ONLY `consentMarketing` — the GDPR data-processing consent snapshot on the
+        party (ADR-0198). `consentGdpr`, the immutable onboarding-time consent, is never
+        touched by this route. partyId is taken from the JWT, never the body.
+      operationId: updateConsent
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [marketingConsent]
+              properties:
+                marketingConsent: {type: boolean}
+      responses:
+        '200':
+          description: Updated profile (party-service's full projection)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Profile'
+        '400':
+          description: 'marketingConsent (boolean) is required'
+
+  /consents:
+    get:
+      tags: [Consents]
+      summary: List the caller's own PSD2/agent consents (party-scoped, projected)
+      description: >-
+        Projects consent-service's full ConsentResponse down to a customer-safe shape —
+        partyId and granteeId are dropped. Fails soft to an empty array on any upstream
+        failure; partyId always comes from the JWT so there is no ownership failure mode.
+      operationId: listConsents
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's consents, projected (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string, format: uuid}
+                    granteeName: {type: string}
+                    granteeType: {type: string, enum: [TPP, BANK_AGENT, CUSTOMER_AGENT, INTERNAL_SERVICE]}
+                    status: {type: string, enum: [PENDING_SCA, ACTIVE, EXPIRED, REVOKED, REJECTED, SUPERSEDED]}
+                    scopes:
+                      type: array
+                      items:
+                        type: string
+                        enum:
+                          - ACCOUNTS_READ
+                          - BALANCES_READ
+                          - TRANSACTIONS_READ
+                          - STATEMENTS_READ
+                          - PAYMENT_ACCOUNTS_READ
+                          - STANDING_ORDERS_READ
+                          - DIRECT_DEBITS_READ
+                          - PAYMENTS_INITIATE
+                          - PAYMENTS_STATUS_READ
+                          - DOMESTIC_PAYMENT_INITIATE
+                          - SIPO_PAYMENT_INITIATE
+                          - FUNDS_CONFIRMATION
+                          - AGENT_QUERY
+                          - AGENT_INITIATE
+                          - AGENT_NOTIFY
+                          - AGENT_ANALYZE
+                          - TELEMETRY_RUM
+                          - MARKETING_COMMS_EMAIL
+                          - MARKETING_COMMS_PUSH
+                          - MARKETING_COMMS_INAPP
+                    accountIbans: {type: array, items: {type: string}, nullable: true}
+                    validFrom: {type: string, format: date-time}
+                    validTo: {type: string, format: date-time}
+                    createdAt: {type: string, format: date-time}
+
+  /consents/{id}:
+    delete:
+      tags: [Consents]
+      summary: Revoke one of the caller's own consents
+      description: >-
+        The revoke reason is fixed by the edge to "Revoked by customer" — not customer-editable.
+        partyId is taken from the JWT and forwarded as a query parameter so the caller can only
+        ever revoke their own consent (a foreign consent id is refused, not silently accepted).
+      operationId: revokeConsent
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Revoked consent (full, unprojected upstream shape)
+        '403':
+          description: Consent does not belong to caller
+        '404':
+          description: Consent not found
 
   /payees:
     get:
@@ -709,6 +1071,265 @@ paths:
         '403':
           description: Self-service intake is disabled, unpriced, or the caller is not permitted
 
+  /loans:
+    get:
+      tags: [Lending]
+      summary: List the caller's own loans (party-scoped, projected)
+      description: >-
+        Projects lending-service's Loan model down to a customer-safe shape. Fails soft to an
+        empty array on any upstream failure or parse error — never surfaces a raw error.
+      operationId: listLoans
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's loans, projected (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Loan'}
+
+  /loans/{loanId}/schedule:
+    get:
+      tags: [Lending]
+      summary: Repayment schedule for one of the caller's own loans
+      description: >-
+        Ownership is enforced at the edge — lending-service's schedule endpoint is not itself
+        party-scoped, so the edge fetches the loan first and compares its partyId to the JWT
+        before requesting the schedule. Fails soft to an empty array if the schedule fetch
+        itself fails.
+      operationId: getLoanSchedule
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: loanId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Repayment schedule, projected (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    number: {type: integer}
+                    dueDate: {type: string, format: date, nullable: true}
+                    paymentAmount: {type: string}
+                    currency: {type: string}
+                    principalAmount: {type: string}
+                    interestAmount: {type: string}
+                    paid: {type: boolean}
+        '403':
+          description: Loan does not belong to caller
+
+  /standing-orders:
+    get:
+      tags: [Standing Orders]
+      summary: List the caller's own standing orders (party-scoped)
+      operationId: listStandingOrders
+      security:
+        - customerOidc: [payments:read]
+      responses:
+        '200':
+          description: Raw standing-order-service passthrough
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/StandingOrder'}
+    post:
+      tags: [Standing Orders]
+      summary: Create a standing (recurring) order from an account the caller owns
+      description: >-
+        debitAccountId is ownership-checked at the edge; partyId is always taken from the JWT
+        (a client-supplied value is overwritten). startDate defaults to today when omitted.
+      operationId: createStandingOrder
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debitAccountId, creditorIban, creditorName, amountMinorUnits, currency, frequency, paymentType]
+              properties:
+                debitAccountId: {type: string, format: uuid}
+                debtorIban: {type: string, nullable: true}
+                debtorName: {type: string, nullable: true}
+                creditorIban: {type: string}
+                creditorName: {type: string}
+                creditorBic: {type: string, nullable: true}
+                amountMinorUnits: {type: integer, format: int64}
+                currency: {type: string}
+                frequency: {type: string, enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]}
+                paymentType: {type: string, enum: [SEPA_CREDIT, DOMESTIC, INTERNAL]}
+                remittanceInfo: {type: string, nullable: true}
+                startDate: {type: string, format: date, description: Defaults to today when omitted}
+                endDate: {type: string, format: date, nullable: true}
+      responses:
+        '201':
+          description: Standing order created
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StandingOrder'}
+        '400':
+          description: Missing or malformed field
+        '403':
+          description: Debit account does not belong to caller
+
+  /standing-orders/{id}:
+    delete:
+      tags: [Standing Orders]
+      summary: Cancel one of the caller's own standing orders
+      description: >-
+        Ownership enforced at the edge (fetch-then-compare). A missing order and an order
+        owned by another party both return the same 403 — no existence oracle.
+      operationId: cancelStandingOrder
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204':
+          description: Cancelled
+        '403':
+          description: Standing order not found, or not owned by the caller
+
+  /standing-orders/{id}/pause:
+    post:
+      tags: [Standing Orders]
+      summary: Pause one of the caller's own standing orders
+      operationId: pauseStandingOrder
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Standing order paused
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StandingOrder'}
+        '403':
+          description: Standing order not found, or not owned by the caller
+
+  /standing-orders/{id}/resume:
+    post:
+      tags: [Standing Orders]
+      summary: Resume one of the caller's own paused standing orders
+      operationId: resumeStandingOrder
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Standing order resumed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StandingOrder'}
+        '403':
+          description: Standing order not found, or not owned by the caller
+
+  /disputes:
+    get:
+      tags: [Disputes]
+      summary: List disputes filed against transactions on an account the caller owns
+      operationId: listDisputes
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Raw dispute-service passthrough
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Dispute'}
+        '400':
+          description: "Missing required query parameter 'accountId'"
+        '403':
+          description: Account does not belong to caller
+    post:
+      tags: [Disputes]
+      summary: File a dispute against a transaction on an account the caller owns
+      description: >-
+        partyId is always taken from the JWT (a client-supplied value is overwritten).
+        accountId is ownership-checked at the edge.
+      operationId: createDispute
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [transactionId, accountId, disputeType, amount, transactionDate]
+              properties:
+                transactionId: {type: string, format: uuid}
+                accountId: {type: string, format: uuid}
+                disputeType:
+                  type: string
+                  enum: [UNAUTHORIZED, DUPLICATE, GOODS_NOT_RECEIVED, NOT_AS_DESCRIBED, CREDIT_NOT_PROCESSED, TECHNICAL_ERROR, OTHER]
+                amount: {type: string}
+                currency: {type: string, default: EUR}
+                description: {type: string, nullable: true}
+                merchantName: {type: string, nullable: true}
+                merchantId: {type: string, nullable: true}
+                transactionDate: {type: string, format: date}
+      responses:
+        '201':
+          description: Dispute filed
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Dispute'}
+        '400':
+          description: Missing or malformed accountId, or malformed body
+        '403':
+          description: Account does not belong to caller
+
+  /kyc:
+    get:
+      tags: [KYC]
+      summary: The caller's own KYC case status (party-scoped, projected)
+      description: >-
+        Bespoke alias over kyc-service's `GET /cases/party/{partyId}` — there is no bare
+        `/kyc` route upstream. Internal-only fields (risk level, due-diligence tier, notes,
+        assignee) are deliberately dropped. Fails soft: no case, or kyc-service unreachable,
+        both return `{"status": "NONE", "checks": []}` rather than an error.
+      operationId: getKycStatus
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: KYC status and checks (always 200 — fail-soft)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, checks]
+                properties:
+                  status:
+                    type: string
+                    enum: [NONE, OPEN, DOCUMENTS_REQUIRED, UNDER_REVIEW, APPROVED, REJECTED, EXPIRED]
+                  verifiedAt: {type: string, format: date-time, description: Present only once the case has been reviewed}
+                  checks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        type: {type: string, enum: [IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA]}
+                        status: {type: string, enum: [PENDING, PASSED, FAILED, MANUAL_REVIEW]}
+                        performedAt: {type: string, format: date-time}
+
   /domestic-payments:
     post:
       tags: [Payments]
@@ -867,6 +1488,469 @@ paths:
         '404':
           description: Payment not found, or not owned by the caller (no existence oracle)
 
+  /payment-sessions:
+    post:
+      tags: [Payment Sessions]
+      summary: Create a "nearby pay" (BLE proximity) session on the caller's own account (ADR-0095)
+      description: >-
+        Entirely in-memory at the edge — no dedicated backend service. Sessions expire after
+        5 minutes and do not survive an edge restart (single-replica-only by design).
+      operationId: createPaymentSession
+      security:
+        - customerOidc: [payments:initiate]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creditorAccountId]
+              properties:
+                creditorAccountId: {type: string, format: uuid}
+                requestedAmount: {type: string, nullable: true}
+      responses:
+        '200':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: {type: string, description: Opaque capability token — bearer resolves the session}
+        '400':
+          description: Missing or malformed creditorAccountId
+        '403':
+          description: Account does not belong to caller
+
+  /payment-sessions/{token}:
+    get:
+      tags: [Payment Sessions]
+      summary: Resolve a nearby-pay session by its token
+      description: The token itself is the capability — any authenticated customer may resolve it.
+      operationId: resolvePaymentSession
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: token, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Session display data
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  displayName: {type: string}
+                  requestedAmount: {type: string, nullable: true}
+                  creditorMasked: {type: string}
+        '404':
+          description: Session not found (unknown or expired token)
+
+  /payment-sessions/{token}/status:
+    get:
+      tags: [Payment Sessions]
+      summary: Poll the status of a nearby-pay session the caller created
+      description: >-
+        Only the session's creator (creditorPartyId) may poll. An unknown or expired token
+        returns 200 with status EXPIRED rather than 404 — status is a projection over the
+        session's lifecycle, not an existence check. PAID is reconciled against real
+        domestic-payment settlement, not just instruction acceptance.
+      operationId: paymentSessionStatus
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: token, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Current session status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [ACTIVE, PROCESSING, PAID, REJECTED, EXPIRED]}
+        '403':
+          description: Not the session owner
+
+  /sdd/mandates:
+    get:
+      tags: [SDD]
+      summary: List SEPA Direct Debit mandates on an account the caller owns (projected)
+      operationId: listSddMandates
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Mandates, customer-safe projection (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string, format: uuid}
+                    creditorName: {type: string}
+                    creditorIdentifier: {type: string}
+                    umr: {type: string}
+                    scheme: {type: string, enum: [CORE, B2B]}
+                    sequenceType: {type: string, enum: [OOFF, FRST, RCUR, FNAL]}
+                    status: {type: string, enum: [PENDING_CONFIRMATION, ACTIVE, SUSPENDED, CANCELLED, EXPIRED]}
+                    signatureDate: {type: string, format: date}
+                    lastCollectionDate: {type: string, format: date, nullable: true}
+        '400':
+          description: Missing required query parameter 'accountId'
+        '403':
+          description: Account does not belong to caller
+    post:
+      tags: [SDD]
+      summary: Register a new SEPA Direct Debit mandate on an account the caller owns
+      description: >-
+        The edge resolves debtorIban/debtorName from the account and mints the UMR and
+        signature date server-side — none of these are client-supplied.
+      operationId: createSddMandate
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountId, creditorName, creditorIdentifier]
+              properties:
+                accountId: {type: string, format: uuid}
+                creditorName: {type: string}
+                creditorIdentifier: {type: string}
+                scheme: {type: string, enum: [CORE, B2B], default: CORE}
+                sequenceType: {type: string, enum: [OOFF, FRST, RCUR, FNAL], default: RCUR}
+      responses:
+        '201':
+          description: Mandate registered (idempotent on creditor identifier + UMR)
+        '400':
+          description: Missing accountId/creditorName/creditorIdentifier, or unresolvable debtor IBAN
+        '403':
+          description: Account does not belong to caller
+
+  /sdd/mandates/{id}/cancel:
+    post:
+      tags: [SDD]
+      summary: Cancel a mandate on an account the caller owns
+      operationId: cancelSddMandate
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Mandate cancelled
+        '403':
+          description: Mandate not found, or not owned by the caller
+
+  /sdd/mandates/{id}/suspend:
+    post:
+      tags: [SDD]
+      summary: Suspend a mandate on an account the caller owns
+      operationId: suspendSddMandate
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Mandate suspended
+        '403':
+          description: Mandate not found, or not owned by the caller
+
+  /sdd/mandates/{id}/resume:
+    post:
+      tags: [SDD]
+      summary: Resume a suspended mandate on an account the caller owns
+      operationId: resumeSddMandate
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Mandate resumed
+        '403':
+          description: Mandate not found, or not owned by the caller
+
+  /sepa-instant:
+    get:
+      tags: [SEPA Instant]
+      summary: List SEPA Instant Credit Transfers on an account the caller owns
+      operationId: listSepaInstant
+      security:
+        - customerOidc: [payments:read]
+      parameters:
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: Raw sepa-instant-service passthrough (first page)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    paymentId: {type: string, format: uuid}
+                    status: {type: string, enum: [PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED]}
+                    debtorIban: {type: string}
+                    creditorIban: {type: string}
+                    amount: {type: string}
+                    currency: {type: string}
+                    endToEndId: {type: string}
+                    executionTimeoutAt: {type: string, format: date-time, nullable: true}
+                    settledAt: {type: string, format: date-time, nullable: true}
+                    createdAt: {type: string, format: date-time}
+        '400':
+          description: Missing required query parameter 'accountId'
+        '403':
+          description: Account does not belong to caller
+    post:
+      tags: [SEPA Instant]
+      summary: Initiate a SEPA Instant Credit Transfer from an account the caller owns (SCA-gated)
+      description: >-
+        The edge resolves the debtor IBAN/name and generates endToEndId server-side.
+        Money movement is SCA-gated — the challenge must already be approved.
+      operationId: createSepaInstant
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}, description: Synthesized by the edge when absent}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, creditorIban, creditorName, amount]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                creditorIban: {type: string}
+                creditorName: {type: string}
+                creditorBic: {type: string, nullable: true}
+                amount: {type: string}
+                currency: {type: string, default: EUR}
+                reference: {type: string, nullable: true}
+      responses:
+        '201':
+          description: SEPA Instant payment submitted
+        '400':
+          description: Missing or malformed field
+        '403':
+          description: Debtor account does not belong to caller, or SCA missing/rejected
+
+  /sepa-instant/{paymentId}/recall:
+    post:
+      tags: [SEPA Instant]
+      summary: Request recall of one of the caller's own SEPA Instant payments
+      description: >-
+        A recall is a scheme REQUEST, not a guarantee. accountId proves the caller's own
+        account is the debtor on this payment (the payment resource is not itself party-scoped).
+      operationId: recallSepaInstant
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: paymentId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: accountId, in: query, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string, default: REQUESTED_BY_CUSTOMER}
+      responses:
+        '200':
+          description: Recall requested
+        '400':
+          description: Missing required query parameter 'accountId'
+        '403':
+          description: Payment not found, or does not belong to caller's account
+
+  /swift:
+    post:
+      tags: [SWIFT]
+      summary: Initiate an outbound SWIFT (MT103) payment from an account the caller owns (SCA-gated)
+      description: >-
+        The edge assembles the full MT103 instruction (message type, value date, charge code
+        SHA, priority NORMAL) from a lightweight client body. Money movement is SCA-gated.
+      operationId: createSwift
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}}
+        - {name: X-SCA-Challenge-Id, in: header, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [debtorAccountId, creditorIban, creditorName, bic, amount]
+              properties:
+                debtorAccountId: {type: string, format: uuid}
+                creditorIban: {type: string}
+                creditorName: {type: string}
+                bic: {type: string}
+                amount: {type: string}
+                currency: {type: string, default: EUR}
+                reference: {type: string, nullable: true}
+      responses:
+        '201':
+          description: SWIFT message accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  messageType: {type: string, enum: [MT103, MT202, MT900, MT910, MT940, MT950, MT199]}
+                  senderBic: {type: string}
+                  receiverBic: {type: string}
+                  amount: {type: number}
+                  currency: {type: string}
+                  status: {type: string, enum: [PENDING, VALIDATED, SENT, ACKNOWLEDGED, REJECTED, FAILED, COMPLETED]}
+                  createdAt: {type: string, format: date-time}
+                  reference: {type: string}
+        '400':
+          description: Missing or malformed field
+        '403':
+          description: Debtor account does not belong to caller, or SCA missing/rejected
+
+  /vop/verify:
+    post:
+      tags: [VoP]
+      summary: Verification of Payee — confirm a creditor's IBAN/name pair before paying
+      description: >-
+        Pure name-matching lookup; no money movement and no ownership check (any authenticated
+        customer may verify any IBAN/name pair, same as the SEPA scheme's VoP requirement).
+      operationId: verifyPayee
+      security:
+        - customerOidc: [payments:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [creditorIban, creditorName]
+              properties:
+                creditorIban: {type: string, maxLength: 34}
+                creditorName: {type: string, maxLength: 140}
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: {type: string, enum: [match, close_match, no_match, no_data]}
+                  matchedName: {type: string, nullable: true, description: Present only when status is close_match}
+                  reason:
+                    type: string
+                    nullable: true
+                    description: Present only when status is no_data
+                    enum: [no_scheme_connectivity, account_not_found, name_not_available, lookup_unavailable]
+                  verifiedAt: {type: string, format: date-time}
+        '400':
+          description: Missing, blank, or oversized creditorIban/creditorName
+
+  /transfers:
+    post:
+      tags: [Transfers]
+      summary: Move money between two of the caller's own accounts (own-account transfer)
+      description: >-
+        Distinct from /domestic-payments and /sepa-payments — no IBAN/creditor resolution and
+        no payment screening, since both legs stay inside the bank and belong to the same
+        party. Booked via transaction-service under PSD2 RTS Art. 15's own-account SCA
+        exemption. Both accounts must be owned by the caller and must differ.
+      operationId: createTransfer
+      security:
+        - customerOidc: [payments:initiate]
+      parameters:
+        - {name: Idempotency-Key, in: header, required: false, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceAccountId, targetAccountId, amount]
+              properties:
+                sourceAccountId: {type: string, format: uuid}
+                targetAccountId: {type: string, format: uuid}
+                amount: {type: string}
+                currency: {type: string, default: CZK}
+                description: {type: string, nullable: true}
+      responses:
+        '201':
+          description: Transfer booked
+        '400':
+          description: Malformed body, or source and target account are the same
+        '403':
+          description: Source or target account does not belong to caller
+
+  /complaints:
+    post:
+      tags: [Complaints]
+      summary: File a general complaint (not necessarily tied to a dispute)
+      description: >-
+        Distinct from /disputes — a complaint need not reference a transaction. accountId is
+        ownership-checked only when supplied (it's optional). There is no customer-facing
+        complaint LISTING yet (ADR-0085) — this route is create-only.
+      operationId: fileComplaint
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, description]
+              properties:
+                category:
+                  type: string
+                  enum: [PAYMENT_SERVICE, FEES, ACCOUNT_SERVICE, LENDING, CONDUCT, DATA_PROTECTION, OTHER]
+                description: {type: string}
+                accountId: {type: string, format: uuid, nullable: true}
+                transactionId: {type: string, format: uuid, nullable: true}
+                disputeId: {type: string, format: uuid, nullable: true}
+      responses:
+        '201':
+          description: Complaint received
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: {type: string, format: uuid}
+                  reference: {type: string}
+                  category: {type: string}
+                  channel: {type: string, enum: [APP, BRANCH, EMAIL, ARBITER]}
+                  description: {type: string}
+                  status: {type: string, enum: [RECEIVED, RESOLVED, CLOSED]}
+                  accountId: {type: string, format: uuid, nullable: true}
+                  transactionId: {type: string, format: uuid, nullable: true}
+                  disputeId: {type: string, format: uuid, nullable: true}
+                  receivedDate: {type: string, format: date}
+                  dueDate: {type: string, format: date, description: Statutory reply deadline}
+                  createdAt: {type: string, format: date-time}
+        '400':
+          description: Malformed body
+        '403':
+          description: accountId supplied but does not belong to caller
+
   /sca/parties/{partyId}/devices:
     post:
       tags: [SCA]
@@ -937,6 +2021,36 @@ paths:
         '200':
           description: Decision recorded
 
+  /sca/pending:
+    get:
+      tags: [SCA]
+      summary: List the caller's own pending (unanswered) SCA challenges
+      operationId: listPendingSca
+      security:
+        - customerOidc: [sca:decide]
+      responses:
+        '200':
+          description: Pending challenges, newest first (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: {type: string, format: uuid}
+                    purpose:
+                      type: string
+                      enum: [CONSENT_GRANT, PAYMENT_INITIATION, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS]
+                    method: {type: string, enum: [PUSH_NOTIFICATION, TOTP, BIOMETRIC]}
+                    amount: {type: string, nullable: true}
+                    currency: {type: string, nullable: true}
+                    creditorIban: {type: string, nullable: true}
+                    creditorName: {type: string, nullable: true}
+                    reference: {type: string, nullable: true}
+                    expiresAt: {type: string, format: date-time}
+                    createdAt: {type: string, format: date-time}
+
   /devices:
     post:
       tags: [Devices]
@@ -968,6 +2082,22 @@ paths:
       responses:
         '200':
           description: Device list
+
+  /devices/{id}:
+    delete:
+      tags: [Devices]
+      summary: Deregister one of the caller's own push devices
+      description: partyId is always taken from the JWT, so a caller can never revoke another party's device.
+      operationId: revokeDevice
+      security:
+        - customerOidc: [accounts:write]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '204':
+          description: Deregistered
+        '404':
+          description: Device not found, or already inactive, or not owned by the caller
 
   /documents:
     get:
@@ -1130,6 +2260,61 @@ paths:
           description: Manual verification required (NEEDS_MANUAL_VERIFICATION)
         '502':
           description: party-service or pid-service unavailable
+
+  /onboarding/terms:
+    get:
+      tags: [Onboarding]
+      summary: List the published terms-and-conditions document(s) for a language
+      description: >-
+        Unauthenticated (pre-session, ADR-0069). Not backed by a dedicated terms service —
+        looks up document-service's PUBLISHED template catalog for `VOP_CS` or `VOP_EN`
+        depending on `lang` (default `cs`). Results are cached in-memory per language for 5
+        minutes.
+      operationId: onboardingTerms
+      parameters:
+        - {name: lang, in: query, required: false, schema: {type: string, enum: [cs, en], default: cs}}
+      responses:
+        '200':
+          description: Published terms documents for the language (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  documents:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        code: {type: string, enum: [VOP_CS, VOP_EN]}
+                        name: {type: string}
+                        version: {type: string}
+                        publishedAt: {type: string, format: date-time}
+        '502':
+          description: document-service templates unavailable or unreadable
+
+  /onboarding/terms/{code}/content:
+    get:
+      tags: [Onboarding]
+      summary: Render and stream the content of one published terms document
+      description: >-
+        Unauthenticated (pre-session, ADR-0069). `code` is restricted to a closed allow-list
+        (`VOP_CS`, `VOP_EN`) — anything else is refused before it ever reaches document-service.
+        Renders the current PUBLISHED version to PDF via document-service and streams the
+        bytes through (cached per code+version). Response is binary, not JSON.
+      operationId: onboardingTermsContent
+      parameters:
+        - {name: code, in: path, required: true, schema: {type: string, enum: [VOP_CS, VOP_EN]}}
+      responses:
+        '200':
+          description: The rendered document (PDF)
+          content:
+            application/pdf:
+              schema: {type: string, format: binary}
+        '404':
+          description: Unknown terms code, or no published version of this document
+        '502':
+          description: document-service templates unavailable, or the render failed
 
   /onboarding/events:
     post:
@@ -1888,6 +3073,101 @@ components:
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
     # $ref). Kept field-for-field in step with the upstream openapi.yaml they mirror.
 
+    # Mirrors account-service's PocketResponse (currency-pocket / multi-currency wallet, ADR-0024).
+    Pocket:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        currencyCode: {type: string}
+        isPrimary: {type: boolean}
+        status: {type: string, enum: [ACTIVE, FROZEN, CLOSED]}
+        openedAt: {type: string, format: date-time}
+        closedAt: {type: string, format: date-time, nullable: true}
+
+    # Mirrors standing-order-service's StandingOrderResponse.
+    StandingOrder:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partyId: {type: string, format: uuid}
+        debtorAccountId: {type: string, format: uuid}
+        creditorIban: {type: string}
+        creditorName: {type: string}
+        status: {type: string, enum: [ACTIVE, PAUSED, CANCELLED, COMPLETED, FAILED]}
+        frequency: {type: string, enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]}
+        paymentType: {type: string, enum: [SEPA_CREDIT, DOMESTIC, INTERNAL]}
+        amountMinorUnits: {type: integer, format: int64}
+        amount: {type: number}
+        currency: {type: string}
+        nextExecutionDate: {type: string, format: date}
+        remittanceInfo: {type: string, nullable: true}
+        description: {type: string, nullable: true}
+        executionCount: {type: integer}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    # Mirrors dispute-service's Dispute model.
+    Dispute:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        reference: {type: string}
+        transactionId: {type: string, format: uuid}
+        accountId: {type: string, format: uuid}
+        partyId: {type: string, format: uuid}
+        disputeType:
+          type: string
+          enum: [UNAUTHORIZED, DUPLICATE, GOODS_NOT_RECEIVED, NOT_AS_DESCRIBED, CREDIT_NOT_PROCESSED, TECHNICAL_ERROR, OTHER]
+        status:
+          type: string
+          enum: [OPEN, UNDER_REVIEW, PENDING_CUSTOMER, PENDING_MERCHANT, RESOLVED_CUSTOMER, RESOLVED_MERCHANT, WITHDRAWN, ESCALATED]
+        resolution: {type: string, enum: [CHARGEBACK, REPRESENTMENT, ARBITRATION, WITHDRAWN, PENDING], nullable: true}
+        amount: {type: string}
+        currency: {type: string, default: EUR}
+        description: {type: string, nullable: true}
+        merchantName: {type: string, nullable: true}
+        merchantId: {type: string, nullable: true}
+        transactionDate: {type: string, format: date}
+        filingDate: {type: string, format: date}
+        resolutionDeadline: {type: string, format: date, nullable: true}
+        resolvedAt: {type: string, format: date-time, nullable: true}
+        resolvedBy: {type: string, nullable: true}
+        chargebackAmount: {type: string, nullable: true}
+        remediationOutcome: {type: string, enum: [UPHELD, REJECTED, PARTIAL], nullable: true}
+        remediationAmount: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+
+    # Edge's projected view of lending-service's Loan (internal fields dropped — see
+    # CustomerEdgeResource.projectLoan).
+    Loan:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        principalAmount: {type: string}
+        currency: {type: string, default: CZK}
+        annualRatePercent: {type: string, description: 'nominal annual rate × 100, trailing zeros stripped; omitted when unset'}
+        termPeriods: {type: integer}
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - DELINQUENT
+            - DEFAULTED
+            - FORBEARANCE_ASSESSED
+            - TERMINATION_NOTICED
+            - ACCELERATED
+            - EARLY_REPAYMENT_REQUESTED
+            - SETTLEMENT_QUOTED
+            - SETTLED
+            - WITHDRAWN
+            - UNWOUND
+            - CLOSED
+            - WRITTEN_OFF
+        firstDueDate: {type: string, format: date, nullable: true}
+        disbursedAt: {type: string, format: date-time, nullable: true}
+
     # Mirrors openbank-app shared ThemeSpec (ADR-0190). Forward-tolerant on both
     # sides: unknown fields are ignored by the app decoder, and the edge stores the
     # document verbatim after a shape check.
@@ -1951,6 +3231,15 @@ components:
         totalCount:
           type: integer
           nullable: true
+
+    # Mirrors notification-service's NotificationPreferenceDto. No stored row defaults every
+    # channel to true.
+    NotificationPreferences:
+      type: object
+      properties:
+        paymentsPush: {type: boolean, default: true}
+        productPush: {type: boolean, default: true}
+        marketingPush: {type: boolean, default: true}
 
     DirectoryLookupRequest:
       type: object
