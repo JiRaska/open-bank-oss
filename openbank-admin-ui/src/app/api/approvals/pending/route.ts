@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'sepaPayment' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'sepaPayment' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -39,6 +39,9 @@ type LendingApproval = {
 // reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
 // built to show parked decisions.
 type SanctionsApproval = LendingApproval
+
+// transaction-service serves the same libs `PendingApproval` shape too (#5679).
+type TransactionApproval = LendingApproval
 
 // sepa-payment-service serves the same libs `PendingApproval` shape (issue #5679, money-path
 // first per that issue's own ordering). Before this, a `sepaPayment.transitionStatus` four-eyes
@@ -95,6 +98,21 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('transaction-service', 'transaction', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as TransactionApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'transaction' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 async function sepaPaymentPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(serverSvcUrl('sepa-payment', 'payments', 8115, '/api/v1/sepa-payments/approvals', { limit: '50' }), {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
@@ -137,16 +155,17 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, sepaPayment, agent] = await Promise.all([
+  const [lending, sanctions, transaction, sepaPayment, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
+    transactionPending(headers).catch(() => unavailable),
     sepaPaymentPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...sepaPayment.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...sepaPayment.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
-    sources: { lending: lending.state, sanctions: sanctions.state, sepaPayment: sepaPayment.state, agent: agent.state },
+    sources: { lending: lending.state, sanctions: sanctions.state, transaction: transaction.state, sepaPayment: sepaPayment.state, agent: agent.state },
   })
 }

@@ -1,7 +1,8 @@
 ---
 date: 2026-07-29
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — triage of the wider code-cited-but-planned ADR set; this ADR's own remaining slice is tracked there"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,14 @@ summary: "Jurisdictional credit law (disclosures, cooling-off, APR labels, termi
 ---
 
 # ADR-0212 — Jurisdictional credit compliance packs as versioned effective-dated data
+
+**Delivery note (2026-08-19).** The pack mechanism is live on `main` and was carrying
+`delivery-status: planned` while doing so: `CompliancePackActivationService` /
+`CompliancePackActivationRepository`, the `CompliancePackCompiler` / `CompliancePackRegistry` /
+`CompiledCompliancePack` types in `openbank-libs-domain`, four-eyes activation via the shared
+`Proposal`/`ProposalState` governance types (this ADR's "four-eyes-activated" clause), and
+`V7__compliance_pack_activation.sql`. Found by the code→ADR evidence read described in #5708;
+the remaining slices are triaged there.
 
 ## Context
 

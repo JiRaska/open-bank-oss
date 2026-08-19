@@ -57,14 +57,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 UI_DIR="$REPO_ROOT/openbank-admin-ui"
 
-ensure_deps() {
-  if node -e "require.resolve('yaml',{paths:['$UI_DIR']});require.resolve('zod',{paths:['$UI_DIR']})" \
-      >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "[governance-manifest] installing openbank-admin-ui production deps (npm ci)"
-  ( cd "$UI_DIR" && npm ci --omit=dev --ignore-scripts --no-audit --no-fund >/dev/null )
-}
+# The install moved to a shared, LOCKED helper: mermaid-parses needs modules from this same
+# directory and runs in this same shard, and two concurrent `npm ci` calls corrupted the tree for
+# both gates (ENOTEMPTY / ENOTDIR, both reported UNFALSIFIED). It installs devDependencies now,
+# because the other gate needs jsdom — a superset install, so nothing here regresses.
+# shellcheck source=.github/scripts/ensure-admin-ui-deps.sh
+source "$SCRIPT_DIR/ensure-admin-ui-deps.sh"
+
+ensure_deps() { ensure_admin_ui_deps "governance-manifest"; }
 
 # --- falsification -----------------------------------------------------------------------
 # Fed a tree it MUST flag and one it must not. The repo's hardest-won CI rule is that a gate

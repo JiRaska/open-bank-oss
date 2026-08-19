@@ -2570,6 +2570,7 @@ authz:
         - account.search
         - account.unfreeze
         - account.update
+        - balance.approval.decide
         - balance.credit
         - balance.debit
         - balance.hold
@@ -2807,6 +2808,7 @@ shared_m2m_matrix_write_grants:
     - account.search
     - account.unfreeze
     - account.update
+    - balance.approval.decide
     - balance.credit
     - balance.debit
     - balance.hold

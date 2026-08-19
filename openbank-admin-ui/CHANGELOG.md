@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.169.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.168.0...admin-ui-v0.169.0) (2026-08-19)
+
+
+### Features
+
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
+
+### Bug Fixes
+
+* **admin-ui:** reconcile the two production-readiness collectors ([#5702](https://github.com/JiRaska/open-bank-oss/issues/5702)) ([101a56b](https://github.com/JiRaska/open-bank-oss/commit/101a56b3386e172564485d23958cfb7f8e4051de))
+
 ## [0.168.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.167.0...admin-ui-v0.168.0) (2026-08-19)
 
 

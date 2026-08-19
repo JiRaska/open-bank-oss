@@ -33,7 +33,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(res.status).toBe(401)
   })
 
-  it('merges lending, sanctions, sepaPayment and agent queues into canonical items, sorted by proposedAt', async () => {
+  it('merges lending, sanctions, transaction, sepaPayment and agent queues into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) {
         return Promise.resolve(new Response(JSON.stringify([
@@ -44,6 +44,11 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       if (url.includes('sanctions')) {
         return Promise.resolve(new Response(JSON.stringify([
           { id: 'S-1', action: 'sanctions.clear', resourceId: 'hit-9', makerId: 'analyst.c', createdAt: '2026-07-29T12:00:00Z' },
+        ]), { status: 200 }))
+      }
+      if (url.includes('transaction')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { id: 'T-1', action: 'transaction.reverse', resourceId: 'txn-9', makerId: 'teller.d', createdAt: '2026-07-30T09:30:00Z' },
         ]), { status: 200 }))
       }
       if (url.includes('sepa-payments/approvals') || url.includes('sepa-payment')) {
@@ -59,11 +64,28 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
-    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'SP-1', 'S-1', 'P-1', 'L-2'])
+    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'SP-1', 'S-1', 'P-1', 'T-1', 'L-2'])
     expect(body.items[0]).toMatchObject({ domain: 'lending', action: 'lending.writeoff', maker: 'officer.a' })
     expect(body.items[1]).toMatchObject({ domain: 'sepaPayment', action: 'sepaPayment.transitionStatus', maker: 'operator.d' })
     expect(body.items[2]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
     expect(body.items[3]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+    expect(body.items[4]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
+  })
+
+  // The regression this file exists to prevent, stated as a test for the transaction slice of
+  // issue #5679: transaction-service now serves its pending list and the inbox must read it, or
+  // a parked `transaction.reverse` decision is invisible on the one screen built to show them.
+  it('reads the transaction queue at all — an unread source is indistinguishable from an empty one', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      seen.push(String(url))
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(seen.some(u => u.includes('/api/v1/transactions/approvals'))).toBe(true)
+    expect(body.sources.transaction).toBe('ok')
   })
 
   // The regression this file exists to prevent, stated as a test: sanctions-service has served
@@ -104,6 +126,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) return Promise.reject(new Error('lending down'))
       if (url.includes('sanctions')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+      if (url.includes('transaction')) return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       if (url.includes('sepa-payments/approvals') || url.includes('sepa-payment')) {
         return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
       }
@@ -138,6 +161,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.items).toEqual([])
     expect(body.sources.lending).toBe('forbidden')
     expect(body.sources.sanctions).toBe('ok')
+    expect(body.sources.transaction).toBe('ok')
     expect(body.sources.sepaPayment).toBe('ok')
     expect(body.sources.agent).toBe('ok')
   })
@@ -154,6 +178,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     expect(body.sources.lending).toBe('unavailable')
     expect(body.sources.sanctions).toBe('unavailable')
+    expect(body.sources.transaction).toBe('unavailable')
     expect(body.sources.sepaPayment).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })

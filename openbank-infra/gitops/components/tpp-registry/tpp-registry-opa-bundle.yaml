@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: tpp-registry-service
     app.kubernetes.io/part-of: tpp-registry
   annotations:
-    openbank.tech/policy-checksum: "0f721db9ec4019f8"
+    openbank.tech/policy-checksum: "f359d78bd560b096"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1286,6 +1286,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold
