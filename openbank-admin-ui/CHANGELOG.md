@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.171.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.170.0...admin-ui-v0.171.0) (2026-08-19)
+
+
+### Features
+
+* **fx:** expose pending four-eyes approvals via approval inbox ([#5695](https://github.com/JiRaska/open-bank-oss/issues/5695)) ([81c159c](https://github.com/JiRaska/open-bank-oss/commit/81c159ce49cb4671e03171a3e2ccec1068cb3929))
+
 ## [0.170.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.169.0...admin-ui-v0.170.0) (2026-08-19)
 
 
