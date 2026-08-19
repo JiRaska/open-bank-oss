@@ -45,7 +45,7 @@ import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import gatelib  # noqa: E402
+import gatelib
 
 REPO = Path(__file__).resolve().parents[2]
 STRATEGY = "CamelCaseToUnderscoresNamingStrategy"
@@ -59,13 +59,13 @@ CAMEL = re.compile(r"[a-z][A-Z]")
 # openbank-audit-service against a plain result-holder that merely shares a file with an entity.
 ENTITY_CLASS = re.compile(
     r"@Entity\b(?P<anns>(?:[^\n]*\n)*?)\s*class\s+(?P<name>\w+)[^{]*\{(?P<body>.*?)\n\}",
-    re.S,
+    re.DOTALL,
 )
 TABLE_NAME = re.compile(r'@Table\(\s*name\s*=\s*"([^"]+)"')
 PROPERTY = re.compile(
     r"((?:^[ \t]*@(?:\w+:)?[\w.]+(?:\((?:[^()]|\([^()]*\))*\))?[ \t]*\n)*)"
     r"^[ \t]*(?:lateinit\s+)?(?:var|val)\s+(\w+)\s*:",
-    re.M,
+    re.MULTILINE,
 )
 # `@field:Column` / `@get:Column` are the same annotation with a Kotlin use-site target, and
 # roughly half the fleet writes them that way. A first cut of this regex required a bare `@Column`
@@ -111,12 +111,12 @@ def audit(repo: Path) -> tuple[list[str], int]:
                 continue
             for cls in ENTITY_CLASS.finditer(text):
                 examined += 1
-                for annotations, prop in PROPERTY.findall(cls.group("body")):
-                    if any(marker in annotations for marker in NOT_A_COLUMN):
+                for anns, prop in PROPERTY.findall(cls.group("body")):
+                    if any(marker in anns for marker in NOT_A_COLUMN):
                         continue
                     if not CAMEL.search(prop):
                         continue  # single word: the implicit name and the folded identifier agree
-                    if EXPLICIT_NAME.search(annotations):
+                    if EXPLICIT_NAME.search(anns):
                         continue
                     findings.append(
                         f"{f.relative_to(repo)}: {cls.group('name')}.{prop} has no explicit "
