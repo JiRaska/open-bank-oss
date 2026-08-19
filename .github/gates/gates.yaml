@@ -625,16 +625,21 @@ gates:
   # any gitops-scoped check and is written into the script header rather than left to be
   # discovered.
   #
-  # ADVISORY, not enforced, and the reason is specific rather than caution: enforcing it today
-  # would fail every PR on one open question — whether engagement-db should be backed up or is
-  # genuinely disposable — that is an owner's decision and not a contributor's to unblock. The
-  # exemption is an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`), deliberately
-  # not a list kept beside the manifests: a separate list drifts from what it describes and
-  # nothing notices, which is the defect this repo keeps re-finding.
+  # ENFORCED since 2026-08-19. It was advisory for one specific reason, written above: enforcing
+  # it would have failed every PR on a single open question — whether engagement-db should be
+  # backed up or is genuinely disposable — which is an owner's decision, not a contributor's to
+  # unblock. That question is now answered (backed up, same #863 pattern as the rest of the
+  # fleet), the gitops-visible count is 0, and an advisory gate that has correctly named the same
+  # cluster since 2026-08-16 with nothing happening is a finding nobody is required to read. The
+  # exemption remains an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`),
+  # deliberately not a list kept beside the manifests: a separate list drifts from what it
+  # describes and nothing notices, which is the defect this repo keeps re-finding. So a future
+  # genuinely-disposable database is still one annotation away from green, and that annotation
+  # sits on the thing it describes.
   - id: cnpg-backup-declared-gate
-    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (advisory)"
+    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     rationale: >-
       db-backup-association-gate only inspects clusters that already declare a
       barmanObjectStore, so a database that never asked to be backed up is invisible to it.

@@ -23,7 +23,43 @@ spec:
     limits:
       cpu: "1"
       memory: 512Mi
+  postgresql:
+    parameters:
+      wal_keep_size: "64MB"
+      # Bound WAL so a checkpoint spike or bulk load cannot fill the 2Gi volume (#1432).
+      max_wal_size: "512MB"
+  # WAL archiving + daily base backups to S3 (ADR-0035, #863 pattern). Credentials via EKS
+  # Pod Identity on the engagement-db ServiceAccount (aws/.../db-backups.tf) — barman reads the
+  # SDK chain, no secret. Sandbox S3 lifecycle expires after 35d; prod needs compliance retention.
+  #
+  # engagement-db was the LAST CNPG cluster in the fleet with no backup of any kind: it never
+  # attempted an archive, so — unlike the campaign-db case, where archiving failed loudly for
+  # ~48h — nothing alerted and nothing could. The first time anyone needed a recovery point
+  # there would not have been one. Enumerated by walking every `kind: Cluster` manifest for a
+  # `barmanObjectStore`, not by reading the fleet-rollout comment in db-backups.tf, which has
+  # now been wrong three times (#1444).
+  backup:
+    retentionPolicy: "30d"
+    barmanObjectStore:
+      destinationPath: s3://openbank-sandbox-db-backups/engagement-db
+      s3Credentials:
+        inheritFromIAMRole: true
+      wal:
+        compression: gzip
+      data:
+        compression: gzip
   bootstrap:
     initdb:
       database: openbank_engagement
       owner: openbank
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: engagement-db-daily
+  namespace: engagement
+spec:
+  schedule: "0 51 4 * * *"
+  backupOwnerReference: self
+  cluster:
+    name: engagement-db
