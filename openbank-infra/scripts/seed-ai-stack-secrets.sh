@@ -44,6 +44,23 @@ has_field() { # kv_path field
   bao_exec bao kv get -field="$2" "$1" >/dev/null 2>&1
 }
 
+has_path() { # kv_path
+  bao_exec bao kv get "$1" >/dev/null 2>&1
+}
+
+# `kv patch` MERGES do existujícího tajemství — a na neexistující cestě vrátí 404. `kv put` cestu
+# založí, ale REPLACES všechno, co tam je. Takže první zápis na čerstvou cestu musí být put a každý
+# další patch. Samotný put by při každém běhu smazal sourozenecké klíče; samotný patch spadne na
+# úplně prvním běhu (změřeno 2026-08-19, první ostré spuštění tohohle skriptu):
+#   Error writing data to openbank/data/langfuse: Code: 404
+kv_write() { # kv_path field value
+  if has_path "$1"; then
+    bao_exec bao kv patch "$1" "$2=$3" >/dev/null
+  else
+    bao_exec bao kv put "$1" "$2=$3" >/dev/null
+  fi
+}
+
 if [[ -z "${VAULT_TOKEN:-}" ]]; then
   if [[ -n "${BAO_TOKEN:-}" ]]; then VAULT_TOKEN="$BAO_TOKEN"
   elif [[ -n "${RT:-}" ]]; then VAULT_TOKEN="$RT"; fi
@@ -82,8 +99,7 @@ seed_langfuse_field() { # field generator_command
   fi
   local value
   value="$(eval "$gen")"
-  # kv patch, ne kv put: put přepíše CELÝ secret a shodil by ostatní klíče na téže cestě.
-  bao_exec bao kv patch "$KV_LANGFUSE" "$field=$value" >/dev/null
+  kv_write "$KV_LANGFUSE" "$field" "$value"
   unset value
   echo "   $field: zapsáno"
 }
@@ -103,7 +119,7 @@ if [[ "$ROTATE" -eq 0 ]] && has_field "$KV_LANGFUSE" INIT_USER_EMAIL; then
 else
   read -r -p "   INIT_USER_EMAIL (operátorský e-mail pro login do Langfuse): " LF_EMAIL
   [[ -n "$LF_EMAIL" ]] || { echo "prázdný e-mail — Langfuse by uživatele nezaložil"; exit 1; }
-  bao_exec bao kv patch "$KV_LANGFUSE" "INIT_USER_EMAIL=$LF_EMAIL" >/dev/null
+  kv_write "$KV_LANGFUSE" INIT_USER_EMAIL "$LF_EMAIL"
   echo "   INIT_USER_EMAIL: zapsáno"
 fi
 
