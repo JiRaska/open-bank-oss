@@ -38,7 +38,7 @@ graph TB
     uc[Application<br/>ClearingService<br/>in/out porty]
     dom[Domain<br/>ClearingBatch / ClearingItem / SettlementPosition<br/>+ enumy]
     persist[Persistence<br/>Clearing*RepositoryImpl<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>ClearingOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>ClearingOutboxDispatcher<br/>@Scheduled každých 5s"]
     kpub[Kafka<br/>KafkaClearingOutboxEventPublisher]
     authz[Authz<br/>AuthzProducer → OPA]
   end

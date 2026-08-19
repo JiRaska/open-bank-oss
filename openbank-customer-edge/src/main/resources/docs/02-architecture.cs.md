@@ -42,8 +42,8 @@ graph LR
 graph TB
   subgraph "openbank-customer-edge (Quarkus 3.x, bezstavová)"
     direction TB
-    rest1[REST<br/>CustomerEdgeResource<br/>class @RolesAllowed ROLE_CUSTOMER]
-    rest2[REST<br/>OnboardingResource<br/>@PermitAll /onboarding/start]
+    rest1["REST<br/>CustomerEdgeResource<br/>class @RolesAllowed ROLE_CUSTOMER"]
+    rest2["REST<br/>OnboardingResource<br/>@PermitAll /onboarding/start"]
     idsvc[Doména<br/>CustomerIdentity<br/>party-id z JWT]
     client[Adaptér<br/>UpstreamClient<br/>singleton JDK HttpClient]
     tok[Cache M2M tokenu<br/>client_credentials, 60s buffer]
