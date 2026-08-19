@@ -6,6 +6,7 @@ package com.openbank.onboarding.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
@@ -26,9 +27,23 @@ import java.util.UUID
  * Quarkus dispatches suspend @Incoming handlers on the Vert.x event loop with a proper
  * duplicated context, so awaitSuspending() inside the projection service works correctly.
  *
- * Poison-pill protection: any parse or projection failure is caught, logged, and the message
- * is acked (return). This is correct for a read-model projection: a single bad event must not
- * wedge the consumer group; the canonical source of truth (party/kyc/sca) can be replayed.
+ * **Poison pills are acked; failing dependencies are not (#5745, #5698).** A parse or mapping
+ * failure is still caught, logged and acked — replaying that record fails identically forever, so
+ * it is the one case where dropping is right. A *projection* failure is a different thing: the
+ * database or the read-model service is down, the event is fine, and returning normally tells Kafka
+ * the work is done. Those are retried a bounded number of times by [EventRetry] and then rethrown,
+ * which nacks the record.
+ *
+ * The old KDoc justified acking projection failures with "the canonical source of truth
+ * (party/kyc/sca) can be replayed". Nothing replays it: no re-seed job exists in this service, and
+ * the two things being lost are not cosmetic — a dropped `PARTY_ERASED` leaves personal data in the
+ * onboarding read model after an Art. 17 erasure was executed everywhere else (a compliance breach,
+ * not a stale tile), and a dropped KYC/SCA transition means the funnel never sees the party move.
+ *
+ * **None of these three channels configures a `failure-strategy`,** so SmallRye's default `fail`
+ * applies and a nack STOPS the channel instead of dead-lettering. That is the deliberate trade —
+ * a halted channel is loud and its backlog survives on the topic — but there is no DLQ behind
+ * these three today and this KDoc does not pretend otherwise; wiring one is #5745 section B.
  */
 @ApplicationScoped
 class OnboardingEventConsumer(private val clock: Clock) {
@@ -64,16 +79,12 @@ class OnboardingEventConsumer(private val clock: Clock) {
                 log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
                 return
             }
-            try {
+            // Rethrows after the bounded attempts. An erasure that is acked without happening is a
+            // GDPR Art. 17 breach that no later process notices, and `PARTY_ERASED` is emitted once.
+            EventRetry.withRetry(log, "[party-events-in] GDPR Art. 17 erasure", partyId) {
                 projection.eraseParty(partyId)
-                log.infof("[party-events-in] GDPR Art. 17: erased onboarding read-model for party %s", partyId)
-            } catch (e: Exception) {
-                log.errorf(
-                    e,
-                    "[party-events-in] GDPR Art. 17: failed to erase onboarding read-model for party %s",
-                    partyId,
-                )
             }
+            log.infof("[party-events-in] GDPR Art. 17: erased onboarding read-model for party %s", partyId)
             return
         }
 
@@ -199,19 +210,38 @@ class OnboardingEventConsumer(private val clock: Clock) {
         return event
     }
 
+    @Suppress("TooGenericExceptionCaught")
     private suspend fun project(event: OnboardingEvent, topic: String) {
         try {
-            projection.applyEvent(event)
-            metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
+            EventRetry.withRetry(log, "[$topic] Projection of ${event::class.simpleName}", partyIdOf(event)) {
+                projection.applyEvent(event)
+            }
         } catch (e: Exception) {
+            // The FAILED counter is still recorded — it is the series the funnel dashboards read —
+            // and then the failure is rethrown so the record is nacked rather than acked as done.
             metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
-            log.errorf(e, "[%s] Projection failed for event type %s", topic, event::class.simpleName)
-            // Ack the message (don't rethrow) — the read-model can be re-seeded from events if needed.
+            throw e
         }
+        metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
     }
 
     // ── JSON helpers ─────────────────────────────────────────────────────────
 
     private fun JsonNode.asUuid(): UUID? = runCatching { UUID.fromString(asText()) }.getOrNull()
     private fun JsonNode.asInstant(): Instant? = runCatching { Instant.parse(asText()) }.getOrNull()
+}
+
+/**
+ * The sealed base declares only `occurredAt`; every subtype carries its own party id.
+ *
+ * Top-level on purpose: as a member it would put the class AT detekt's `TooManyFunctions`
+ * threshold of 11, which fires at the limit rather than above it. It carries no annotation, so the
+ * next-declaration binding trap does not apply here.
+ */
+private fun partyIdOf(event: OnboardingEvent): UUID = when (event) {
+    is OnboardingEvent.PartyCreated -> event.partyId
+    is OnboardingEvent.PartyStatusChanged -> event.partyId
+    is OnboardingEvent.KycCaseOpened -> event.partyId
+    is OnboardingEvent.KycStatusChanged -> event.partyId
+    is OnboardingEvent.DeviceEnrolled -> event.partyId
 }
