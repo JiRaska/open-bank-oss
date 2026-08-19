@@ -40,7 +40,7 @@ graph TB
     rest[REST<br/>OnboardingResource<br/>3 GET endpoints]
     uc[Application<br/>OnboardingProjectionService<br/>implements OnboardingUseCase]
     dom[Domain<br/>OnboardingRecord / OnboardingEvent<br/>FunnelStage.derive]
-    consumer[Messaging<br/>OnboardingEventConsumer<br/>3 suspend @Incoming]
+    consumer["Messaging<br/>OnboardingEventConsumer<br/>3 suspend @Incoming"]
     persist[Persistence<br/>OnboardingRepositoryImpl<br/>Hibernate Reactive / Panache]
   end
 

@@ -254,7 +254,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0243](0243-k6-performance-gate-as-ci-advisory-check.md) | k6 performance gate as CI advisory check | Proposed | Shipped | ci,testing,observability | — |
 | [0244](0244-agent-swarm-coordination-via-temporal-case-workflows.md) | Agent swarm coordination via Temporal case workflows | Proposed | Partial | ai-agents,architecture,resilience,governance | — |
 | [0245](0245-campaign-conversion-as-an-observed-product-event.md) | Campaign conversion as an observed product event | Proposed | Partial | analytics,kafka,privacy-gdpr,admin-ui | — |
-| [0246](0246-admin-ui-swarm-thread-view-over-temporal-case-history.md) | Admin-ui swarm thread view over Temporal case history | Proposed | Planned | ai-agents,admin-ui,observability,governance | — |
+| [0246](0246-admin-ui-swarm-thread-view-over-temporal-case-history.md) | Admin-ui swarm thread view over Temporal case history | Proposed | Partial | ai-agents,admin-ui,observability,governance | — |
 | [0247](0247-fraud-hold-as-a-party-level-adverse-state.md) | Fraud hold as a party-level adverse state | Proposed | Planned | fraud,privacy-gdpr,kafka | — |
 | [0248](0248-statement-and-payment-confirmation-document-templates.md) | Statement and payment confirmation document templates | Proposed | Partial | documents,statements,psd2-api | — |
 | [0249](0249-dispositor-model-additional-cardholders-and-enforced-delegated-spending.md) | Dispositor model: additional cardholders and enforced delegated spending | Proposed | Partial | authz,cards,payments,sca | — |

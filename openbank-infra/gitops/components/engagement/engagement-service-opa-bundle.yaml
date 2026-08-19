@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: engagement-service
     app.kubernetes.io/part-of: engagement
   annotations:
-    openbank.tech/policy-checksum: "46effa788909c54c"
+    openbank.tech/policy-checksum: "57ced8e58fb25190"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -962,6 +962,7 @@ data:
             - account.search
             - account.unfreeze
             - account.update
+            - balance.approval.decide
             - balance.credit
             - balance.debit
             - balance.hold

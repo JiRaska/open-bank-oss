@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'fx' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'fx' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -40,6 +40,8 @@ type LendingApproval = {
 // built to show parked decisions.
 type SanctionsApproval = LendingApproval
 
+// transaction-service serves the same libs `PendingApproval` shape too (#5679).
+type TransactionApproval = LendingApproval
 // fx-service serves the same libs `PendingApproval` shape (issue #5679, money-path first per
 // that issue's own ordering). Before this, an `fx.convert` four-eyes decision parked at 202
 // was discoverable only by whoever had been handed its id out of band.
@@ -95,6 +97,21 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('transaction-service', 'transaction', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as TransactionApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'transaction' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 async function fxPending(headers: HeadersInit): Promise<SourceResult> {
   // k8s workload is `fx-service` (with the `-service` suffix, unlike sepa-instant) — see
   // src/app/api/svc/[service]/[...path]/route.ts's SERVICE_MAP for the canonical key and
@@ -144,16 +161,20 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, fx, agent] = await Promise.all([
+  const [lending, sanctions, transaction, fx, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
+    transactionPending(headers).catch(() => unavailable),
     fxPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...fx.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...fx.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
-    sources: { lending: lending.state, sanctions: sanctions.state, fx: fx.state, agent: agent.state },
+    sources: {
+      lending: lending.state, sanctions: sanctions.state, transaction: transaction.state,
+      fx: fx.state, agent: agent.state,
+    },
   })
 }
