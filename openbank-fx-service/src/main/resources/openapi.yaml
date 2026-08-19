@@ -308,6 +308,10 @@ paths:
           description: >-
             The caller is the maker of this approval. Segregation of duties is enforced in
             RedisApprovalStore.decide, not per-service.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 
 components:
   responses:
