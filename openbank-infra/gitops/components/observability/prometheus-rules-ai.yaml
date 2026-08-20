@@ -36,20 +36,24 @@ spec:
     - name: openbank.ai.price-book
       interval: 1h
       rules:
-        # Authoritative: BerriAI/litellm model_prices_and_context_window.json, entry
-        # `groq/llama-3.3-70b-versatile` — $0.59/M input, $0.79/M output.
+        # DeepInfra's published rate card for `meta-llama/Llama-3.3-70B-Instruct-Turbo`, the route
+        # the caller-facing id `llama-3.3-70b-versatile` now resolves to — $0.10/M input,
+        # $0.32/M output. It carried Groq's $0.59/$0.79 until #5736, and kept carrying it for the
+        # whole time Groq had decommissioned the model and every call 404'd: a price keyed by a
+        # model id cannot notice the id no longer resolves. Keep this in lockstep with
+        # litellm-config.yaml's input_cost_per_token/output_cost_per_token for the same route.
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000059)
+          expr: vector(0.0000001)
           labels:
             model: llama-3.3-70b-versatile
             kind: prompt
-            price_source: litellm-map
+            price_source: provider-rate-card
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000079)
+          expr: vector(0.00000032)
           labels:
             model: llama-3.3-70b-versatile
             kind: completion
-            price_source: litellm-map
+            price_source: provider-rate-card
         # APPROXIMATE. LiteLLM's price map has no `deepinfra/deepseek-ai/DeepSeek-V3.2` entry — the
         # newest DeepInfra DeepSeek it knows is V3.1 ($0.27/M input, $1.00/M output), used here as
         # the nearest published sibling. Every panel and alert built on this carries
@@ -199,6 +203,53 @@ spec:
               NOT page — nothing is down. It means the AI features are silently off: the agents
               still answer, with their non-model path. Check the gateway pod, the provider status
               and the API key.
+
+        # Alerts on the SUCCESS state, and exists because AiCallErrorRateHigh above cannot see a
+        # low-rate caller failing totally (#5736).
+        #
+        # MEASURED, not reasoned: `llama-3.3-70b-versatile` returned 404 on every call for 8h40m
+        # while its only caller ran twice an hour. AiCallErrorRateHigh went `pending` at 04:04 and
+        # was still only `pending` at 12:44 — 44 evaluation points, and it NEVER reached `firing`.
+        # A caller with a 30-minute period increments the counter once per `rate(...[15m])` window,
+        # so the ratio is 100% for about 15 minutes and then decays to nothing, resetting the
+        # `for: 15m` timer just short of maturity, forever. The alert was healthy, loaded and
+        # evaluating the whole time. Nothing was wrong with it except that its window is shorter
+        # than its subject's period — which is a property of the CALLER, not of the alert, so no
+        # threshold tuning fixes it and the same hole reopens for the next infrequent caller.
+        #
+        # So this one is deliberately rate-free. `increase(...[6h])` spans any caller that runs at
+        # least once in six hours, and `unless` is a set difference rather than a ratio: it needs
+        # no `outcome="success"` series to exist. That matters here more than it looks — a model
+        # that has NEVER once succeeded has no success series at all, so the arithmetic form
+        # (`success / total == 0`) matches nothing and is blind in exactly the total-failure case
+        # it would be written for. Same shape as #5733.
+        #
+        # Value at t=0 on a cold pod: every counter starts at 0, so the left side (`> 0`) yields no
+        # series and the rule is silent — no boot-time false positive, and no `for:` needed to
+        # suppress one. A model nobody calls is likewise absent from both sides and stays silent;
+        # "not deployed" is a different question and deliberately not this alert's (see the
+        # no-absence-alert note above). `for: 30m` only debounces a single failure at the edge of
+        # the window.
+        - alert: AiModelNeverSucceeds
+          expr: |
+            (sum by (model) (increase(openbank_llm_requests_total{outcome!="not_configured"}[6h])) > 0)
+            unless
+            (sum by (model) (increase(openbank_llm_requests_total{outcome="success"}[6h])) > 0)
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Every LLM call to {{ $labels.model }} is failing — not one has succeeded in 6h"
+            description: >-
+              The gateway is answering and every answer is an error, so this is not an outage of
+              the gateway and the pod is Ready. Callers degrade to their deterministic fallback,
+              which is why nothing else goes red. Check the MODEL first: a provider that
+              decommissioned this id answers 404 `model_not_found` while its siblings still return
+              200, whereas a dead or unseeded key answers 401/403 on every model — the two need
+              opposite fixes and the metric label `http_error` distinguishes neither. Probe the
+              provider's own model list from inside the gateway pod; a model id in git is a claim
+              about someone else's catalogue, not a constant.
 
         # The gap this whole PR exists to close. An agent whose key was never seeded returns null
         # forever and logs one warning at startup; nothing else anywhere says so.
