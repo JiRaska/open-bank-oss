@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.5...security-scanner-v0.8.0) (2026-08-20)
+
+
+### Features
+
+* **analytics:** fail closed without durable backfill ([#6050](https://github.com/JiRaska/open-bank-oss/issues/6050)) ([8fca000](https://github.com/JiRaska/open-bank-oss/commit/8fca000162af7d6f6c3ed0bcb4c9fcba5d8742d8))
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.4...security-scanner-v0.7.5) (2026-08-18)
 
 
