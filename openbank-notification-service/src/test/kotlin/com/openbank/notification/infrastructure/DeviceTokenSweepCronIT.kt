@@ -38,18 +38,20 @@ class DeviceTokenSweepCronIT {
         var status = "ACTIVE"
         while (System.nanoTime() < deadline && status == "ACTIVE") {
             Thread.sleep(200)
-            dataSource.connection.use { c ->
-                c.prepareStatement("select status from device_tokens where device_id = ?").use { s ->
-                    s.setObject(1, id)
-                    s.executeQuery().use { rs -> if (rs.next()) status = rs.getString(1) }
-                }
-            }
+            status = statusOf(id)
         }
         assertThat(status).isEqualTo("INACTIVE")
         assertThat(
             meterRegistry.find("openbank_workflow_success_recorded")
                 .tag("workflow", "device-token-stale-sweep").gauge()?.value(),
         ).isEqualTo(1.0)
+    }
+
+    private fun statusOf(id: java.util.UUID): String = dataSource.connection.use { c ->
+        c.prepareStatement("select status from device_tokens where device_id = ?").use { s ->
+            s.setObject(1, id)
+            s.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else "MISSING" }
+        }
     }
 
     private fun insertStale(c: Connection, id: java.util.UUID) {
