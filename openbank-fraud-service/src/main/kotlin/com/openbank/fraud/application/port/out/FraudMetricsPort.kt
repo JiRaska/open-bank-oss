@@ -36,4 +36,18 @@ interface FraudMetricsPort {
      * known to happen means the guard is not being reached.
      */
     fun recordSignalReplaySuppressed(aggregate: String)
+
+    /**
+     * Record that a transaction signal arrived with **no `occurredAt`** and that processing time was
+     * substituted for it (issue #6044). Every velocity bucket and payee-history row written from
+     * such a signal asserts a business time nobody measured, and — because the bucket is part of the
+     * primary key — a replay of that same signal will not land in the same row, so the redelivery
+     * guard cannot reach it. The substitution is otherwise completely silent: it writes a normal row
+     * and logs nothing, exactly like the ingest-time substitution #3883 found in the audit
+     * consumer. This counter is the only thing that distinguishes "every producer sends an event
+     * time" from "we have been inventing them". `openbank.transactions.transaction.initiated`
+     * declares `occurredAt` as required, so the expected value is a flat ZERO; any non-zero rate is
+     * a producer defect, not a tolerable degradation.
+     */
+    fun recordSignalMissingEventTime()
 }

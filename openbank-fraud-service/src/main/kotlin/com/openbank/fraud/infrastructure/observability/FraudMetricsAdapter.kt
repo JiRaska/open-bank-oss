@@ -65,6 +65,15 @@ class FraudMetricsAdapter(private val registry: MeterRegistry?) : FraudMetricsPo
         }
     }
 
+    override fun recordSignalMissingEventTime() {
+        registry?.let { r ->
+            Counter.builder("openbank.fraud.signal.missing.event.time")
+                .tag("service", SERVICE)
+                .register(r)
+                .increment()
+        }
+    }
+
     companion object {
         private const val SERVICE = "fraud"
     }

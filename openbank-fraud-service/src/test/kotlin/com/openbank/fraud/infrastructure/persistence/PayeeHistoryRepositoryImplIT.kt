@@ -181,6 +181,8 @@ class PayeeHistoryRepositoryImplIT {
                 override fun recordSignalReplaySuppressed(aggregate: String) {
                     suppressed.add(aggregate)
                 }
+
+                override fun recordSignalMissingEventTime() = Unit
             },
             100,
         )
