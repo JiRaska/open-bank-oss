@@ -1875,10 +1875,12 @@ gates:
   # could not see `val sourceService: String = SOURCE_SERVICE` and enumerated 17 of 21 producers
   # while printing a confident OK. Only the floor turned that into a visible number.
   #
-  # lending is BASELINED with its value and its reason (#5902): converging renames nine shipped
-  # event types and splits audit_entries a second time, so it is an open decision, not a tidy-up.
-  # The gate is green today without hiding the finding, and deleting that baseline entry is the
-  # visible act of taking the decision. ENFORCED.
+  # lending is a DECLARED EXCEPTION, not debt (#5902 decided: keep "lending"). The rows it already
+  # wrote are unrewritable by anyone — audit_entries is append-only at the DB and `source_service`
+  # is chain-hashed — so a rename could only add a fourth boundary on top of a split that can never
+  # be repaired. The boundary is documented in openbank-lending-service/CLAUDE.md instead. The
+  # baseline entry pins the (module, value) pair, so lending drifting to a third spelling still
+  # fails. ENFORCED.
   - id: source-service-convention
     name: "sourceService == module directory name (issues #5256/#5902, enforced)"
     group: kotlin

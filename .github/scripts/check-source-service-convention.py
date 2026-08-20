@@ -41,13 +41,24 @@
 #   decided. They carry no literal, so they are not this check's subject; flagging them would make
 #   the gate noise and silence is the correct verdict.
 #
-# WHY LENDING IS BASELINED RATHER THAN FIXED
-#   Converging lending to "lending-service" renames nine shipped event types and splits the already
-#   split `audit_entries` rows a SECOND time. Whether to converge + backfill, or to keep "lending"
-#   and document the boundary, is a decision recorded in #5902 — not something a gate should force
-#   by going red. So lending is baselined WITH its value and its reason: the gate is green today
-#   without hiding the finding, and deleting that baseline entry is the visible act of taking the
-#   decision. The baseline pins the VALUE, so lending drifting to some third spelling still fails.
+# WHY LENDING IS AN EXCEPTION — A SETTLED DECISION, NOT DEBT
+#   `openbank-lending-service` emits "lending". That is DECIDED and kept (#5902): the boundary it
+#   leaves in `audit_entries` is documented in `openbank-lending-service/CLAUDE.md` — which three
+#   aliases are one producer, which six event types and which nine days the "lending-service" window
+#   covers, and the query that reconciles them. Nothing here is waiting on anyone.
+#
+#   Renaming was rejected on cost, and the cost is structural rather than a matter of effort:
+#   `audit_entries` is append-only AT THE DATABASE (V2's `no_update_audit` / `no_delete_audit` rules
+#   are `DO INSTEAD NOTHING`, so a normalising UPDATE touches zero rows and reports success), and
+#   `source_service` is hashed into the ADR-0031/0133 `record_hash` chain, so rewriting it would
+#   break tamper-evidence for every affected row and every row after it. The existing rows cannot be
+#   converged by anyone, ever; a rename would only add a FOURTH boundary on top of them.
+#
+#   So this entry is not a TODO and should not be "cleaned up" — a future reader finding it must not
+#   read it as a rename nobody got around to. It stays until someone deliberately reopens #5902, and
+#   deleting it is what that reopening looks like. It pins the (module, VALUE) pair, so lending
+#   drifting to some third spelling still fails the gate — that is the property this entry exists to
+#   keep, and it survives independently of the decision above.
 #
 # EXIT CODES
 #   0  every producer's emitted value equals its module directory name (modulo the baseline)
@@ -79,11 +90,12 @@ MIN_PRODUCERS_DEFAULT = 20
 # keeps the entry from absorbing a future third spelling from the same producer.
 BASELINE = {
     ("openbank-lending-service", "lending"): (
-        "#5902 — nine shipped event types emit \"lending\" while the convention (and "
-        "audit-service's TopicAttribution fallback) says \"lending-service\". Converging renames "
-        "nine live types and splits audit_entries a second time, so the choice between "
-        "converge+backfill / keep-and-document is an open decision in #5902, not a tidy-up. "
-        "Remove this entry when that decision is taken."
+        "#5902 DECIDED: lending keeps \"lending\" and the audit_entries boundary is documented "
+        "instead (openbank-lending-service/CLAUDE.md). NOT debt, and NOT a rename awaiting "
+        "cleanup — the existing rows are unrewritable by anyone (audit_entries is append-only at "
+        "the DB and source_service is chain-hashed), so a rename could only add a fourth boundary "
+        "on top of a split that can never be repaired. This entry is permanent unless #5902 is "
+        "deliberately reopened. It pins the VALUE, so a third spelling from this module still fails."
     ),
 }
 
@@ -393,7 +405,8 @@ def run(root, min_producers, quiet=False):
         return 1
     print(
         f"sourceService convention: OK — {len(producers)} producer(s) checked, "
-        f"{len(BASELINE)} baselined. See #5902 for why the baselined set is an open decision.",
+        f"{len(BASELINE)} declared exception(s). See #5902 and BASELINE above: the exception is a "
+        f"settled decision with a documented boundary, not pending work.",
     )
     return 0
 
