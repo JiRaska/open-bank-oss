@@ -113,10 +113,6 @@ BASELINE: dict[str, str] = {
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
     "openbank-swift-service:ACKNOWLEDGED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
         "#5962 — SwiftStatus: undeclared COMPLETED",
-    "openbank-transaction-service:COMPLETED,FAILED,PENDING,REVERSED":
-        "#5962 — TransactionStatus: undeclared PROCESSING",
-    "openbank-transaction-service:CREDIT,DEBIT,FEE,REVERSAL":
-        "#5962 — TransactionType: undeclared ADJUSTMENT/INTEREST/TRANSFER",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
