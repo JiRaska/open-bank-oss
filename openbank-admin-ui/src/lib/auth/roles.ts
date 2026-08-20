@@ -102,6 +102,13 @@ export const PERMISSIONS = {
   "audit:view":           [ROLES.ADMIN, ROLES.AUDITOR, ROLES.COMPLIANCE, ROLES.SUPERVISOR],
   // Compliance / Regulatory
   "compliance:view":      [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.AUDITOR, ROLES.SUPERVISOR],
+  // Sanctions service exposes viewer-tier reads, but reserves screening, list management and
+  // four-eyes decisions for operators/admins. Keep this split separate from compliance:view so
+  // the console never promises a mutation that the backend will reject.
+  "sanctions:view":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER],
+  "sanctions:screen":     [ROLES.ADMIN, ROLES.OPERATOR],
+  "sanctions:manage":     [ROLES.ADMIN, ROLES.OPERATOR],
+  "sanctions:review":     [ROLES.ADMIN, ROLES.OPERATOR],
   "regulatory:view":          [ROLES.ADMIN, ROLES.COMPLIANCE],
   "regulatory:submit":        [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Technical accounts
@@ -199,8 +206,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
     '/payments', '/product-catalog', '/standing-orders', '/sdd', '/sepa-instant', '/clearing',
     '/fx', '/swift', '/interest', '/pid', '/fees', '/lending',
   ]],
+  ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
-    '/aml', '/fraud', '/sanctions', '/disputes', '/consents', '/customer-360', '/campaigns',
+    '/aml', '/fraud', '/disputes', '/consents', '/customer-360', '/campaigns',
     '/segments', '/lending/compliance-packs', '/docs/compliance', '/docs/bcp',
   ]],
   ['system:view', [

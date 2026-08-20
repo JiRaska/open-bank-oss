@@ -9,7 +9,7 @@ import {
   AlertTriangle, User, Play, List, ChevronDown, ChevronUp,
   ToggleLeft, ToggleRight, ExternalLink, Download, Loader2
 } from 'lucide-react'
-import { AuthGuard } from '@/components/auth/AuthGuard'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
@@ -108,7 +108,7 @@ function CronEditor({ list, onSave }: { list: SanctionsList; onSave: (id: string
           </button>
         ))}
       </div>
-      <button onClick={save} disabled={saving}
+      <button type="button" onClick={save} disabled={saving}
         style={{ alignSelf: 'flex-start', padding: '5px 12px', borderRadius: '5px', fontSize: '12px', fontWeight: 600,
           background: 'var(--accent)', color: 'white', border: 'none', cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? 0.7 : 1,
           display: 'flex', alignItems: 'center', gap: '5px' }}>
@@ -140,9 +140,11 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
   return (
     <div style={{ border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden', opacity: list.enabled ? 1 : 0.6, transition: 'opacity 0.2s' }}>
       <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface)' }}>
-        <button onClick={() => onToggle(list.id, !list.enabled)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: list.enabled ? 'var(--success)' : 'var(--text-tertiary)', padding: 0, display: 'flex' }}>
-          {list.enabled ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
-        </button>
+        <Can permission="sanctions:manage">
+          <button type="button" onClick={() => onToggle(list.id, !list.enabled)} aria-label={list.enabled ? t('Deaktivovat sankční seznam', 'Disable sanctions list') : t('Aktivovat sankční seznam', 'Enable sanctions list')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: list.enabled ? 'var(--success)' : 'var(--text-tertiary)', padding: 0, display: 'flex' }}>
+            {list.enabled ? <ToggleRight size={20} aria-hidden="true" /> : <ToggleLeft size={20} aria-hidden="true" />}
+          </button>
+        </Can>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>{list.displayName}</div>
           <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'var(--font-mono)' }}>{list.listType}</div>
@@ -155,13 +157,15 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
             </>
           ) : <div>{t('Nikdy nestaženo', 'Never downloaded')}</div>}
         </div>
-        <button onClick={handleRefresh} disabled={refreshing}
+        <Can permission="sanctions:manage">
+        <button type="button" onClick={handleRefresh} disabled={refreshing} aria-busy={refreshing} aria-label={t('Stáhnout sankční seznam', 'Download sanctions list')}
           style={{ padding: '5px 10px', borderRadius: '5px', fontSize: '11px', fontWeight: 600, border: '1px solid var(--border)',
             background: 'var(--surface-2)', color: 'var(--text-secondary)', cursor: refreshing ? 'not-allowed' : 'pointer',
             display: 'flex', alignItems: 'center', gap: '4px' }}>
-          {refreshing ? <Loader2 size={11} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={11} />}
+          {refreshing ? <Loader2 size={11} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={11} aria-hidden="true" />}
           {t('Stáhnout', 'Download')}
         </button>
+        </Can>
         <button onClick={() => setExpanded(e => !e)}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px', display: 'flex' }}>
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -175,7 +179,7 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
               style={{ color: 'var(--accent)', textDecoration: 'none', wordBreak: 'break-all' }}>{list.sourceUrl}</a>
           </div>
           <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', marginBottom: '2px' }}>{t('Plán stahování', 'Download schedule')}</div>
-          <CronEditor list={list} onSave={onSave} />
+          <Can permission="sanctions:manage"><CronEditor list={list} onSave={onSave} /></Can>
         </div>
       )}
     </div>
@@ -483,7 +487,7 @@ export default function SanctionsPage() {
   ]
 
   return (
-    <AuthGuard permission="compliance:view">
+    <AuthGuard permission="sanctions:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           title={t('Prověření sankcí', 'Sanctions Screening')}
@@ -611,15 +615,17 @@ export default function SanctionsPage() {
                               {t('Rozhodl', 'By')} {c.reviewedBy}
                             </span>
                           ) : (isHit || isPending) ? (
-                            <button onClick={() => openReview(c)} disabled={reviewFor === c.id}
-                              style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)',
-                                color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: reviewFor === c.id ? 'default' : 'pointer' }}>
-                              {t('Posoudit', 'Review')}
-                            </button>
+                            <Can permission="sanctions:review">
+                              <button type="button" onClick={() => openReview(c)} disabled={reviewFor === c.id}
+                                style={{ padding: '4px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)',
+                                  color: 'var(--text-primary)', fontSize: '11px', fontWeight: 600, cursor: reviewFor === c.id ? 'default' : 'pointer' }}>
+                                {t('Posoudit', 'Review')}
+                              </button>
+                            </Can>
                           ) : <span style={{ color: 'var(--text-tertiary)' }}>—</span>}
                         </td>
                       </tr>
-                      {reviewFor === c.id && (
+                      {reviewFor === c.id && <Can permission="sanctions:review">
                         <tr style={{ borderBottom: '1px solid var(--border)', background: 'var(--surface-2)' }}>
                           <td colSpan={7} style={{ padding: '16px' }}>
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxWidth: '640px' }}>
@@ -693,7 +699,7 @@ export default function SanctionsPage() {
                             </div>
                           </td>
                         </tr>
-                      )}
+                      </Can>}
                       </Fragment>
                     )
                   })}</tbody>
@@ -704,6 +710,7 @@ export default function SanctionsPage() {
                   sanctions-service exposes no pending-approvals list endpoint — ApprovalResource
                   serves only PATCH /{id}, so the id has to be handed over out of band. The
                   ADR-0227 inbox federates lending and agent only, and is read-only by design. */}
+              <Can permission="sanctions:review" fallback={<div style={{ padding: '16px', borderTop: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '12px' }}>{t('Rozhodování sankčních žádostí je dostupné pouze operátorům a administrátorům.', 'Sanctions decisions are available to operators and administrators only.')}</div>}>
               <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
                 <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <div style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -751,12 +758,12 @@ export default function SanctionsPage() {
                     <input id="sanctions-approval-id" aria-label={t('ID žádosti', 'Approval id')} value={decideId} onChange={e => setDecideId(e.target.value)} placeholder={t('ID žádosti', 'Approval id')}
                       style={{ flex: 1, padding: '8px 12px', borderRadius: '6px', border: '1px solid var(--border)', fontSize: '12px',
                         fontFamily: 'var(--font-mono)', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
-                    <button onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()}
+                    <button type="button" onClick={() => decideApproval(true)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
                       style={{ padding: '8px 14px', borderRadius: '6px', border: 'none', background: 'var(--success)', color: '#fff', fontSize: '12px', fontWeight: 600,
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
                       {t('Schválit', 'Approve')}
                     </button>
-                    <button onClick={() => decideApproval(false)} disabled={decideBusy || !decideId.trim()}
+                    <button type="button" onClick={() => decideApproval(false)} disabled={decideBusy || !decideId.trim()} aria-busy={decideBusy}
                       style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-secondary)', fontSize: '12px',
                         cursor: decideBusy || !decideId.trim() ? 'default' : 'pointer', opacity: decideBusy || !decideId.trim() ? 0.6 : 1 }}>
                       {t('Zamítnout', 'Reject')}
@@ -765,10 +772,12 @@ export default function SanctionsPage() {
                   {decideMsg && <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{decideMsg}</div>}
                 </div>
               </div>
+              </Can>
             </>
           )}
 
           {tab === 'search' && (
+            <Can permission="sanctions:screen" fallback={<DataUnavailable kind="unauthorized" feature={t('Manuální sankční prověření', 'Manual sanctions screening')} lang={language} />}>
             <div style={{ padding: '24px' }}>
               <div style={{ maxWidth: '560px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>{t('Manuální prověření entity', 'Manual entity screening')}</div>
@@ -915,6 +924,7 @@ export default function SanctionsPage() {
                 )}
               </div>
             </div>
+            </Can>
           )}
 
           {tab === 'lists' && (
@@ -923,6 +933,7 @@ export default function SanctionsPage() {
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                   {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů aktivních', 'lists active')}
                 </div>
+                <Can permission="sanctions:manage">
                 <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
                   style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
                     background: 'var(--accent)', color: 'white', border: 'none',
@@ -931,6 +942,7 @@ export default function SanctionsPage() {
                   {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <RefreshCw size={12} aria-hidden="true" />}
                   {t('Stáhnout vše', 'Download all')}
                 </button>
+                </Can>
               </div>
               {listsLoading ? (
                 <div style={{ padding: '32px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
