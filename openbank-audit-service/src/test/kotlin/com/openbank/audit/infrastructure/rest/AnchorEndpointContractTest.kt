@@ -44,6 +44,14 @@ class AnchorEndpointContractTest {
     }
 
     @Test
+    fun `verification key lookup requires the recorded key id`() {
+        val keyIdParam = verificationKey.parameters.find { parameter ->
+            parameter.annotations.any { it is QueryParam && it.value == "keyId" }
+        }
+        assertThat(keyIdParam).isNotNull()
+    }
+
+    @Test
     fun `anchor endpoints are role-gated (never PermitAll, K7)`() {
         for (m in listOf(listAnchors, verifyAnchors, verificationKey)) {
             val roles = m.getAnnotation(RolesAllowed::class.java)
@@ -58,7 +66,7 @@ class AnchorEndpointContractTest {
     fun `AnchorVerification carries the documented summary fields`() {
         val fields = AnchorVerification::class.java.declaredFields.map { it.name }.toSet()
         assertThat(fields).containsAll(
-            listOf("status", "anchorCount", "verifiedCount", "unsignedCount", "firstBroken"),
+            listOf("status", "anchorCount", "verifiedCount", "unsignedCount", "unverifiableCount", "firstBroken"),
         )
     }
 }

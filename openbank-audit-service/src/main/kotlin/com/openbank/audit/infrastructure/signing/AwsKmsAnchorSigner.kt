@@ -47,7 +47,7 @@ class AwsKmsAnchorSigner(private val kms: KmsClient, override val keyId: String)
         }.getOrNull()
     }
 
-    override fun verificationKeyPem(): String = kms.getPublicKey(
+    override fun verificationKeyPem(keyId: String): String = kms.getPublicKey(
         GetPublicKeyRequest.builder().keyId(keyId).build(),
     ).publicKey().asByteArray().let { der ->
         val encoded = Base64.getMimeEncoder(PEM_LINE_LENGTH, "\n".toByteArray()).encodeToString(der)

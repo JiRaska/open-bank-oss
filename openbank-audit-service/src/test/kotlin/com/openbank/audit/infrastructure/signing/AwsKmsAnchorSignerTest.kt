@@ -61,8 +61,8 @@ class AwsKmsAnchorSignerTest {
             .publicKey(SdkBytes.fromUtf8String("public-key"))
             .build()
 
-        assertThat(signer.verificationKeyPem())
+        assertThat(signer.verificationKeyPem("arn:aws:kms:region:account:key/current"))
             .isEqualTo("-----BEGIN PUBLIC KEY-----\ncHVibGljLWtleQ==\n-----END PUBLIC KEY-----\n")
-        assertThat(request.captured.keyId()).isEqualTo("alias/openbank-audit-anchor")
+        assertThat(request.captured.keyId()).isEqualTo("arn:aws:kms:region:account:key/current")
     }
 }

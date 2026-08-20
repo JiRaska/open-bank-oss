@@ -25,8 +25,8 @@ interface AnchorSigner {
      */
     fun verify(digest: ByteArray, signature: String, keyId: String): Boolean?
 
-    /** PEM-encoded public key for offline verification, or null for symmetric development signers. */
-    fun verificationKeyPem(): String? = null
+    /** PEM-encoded public key for [keyId], or null for symmetric development signers. */
+    fun verificationKeyPem(keyId: String): String? = null
 }
 
 data class AnchorSignature(val value: String, val keyId: String)

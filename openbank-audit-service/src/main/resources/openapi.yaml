@@ -253,8 +253,15 @@ paths:
       summary: Get the public key for offline audit-anchor verification (ADR-0031 D5)
       operationId: getAnchorVerificationKey
       description: >
-        Returns the PEM public key and KMS key identifier used for asymmetric anchor signatures.
-        The endpoint is unavailable when the service uses its local symmetric development signer.
+        Returns PEM material captured with the requested immutable KMS key identifier only when
+        it is recorded on an anchor. This supports offline verification across KMS key rotations.
+      parameters:
+        - name: keyId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: Immutable KMS key identifier recorded on the anchor to verify.
       security:
         - bearerAuth: []
       responses:
@@ -269,7 +276,7 @@ paths:
         '403':
           description: Caller does not have an audit-reading role
         '404':
-          description: Asymmetric anchor signing is not configured
+          description: No public verification key exists for the requested recorded key
 
 components:
   securitySchemes:

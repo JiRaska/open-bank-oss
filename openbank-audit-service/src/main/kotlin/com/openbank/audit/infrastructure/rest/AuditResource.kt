@@ -232,19 +232,20 @@ class AuditResource {
         Response.ok(anchors.recent(limit)).build()
 
     /**
-     * Return the public key for offline verification of KMS-backed anchors. This stays under the
-     * same auditor gate as the anchors themselves; a symmetric development signer exposes none.
+     * Return the public key captured with a specified KMS-backed anchor generation. This stays
+     * under the same auditor gate as the anchors themselves.
      */
     @GET
     @Path("/anchors/verification-key")
     @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
     @Authorize(action = "audit.verify", resource = "")
     @Operation(summary = "Get the public key for offline audit-anchor verification (ADR-0031 D5)")
-    fun anchorVerificationKey(): Response = anchors.verificationKey()?.let { Response.ok(it).build() }
-        ?: Response.status(Response.Status.NOT_FOUND)
-            .entity("""{"error":"asymmetric anchor verification key is not configured"}""")
-            .type(MediaType.APPLICATION_JSON)
-            .build()
+    suspend fun anchorVerificationKey(@QueryParam("keyId") keyId: String?): Response =
+        anchors.verificationKey(requireNotNull(keyId) { "keyId is required" })?.let { Response.ok(it).build() }
+            ?: Response.status(Response.Status.NOT_FOUND)
+                .entity("""{"error":"no public verification key exists for this recorded anchor key"}""")
+                .type(MediaType.APPLICATION_JSON)
+                .build()
 
     /**
      * Verify every signed anchor: recompute each digest, check its signature, and confirm the

@@ -25,6 +25,8 @@ data class AuditAnchor(
     val anchorDigest: String,
     val signature: String?,
     val keyId: String,
+    /** Immutable public verification material captured with an asymmetric signature. */
+    val publicKeyPem: String? = null,
     val signedAt: Instant,
 ) {
     companion object {

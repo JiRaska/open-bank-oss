@@ -40,6 +40,9 @@ class AuditAnchorEntity : PanacheEntity() {
     @Column(name = "key_id", nullable = false)
     lateinit var keyId: String
 
+    @Column(name = "public_key_pem")
+    var publicKeyPem: String? = null
+
     @Column(name = "signed_at", nullable = false)
     lateinit var signedAt: Instant
 }
@@ -56,6 +59,7 @@ class AuditAnchorRepository : PanacheRepository<AuditAnchorEntity> {
             it.anchorDigest = anchor.anchorDigest
             it.signature = anchor.signature
             it.keyId = anchor.keyId
+            it.publicKeyPem = anchor.publicKeyPem
             it.signedAt = anchor.signedAt
         }
         Panache.withTransaction { persist(e) }.awaitSuspending()
@@ -69,6 +73,11 @@ class AuditAnchorRepository : PanacheRepository<AuditAnchorEntity> {
         find("ORDER BY id ASC").list()
     }.awaitSuspending().map { it.toDomain() }
 
+    /** Retrieves an immutable public key only when it was captured on a matching anchor. */
+    suspend fun publicKeyFor(keyId: String): String? = Panache.withSession {
+        find("keyId = ?1 AND publicKeyPem IS NOT NULL ORDER BY id DESC", keyId).firstResult()
+    }.awaitSuspending()?.publicKeyPem
+
     private fun AuditAnchorEntity.toDomain() = AuditAnchor(
         lastEntryId = lastEntryId,
         lastRecordHash = lastRecordHash,
@@ -77,6 +86,7 @@ class AuditAnchorRepository : PanacheRepository<AuditAnchorEntity> {
         anchorDigest = anchorDigest,
         signature = signature,
         keyId = keyId,
+        publicKeyPem = publicKeyPem,
         signedAt = signedAt,
     )
 }
