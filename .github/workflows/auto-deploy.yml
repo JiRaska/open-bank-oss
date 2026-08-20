@@ -82,6 +82,15 @@ on:
         type: boolean
         required: false
         default: false
+      codeploy_pact_versions:
+        description: >-
+          Optional JSON object mapping every co-deployed service to the exact 40-character Pact
+          version to evaluate, for example {"openbank-product-catalog":"<sha>"}. Each supplied
+          version must be proven byte-identical to the deploy ref in that service's build inputs;
+          otherwise the co-deploy gate refuses the run. Use this only to replay a previously
+          verified product set after main has moved on.
+        required: false
+        default: ""
       reconcile:
         description: >-
           Run the scheduled reconcile logic immediately (issue #2020). Instead of building the
@@ -885,6 +894,7 @@ jobs:
           # such ceiling.
           SERVICES: ${{ needs.changes.outputs.services }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
+          INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
