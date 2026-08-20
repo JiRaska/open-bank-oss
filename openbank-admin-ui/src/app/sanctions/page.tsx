@@ -477,9 +477,9 @@ export default function SanctionsPage() {
   const pending = checks.filter(c => c.status === 'POTENTIAL_HIT')
 
   const TABS = [
-    { id: 'checks' as const, label: t('Záznamy kontrol', 'Check Records'), icon: <ShieldAlert size={13} /> },
-    { id: 'search' as const, label: t('Manuální vyhledávání', 'Manual Search'), icon: <Search size={13} /> },
-    { id: 'lists' as const, label: t('Správa listů', 'List Management'), icon: <List size={13} /> },
+    { id: 'checks' as const, label: t('Záznamy kontrol', 'Check Records'), icon: <ShieldAlert size={13} aria-hidden="true" /> },
+    { id: 'search' as const, label: t('Manuální vyhledávání', 'Manual Search'), icon: <Search size={13} aria-hidden="true" /> },
+    { id: 'lists' as const, label: t('Správa listů', 'List Management'), icon: <List size={13} aria-hidden="true" /> },
   ]
 
   return (
@@ -525,9 +525,9 @@ export default function SanctionsPage() {
         </div>
 
         <div className="card">
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 4px' }}>
+          <div role="group" aria-label={t('Sekce sankčního workflow', 'Sanctions workflow sections')} style={{ display: 'flex', borderBottom: '1px solid var(--border)', padding: '0 4px' }}>
             {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)}
+              <button key={t.id} type="button" aria-pressed={tab === t.id} aria-label={t.label} onClick={() => setTab(t.id)}
                 style={{ padding: '12px 16px', fontSize: '13px', fontWeight: tab === t.id ? 700 : 500,
                   color: tab === t.id ? 'var(--accent)' : 'var(--text-secondary)',
                   background: 'none', border: 'none', borderBottom: tab === t.id ? '2px solid var(--accent)' : '2px solid transparent',
@@ -546,8 +546,8 @@ export default function SanctionsPage() {
                     style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                       border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
                 </div>
-                <button onClick={loadChecks} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                  <RefreshCw size={12} />{t('Obnovit', 'Refresh')}
+                <button type="button" aria-busy={loading} aria-label={t('Obnovit sankční kontroly', 'Refresh sanctions checks')} onClick={loadChecks} style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--surface-2)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                  <RefreshCw size={12} aria-hidden="true" />{t('Obnovit', 'Refresh')}
                 </button>
               </div>
               {loading ? (
@@ -805,13 +805,13 @@ export default function SanctionsPage() {
                     <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
                       {t('Rozsah prověření', 'Search scope')}
                     </label>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button onClick={() => setSelectedListTypes(lists.map(lst => lst.listType))}
+                    <div role="group" aria-label={t('Výběr všech sankčních listů', 'Select sanctions lists')} style={{ display: 'flex', gap: '8px' }}>
+                      <button type="button" onClick={() => setSelectedListTypes(lists.map(lst => lst.listType))}
                         style={{ fontSize: '11px', fontWeight: 600, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                         {t('Vše', 'All')}
                       </button>
                       <span style={{ color: 'var(--border)', fontSize: '11px' }}>·</span>
-                      <button onClick={() => setSelectedListTypes([])}
+                      <button type="button" onClick={() => setSelectedListTypes([])}
                         style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-tertiary)', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                         {t('Nic', 'None')}
                       </button>
@@ -862,13 +862,13 @@ export default function SanctionsPage() {
                   )}
                 </div>
 
-                <button onClick={handleScreen} disabled={screening || !searchName.trim() || selectedListTypes.length === 0}
+                <button type="button" aria-busy={screening} aria-label={screening ? t('Prověřování probíhá', 'Screening in progress') : t('Spustit prověření sankcí', 'Run sanctions screening')} onClick={handleScreen} disabled={screening || !searchName.trim() || selectedListTypes.length === 0}
                   style={{ padding: '10px 20px', borderRadius: '7px', fontSize: '13px', fontWeight: 700,
                     background: 'var(--accent)', color: 'white', border: 'none',
                     cursor: screening || !searchName.trim() || selectedListTypes.length === 0 ? 'not-allowed' : 'pointer',
                     opacity: screening || !searchName.trim() || selectedListTypes.length === 0 ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', gap: '8px', alignSelf: 'flex-start' }}>
-                  {screening ? <Loader2 size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Play size={14} />}
+                  {screening ? <Loader2 size={14} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <Play size={14} aria-hidden="true" />}
                   {screening ? t('Prověřuji…', 'Screening…') : t('Spustit prověření', 'Run screening')}
                   {!screening && selectedListTypes.length > 0 && selectedListTypes.length < lists.length && (
                     <span style={{ fontSize: '11px', fontWeight: 600, opacity: 0.8 }}>
@@ -923,12 +923,12 @@ export default function SanctionsPage() {
                 <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
                   {lists.filter(l => l.enabled).length} {t('z', 'of')} {lists.length} {t('listů aktivních', 'lists active')}
                 </div>
-                <button onClick={handleRefreshAll} disabled={refreshingAll}
+                <button type="button" aria-busy={refreshingAll} aria-label={t('Stáhnout všechny sankční listy', 'Download all sanctions lists')} onClick={handleRefreshAll} disabled={refreshingAll}
                   style={{ padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600,
                     background: 'var(--accent)', color: 'white', border: 'none',
                     cursor: refreshingAll ? 'not-allowed' : 'pointer', opacity: refreshingAll ? 0.7 : 1,
                     display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {refreshingAll ? <Loader2 size={12} style={{ animation: 'spin 0.8s linear infinite' }} /> : <RefreshCw size={12} />}
+                  {refreshingAll ? <Loader2 size={12} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite' }} /> : <RefreshCw size={12} aria-hidden="true" />}
                   {t('Stáhnout vše', 'Download all')}
                 </button>
               </div>
