@@ -95,16 +95,16 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-        - name: offset
+        - name: page
           in: query
           schema:
             type: integer
             default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: List of payments
@@ -213,26 +213,38 @@ components:
 
   schemas:
     SubmitSctInstRequest:
+      # Field-for-field with SubmitSctInstRequest in SctInstDtos.kt. `idempotencyKey`,
+      # `debtorIban` and `debtorName` are non-nullable there, so a body omitting any of them
+      # fails to deserialise; the `Idempotency-Key` header, when present, overrides the body
+      # field but does not make it optional (SctInstResource.submit reads `body.idempotencyKey`).
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, endToEndId]
+      required: [idempotencyKey, debtorAccountId, debtorIban, debtorName, creditorIban, creditorName, amount, endToEndId]
       properties:
+        idempotencyKey:
+          type: string
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
         creditorIban:
           type: string
         creditorName:
           type: string
         creditorBic:
           type: string
+          nullable: true
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           default: EUR
-        endToEndId:
-          type: string
         remittanceInfo:
+          type: string
+          nullable: true
+        endToEndId:
           type: string
 
     RecallRequest:
