@@ -47,10 +47,17 @@ class DeviceTokenSweepCronIT {
         ).isEqualTo(1.0)
     }
 
-    private fun statusOf(id: java.util.UUID): String = dataSource.connection.use { c ->
-        c.prepareStatement("select status from device_tokens where device_id = ?").use { s ->
-            s.setObject(1, id)
-            s.executeQuery().use { rs -> if (rs.next()) rs.getString(1) else "MISSING" }
+    private fun statusOf(id: java.util.UUID): String {
+        val connection = dataSource.connection
+        val statement = connection.prepareStatement("select status from device_tokens where device_id = ?")
+        statement.setObject(1, id)
+        val result = statement.executeQuery()
+        return try {
+            if (result.next()) result.getString(1) else "MISSING"
+        } finally {
+            result.close()
+            statement.close()
+            connection.close()
         }
     }
 
