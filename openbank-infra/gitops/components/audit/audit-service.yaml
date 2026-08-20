@@ -33,6 +33,7 @@ spec:
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "0abbbe4ed712e13f"
     spec:
+      serviceAccountName: audit-service
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -241,6 +242,14 @@ spec:
         - name: msg-override
           configMap:
             name: audit-service-msg-override
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-service
+  namespace: audit
+  labels:
+    app.kubernetes.io/name: audit-service
 ---
 apiVersion: v1
 kind: Service
