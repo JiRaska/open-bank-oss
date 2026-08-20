@@ -10,6 +10,7 @@ import { cn } from '@/lib/utils'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 interface ToolDef {
   name: string
@@ -75,7 +76,7 @@ export default function AgentPage() {
 
   useEffect(() => { loadTools() }, [loadTools])
 
-  return (
+  return <AuthGuard permission="agent:view">
     <div>
       <PageHeader
         breadcrumb={<div className="breadcrumb">
@@ -88,7 +89,7 @@ export default function AgentPage() {
         title={t('Agent služba', 'Agent Service')}
         subtitle={t('MCP server zpřístupňující nástroje OpenBank AI agentům · JSON-RPC 2.0 přes HTTP', 'MCP server exposing OpenBank tools to AI agents · JSON-RPC 2.0 over HTTP')}
         icon={<Bot aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        actions={<button className="btn btn-secondary" onClick={loadTools} disabled={loading}>
+        actions={<button type="button" className="btn btn-secondary" onClick={loadTools} disabled={loading}>
           <RefreshCw size={13} className={cn(loading && 'animate-spin')} />
           {t('Obnovit', 'Refresh')}
         </button>}
@@ -306,7 +307,7 @@ export default function AgentPage() {
         </div>
       </div>
     </div>
-  )
+  </AuthGuard>
 }
 
 function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boolean; onToggle: () => void }) {
@@ -397,21 +398,23 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
           )}
 
           {/* Run button */}
-          <div>
-            <button
-              type="button"
-              aria-busy={running}
-              className="btn btn-primary"
-              onClick={run}
-              disabled={running}
-              style={{ background: running ? 'var(--text-tertiary)' : 'var(--accent)' }}
-            >
-              {running
-                ? <><RefreshCw size={13} aria-hidden="true" className="animate-spin"/> {t('Probíhá…', 'Running…')}</>
-                : <><Play size={13} aria-hidden="true"/> {t('Spustit nástroj', 'Run tool')}</>
-              }
-            </button>
-          </div>
+          <Can permission="agent:execute" fallback={<div className="text-xs text-muted-foreground">{t('Spuštění nástrojů vyžaduje oprávnění agenta.', 'Tool execution requires agent authorization.')}</div>}>
+            <div>
+              <button
+                type="button"
+                aria-busy={running}
+                className="btn btn-primary"
+                onClick={run}
+                disabled={running}
+                style={{ background: running ? 'var(--text-tertiary)' : 'var(--accent)' }}
+              >
+                {running
+                  ? <><RefreshCw size={13} aria-hidden="true" className="animate-spin"/> {t('Probíhá…', 'Running…')}</>
+                  : <><Play size={13} aria-hidden="true"/> {t('Spustit nástroj', 'Run tool')}</>
+                }
+              </button>
+            </div>
+          </Can>
 
           {/* Result */}
           {result && (

@@ -180,6 +180,10 @@ export const PERMISSIONS = {
   // @RolesAllowed/rego to have verified against, because these pages proxy telemetry
   // (Prometheus, Holmes, k8s) rather than calling a service with its own RBAC.
   "system:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.DEMO],
+  // MCP agent-service accepts only these human roles; keep demo out of the tool cockpit and
+  // expose compliance's authorized read/execute path instead.
+  "agent:view":               [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // DevOps findings are readable by system:view, but the devops-agent POST approval/rejection
   // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
   "devops:decide":             [ROLES.ADMIN],
@@ -241,6 +245,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
     '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/notifications', '/system',
   ]],
+  ['agent:view', ['/system/agent']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
 ]
