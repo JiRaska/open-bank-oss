@@ -104,8 +104,7 @@ class AuditSubscriptionSurfaceIT {
      * here would not be the value the test class sees.
      */
     class InMemoryAuditChannel : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory(CHANNEL)
+        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(CHANNEL)
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -114,12 +113,11 @@ class AuditSubscriptionSurfaceIT {
     @Inject
     lateinit var connector: InMemoryConnector
 
-    private fun subscribedTopics(): List<String> =
-        ConfigProvider.getConfig()
-            .getValue("mp.messaging.incoming.$CHANNEL.topics", String::class.java)
-            .split(",")
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+    private fun subscribedTopics(): List<String> = ConfigProvider.getConfig()
+        .getValue("mp.messaging.incoming.$CHANNEL.topics", String::class.java)
+        .split(",")
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
 
     @Test
     fun `every subscribed topic delivered through the real channel lands an attributed audit row`() {
@@ -212,30 +210,41 @@ class AuditSubscriptionSurfaceIT {
      * topic at once instead of dying on the first.
      */
     private fun awaitRows(markers: Set<String>): Map<String, Pair<String, String>> {
-        val config = ConfigProvider.getConfig()
-        val url = config.getValue("quarkus.datasource.jdbc.url", String::class.java)
-        val user = config.getValue("quarkus.datasource.username", String::class.java)
-        val password = config.getValue("quarkus.datasource.password", String::class.java)
         val found = mutableMapOf<String, Pair<String, String>>()
         val deadline = System.nanoTime() + AWAIT_NANOS
-        DriverManager.getConnection(url, user, password).use { connection ->
-            connection.prepareStatement(
-                "SELECT aggregate_id, event_type, source_service FROM audit_entries " +
-                    "WHERE aggregate_id = ANY (?)",
-            ).use { statement ->
-                statement.setArray(1, connection.createArrayOf("varchar", markers.toTypedArray()))
-                while (found.size < markers.size && System.nanoTime() < deadline) {
-                    statement.executeQuery().use { rs ->
-                        while (rs.next()) {
-                            found[rs.getString(1)] = rs.getString(2) to rs.getString(3)
-                        }
-                    }
-                    if (found.size < markers.size) Thread.sleep(POLL_MILLIS)
-                }
+        DriverManager.getConnection(jdbcUrl(), jdbcUser(), jdbcPassword()).use { connection ->
+            val sql = "SELECT aggregate_id, event_type, source_service FROM audit_entries " +
+                "WHERE aggregate_id = ANY (?)"
+            val array = connection.createArrayOf("varchar", markers.toTypedArray())
+            while (found.size < markers.size && System.nanoTime() < deadline) {
+                collectInto(found, connection.prepareStatement(sql), array)
+                if (found.size < markers.size) Thread.sleep(POLL_MILLIS)
             }
         }
         return found
     }
+
+    private fun collectInto(
+        found: MutableMap<String, Pair<String, String>>,
+        statement: java.sql.PreparedStatement,
+        markers: java.sql.Array,
+    ) {
+        statement.use {
+            it.setArray(1, markers)
+            it.executeQuery().use { rs ->
+                while (rs.next()) found[rs.getString(1)] = rs.getString(2) to rs.getString(3)
+            }
+        }
+    }
+
+    private fun jdbcUrl(): String =
+        ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java)
+
+    private fun jdbcUser(): String =
+        ConfigProvider.getConfig().getValue("quarkus.datasource.username", String::class.java)
+
+    private fun jdbcPassword(): String =
+        ConfigProvider.getConfig().getValue("quarkus.datasource.password", String::class.java)
 
     private companion object {
         const val CHANNEL = "audit-events-in"
