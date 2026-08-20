@@ -224,11 +224,13 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
-    '/aml', '/fraud', '/disputes', '/consents', '/customer-360', '/campaigns',
+    '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
     '/docs/compliance', '/docs/bcp',
   ]],
   ['campaign:view', ['/segments']],
   ['campaign:create', ['/segments/new']],
+  ['campaign:view', ['/campaigns']],
+  ['campaign:create', ['/campaigns/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
   ['system:view', [
     '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',

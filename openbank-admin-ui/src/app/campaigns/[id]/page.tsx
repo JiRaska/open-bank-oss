@@ -11,6 +11,7 @@ import { ArrowLeft, Megaphone } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { JourneyCanvas, type DecisionPathSelection, type JourneyDecision, type StepFunnel } from '@/components/campaigns/JourneyCanvas'
 import { SectionBoundary } from '@/components/feedback/SectionBoundary'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
@@ -276,6 +277,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         return []
     }
   }
+  const actionPermission = (action: string): 'campaign:create' | 'campaign:submit' | 'campaign:activate' =>
+    action === 'activate' ? 'campaign:activate' : action === 'submit' ? 'campaign:submit' : 'campaign:create'
 
   const actionLabel = (a: string): string =>
     ({
@@ -495,7 +498,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   }
   const nextAction = campaignNextAction()
 
-  return (
+  return <AuthGuard permission="campaign:view">
     <div className="space-y-6">
       <Link href="/campaigns" className="inline-flex items-center gap-1 text-sm hover:underline">
         <ArrowLeft className="h-4 w-4" /> {t('Kampaně', 'Campaigns')}
@@ -512,20 +515,20 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           which is how a real refusal stops being read. */}
       {!loading && !unavailable && c && actionsFor(c.state).length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
-          {c.state === 'DRAFT' && (
-            <Link href={`/campaigns/new?draft=${encodeURIComponent(c.id)}`} className="rounded-md border px-3 py-1.5 text-sm">
-              {t('Upravit koncept', 'Edit draft')}
-            </Link>
-          )}
+          {c.state === 'DRAFT' && <Can permission="campaign:create"><Link href={`/campaigns/new?draft=${encodeURIComponent(c.id)}`} className="rounded-md border px-3 py-1.5 text-sm">
+            {t('Upravit koncept', 'Edit draft')}
+          </Link></Can>}
           {actionsFor(c.state).map(a => (
-            <button
-              key={a}
-              onClick={() => runAction(a)}
-              disabled={acting}
-              className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
-            >
-              {actionLabel(a)}
-            </button>
+            <Can key={a} permission={actionPermission(a)} fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného operátora', 'Awaiting an authorized operator')}</span>}>
+              <button
+                type="button"
+                onClick={() => runAction(a)}
+                disabled={acting}
+                className="rounded-md border px-3 py-1.5 text-sm disabled:opacity-40"
+              >
+                {actionLabel(a)}
+              </button>
+            </Can>
           ))}
           {c.state === 'PENDING_APPROVAL' && (
             // Said out loud, because the refusal is otherwise indistinguishable from a bug: the
@@ -552,9 +555,11 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                 )}
               </p>
             </div>
-            <button type="button" className="btn btn-secondary" onClick={duplicateAsDraft} disabled={duplicating}>
-              {duplicating ? t('Zakládám koncept…', 'Creating draft…') : t('Vytvořit kopii jako koncept', 'Create draft copy')}
-            </button>
+            <Can permission="campaign:create" fallback={<span className="text-xs text-muted-foreground">{t('Kopii může vytvořit jen oprávněný operátor', 'Only an authorized operator can create a copy')}</span>}>
+              <button type="button" className="btn btn-secondary" onClick={duplicateAsDraft} disabled={duplicating}>
+                {duplicating ? t('Zakládám koncept…', 'Creating draft…') : t('Vytvořit kopii jako koncept', 'Create draft copy')}
+              </button>
+            </Can>
           </div>
         </aside>
       )}
@@ -972,5 +977,5 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
         </>
       )}
     </div>
-  )
+  </AuthGuard>
 }
