@@ -76,7 +76,8 @@ class ProductCatalogHostHeaderIT {
                 val requestedId = ex.requestURI.path.substringAfterLast('/')
                 val currency = if (requestedId == EUR_PRODUCT_ID) "EUR" else "CZK"
                 val body =
-                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE","currency":"$currency"}""".toByteArray()
+                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE","currency":"$currency"}"""
+                        .toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
