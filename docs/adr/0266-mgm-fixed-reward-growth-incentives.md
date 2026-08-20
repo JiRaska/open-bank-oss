@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [mobile-app, admin-ui, ledger, governance]
 summary: "MGM referrals and promo codes become governed incentive artifacts outside campaign-service; the first slice is a fixed-reward referral lifecycle with immutable attribution, anti-abuse and ledger handoff."
-followup: "Implementation requires a separate ADR for money-path reward posting and an issue for the fixed-reward referral vertical slice; this ADR intentionally ships no runtime code."
+followup: "#5943 — implementation issue for the fixed-reward referral vertical slice; a separate money-path ADR is required before reward posting."
 ---
 
 # ADR-0266 — MGM Fixed-Reward Growth Incentives
