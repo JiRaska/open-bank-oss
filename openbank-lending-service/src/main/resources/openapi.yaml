@@ -647,6 +647,9 @@ paths:
       responses:
         '201':
           description: Proposal registered, awaiting a checker
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PackActivationView' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -674,6 +677,9 @@ paths:
       responses:
         '200':
           description: Decision recorded; an approved pack is active in-memory immediately
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PackActivationView' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -688,6 +694,11 @@ paths:
       responses:
         '200':
           description: Pending proposals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/compliance-packs/active:
@@ -698,6 +709,11 @@ paths:
       responses:
         '200':
           description: Active packs with content hashes
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/PackActivationView' }
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -733,6 +749,44 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    PackActivationView:
+      type: object
+      required:
+        - id
+        - jurisdiction
+        - productType
+        - packVersion
+        - effectiveFrom
+        - contentHash
+        - state
+        - proposedBy
+        - pack
+      properties:
+        id: { type: string, format: uuid }
+        jurisdiction: { type: string }
+        productType: { type: string, enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT] }
+        packVersion: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        contentHash: { type: string, description: SHA-256 fingerprint of the exact reviewed pack }
+        state: { type: string, enum: [PROPOSED, APPROVED, REJECTED, EXECUTED] }
+        proposedBy: { type: string }
+        proposedAt: { type: string, format: date-time, nullable: true }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        decisionReason: { type: string, nullable: true }
+        pack:
+          $ref: '#/components/schemas/CompliancePack'
+    CompliancePack:
+      type: object
+      description: Exact reviewed pack content, returned so operators can inspect what the hash identifies.
+      additionalProperties: true
+      required: [jurisdiction, productType, version, effectiveFrom]
+      properties:
+        jurisdiction: { type: string }
+        productType: { type: string, enum: [CONSUMER_CREDIT, MORTGAGE, OVERDRAFT, SME_CREDIT] }
+        version: { type: integer }
+        effectiveFrom: { type: string, format: date }
+        effectiveTo: { type: string, format: date, nullable: true }
     ApiError:
       type: object
       properties:

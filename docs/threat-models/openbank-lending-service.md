@@ -555,3 +555,11 @@ comes only from `X-Customer-Party-Id`.
   Default OFF (`lending.intake.enabled=false`) and refuses everything while
   `lending.intake.caller-principal` is unset. No DB schema change; maker leg only, so the four-eyes
   disbursement control is untouched; rollback = revert the commit or leave the flag false.
+- **2026-08-20** — Compliance-pack operator detail. The existing authenticated
+  compliance-pack read endpoints now return the exact stored pack together with proposal/decision
+  audit metadata so the admin console can inspect what was activated instead of showing only a
+  hash. Authorization is unchanged (`ROLE_COMPLIANCE`/`ROLE_ADMIN` on the existing resource), no
+  new endpoint, trust boundary, persistence, or write path is introduced, and the response contains
+  the already-stored jurisdiction/product rule document rather than credentials or deployment
+  configuration. Integration tests cover both pending and active projections. Rollback: revert the
+  response projection and additive OpenAPI schema fields.
