@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.173.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.1...admin-ui-v0.173.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** complete settings tab semantics ([#5821](https://github.com/JiRaska/open-bank-oss/issues/5821)) ([3195d9d](https://github.com/JiRaska/open-bank-oss/commit/3195d9db26c3f2a16366e92cf651bf3d93826d15))
+
 ## [0.173.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.0...admin-ui-v0.173.1) (2026-08-20)
 
 
