@@ -139,7 +139,14 @@ copilot:
     embedding-dimensions: ${COPILOT_EMBEDDING_DIMENSIONS:1024}
     embedding-api-key: ${COPILOT_EMBEDDING_API_KEY:}
     # Re-checks content hashes; embeds only what changed, so the steady-state cost is one query.
-    index-cron: ${COPILOT_INDEX_CRON:0 17 */6 * * ?}
+    #
+    # An INTERVAL with an initial delay, not a cron: a cron leaves a freshly deployed environment
+    # with an empty index — and therefore keyword-only search — until the next scheduled hour. The
+    # 90s delay is deliberate rather than 0: at boot the gateway route, the projected secret and the
+    # database connection may all still be settling, and a failed run here is harmless because the
+    # next tick retries it.
+    index-interval: ${COPILOT_INDEX_INTERVAL:6h}
+    index-initial-delay: ${COPILOT_INDEX_INITIAL_DELAY:90s}
   # OPA per-tool gate (ADR-0089 D3, ADR-0034). Off by default (advisory); flip to true in gitops
   # once copilot-opa-bundle.yaml is deployed and the sidecar is live (issue #998 advisory→enforce).
   opa:
