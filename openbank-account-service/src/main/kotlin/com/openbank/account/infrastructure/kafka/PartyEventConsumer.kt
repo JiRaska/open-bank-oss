@@ -31,7 +31,7 @@ private data class PartyEvent(
 )
 
 /**
- * Onboarding account lifecycle driven by party domain events (ADR-0073).
+ * Onboarding account lifecycle driven by party domain events (ADR-0267).
  *
  * - PARTY_CREATED (INDIVIDUAL) → open a PENDING_ACTIVATION multi-currency CURRENT account
  *   (one IBAN + primary CZK pocket) plus a SAVINGS account, so a fresh customer can try
