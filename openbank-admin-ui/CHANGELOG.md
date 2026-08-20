@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.172.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.0...admin-ui-v0.172.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** clear stale party screening name ([#5793](https://github.com/JiRaska/open-bank-oss/issues/5793)) ([78655f1](https://github.com/JiRaska/open-bank-oss/commit/78655f1ea53b3524665f4c4c6c91ff7fb11ad5ca))
+
 ## [0.172.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.171.0...admin-ui-v0.172.0) (2026-08-19)
 
 
