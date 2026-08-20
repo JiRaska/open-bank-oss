@@ -81,6 +81,7 @@ export async function GET() {
       workerTaskSlots,
       workerTaskSlotsUsed,
       namespaces,
+      workflowTypes,
     ] = await Promise.all([
       // Metric names below are the Temporal SERVER (tally/prometheus) names as
       // scraped by the temporal-server PodMonitor (prefixed temporal_ at scrape
@@ -108,6 +109,7 @@ export async function GET() {
       queryInstant('sum(temporal_worker_task_slots_available)', controller.signal),
       queryInstant('sum(temporal_worker_task_slots_used)', controller.signal),
       queryVector('group by (namespace) (temporal_workflow_success)', controller.signal),
+      queryVector('sum by (namespace, workflow_type) (increase(temporal_workflow_success[1h]))', controller.signal),
     ])
 
     // temporal_restarts is absent (count → vector(0)) only when Temporal is not scraped yet
@@ -146,6 +148,11 @@ export async function GET() {
           slotsUsed: workerTaskSlotsUsed !== null ? Math.round(workerTaskSlotsUsed) : null,
         },
         namespaces: activeNamespaces.length > 0 ? activeNamespaces : ['openbank-default'],
+        workflowTypes: workflowTypes.map(row => ({
+          namespace: row.labels.namespace ?? 'unknown',
+          workflowType: row.labels.workflow_type ?? 'unknown',
+          completed1h: Math.round(row.value),
+        })).filter(row => row.workflowType !== 'unknown'),
       } : null,
     }, { headers: { 'Cache-Control': 'no-store' } })
   } finally {

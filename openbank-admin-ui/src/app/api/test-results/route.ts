@@ -41,35 +41,6 @@ async function fromBundle(): Promise<TestResultsResponse | null> {
   }
 }
 
-const KNOWN_SERVICES = [
-  'openbank-account-service',
-  'openbank-aml-service',
-  'openbank-audit-service',
-  'openbank-balance-service',
-  'openbank-card-issuance-service',
-  'openbank-clearing-service',
-  'openbank-consent-service',
-  'openbank-dispute-service',
-  'openbank-domestic-payment',
-  'openbank-fx-service',
-  'openbank-interest-service',
-  'openbank-kyc-service',
-  'openbank-ledger-service',
-  'openbank-notification-service',
-  'openbank-party-service',
-  'openbank-pid-service',
-  'openbank-psd2-service',
-  'openbank-sanctions-service',
-  'openbank-sca-service',
-  'openbank-security-scanner',
-  'openbank-sepa-instant',
-  'openbank-sepa-payment',
-  'openbank-standing-order-service',
-  'openbank-swift-service',
-  'openbank-tpp-registry-service',
-  'openbank-transaction-service',
-]
-
 function pgHost(): string {
   if (process.env.SERVICES_HOST === 'container') return 'openbank-postgres'
   return process.env.PGHOST ?? 'localhost'
@@ -139,7 +110,10 @@ export async function GET() {
     if (r.test_type === 'integration') entry.integration = r
   }
 
-  const services: ServiceTestResult[] = KNOWN_SERVICES.map(name => {
+  // The legacy DB has no fleet catalogue. Use exactly the services it has observed;
+  // the normal bundled path is generated from release-please and is authoritative.
+  const observedServices = [...new Set([...summaryRows, ...typeRows].map(r => String(r.service)))].sort()
+  const services: ServiceTestResult[] = observedServices.map(name => {
     const r   = byService.get(name)
     const typ = byServiceType.get(name) ?? { unit: null, integration: null }
     const u   = typ.unit

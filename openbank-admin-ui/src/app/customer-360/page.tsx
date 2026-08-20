@@ -13,6 +13,8 @@ import type { Customer360 } from '@/app/api/customer-360/[partyId]/route'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
 import { DevicesPanel } from '@/components/party/DevicesPanel'
+import { DocumentsPanel } from '@/components/party/DocumentsPanel'
+import { CustomerPortfolioPanel } from '@/components/party/CustomerPortfolioPanel'
 
 // ADR-0210: a lookup over the analytics silver layer, not a customer list. There is no
 // crm-service and no "list all customers" surface here — party-service owns that.
@@ -91,7 +93,9 @@ export default function Customer360Page() {
           projected events must not hide an active fraud hold. Those are independent sources and the
           page now degrades independently for each. */}
       {selected && <AdverseStatePanel key={selected.id} partyId={selected.id} />}
+      {selected && <CustomerPortfolioPanel key={selected.id} partyId={selected.id} />}
       {selected && <DevicesPanel key={selected.id} partyId={selected.id} />}
+      {selected && <DocumentsPanel key={selected.id} partyId={selected.id} />}
 
       {loading && (
         <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>

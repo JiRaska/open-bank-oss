@@ -12,6 +12,7 @@ import { ShieldCheck, Search, RefreshCw, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
 const KYC_SERVICE = '/api/svc/kyc-service'
 
@@ -31,6 +32,7 @@ export default function KycPage() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [search, setSearch]   = useState('')
   const [partyId, setPartyId] = useState('')
+  const [selectedParty, setSelectedParty] = useState<PartyHit | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true); setUnavailable(null)
@@ -81,7 +83,14 @@ export default function KycPage() {
         </button>}
       />
 
-      {/* Toolbar */}
+      <PartySearch
+        selectedId={selectedParty?.id}
+        busy={loading}
+        onSelect={party => { setSelectedParty(party); setPartyId(party.id) }}
+        placeholder={t('Jméno, příjmení, firma nebo Party UUID', 'Name, company, or Party UUID')}
+      />
+
+      {/* Case-local filter */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
           <Search aria-hidden="true" size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
@@ -98,6 +107,7 @@ export default function KycPage() {
           aria-busy={loading}
           aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}
         >{t('Hledat', 'Search')}</button>
+        {selectedParty && <button type="button" className="btn btn-secondary" onClick={() => { setSelectedParty(null); setPartyId('') }}>{t('Všechny případy', 'All cases')}</button>}
       </div>
 
       {unavailable && (
