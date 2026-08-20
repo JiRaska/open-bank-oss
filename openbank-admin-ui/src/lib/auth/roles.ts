@@ -56,6 +56,12 @@ export const PERMISSIONS = {
   "lending:compliance:view":    [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
+  // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
+  // creation and lifecycle transitions are restricted to HUMAN operators/admins.
+  "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
+  "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
+  "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
+  "campaign:activate":      [ROLES.ADMIN, ROLES.OPERATOR],
   // Card-issuance deliberately has a narrower read role than the wider payments
   // workspace: its GET endpoints accept only VIEWER/OPERATOR/ADMIN, and every
   // lifecycle writes except block/cancel accept only OPERATOR/ADMIN. Compliance
@@ -219,8 +225,10 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360', '/campaigns',
-    '/segments', '/docs/compliance', '/docs/bcp',
+    '/docs/compliance', '/docs/bcp',
   ]],
+  ['campaign:view', ['/segments']],
+  ['campaign:create', ['/segments/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
   ['system:view', [
     '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
