@@ -84,12 +84,6 @@ BASELINE: dict[str, str] = {
         "#5962 — AccountingDayStatus: undeclared OPEN",
     "openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED":
         "#5962 — CollateralStatus: spec-only EXECUTED",
-    "openbank-party-service:COMPANY_REGISTRATION,DRIVING_LICENSE,ID_CARD,PASSPORT":
-        "#5962 — DocumentType: spec-only DRIVING_LICENSE/ID_CARD; undeclared DRIVING_LICENCE/NATIONAL_ID/TAX_ID",
-    "openbank-party-service:EXPIRED,PENDING,REJECTED,VERIFIED":
-        "#5962 — KycStatus: spec-only PENDING/VERIFIED; undeclared APPROVED/IN_PROGRESS/NOT_STARTED",
-    "openbank-party-service:ACTIVE,CLOSED,PENDING_KYC,SUSPENDED":
-        "#5962 — PartyStatus: undeclared MERGED",
     "openbank-pid-service:ACTIVE,CLOSED,SUSPENDED":
         "#5962 — PartyStatus: spec-only CLOSED; undeclared DECEASED/TERMINATED",
     "openbank-pid-service:LEGAL_ENTITY,NATURAL_PERSON":
