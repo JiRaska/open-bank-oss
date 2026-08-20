@@ -163,6 +163,9 @@ export const PERMISSIONS = {
   // @RolesAllowed/rego to have verified against, because these pages proxy telemetry
   // (Prometheus, Holmes, k8s) rather than calling a service with its own RBAC.
   "system:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.DEMO],
+  // DevOps findings are readable by system:view, but the devops-agent POST approval/rejection
+  // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
+  "devops:decide":             [ROLES.ADMIN],
   "system:config":            [ROLES.ADMIN],
   // Docs
   "docs:view":                [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR],
