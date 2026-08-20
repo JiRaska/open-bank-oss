@@ -48,11 +48,11 @@ const URGENCY: Record<Urgency, { cs: string; en: string; color: string; bg: stri
 
 type T = (cs: string, en: string) => string
 
-function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('cs-CZ', { year: 'numeric', month: 'short' })
+function fmtDate(iso: string, locale: string): string {
+  return new Date(iso).toLocaleDateString(locale, { year: 'numeric', month: 'short' })
 }
 
-export function LifecycleStrip({ data, name, t }: { data: CompLifecycle; name: string; t: T }) {
+export function LifecycleStrip({ data, name, t, dateLocale = 'en-GB' }: { data: CompLifecycle; name: string; t: T; dateLocale?: string }) {
   const [draft, setDraft] = useState<'idle' | 'busy' | 'done' | 'err'>('idle')
   const u = URGENCY[data.urgency]
   const lc = data.lifecycle
@@ -122,7 +122,7 @@ export function LifecycleStrip({ data, name, t }: { data: CompLifecycle; name: s
               <Clock size={12} />
               {lc.eolPassed
                 ? t('Po EoL', 'Past EoL')
-                : `${t('Podpora do', 'Supported to')} ${fmtDate(lc.eol)}${lc.eolDaysLeft != null ? ` · ~${lc.eolDaysLeft} ${t('dní', 'days')}` : ''}`}
+                : `${t('Podpora do', 'Supported to')} ${fmtDate(lc.eol, dateLocale)}${lc.eolDaysLeft != null ? ` · ~${lc.eolDaysLeft} ${t('dní', 'days')}` : ''}`}
             </span>
           ) : (
             <span style={{ color: 'var(--text-tertiary)' }}>{t('EoL nestanoveno', 'No EoL set')}</span>

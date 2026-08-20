@@ -35,10 +35,12 @@ interface Agent {
 interface Decision { id: string; title: string; status: DStatus; detail: string }
 interface Compliance { framework: string; requirement: string; control: string; status: DStatus }
 interface PhaseRoadmap { number: number; status: PhaseStatus; title: string; outcome: string }
+interface ControlMaturity { current: number; total: number; label: string; achieved: string[]; remaining: string }
 interface GovData {
   adrRef: string; adrStatus: string; phase: number; totalPhases: number; phaseLabel: string
   enforcement: string; policyDefault: string; agentsActing: number
   phaseRoadmap: PhaseRoadmap[]
+  controlMaturity: ControlMaturity
   chartersAvailable: boolean; agentCount: number; agents: Agent[]
   toolTiers: Record<string, string[]>
   decisions: Decision[]; decisionSummary: { built: number; partial: number; planned: number; total: number }
@@ -319,7 +321,7 @@ function IAOpsContent() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
               <Bot size={18} style={{ color: '#6366f1' }} />
               <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                {t('Stav governance', 'Governance posture')}
+                {t('Schválená governance roadmapa', 'Governance-approved roadmap')}
               </span>
               <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
                 background: '#ede9fe', color: '#6366f1' }}>{data.adrRef} · {data.adrStatus}</span>
@@ -335,10 +337,10 @@ function IAOpsContent() {
 
             <div className="grid-4">
               {[
-                { label: t('Fáze (ADR-0031)', 'Phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: data.phaseLabel, color: '#6366f1' },
+                { label: t('Fáze roadmapy (ADR-0031)', 'Roadmap phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: t(`${data.phaseLabel} · není živá runtime atestace`, `${data.phaseLabel} · not live runtime evidence`), color: '#6366f1' },
                 { label: t('Vynucování', 'Enforcement'), value: data.enforcement === 'advisory' ? t('Advisory (audit)', 'Advisory (audit)') : data.enforcement, sub: t(`Default: ${data.policyDefault} (deny-by-default)`, `Default: ${data.policyDefault} (deny-by-default)`), color: '#d97706' },
-                { label: t('Agentů jedná', 'Agents acting'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno`, `${data.agentCount} charters defined`), color: '#16a34a' },
-                { label: t('Roadmapa D1–D9', 'Roadmap D1–D9'), value: `${data.decisionSummary.built}/${data.decisionSummary.total}`, sub: t(`${data.decisionSummary.partial} částečně · ${data.decisionSummary.planned} plánováno`, `${data.decisionSummary.partial} partial · ${data.decisionSummary.planned} planned`), color: '#0891b2' },
+                { label: t('Autonomní změnoví agenti', 'Autonomous state-changing agents'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno · není to živé počítadlo aktivity`, `${data.agentCount} charters defined · not a live activity count`), color: '#16a34a' },
+                { label: t('Governance kontroly', 'Governance controls'), value: `${data.controlMaturity.current}/${data.controlMaturity.total}`, sub: t('Kontroly, ne oprávnění k autonomní změně', 'Controls, not authority for autonomous change'), color: '#0891b2' },
               ].map(k => (
                 <div key={k.label} className="stat-card">
                   <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '2px' }}>{k.value}</div>
@@ -346,6 +348,21 @@ function IAOpsContent() {
                   <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px' }}>{k.sub}</div>
                 </div>
               ))}
+            </div>
+
+            <div style={{ marginTop: '14px', padding: '12px 14px', borderRadius: '10px', background: 'rgba(8,145,178,0.06)', border: '1px solid rgba(8,145,178,0.18)' }}>
+              <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)' }}>
+                {t(
+                  `${data.controlMaturity.current} z ${data.controlMaturity.total} ochranných pilířů je postavených.`,
+                  `${data.controlMaturity.current} of ${data.controlMaturity.total} protective control families are built.`,
+                )}
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.55, margin: '4px 0 0' }}>
+                {t(
+                  `${data.controlMaturity.label} To není povolení k autonomní změně — ta zůstává na ${data.phase}/${data.totalPhases}, dokud neexistuje nezávisle ověřený provozní důkaz.`,
+                  `${data.controlMaturity.label} This is not permission for autonomous change — that remains at ${data.phase}/${data.totalPhases} until independently verified operational evidence exists.`,
+                )}
+              </p>
             </div>
 
             {/* What / Why / How */}

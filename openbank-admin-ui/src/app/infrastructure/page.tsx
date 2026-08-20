@@ -283,7 +283,7 @@ export default function InfrastructurePage() {
                   )}
 
                   {lifecycle[comp.id] && (
-                    <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} />
+                    <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} dateLocale={dateLocale} />
                   )}
                 </div>
               )

@@ -101,11 +101,13 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.items[2]).toMatchObject({ domain: 'clearing', action: 'clearingBatch.settle', maker: 'operator.d' })
     expect(body.items[3]).toMatchObject({ domain: 'ledger', action: 'ledger.reverse', maker: 'operator.d' })
     expect(body.items[4]).toMatchObject({ domain: 'swift', action: 'swift.send', maker: 'operator.d' })
-    expect(body.items[5]).toMatchObject({ domain: 'sepaPayment', action: 'sepaPayment.transitionStatus', maker: 'operator.d' })
+    expect(body.items[5]).toMatchObject({ domain: 'sepa-payment', action: 'sepaPayment.transitionStatus', maker: 'operator.d' })
     expect(body.items[6]).toMatchObject({ domain: 'fx', action: 'fx.convert', maker: 'trader.d' })
     expect(body.items[7]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
     expect(body.items[8]).toMatchObject({ domain: 'agent', action: 'agent.research' })
     expect(body.items[9]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
+    expect(body.sources.account).toBe('not-configured')
+    expect(body.sources.balance).toBe('not-configured')
   })
 
   // The regression this file exists to prevent, stated as a test for the transaction slice of
@@ -237,7 +239,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     const body = await (await (await route()).GET()).json()
 
     expect(seen.some(u => u.includes('/api/v1/sepa-payments/approvals'))).toBe(true)
-    expect(body.sources.sepaPayment).toBe('ok')
+    expect(body.sources['sepa-payment']).toBe('ok')
   })
 
   it('degrades to the working half when one queue is down', async () => {
@@ -292,7 +294,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.fx).toBe('ok')
     expect(body.sources.ledger).toBe('ok')
     expect(body.sources.swift).toBe('ok')
-    expect(body.sources.sepaPayment).toBe('ok')
+    expect(body.sources['sepa-payment']).toBe('ok')
     expect(body.sources.agent).toBe('ok')
   })
 
@@ -314,7 +316,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.fx).toBe('unavailable')
     expect(body.sources.ledger).toBe('unavailable')
     expect(body.sources.swift).toBe('unavailable')
-    expect(body.sources.sepaPayment).toBe('unavailable')
+    expect(body.sources['sepa-payment']).toBe('unavailable')
     expect(body.sources.agent).toBe('unavailable')
   })
 })

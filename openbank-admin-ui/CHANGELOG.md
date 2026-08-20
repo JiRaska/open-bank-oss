@@ -1,5 +1,52 @@
 # Changelog
 
+## [0.173.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.1...admin-ui-v0.173.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** complete settings tab semantics ([#5821](https://github.com/JiRaska/open-bank-oss/issues/5821)) ([3195d9d](https://github.com/JiRaska/open-bank-oss/commit/3195d9db26c3f2a16366e92cf651bf3d93826d15))
+
+## [0.173.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.0...admin-ui-v0.173.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** respect locale in shared displays ([#5807](https://github.com/JiRaska/open-bank-oss/issues/5807)) ([d0ec7a9](https://github.com/JiRaska/open-bank-oss/commit/d0ec7a977b4eabb45ec222ffbc8166c5a759e4d8))
+
+## [0.173.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.3...admin-ui-v0.173.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** distinguish governance controls from autonomy ([#5805](https://github.com/JiRaska/open-bank-oss/issues/5805)) ([9a1a8c1](https://github.com/JiRaska/open-bank-oss/commit/9a1a8c1c8b64aa484fcc20e073cbb08eabe6effc))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose FX tab state ([#5810](https://github.com/JiRaska/open-bank-oss/issues/5810)) ([4019caa](https://github.com/JiRaska/open-bank-oss/commit/4019caa48353f6fd57d5bc3ba8972bf6f313762f))
+
+## [0.172.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.2...admin-ui-v0.172.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose unwired approval queues ([#5804](https://github.com/JiRaska/open-bank-oss/issues/5804)) ([15cb73a](https://github.com/JiRaska/open-bank-oss/commit/15cb73a15cd9f7989f4c74c914d15bcb914e5b53))
+
+## [0.172.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.1...admin-ui-v0.172.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify AIOps navigation state ([#5796](https://github.com/JiRaska/open-bank-oss/issues/5796)) ([f952539](https://github.com/JiRaska/open-bank-oss/commit/f9525395fc211da4b18f07714af74104cb6cc664))
+
+## [0.172.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.0...admin-ui-v0.172.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** clear stale party screening name ([#5793](https://github.com/JiRaska/open-bank-oss/issues/5793)) ([78655f1](https://github.com/JiRaska/open-bank-oss/commit/78655f1ea53b3524665f4c4c6c91ff7fb11ad5ca))
+
 ## [0.172.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.171.0...admin-ui-v0.172.0) (2026-08-19)
 
 
