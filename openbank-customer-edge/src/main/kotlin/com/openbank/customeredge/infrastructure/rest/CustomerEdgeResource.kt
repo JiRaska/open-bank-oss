@@ -409,7 +409,7 @@ class CustomerEdgeResource(
         return Response.ok(body).type(MediaType.APPLICATION_JSON).build()
     }
 
-    // --- KYC / identity verification status (AML Act §8, ADR-0073) ---
+    // --- KYC / identity verification status (AML Act §8, ADR-0116) ---
 
     /**
      * The caller's OWN identity-verification (KYC) status. No path param — the party is taken from
