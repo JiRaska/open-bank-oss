@@ -2378,6 +2378,25 @@ gates:
     run: |
       python3 .github/scripts/check-aggregate-type-case-fold.py --root .
 
+  # An alert rule over a metric nothing emits is indistinguishable from a correctly-quiet one:
+  # it loads, promtool accepts it, Alertmanager routes it, and Prometheus lists it `inactive`
+  # forever. Four existed, one `severity: critical` on the money path (TransactionSagaStuck,
+  # since fixed by #5787) — see #5733. The dashboard half of this class was #5049; the alert half
+  # is worse, because an empty panel is at least visible to whoever opens it while a rule that
+  # never fires produces no artifact at all.
+  - id: alert-metric-emitted
+    name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
+    group: data
+    mode: enforced
+    min_subjects: 80   # 115 alert rules in gitops PrometheusRule CRs today (2026-08-19)
+    rationale: "A critical money-path alert that cannot fire reads exactly like a healthy one; nothing in Prometheus, promtool or Alertmanager distinguishes them."
+    review_after: "2027-02-19"
+    selftest: |
+      python3 .github/scripts/check-alert-metric-emitted.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-alert-metric-emitted.py --enforce
+
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
     group: data
