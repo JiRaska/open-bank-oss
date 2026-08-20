@@ -15,6 +15,25 @@
 #    `endpoint with name openbank-kafka already exists` / `Connection refused`.
 #  - Services with no infra-touching @QuarkusTest (anacredit, product-catalog, …) and
 #    pure-unit modules need nothing here; their tests boot no containers at all.
+#
+# ADR-0250 Phase 2 (issue #4414): this file used to be a SINGLE job that ran `build`
+# (compile/test/quarkusBuild/consumer-pact generation) AND provider-verification against the
+# Pact Broker as one unit, on the scarce self-hosted `openbank-build` ARC pool on every
+# main push — because provider verification needs in-cluster DNS to reach the broker
+# (ADR-0056: no public ingress). Filtering which TESTS ran with `--tests` never decoupled the
+# two: `-Dpactbroker.url` is a tracked INPUT of the `test` task, so a broker-configured
+# invocation is always a different Gradle cache key from an unconfigured one, forcing a full
+# recompile+retest regardless of what `--tests` selects. It is now split into two jobs:
+#   - `build`  — compile, `test` (incl. consumer-pact generation), quarkusBuild. Hosted
+#     (`ubuntu-latest`, free/unlimited on this public repo), for EVERY event including
+#     main-push. Uploads this service's freshly-generated consumer pacts as an artifact.
+#   - `contract` — provider verification against the Pact Broker + publishing consumer
+#     pacts. Stays on `openbank-build` (in-cluster ARC, the only pool that resolves the
+#     broker's cluster-DNS name) and runs ONLY on a main push / an on-main workflow_dispatch
+#     (verify-provider.yml). Downloads `build`'s pact artifact rather than regenerating it —
+#     a missing/failed download FAILS the job (no silent skip): see the download step.
+#     Runs the `providerPactTest` Gradle task (build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts)
+#     — a source set/task independent of `test`, so invoking it never forces `test` to re-run.
 name: _service-ci
 
 on:
@@ -54,96 +73,267 @@ on:
 permissions:
   contents: read
   # GitHub OIDC → assume openbank-arc-build-runner for ECR auth (see the "Authenticate to
-  # ECR via OIDC" step). Needed on the Hetzner self-hosted pool, which has no ambient AWS
-  # creds (no EKS Pod Identity); harmless on the ARC pool.
+  # ECR via OIDC" step, `contract` job). Needed on the Hetzner self-hosted pool, which has
+  # no ambient AWS creds (no EKS Pod Identity); harmless on the ARC pool.
   id-token: write
 
 jobs:
+  # ── build: compile, test, quarkusBuild, consumer-pact generation ────────────────────────
+  # Hosted, every event (PR, push, schedule, workflow_dispatch) — free/unlimited on this
+  # public repo (ADR-0250). Never touches the Pact Broker: PACT_BROKER_URL is not set here
+  # at all, so the @PactBroker-annotated provider-verification classes stay
+  # @EnabledIfSystemProperty-skipped (identical to the pre-existing PR-lane behaviour) and
+  # the git-pact (@PactFolder) classes run unconditionally, same as before.
   build:
-    name: ${{ inputs.service }}
-    # Split lane (FinOps, public repo): PR and nightly/scheduled builds run on free
-    # unlimited GitHub-hosted runners (4 vCPU/16 GB on public repos) — same
-    # no-broker/no-ECR environment a fork PR already gets. ONLY the main-PUSH build
-    # stays on the self-hosted pool (ARC scale-to-zero): the Pact broker has no
-    # public ingress (ADR-0056) and provider verification results MUST be published
-    # from the main-push build or can-i-deploy blocks the auto-deploy of that SHA.
-    # KEEP THIS EXPRESSION IN LOCKSTEP with the PACT_BROKER_URL env below — a hosted
-    # runner with a set (unreachable) broker URL fails the provider tests instead
-    # of skipping them.
-    # workflow_dispatch (verify-provider.yml, #2039) also runs on the ARC pool so a single
-    # provider can re-verify + re-publish without a full-fleet run. KEEP IN LOCKSTEP with PACT_BROKER_URL.
-    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && 'openbank-build' || 'ubuntu-latest' }}
+    name: ${{ inputs.service }} (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      # Force a UTF-8 locale so the JVM's sun.jnu.encoding (the *filename* charset,
+      # derived from the OS locale at startup — NOT from -Dfile.encoding) is UTF-8.
+      # Kotlin test names with non-ASCII chars (e.g. a Czech '—' em-dash) otherwise produce
+      # an unmappable .class path -> InvalidPathException -> compileTestKotlin internal
+      # compiler error.
+      LANG: C.UTF-8
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref != '' && inputs.ref || '' }}
+          fetch-depth: ${{ inputs.ref == '' && 1 || 0 }}
+
+      # Resolve GRADLE_USER_HOME. This job is ALWAYS `runner.environment == 'github-hosted'`
+      # now (never self-hosted), so it always takes the default-home branch below — restoring
+      # the warm cache fleet-lint keeps on main via setup-gradle's cross-job cache restore.
+      # NOTE: env context is NOT available in job-level env: blocks of reusable workflows
+      # (workflow_call) — GitHub rejects "Unrecognized named-value: 'env'" at parse time —
+      # so this is resolved in a step where env IS available, same as the original single job.
+      - name: Resolve GRADLE_USER_HOME
+        run: echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
+
+      # Warm this service's Gradle dependency cache BEFORE "Build + test" runs, so an
+      # interrupted-download-corrupted module cache entry is caught and healed HERE, not
+      # inside "Build + test" (which must run exactly once — see the ADVISORY note below).
+      - name: Warm Gradle dependency cache (self-heal corrupted entries)
+        continue-on-error: true
+        run: |
+          set +e
+          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          warmup_status=$?
+          if [ $warmup_status -eq 124 ]; then
+            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
+            cat /tmp/gradle-warmup.log
+          elif [ $warmup_status -ne 0 ]; then
+            cat /tmp/gradle-warmup.log
+            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
+              echo "retrying dependency warm-up after healing corrupted cache entries"
+              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              retry_status=$?
+              if [ $retry_status -eq 124 ]; then
+                echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
+              fi
+            else
+              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
+            fi
+          fi
+
+      # Normalize the Testcontainers Docker endpoint. GitHub-hosted runners already ship
+      # Docker at the standard unix socket, but this keeps the same normalization as the
+      # self-hosted `contract` job (#873) in case DOCKER_HOST is ever set ambiently.
+      - name: Normalize DOCKER_HOST for Testcontainers (#873)
+        run: |
+          if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
+            echo "DOCKER_HOST=unix:///var/run/docker.sock" >> "$GITHUB_ENV"
+            echo "normalized DOCKER_HOST -> unix:///var/run/docker.sock"
+          else
+            echo "DOCKER_HOST left as: ${DOCKER_HOST}"
+          fi
+
+      # Raise fs.aio-max-nr so parallel Testcontainers don't exhaust the kernel's default
+      # 65536 AIO pool (Redpanda/Seastar + Quarkus reactive). Advisory, best-effort; a
+      # GitHub-hosted runner is an isolated VM so this is safe to attempt unconditionally.
+      - name: Raise fs.aio-max-nr for Testcontainers (best-effort, Linux)
+        continue-on-error: true
+        timeout-minutes: 1
+        run: |
+          cur=$(cat /proc/sys/fs/aio-max-nr 2>/dev/null || echo 0)
+          if [ "${cur:-0}" -lt 1048576 ]; then
+            if sudo -n sysctl -w fs.aio-max-nr=1048576 >/dev/null 2>&1; then
+              echo "raised fs.aio-max-nr: ${cur} -> 1048576"
+            else
+              echo "::warning::could not raise fs.aio-max-nr (currently ${cur}); parallel Testcontainers may exhaust the AIO pool on this runner (no passwordless sudo?)"
+            fi
+          else
+            echo "fs.aio-max-nr already ${cur} (>= 1048576)"
+          fi
+
+      # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
+      # lets Gradle's toolchain resolution pick the right one with zero Foojay
+      # downloads at build time (faster, fewer billed minutes).
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          # This job is always GitHub-hosted now — the Actions cache is network-internal
+          # and free there, and there is no in-cluster remote build cache to fall back on
+          # (that cache is only reachable from ARC pods, see the `contract` job below).
+          cache-disabled: false
+          # RESTORE the warm cache fleet-lint keeps on main, but never WRITE — writing 40+
+          # per-service home caches on PR branches would churn the Actions cache quota.
+          cache-read-only: true
+          gradle-home-cache-strict-match: false
+
+      # No `-Dpactbroker.*` flags here at all (unlike the pre-split single job): this job
+      # never has a broker URL to forward, so the @PactBroker-gated provider-verification
+      # test stays skipped and there is no #1009-style cache-key hazard to guard against —
+      # `test` here has ONE stable set of inputs regardless of which event triggered it.
+      # -Dquarkus.smallrye-openapi.store-schema-directory writes the document Quarkus
+      # actually serves, as a side effect of the SAME quarkusBuild task this :build already
+      # runs. Read by the openapi-request-schema-conformance step below.
+      - name: Build + test (:${{ inputs.service }})
+        run: |
+          ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+            -Dquarkus.smallrye-openapi.store-schema-directory="${{ inputs.service }}/build/openapi-generated"
+
+      # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
+      # cause, so the reader goes hunting for a test bug that is not there. Diagnostic only:
+      # it reads JUnit XML already on disk, always exits 0, and can never change the verdict.
+      - name: "Explain a Docker registry pull failure (diagnostic)"
+        if: failure()
+        run: |
+          python3 .github/scripts/check-testcontainers-registry-failure.py \
+            --service "${{ inputs.service }}"
+
+      # rules.yaml: openapi_request_schema_conformance (advisory).
+      - name: "openapi request-schema conformance (advisory)"
+        run: |
+          SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
+          if [ ! -f "$SPEC" ]; then
+            echo "openapi-request-schema-conformance: ${{ inputs.service }} has no openapi.yaml — skipping."
+            exit 0
+          fi
+          python3 .github/scripts/check-openapi-request-schema-conformance.py \
+            --service "${{ inputs.service }}" \
+            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
+
+      # Coverage upload (Codecov is free for public repos; tokenless via the OIDC
+      # id-token this job already has). Advisory only — never gates the build.
+      # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
+      #
+      # No -D pact flags to mirror here (unlike the pre-split single job's #1009 workaround):
+      # `test` above never touched pactbroker.* either, so this is a plain up-to-date/cached
+      # second invocation of the same, single-shaped `test` task.
+      - name: Generate Kover XML report
+        continue-on-error: true
+        run: ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+
+      - name: Upload coverage to Codecov
+        continue-on-error: true
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          files: ${{ inputs.service }}/build/reports/kover/report.xml
+          flags: ${{ inputs.service }}
+          use_oidc: true
+          fail_ci_if_error: false
+
+      # Consumer pacts this service just (re)generated (pact.rootDir -> repo /pacts, ADR-0063)
+      # are handed to the `contract` job as an artifact rather than regenerated there — the
+      # `contract` job runs on a DIFFERENT runner pool and re-running `test` there is exactly
+      # the redundant work ADR-0250 Phase 2 removes. Always upload something (even zero pact
+      # files, the common case for a pure provider or a service with no consumer contracts) so
+      # a MISSING artifact on the `contract` side unambiguously means this job never ran or
+      # never reached this step — never "this service has no consumer pacts", which is instead
+      # expressed by an empty `pact-count` in the manifest (see the download step).
+      - name: Collect consumer pacts for hand-off to the contract job
+        run: |
+          set -euo pipefail
+          mkdir -p pact-handoff
+          shopt -s nullglob
+          files=(pacts/${{ inputs.service }}-*.json)
+          for f in "${files[@]}"; do cp "$f" pact-handoff/; done
+          echo "pact-count=${#files[@]}" > pact-handoff/manifest.txt
+          echo "Collected ${#files[@]} consumer pact file(s) for hand-off."
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: consumer-pacts-${{ inputs.service }}
+          path: pact-handoff/
+          # `manifest.txt` is always written above, so an empty consumer-pact set still
+          # produces a non-empty artifact — "if-no-files-found" only fires if the whole
+          # collection step never ran, which should already have failed the job outright.
+          # NOT named `.manifest`: actions/upload-artifact defaults to
+          # include-hidden-files: false, so a dotfile-only directory silently uploads as
+          # empty and if-no-files-found fires anyway, even though the step above ran fine.
+          if-no-files-found: error
+          retention-days: 3
+
+      # Only on failure: a passing build's test reports are never looked at, but uploading
+      # them on EVERY service build was a dominant driver of GitHub Actions artifact-storage
+      # churn — bursts during a full-fleet rebuild hit the quota and failed unrelated uploads.
+      - name: Upload test reports
+        if: failure()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # `-a${{ github.run_attempt }}` is not cosmetic — an artifact name must be unique
+          # WITHIN A RUN, and re-running a failed job is a new attempt of the SAME run.
+          name: test-reports-${{ inputs.service }}-a${{ github.run_attempt }}
+          path: ${{ inputs.service }}/build/reports/tests
+          if-no-files-found: ignore
+          retention-days: 7
+
+      # A flake cannot be counted from run CONCLUSIONS alone (a re-run flips it away from
+      # `failure`), so retain the JUnit XML per ATTEMPT — a flake becomes a diffable artifact
+      # pair instead of something that has to be noticed and reported at re-run time (#4878).
+      - name: Upload JUnit XML (every run — flake accounting)
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: junit-xml-${{ inputs.service }}-a${{ github.run_attempt }}
+          path: ${{ inputs.service }}/build/test-results/**/*.xml
+          if-no-files-found: ignore
+          retention-days: 3
+
+  # ── contract: Pact provider verification + consumer-pact publishing ─────────────────────
+  # In-cluster ARC pool only (the Pact Broker has no public ingress, ADR-0056) and only on the
+  # events that must publish a verification result: a push to main (the SHA auto-deploy gates
+  # on) or an on-main workflow_dispatch (verify-provider.yml / the reconciler, #2039) —
+  # deliberately the SAME combined condition the pre-split single job used for its
+  # runs-on/PACT_BROKER_URL gating (see its "KEEP THIS EXPRESSION IN LOCKSTEP" comments),
+  # carried over verbatim so verify-provider.yml's single-provider re-verify dispatch keeps
+  # working exactly as before.
+  contract:
+    name: ${{ inputs.service }} (contract)
+    needs: build
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
+    runs-on: openbank-build
     timeout-minutes: 45
     env:
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
-      # in-cluster ARC runner reaches it over cluster DNS. Provider verification +
-      # result publishing run in the gradle test JVM (on the runner pod, so cluster
-      # DNS resolves); consumer-pact publishing is a curl to the broker's
-      # /contracts/publish API (NOT `docker run`, whose dind network can't resolve
-      # cluster DNS). When PACT_BROKER_URL is unset (var not configured) the build
-      # passes empty -D and the @PactBroker provider tests are @EnabledIfSystemProperty
-      # -skipped, and the publish step no-ops — so this is inert until the var lands.
-      # Blanked on the hosted lanes (a GitHub-hosted runner can't reach the
-      # cluster-DNS broker; a set-but-unreachable URL would fail the provider tests
-      # instead of skipping them). Main-push behaviour is unchanged: verify + publish.
-      # KEEP IN LOCKSTEP with the runs-on expression above.
-      PACT_BROKER_URL: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && vars.PACT_BROKER_URL || '' }}
+      # in-cluster ARC runner reaches it over cluster DNS.
+      PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
       PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
       PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
-      # Testcontainers pulls postgres:16.3-alpine and redpandadata/redpanda through
-      # the dind daemon's `--registry-mirror` (→ the in-cluster registry-cache
-      # pull-through proxy, gitops/components/registry-cache), so each image egresses
-      # to Docker Hub at most once cluster-wide; the image coordinates live in each
-      # service's `*TestResource`, not here. (The former POSTGRES_/KAFKA_/VALKEY_IMAGE
-      # + *_PASSWORD env were consumed by the retired shared docker-compose stack.)
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
-      # Per-service Gradle home isolation (follow-up from #578 / fleet CI flakiness).
-      #
-      # Root cause: on the persistent Mac runner pool (ADR-0040/0043), all concurrent
-      # service builds default to ~/.gradle, sharing a single daemon registry. When
-      # one job's setup-gradle post-action fires (on job completion), it sends
-      # `gradle --stop` to that shared registry — killing all daemons, including the
-      # ones of STILL-RUNNING sibling jobs. The sibling then hits "Gradle build daemon
-      # disappeared unexpectedly (it may have been killed or may have crashed)" and
-      # fails, even though the code compiled fine (as in the 1-of-28-fails pattern).
-      #
-      # Fix: each service gets its own stable, persistent Gradle home under
-      # _work/.gradle-svc/<service>. The path is derived from github.workspace
-      # (two levels up → the per-runner _work dir) so it:
-      #  - survives across runs → daemon warmth is preserved (ADR-0043 still works)
-      #  - is completely isolated per service → stop in job A can't kill job B's daemon
-      #  - works on both persistent Macs and ephemeral ARC Linux pods (ARC pods get a
-      #    fresh workspace per run anyway, so the isolation is moot there but harmless)
-      #
-      # setup-gradle honours GRADLE_USER_HOME when no gradle-home-dir input is given,
-      # so setting it here is sufficient (no action input change needed).
-      #
-      # Force a UTF-8 locale so the JVM's sun.jnu.encoding (the *filename* charset,
-      # derived from the OS locale at startup — NOT from -Dfile.encoding) is UTF-8.
-      # The ephemeral ARC runner pods (ADR-0053) default to the POSIX/C locale, so
-      # Kotlin test names with non-ASCII chars (e.g. a Czech '—' em-dash) produced an
-      # unmappable .class path -> InvalidPathException -> compileTestKotlin internal
-      # compiler error. The retired persistent runners happened to have a UTF-8 locale.
       LANG: C.UTF-8
       LC_ALL: C.UTF-8
-      # Shared remote Gradle build cache (ADR-0043): the in-cluster cache server
-      # (gitops/components/gradle-build-cache, nginx WebDAV) is wired into the ARC
-      # runner pods as GRADLE_REMOTE_CACHE_URL/_PUSH/_INSECURE by Terraform
-      # (aws/envs/sandbox-platform/arc-runners.tf); settings.gradle.kts reads those
-      # env vars and configures the HttpBuildCache. We deliberately do NOT re-declare
-      # GRADLE_REMOTE_CACHE_URL here from `${{ vars.* }}`: when that repo var is unset
-      # the expression yields an EMPTY string that a job-level `env:` then layers on
-      # top of the pod-injected value, blanking it — so `isNullOrBlank()` in
-      # settings.gradle disabled the cache fleet-wide. Letting the pod env flow
-      # through untouched is what actually turns the cache on (cluster-internal URL,
-      # only reachable from ARC pods; the warm-local Macs fall back to local cache).
+      # Shared remote Gradle build cache (ADR-0043): injected by arc-runners.tf via the pod
+      # env. Deliberately NOT re-declared from `${{ vars.* }}` here — see the original
+      # single-job file's long-form comment (git history) for why that would blank it.
     steps:
-      # harden-runner is intentionally omitted: it's an eBPF egress-audit shim for
-      # ephemeral GitHub-hosted runners. This self-hosted sandbox instance enforces
-      # egress at the infra layer (egress-only SG in an isolated VPC, ADR-0027), a
-      # stronger control, so the shim is redundant (and unsupported on this host).
-      # P predates the proof runner. Before replacing the workspace with P, save the runner from
-      # this workflow's trusted checkout outside the workspace; F is never checked out for code.
+      # P predates the proof runner. Before replacing the workspace with P, save the runner
+      # from this workflow's trusted checkout outside the workspace; F is never checked out
+      # for code.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: inputs.provider_version != ''
         with:
@@ -208,79 +398,41 @@ jobs:
           fi
           echo "PACT_PROVIDER_VERSION=$PROVIDER_VERSION" >> "$GITHUB_ENV"
 
-      # Resolve GRADLE_USER_HOME by runner class:
-      #  - ARC ephemeral (GRADLE_USER_HOME_NODE_CACHE set by arc-runners.tf): node-local
-      #    hostPath cache, per-service.
-      #  - other self-hosted (Mac/Hetzner): workspace-relative, per-service.
-      #    Both keep the home PER-SERVICE so one job's `gradle --stop` post-action can't
-      #    kill a sibling job's daemon on the SHARED persistent registry (the documented
-      #    "1-of-28-fails / daemon disappeared" incident).
-      #  - GitHub-hosted (the PR lane): the DEFAULT ~/.gradle. Each hosted matrix job gets
-      #    its OWN ephemeral runner, so there is no sibling daemon to protect and the
-      #    per-service isolation is not just moot but HARMFUL: a non-standard home defeats
-      #    setup-gradle's cross-job cache restore, so the PR lane was rebuilding build-logic
-      #    and re-resolving dependencies from cold every run ("Gradle User Home cache not
-      #    found"). With the default home it restores the warm cache fleet-lint keeps on
-      #    main. Measured on openbank-domestic-payment: ~82 s restored vs ~204 s cold — the
-      #    restore is read-only (see cache-read-only below), so it adds nothing to the
-      #    Actions cache quota.
-      # NOTE: env context is NOT available in job-level env: blocks of reusable workflows
-      # (workflow_call) — GitHub rejects "Unrecognized named-value: 'env'" at parse time —
-      # so this is resolved in a step where env IS available.
+      # Resolve GRADLE_USER_HOME. This job is ALWAYS self-hosted now, so it always takes the
+      # per-service isolated-home branch — one job's `gradle --stop` post-action can't kill a
+      # sibling job's daemon on the shared persistent registry (the documented "1-of-28-fails
+      # / daemon disappeared" incident).
       - name: Resolve GRADLE_USER_HOME
-        env:
-          RUNNER_ENV: ${{ runner.environment }}
         run: |
           if [ -n "${GRADLE_USER_HOME_NODE_CACHE:-}" ]; then
             echo "GRADLE_USER_HOME=${GRADLE_USER_HOME_NODE_CACHE}/${{ inputs.service }}" >> "$GITHUB_ENV"
-          elif [ "${RUNNER_ENV}" = "self-hosted" ]; then
-            echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
           else
-            # GitHub-hosted PR lane: default home so setup-gradle restores the shared cache.
-            echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
+            echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
           fi
 
-      # Warm this service's Gradle dependency cache BEFORE "Build + test" runs, so an
-      # interrupted-download-corrupted module cache entry (a .pom downloaded with no
-      # matching .jar — a sibling job/daemon writing to the same shared/persistent
-      # GRADLE_USER_HOME concurrently: the ARC node-local hostPath cache, or the
-      # Mac/Hetzner persistent per-service home) is caught and healed HERE, not inside
-      # "Build + test". That step must run exactly once — it re-runs `test` differently
-      # depending on PUBLISH_RESULTS (the #1009 Pact-publish hazard documented below), so
-      # retrying it on failure risks a double/uncredentialed Pact Broker publish. This
-      # warm-up runs no test code and has no side effects, so it is safe to retry.
-      # `quarkusDependenciesBuild` resolves exactly the runtime classpath that failed with
-      # a dependency-verification error in the incident this guards against; it does not
-      # compile or run anything. Deliberately narrow: heal-gradle-verification-failure.sh
-      # only removes the exact artifact/version Gradle names in its own verification-failure
-      # message — it does not scan the cache for "suspicious" entries (an earlier, broader
-      # heuristic — pom present, jar absent — flagged legitimate BOM-only and
-      # never-downloaded transitive dependencies as corrupt; do not resurrect that).
       - name: Warm Gradle dependency cache (self-heal corrupted entries)
         continue-on-error: true
         run: |
           set +e
-          ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
           warmup_status=$?
-          if [ $warmup_status -ne 0 ]; then
+          if [ $warmup_status -eq 124 ]; then
+            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory step"
+            cat /tmp/gradle-warmup.log
+          elif [ $warmup_status -ne 0 ]; then
             cat /tmp/gradle-warmup.log
             if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
               echo "retrying dependency warm-up after healing corrupted cache entries"
-              ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              retry_status=$?
+              if [ $retry_status -eq 124 ]; then
+                echo "::warning::dependency warm-up retry timed out after 120s; continuing"
+              fi
             else
-              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
+              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real step to report"
             fi
           fi
 
-      # Normalize the Testcontainers Docker endpoint across the MIXED runner pool
-      # (ARC dind + Hetzner + Mac mini/OrbStack — all serve Docker at the unix socket:
-      # arc-runners.tf pins DOCKER_HOST=unix:///var/run/docker.sock, Hetzner uses the
-      # standard socket, OrbStack symlinks /var/run/docker.sock). The convention plugin
-      # inherits the ambient DOCKER_HOST; the retired tcp://localhost:2375 endpoint
-      # lingers in some self-hosted runner envs (the Mac mini) and makes Testcontainers
-      # fail with `DockerDesktopClientProviderStrategy: getSocketPath() null` (#873).
-      # Normalize an empty/retired value to the unix socket; leave any other deliberate
-      # ambient override untouched.
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
         run: |
           if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
@@ -290,17 +442,7 @@ jobs:
             echo "DOCKER_HOST left as: ${DOCKER_HOST}"
           fi
 
-      # Raise fs.aio-max-nr so parallel Testcontainers don't exhaust the kernel's default
-      # 65536 AIO pool. Redpanda (Seastar) reserves AIO contexts per shard and Quarkus
-      # reactive adds more; when the pool hits 0 a container dies with "Could not setup
-      # Async I/O" / exit 139 (e.g. the SctInstAccessControlIT flake on a Hetzner runner).
-      # ARC runners already get this via a privileged init container (arc-runners.tf,
-      # issue #1329); the non-ARC pool (Hetzner) has no repo-managed host bootstrap, so we
-      # raise it here. On a long-lived runner the value persists for later jobs.
-      # Linux-only (macOS has no /proc/sys/fs/aio-max-nr); `sudo -n` fails fast instead of
-      # hanging on a password prompt where NOPASSWD is absent; never fatal.
       - name: Raise fs.aio-max-nr for Testcontainers (best-effort, Linux)
-        if: runner.os == 'Linux'
         continue-on-error: true
         timeout-minutes: 1
         run: |
@@ -315,26 +457,9 @@ jobs:
             echo "fs.aio-max-nr already ${cur} (>= 1048576)"
           fi
 
-      # FinOps: pre-warm Testcontainers images from ECR pull-through cache (PR #1393, updated).
-      #
-      # docker.io images (postgres, redpanda, valkey, apicurio) are pulled via the ECR
-      # pull-through cache rule "docker-hub/" (ecr-pull-through-cache.tf). ECR fetches
-      # from Docker Hub server-side; runner pulls from private ECR over the ecr.dkr VPC
-      # Interface endpoint — zero NAT bytes. After pulling, each image is retagged to its
-      # canonical docker.io name so Testcontainers finds it in the local docker image store
-      # without needing to pull again (Testcontainers uses the image name as cache key).
-      #
-      # Auth: the ARC pool gets ambient AWS creds via EKS Pod Identity, but the Hetzner
-      # self-hosted pool has NONE — so `aws ecr get-login-password` failed there ("ECR login
-      # failed"), and even on ARC the build-runner role lacked pull-through import rights so the
-      # first uncached pull 403'd (transaction-service). Fix both with GitHub OIDC: assume
-      # openbank-arc-build-runner (which already trusts repo:JiRaska/open-bank-oss:* — arc-runners.tf)
-      # and let the ECR-login action docker-login the runner. Keyless and host-agnostic: the
-      # amazon-ecr-login action needs no awscli on the host (absent on Hetzner). Both steps soft-
-      # fail so a runner without OIDC still falls through to the in-cluster registry-cache below.
+      # FinOps: pre-warm Testcontainers images from ECR pull-through cache (PR #1393).
       - name: Authenticate to ECR via OIDC
         id: ecr_auth
-        if: ${{ runner.environment == 'self-hosted' }}
         continue-on-error: true
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
         with:
@@ -342,19 +467,14 @@ jobs:
           aws-region: eu-north-1
       - name: Login to Amazon ECR
         id: ecr_login
-        if: ${{ runner.environment == 'self-hosted' && steps.ecr_auth.outcome == 'success' }}
+        if: ${{ steps.ecr_auth.outcome == 'success' }}
         continue-on-error: true
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
       - name: Pre-warm Testcontainers image cache via ECR
-        if: ${{ runner.environment == 'self-hosted' }}
         continue-on-error: true
         env:
           ECR: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
         run: |
-          # docker is already authenticated to ECR by the "Login to Amazon ECR" step (OIDC) when it
-          # succeeded — no `aws ecr get-login-password` here (that needs host awscli, absent on
-          # Hetzner). Pull from the ECR pull-through cache (zero NAT) and retag to canonical
-          # docker.io names so Testcontainers cache-hits locally without a second pull.
           if [ "${{ steps.ecr_login.outcome }}" = "success" ] \
              && docker pull "$ECR/docker-hub/library/postgres:16.3-alpine"; then
             docker pull "$ECR/docker-hub/valkey/valkey:7.2-alpine" &
@@ -377,9 +497,7 @@ jobs:
           else
             echo "::warning title=TC pre-warm::no image cache reachable — Testcontainers will pull at test time"
           fi
-      # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
-      # lets Gradle's toolchain resolution pick the right one with zero Foojay
-      # downloads at build time (faster, fewer billed minutes).
+
       - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
@@ -387,12 +505,6 @@ jobs:
             21
             25
 
-      # Probe the in-cluster Reposilite Maven mirror (issue #849).
-      # ARC runners (in-cluster) reach the ClusterIP in ~1 ms; Hetzner/Mac
-      # runners get ECONNREFUSED immediately and skip silently. When the probe
-      # succeeds, REPOSILITE_MIRROR_URL is set and settings.gradle.kts prepends
-      # the three Reposilite repos (maven-central / gradle-plugins / google)
-      # before the GCS fallback — zero NAT for in-cluster runners.
       - name: Probe Reposilite in-cluster Maven mirror
         run: |
           if curl -sf --connect-timeout 2 \
@@ -405,19 +517,9 @@ jobs:
             echo "::notice title=Reposilite unavailable::falling back to GCS mirror + CodeArtifact"
           fi
 
-      # Wire Gradle to use AWS CodeArtifact as a Maven Central mirror (FinOps).
-      # CodeArtifact sits in-VPC; its S3 storage backend uses the S3 Gateway endpoint
-      # → dep downloads never exit the VPC, eliminating NAT charges (~$25/day).
-      # The ARC runner pod IAM role has codeartifact:GetAuthorizationToken via IRSA.
       - name: Configure CodeArtifact Maven mirror
-        # Soft-fail: if IRSA is not yet wired the token fetch fails gracefully and
-        # Maven Central is used directly (with NAT cost). Remove once IRSA is stable.
         continue-on-error: true
         run: |
-          # The aws CLI is baked into the openbank-ci-runner image; this guard turns a
-          # missing CLI (stock runner image / new pool) into a VISIBLE soft-skip instead
-          # of a bare `exit 127` in the log. Fallback to public Maven Central is the
-          # emergency path only — it pays NAT and risks 429 throttling (see 2026-06-11).
           if ! command -v aws >/dev/null 2>&1; then
             echo "::warning title=CodeArtifact mirror skipped::aws CLI not on this runner — falling back to public Maven Central (NAT cost + 429 risk). Bake awscli into the runner image (runner-image/Dockerfile)."
             exit 0
@@ -431,8 +533,6 @@ jobs:
             exit 0
           }
           CA_URL="https://openbank-sandbox-265175468565.d.codeartifact.eu-north-1.amazonaws.com/maven/maven-central-proxy/"
-          # Write a Gradle init script that redirects maven central to CodeArtifact.
-          # Placed in GRADLE_USER_HOME/init.d/ so it applies to every project.
           mkdir -p "${GRADLE_USER_HOME}/init.d"
           cat > "${GRADLE_USER_HOME}/init.d/codeartifact-mirror.gradle" <<GRADLE_INIT
           allprojects {
@@ -459,190 +559,43 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
         with:
-          # GitHub Actions cache DISABLED for Gradle home.
-          #
-          # FinOps root-cause (2026-06-22): NAT traffic analysis showed 74 GB/day
-          # upload (OutToDestination) on a light CI day, 100% correlated with CI
-          # hours. Root cause: setup-gradle's post-action was uploading the full
-          # Gradle home (~450 MB per service × 28 services = 12+ GB per main push)
-          # to GitHub Actions cache at actions.githubusercontent.com — a GitHub-
-          # hosted S3 bucket that is NOT reachable via a VPC endpoint, so every
-          # byte exits through the NAT gateway at $0.045/GB + $0.09/GB DataTransfer.
-          # The asymmetric DataTransfer-Out charge doubled the per-GB cost vs a
-          # pure download.
-          #
-          # Why safe to disable:
-          # 1. Gradle task outputs (compiled classes, test results) are served by
-          #    the in-cluster remote build cache (nginx WebDAV, GRADLE_REMOTE_CACHE_URL
-          #    injected by arc-runners.tf) — unchanged tasks resolve in <1s with no
-          #    upstream download. This is what actually speeds up incremental builds.
-          # 2. Gradle wrapper (~150 MB) and Maven dependencies are fetched via the
-          #    CodeArtifact VPC interface endpoint (in-VPC, zero NAT), so cold-start
-          #    dep resolution does not hit the NAT gateway.
-          # 3. Persistent Mac runners retain a warm GRADLE_USER_HOME across jobs
-          #    (ADR-0043); the GitHub cache was never needed for them.
-          # 4. ARC ephemeral pods will see a slightly slower first build on a cold
-          #    cluster but the in-cluster remote build cache covers 95%+ of wall-clock
-          #    by caching the expensive compile/test tasks.
-          #
-          # Net effect: eliminates ~74 GB/day upload + corresponding download traffic
-          # ≈ $6.66/day saved ($200/month). Re-enable if cold-start build time degrades
-          # unacceptably after the remote build cache fills (typically 1-2 runs).
-          #
-          # NOTE: the input is `cache-disabled` (gradle/actions/setup-gradle v6). The
-          # earlier `cache-enabled: false` was NOT a valid input — the action ignored it
-          # ("Unexpected input(s) 'cache-enabled'") so caching stayed ON: the post-action
-          # kept uploading the Gradle home, silently negating the FinOps saving above AND
-          # exhausting the shared storage quota during full-fleet rebuilds
-          # ("Failed to CreateArtifact: Artifact storage quota has been hit"), which failed
-          # otherwise-green service builds.
-          #
-          # The NAT-cost analysis above applies to SELF-HOSTED runners in the VPC.
-          # On GitHub-hosted runners (the PR lane) the Actions cache is
-          # network-internal and free, and there is no in-cluster remote build
-          # cache to fall back on — so the cache is enabled there and disabled
-          # on the self-hosted main lane.
-          cache-disabled: ${{ runner.environment == 'self-hosted' }}
-          # On the hosted PR lane: RESTORE the warm cache fleet-lint keeps on main, but
-          # never WRITE. Writing 26 per-service home caches on PR branches would churn the
-          # Actions cache quota (already ~96% full) and re-trigger the "storage quota has
-          # been hit" build failures noted above. Read-only gets the ~120 s speedup (paired
-          # with the default GRADLE_USER_HOME resolved above, which is what lets the restore
-          # actually hit) at zero quota cost. Ignored on self-hosted (cache-disabled there).
-          cache-read-only: ${{ runner.environment != 'self-hosted' }}
-          # Enable the cross-job OS-level fallback restore so a service build can reuse
-          # fleet-lint's / another service's home cache instead of requiring an exact
-          # per-job match (which never exists — the self-hosted main lane writes no cache).
+          # Self-hosted: disable the GitHub Actions cache for Gradle home (FinOps — see the
+          # original single-job file's history for the NAT-cost analysis) and rely on the
+          # in-cluster remote build cache (GRADLE_REMOTE_CACHE_URL, arc-runners.tf) instead.
+          cache-disabled: true
           gradle-home-cache-strict-match: false
 
-      # No --no-daemon (ADR-0043): on a persistent runner the Gradle daemon is kept
-      # warm and reused across jobs, so the JVM + 30-module configuration is not paid
-      # from cold every build. --build-cache hits the local cache and, when wired, the
-      # shared remote build-cache-node (GRADLE_REMOTE_CACHE_URL) so unchanged modules
-      # in a fleet fan-out resolve from cache instead of recompiling.
-      - name: Build + test (:${{ inputs.service }})
-        env:
-          # PR branch on PRs, "main" on the main push — used to tag the consumer
-          # pact + the provider verification result so can-i-deploy can reason per branch.
-          BRANCH: ${{ github.head_ref || github.ref_name }}
-          # Publish provider verification results only from the main push (the SHA
-          # auto-deploy will gate on). PR builds verify but don't publish results.
-          PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          # Pact Broker config (ADR-0092) is forwarded as -D system properties; the
-          # provider build.gradle.kts copies these into the forked test JVM. Empty
-          # pactbroker.url (var unset) → @PactBroker provider test skips (it is
-          # @EnabledIfSystemProperty(named=pactbroker.url, matches=.+)-gated).
-          #
-          # --rerun-tasks ONLY on the main-push publish path (#1965/#1964). Publishing the
-          # provider-verification result is a network SIDE-EFFECT (a POST to the Pact Broker)
-          # that Gradle's up-to-date / build-cache machinery cannot observe: when the `test`
-          # task is restored from cache — which happens in a fleet fan-out where THIS provider's
-          # source + SHA are unchanged (e.g. a consumer republishes a new pact and the provider
-          # must re-verify + re-publish against it) — the cached result is reused and the publish
-          # POST never fires. That is why #1964 needed a manual build.gradle.kts cache-key bust to
-          # force a re-publish. Forcing re-execution here makes the publish happen on every main
-          # push, deterministically. Gated on PUBLISH_RESULTS (main only) so PR builds and the
-          # PR-lane fleet keep their cache: they verify but never publish, so re-running them would
-          # only cost time with no side-effect to trigger. The later "Generate Kover XML report"
-          # step is NOT re-run (no --rerun-tasks): `test` is up-to-date from this step, so it stays
-          # cached and does not re-execute uncredentialed (the #1009 hazard documented below).
-          RERUN=""
-          if [ "${PUBLISH_RESULTS}" = "true" ]; then RERUN="--rerun-tasks"; fi
-          # -Dquarkus.smallrye-openapi.store-schema-directory writes the document Quarkus actually
-          # serves, as a side effect of the SAME quarkusBuild task this :build already runs
-          # (confirmed via --dry-run: quarkusBuild is already in :build's task graph for every
-          # Quarkus module here, so this adds zero extra build time). Read by the
-          # openapi-request-schema-conformance step below — rules.yaml:
-          # openapi_request_schema_conformance.
-          ./gradlew :${{ inputs.service }}:build ${RERUN} --build-cache --console=plain --stacktrace \
-            -Dquarkus.smallrye-openapi.store-schema-directory="${{ inputs.service }}/build/openapi-generated" \
-            -Dpactbroker.url="${PACT_BROKER_URL:-}" \
-            -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
-            -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
-            -Dpactbroker.enablePending=true \
-            -Dpactbroker.providerBranch="${BRANCH}" \
-            -Dpact.verifier.publishResults="${PUBLISH_RESULTS}" \
-            -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
-            -Dpact.provider.branch="${BRANCH}" \
-            -Dpact.provider.tag="${BRANCH}"
-
-      # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
-      # cause, so the reader goes hunting for a test bug that is not there. The PR lane runs on
-      # `ubuntu-latest`, where the ECR pre-warm step above is skipped, so Testcontainers pulls
-      # straight from Docker Hub. Full reasoning in the script header. Diagnostic only: it reads
-      # JUnit XML already on disk, always exits 0, and can never change the build verdict.
-      - name: "Explain a Docker registry pull failure (diagnostic)"
-        if: failure()
-        run: |
-          python3 .github/scripts/check-testcontainers-registry-failure.py \
-            --service "${{ inputs.service }}"
-
-      # rules.yaml: openapi_request_schema_conformance (advisory). Only the REQUEST-body half of
-      # schema-vs-code — see the script header for why the response half is not attempted. The
-      # existence guard is a bash `[ -f ]` rather than a YAML `if: hashFiles(...)` composition —
-      # no precedent for hashFiles(format(...)) elsewhere in this repo's workflows, and per the
-      # project's own note on workflow files, a mistaken expression here is invisible until an
-      # actual CI run reaches it. A bash guard is checkable with `bash -n` before that.
-      - name: "openapi request-schema conformance (advisory)"
-        run: |
-          SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
-          if [ ! -f "$SPEC" ]; then
-            echo "openapi-request-schema-conformance: ${{ inputs.service }} has no openapi.yaml — skipping."
-            exit 0
-          fi
-          python3 .github/scripts/check-openapi-request-schema-conformance.py \
-            --service "${{ inputs.service }}" \
-            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
-
-      # Coverage upload (Codecov is free for public repos; tokenless via the OIDC
-      # id-token this job already has). Advisory only — never gates the build.
-      # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
-      #
-      # The -D flags below MUST mirror "Build + test" verbatim (issue #1009). koverXmlReport
-      # depends on koverGenerateArtifact -> test, so this is a SECOND, independent `./gradlew`
-      # invocation reaching the same `test` task. build.gradle.kts's `tasks.withType<Test> {
-      # System.getProperty(key)?.let { systemProperty(key, it) } }` makes those Pact -D values
-      # part of `test`'s tracked inputs — omitting them here makes the input set differ from the
-      # build step's, which is a guaranteed cache miss: Gradle re-executes `test` from scratch,
-      # this time with pactbroker.url/pact.verifier.publishResults unset, so the pact-jvm
-      # verifier logs "Skipping publishing of verification results ... not 'true'" and the
-      # @PactBroker provider test's @EnabledIfSystemProperty(pactbroker.url) gate skips it
-      # outright. Confirmed live in run 29489275110 job 87613534930 (2026-07-16): the `test` task
-      # ran a second, full time (fresh Testcontainer boot included) right after this step started,
-      # with none of the Pact system properties present. Passing identical values here lets
-      # Gradle recognize `test` as UP-TO-DATE/FROM-CACHE instead of re-running it uncredentialed.
-      - name: Generate Kover XML report
-        continue-on-error: true
-        env:
-          BRANCH: ${{ github.head_ref || github.ref_name }}
-          PUBLISH_RESULTS: ${{ github.ref == 'refs/heads/main' }}
-        run: |
-          ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain \
-            -Dpactbroker.url="${PACT_BROKER_URL:-}" \
-            -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
-            -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
-            -Dpactbroker.enablePending=true \
-            -Dpactbroker.providerBranch="${BRANCH}" \
-            -Dpact.verifier.publishResults="${PUBLISH_RESULTS}" \
-            -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
-            -Dpact.provider.branch="${BRANCH}" \
-            -Dpact.provider.tag="${BRANCH}"
-
-      - name: Upload coverage to Codecov
-        continue-on-error: true
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+      # Artifact hand-off from `build` MUST fail loud (issue #4414 acceptance criterion): a
+      # missing or failed download means either `build` failed before uploading (in which case
+      # this job would not even be scheduled — `needs: build` implies success) or the artifact
+      # expired/was misnamed, and either way publishing a verification without knowing this
+      # service's actual consumer-pact set would be silently wrong. No continue-on-error, no
+      # if: always() — a failure here fails the job.
+      - name: Download build's consumer-pact artifact
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v6.2.1
         with:
-          files: ${{ inputs.service }}/build/reports/kover/report.xml
-          flags: ${{ inputs.service }}
-          use_oidc: true
-          fail_ci_if_error: false
+          name: consumer-pacts-${{ inputs.service }}
+          path: pact-handoff
 
-      # Publish this service's CONSUMER pacts to the broker (ADR-0092). The consumer
-      # tests regenerate pacts/<consumer>-<provider>.json (pact.rootDir → repo /pacts);
-      # publish only the files where THIS service is the consumer, keyed by git SHA +
-      # branch via the /contracts/publish API. curl (not the pact-cli docker image):
-      # the runner pod resolves the broker's cluster DNS, a dind container would not.
+      - name: Stage handed-off consumer pacts into pacts/
+        run: |
+          set -euo pipefail
+          if [ ! -f pact-handoff/manifest.txt ]; then
+            echo "::error::pact hand-off artifact from the build job has no manifest.txt — treating this as a failed hand-off, not an empty consumer-pact set (the build job always writes one)."
+            exit 1
+          fi
+          cat pact-handoff/manifest.txt
+          mkdir -p pacts
+          shopt -s nullglob
+          files=(pact-handoff/*.json)
+          for f in "${files[@]}"; do cp "$f" pacts/; done
+          echo "Staged ${#files[@]} consumer pact file(s) from the build job's hand-off."
+
+      # Publish this service's CONSUMER pacts to the broker (ADR-0092). Reads the files staged
+      # from the build job's hand-off above (regenerated there, not here — re-running `test`
+      # on this pool is exactly the redundant work this split removes), keyed by git SHA +
+      # branch via the /contracts/publish API. curl (not the pact-cli docker image): the
+      # runner pod resolves the broker's cluster DNS, a dind container would not.
       - name: Publish consumer pacts to broker
         if: ${{ env.PACT_BROKER_URL != '' }}
         env:
@@ -655,7 +608,6 @@ jobs:
             echo "${{ inputs.service }} is not a consumer of any contract — nothing to publish."
             exit 0
           fi
-          # Build the /contracts/publish body: content is BASE64-encoded pact JSON.
           contracts="$(for f in "${files[@]}"; do
             jq -nc \
               --arg c "$(jq -r '.consumer.name' "$f")" \
@@ -678,60 +630,50 @@ jobs:
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
           [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
 
-      # Only on failure: a passing build's test reports are never looked at, but uploading
-      # them on EVERY service build (×~28 services × many runs/day) was a dominant driver of
-      # GitHub Actions artifact-storage churn — bursts during a full-fleet rebuild hit the
-      # quota and failed unrelated uploads ("Failed to CreateArtifact: Artifact storage quota
-      # has been hit"). `failure()` keeps the reports exactly when they're needed for debugging.
+      # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
+      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
+      # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
+      # to the Pact Broker) that Gradle's up-to-date/build-cache machinery cannot observe, so a
+      # cached providerPactTest would silently skip the publish (#1964's original reason,
+      # narrowed here to a task this job ALONE runs — no PR-lane cache to protect).
+      - name: Provider verification (:${{ inputs.service }}:providerPactTest)
+        env:
+          BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          ./gradlew :${{ inputs.service }}:providerPactTest --rerun-tasks --build-cache \
+            --console=plain --stacktrace \
+            -Dpactbroker.url="${PACT_BROKER_URL:-}" \
+            -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
+            -Dpactbroker.auth.password="${PACT_BROKER_PASSWORD:-}" \
+            -Dpactbroker.enablePending=true \
+            -Dpactbroker.providerBranch="${BRANCH}" \
+            -Dpact.verifier.publishResults=true \
+            -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
+            -Dpact.provider.branch="${BRANCH}" \
+            -Dpact.provider.tag="${BRANCH}"
+
+      - name: "Explain a Docker registry pull failure (diagnostic)"
+        if: failure()
+        run: |
+          python3 .github/scripts/check-testcontainers-registry-failure.py \
+            --service "${{ inputs.service }}"
+
       - name: Upload test reports
         if: failure()
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          # `-a${{ github.run_attempt }}` is not cosmetic. An artifact name must be unique
-          # WITHIN A RUN, and re-running a failed job is a new attempt of the SAME run — so
-          # without the suffix the second upload collides and fails. `continue-on-error: true`
-          # then swallows it, which means that until now a re-run silently retained no reports
-          # at all: the case where you most want them.
-          name: test-reports-${{ inputs.service }}-a${{ github.run_attempt }}
-          # XML moved to the always-on step below, so this no longer duplicates it. Net upload
-          # on a failing build is unchanged; the HTML is what a human actually reads here.
-          path: ${{ inputs.service }}/build/reports/tests
+          name: contract-test-reports-${{ inputs.service }}-a${{ github.run_attempt }}
+          path: ${{ inputs.service }}/build/reports/tests/providerPactTest
           if-no-files-found: ignore
           retention-days: 7
 
-      # WHY THIS IS `always()` WHEN THE STEP ABOVE IS DELIBERATELY NOT (#4878).
-      #
-      # A flake cannot be counted in this repo. Re-running a failed run flips its conclusion
-      # away from `failure`, so a query over run conclusions structurally cannot see a flake
-      # that someone re-ran green -- which is the entire population of interest. And a green
-      # run retained nothing, so there was no denominator either: "how often does this test
-      # fail" had no answer at any effort.
-      #
-      # Both halves are fixed by retaining the JUnit XML per ATTEMPT. Attempt 1's failures and
-      # attempt 2's pass then sit side by side under the same run id, and a flake is no longer
-      # something that has to be noticed and reported at the moment of the re-run -- it is a
-      # difference between two artifacts, computable afterwards. That is the whole of this
-      # issue's point 2 obtained by retention rather than by another emitter that has to fire.
-      #
-      # The quota incident that made the step above `failure()` is respected: this uploads the
-      # XML ONLY, not the HTML reports. Measured on openbank-billing-service, that is 140 KB
-      # against 608 KB for the pair, and retention is 3 days rather than 7. Today's artifact
-      # estate is 2.4 GB across ~14.7k artifacts, so a full-fleet rebuild of ~28 services adds
-      # about 4 MB. What is NOT established here is the service-build rate per day, so the
-      # steady-state total is bounded by (rate x 140 KB x 3 days) and not stated as a figure --
-      # if artifact pressure returns, this retention is the dial, and it is the first thing to
-      # look at.
       - name: Upload JUnit XML (every run — flake accounting)
         if: always()
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: junit-xml-${{ inputs.service }}-a${{ github.run_attempt }}
-          path: ${{ inputs.service }}/build/test-results/**/*.xml
+          name: contract-junit-xml-${{ inputs.service }}-a${{ github.run_attempt }}
+          path: ${{ inputs.service }}/build/test-results/providerPactTest/**/*.xml
           if-no-files-found: ignore
           retention-days: 3
-          # Per-test-JVM Testcontainers own their lifecycle (start in @QuarkusTestResource,
-          # stop() at teardown; Ryuk is disabled fleet-wide, so the resource tears them down
-          # itself). On failure their stdout/stderr is captured in the test reports uploaded
-          # above — there is no shared compose stack left running to dump or to reset.

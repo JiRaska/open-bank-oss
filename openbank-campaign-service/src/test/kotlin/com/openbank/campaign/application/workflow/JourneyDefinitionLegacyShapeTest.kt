@@ -13,14 +13,18 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * The replay-safety argument for the #3585 branch conditions, as a test rather than a claim.
+ * The replay-safety argument for the #3585 branch conditions and the #4781/ADR-0263 decision
+ * graph, as a test rather than a claim.
  *
  * `CampaignJourneyWorkflowImpl` calls the new `previousDeliveryStatus` activity only when a step
  * carries a [com.openbank.campaign.domain.model.StepCondition]. An in-flight journey replays the
  * `loadDefinition` result out of its Temporal history — JSON written before the field existed — so
  * the whole argument reduces to one question: does that legacy JSON still deserialize, with
  * `condition` null? If it did not, every running journey would either fail to replay or take a
- * branch its history never recorded.
+ * branch its history never recorded. The identical argument applies to `decisions` and
+ * `nextStepOrder`, added later by #4781 (ADR-0263 D1): a journey started before that PR has a
+ * `JourneyDefinition` in its history with no `decisions` key at all, and a step with no
+ * `nextStepOrder` key.
  *
  * Decoded through the very converter the production client is built with
  * (`TemporalClientProducer.kotlinAwareDataConverter`, mirrored in
@@ -31,6 +35,14 @@ class JourneyDefinitionLegacyShapeTest {
 
     private val legacyStepJson =
         """{"order":0,"template":"MARKETING_PRODUCT_OFFER","channel":"EMAIL","variables":{},"delaySeconds":60}"""
+
+    /**
+     * The exact wire shape of a `CampaignStep` and `JourneyDefinition` immediately before #4781
+     * (parent commit 3cc3fe087^): `condition`/`conditionSourceOrder` already exist (#3585), but
+     * `decisions` and `nextStepOrder` do not — neither key is present here.
+     */
+    private val preGraphStepJson = """{"order":0,"template":"MARKETING_PRODUCT_OFFER","channel":"EMAIL",""" +
+        """"variables":{},"delaySeconds":60,"conditionSourceOrder":null}"""
 
     private fun payload(json: String): Payload = Payload.newBuilder()
         .putMetadata("encoding", ByteString.copyFromUtf8("json/plain"))
@@ -60,5 +72,33 @@ class JourneyDefinitionLegacyShapeTest {
         val step: CampaignStep = ObjectMapper().registerKotlinModule().readValue(legacyStepJson)
 
         assertThat(step.condition).isNull()
+    }
+
+    @Test
+    fun `a definition recorded before the decision graph existed replays with no decisions and no next step`() {
+        // Same argument as the branch-condition test above, one field generation later (ADR-0263
+        // Phase A(b)): an in-flight journey's history predating #4781 has no `decisions` key on
+        // JourneyDefinition and no `nextStepOrder` key on its step — both must default rather than
+        // fail deserialization, through the production kotlinAwareDataConverter.
+        val legacy = """{"steps":[$preGraphStepJson],"stopCondition":null}"""
+
+        val definition = CampaignJourneyWorkflowTest.kotlinAwareDataConverter().fromPayload(
+            payload(legacy),
+            JourneyDefinition::class.java,
+            JourneyDefinition::class.java,
+        )
+
+        assertThat(definition.decisions).isEmpty()
+        assertThat(definition.steps).hasSize(1)
+        assertThat(definition.steps[0].nextStepOrder).isNull()
+        assertThat(definition.steps[0].conditionSourceOrder).isNull()
+    }
+
+    @Test
+    fun `a campaign row written before the decision graph existed reads with no next step`() {
+        // The other persistence path (V2 JSON text column), same generation.
+        val step: CampaignStep = ObjectMapper().registerKotlinModule().readValue(preGraphStepJson)
+
+        assertThat(step.nextStepOrder).isNull()
     }
 }

@@ -77,7 +77,13 @@ configurations.all {
     }
 }
 
-tasks.test {
+// Shared config for EVERY Test task in the module — `test` plus the `providerPactTest` task
+// registered below (ADR-0250 Phase 2). Deliberately `withType<Test>().configureEach` rather
+// than `tasks.test { ... }`: the pact rootDir/broker-forwarding block used to be hand-copied
+// into 36 individual build.gradle.kts files (issue #4414) purely so it would also apply to a
+// service's own extra Test tasks — putting it here once, on every Test task fleet-wide, is what
+// makes per-service copies removable at all.
+tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
     // Testcontainers Docker endpoint. Inherit the ambient DOCKER_HOST (the ephemeral
@@ -105,7 +111,84 @@ tasks.test {
     // tampered text is gone. Set here (not per module) so the 21 services that write pacts cannot
     // drift apart on it.
     systemProperty("pact.writer.overwrite", "true")
+
+    // Pact rootDir + Pact Broker property forwarding (ADR-0092/ADR-0250 Phase 2, issue #4414).
+    // Was hand-copied, with real per-service drift, into 36 build.gradle.kts files — a rolled-up
+    // hash check of those blocks found 5 distinct shapes (not 1), each diffed individually before
+    // this centralisation: a `maxHeapSize` override (account/lending/product-catalog), a JUnit
+    // timeout + CI-only jvmArgs (swift), presence/absence of the rootDir line depending on whether
+    // the service only PROVIDES or only CONSUMES pacts (finrep/copilot vs clearing-simulator/
+    // tpp-registry-service), and a `tasks.test { }`-scoped copy (party-service) instead of
+    // `tasks.withType<Test>`. None of those differences is expressed here — they stay in each
+    // service's own build.gradle.kts — this block only carries the part that was byte-identical
+    // (or a harmless no-op superset) everywhere it appeared.
+    //
+    // Set on the test JVM fork, not the Gradle daemon — System.setProperty at config time would
+    // not propagate into the forked test process.
+    systemProperty("pact.rootDir", "${rootProject.projectDir}/pacts")
+    listOf(
+        "pactbroker.url",
+        "pactbroker.auth.username",
+        "pactbroker.auth.password",
+        "pactbroker.enablePending",
+        "pactbroker.providerBranch",
+        "pact.verifier.publishResults",
+        "pact.provider.version",
+        "pact.provider.branch",
+        "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
+
+// ADR-0250 Phase 2 (issue #4414): a Pact provider-verification test needs `-Dpactbroker.url` set
+// to run against the broker, and that `-D` is a tracked INPUT of whatever Test task runs it — so
+// invoking the ordinary `test` task with a broker URL set (the main-push "contract" build) is
+// ALWAYS a different Gradle cache key from invoking it without one (the "build" job on every
+// other event), even when `--tests` filters which classes execute. That forces a full test-suite
+// re-run on every main push. `--tests` was never going to fix this: it changes what runs, not
+// what the task's inputs are.
+//
+// The fix is a SEPARATE Test task/source set so provider verification has its own task identity
+// and its own cache key, decoupled from `test`'s. It deliberately reuses `test`'s own source
+// directory (`src/test/kotlin`) rather than requiring every service to physically move its
+// `*ProviderVerificationTest.kt` files into a new `src/providerPactTest/kotlin` tree — issue #4414
+// finding 1 established that EVERY provider-verification class in the fleet already ends in
+// `ProviderVerificationTest`, so an include filter on the existing directory selects exactly the
+// right classes with zero fleet-wide file moves. Classes outside that filter (test helpers like a
+// `*TestResource`, referenced by the provider-verification class via `@QuarkusTestResource`) are
+// pulled in via the `test` source set's COMPILED output on the classpath, not recompiled — so
+// running `providerPactTest` triggers `compileTestKotlin` (a compile task, whose inputs are just
+// source files and is therefore cache-stable regardless of `-Dpactbroker.url`) but never EXECUTES
+// the rest of `test`'s suite.
+val providerPactTestSourceSet =
+    sourceSets.create("providerPactTest") {
+        kotlin.srcDir("src/test/kotlin")
+        kotlin.include("**/*ProviderVerificationTest.kt")
+        resources.srcDir("src/test/resources")
+        compileClasspath += sourceSets.main.get().output +
+            sourceSets.test.get().output +
+            configurations.testCompileClasspath.get()
+        runtimeClasspath += output + compileClasspath + sourceSets.test.get().runtimeClasspath
+    }
+
+val providerPactTest =
+    tasks.register<Test>("providerPactTest") {
+        description = "Runs Pact provider-verification tests only, isolated from `test` " +
+            "(ADR-0250 Phase 2, issue #4414) — invoke with -Dpactbroker.url=... to verify " +
+            "against the broker."
+        group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+        testClassesDirs = providerPactTestSourceSet.output.classesDirs
+        classpath = providerPactTestSourceSet.runtimeClasspath
+        // Independent of `check`/`test` — a service with no provider-verification classes at all
+        // (the include filter above matches nothing) still gets the task registered, and it
+        // reports 0 tests rather than failing; JUnit5's default `failOnNoTests` behaviour on an
+        // EMPTY discovered set is "pass", not "fail", which is exactly what an unfiltered `test`
+        // invocation of the same module already relies on for services with no tests of a kind.
+        shouldRunAfter(tasks.named("test"))
+    }
+// Deliberately NOT wired into `check`/`build` (unlike koverVerify below): the whole point of
+// this task is that a main-push "build" job (:service:build, which depends on `check`) must be
+// able to run WITHOUT it, so it never becomes an input the hosted "build" job pays for. Invoke it
+// explicitly: `./gradlew :service:providerPactTest -Dpactbroker.url=...`.
 
 tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {
     setIncludeConfigs(listOf("runtimeClasspath"))

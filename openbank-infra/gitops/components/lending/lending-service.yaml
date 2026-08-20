@@ -9,6 +9,13 @@
 # LENDING_LEDGER_BACKEND=rest activates RestLedgerPostingAdapter; the default
 # `none` keeps the no-op bound for offline builds.
 #
+# LENDING_BORROWER_CREDIT_BACKEND=rest activates the disbursement's customer-facing leg
+# (#3931): the ledger journal above only ever touches internal GL accounts (Loans
+# Receivable, Funding Clearing), so without this a disbursed loan books an asset for the
+# bank and pays the customer nothing — confirmed live before this fix, 44 active loans /
+# 6.6M CZK principal, none of it reaching an account. Same activation shape as
+# LENDING_LEDGER_BACKEND, one env var gating both the account lookup and the credit call.
+#
 # Money-path service (ADR-0030): 2 approvals + threat model required on every PR.
 # Progressive delivery: Argo Rollout canary (ADR-0098).
 apiVersion: argoproj.io/v1alpha1
@@ -34,7 +41,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-lending-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "ddcca992d30aba03"
+        openbank.tech/policy-checksum: "19f5cea6df7afc55"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -45,7 +52,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: lending-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-6265ea86
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-lending-service:sandbox-226727f4
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -107,6 +114,16 @@ spec:
             # Ledger service in-cluster URL (default resolves only localhost).
             - name: LEDGER_SERVICE_URL
               value: http://ledger-service.ledger.svc:8101
+            # Activate AccountServiceClient + BorrowerCreditClient (#3931). Without this
+            # the no-op default stays bound: findCurrentAccount always returns null, and
+            # disburse() correctly fails loud rather than booking a loan nobody was paid —
+            # but "fails loud" still means every disbursement fails, so this must be set.
+            - name: LENDING_BORROWER_CREDIT_BACKEND
+              value: rest
+            - name: ACCOUNT_SERVICE_URL
+              value: http://account-service.accounts.svc:8100
+            - name: TRANSACTION_SERVICE_URL
+              value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean
             # (ApprovalConfig @Produces RedisApprovalStore) resolves regardless, so
             # AuthorizeInterceptor's "no store, log + proceed" branch is never taken for

@@ -39,6 +39,16 @@ describe('hasPermission', () => {
     expect(hasPermission([ROLES.KYC_OPENER], 'kyc:approve')).toBe(false)
   })
 
+  it('matches party-service PII read roles without widening the backend gate', () => {
+    expect(hasPermission([ROLES.ADMIN], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.VIEWER], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.KYC], 'parties:view')).toBe(true)
+    expect(hasPermission([ROLES.COMPLIANCE], 'parties:view')).toBe(false)
+    expect(hasPermission([ROLES.KYC_OPENER], 'parties:view')).toBe(false)
+    expect(hasPermission([ROLES.KYC_REVIEWER], 'parties:view')).toBe(false)
+  })
+
   it('admits the supervisor to payment approval and audit reading, not to creation', () => {
     expect(hasPermission([ROLES.SUPERVISOR], 'payments:approve')).toBe(true)
     expect(hasPermission([ROLES.SUPERVISOR], 'audit:view')).toBe(true)
@@ -73,6 +83,23 @@ describe('hasPermission', () => {
     expect(hasPermission([ROLES.DEMO], 'transactions:reverse')).toBe(false)
     expect(hasPermission([ROLES.DEMO], 'payments:approve')).toBe(false)
     expect(hasPermission([ROLES.DEMO], 'system:config')).toBe(false)
+  })
+
+  // Flaky Test Hunter (ADR-0168, issue #5499): 'flaky-test-hunter:trigger' mirrors
+  // FlakyTestResource's POST /check/trigger @RolesAllowed("ROLE_ADMIN") exactly — a viewer or
+  // operator can read the findings list (via system:view on the /iaops page) but must never see
+  // the "Run check now" action, same as the backend would 403 it.
+  it('admits only ROLE_ADMIN to trigger a flaky-test-hunter check', () => {
+    expect(hasPermission([ROLES.ADMIN], 'flaky-test-hunter:trigger')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'flaky-test-hunter:trigger')).toBe(false)
+    expect(hasPermission([ROLES.VIEWER], 'flaky-test-hunter:trigger')).toBe(false)
+    expect(hasPermission([ROLES.DEMO], 'flaky-test-hunter:trigger')).toBe(false)
+  })
+
+  it('admits ROLE_ADMIN and ROLE_VIEWER to flaky-test-hunter:view, mirroring the GET /findings roles', () => {
+    expect(hasPermission([ROLES.ADMIN], 'flaky-test-hunter:view')).toBe(true)
+    expect(hasPermission([ROLES.VIEWER], 'flaky-test-hunter:view')).toBe(true)
+    expect(hasPermission([ROLES.OPERATOR], 'flaky-test-hunter:view')).toBe(false)
   })
 })
 

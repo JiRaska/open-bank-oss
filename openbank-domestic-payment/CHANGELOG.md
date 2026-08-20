@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.15.0...domestic-payment-v0.16.0) (2026-08-19)
+
+
+### Features
+
+* **domestic-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5692](https://github.com/JiRaska/open-bank-oss/issues/5692)) ([73b584e](https://github.com/JiRaska/open-bank-oss/commit/73b584e972ddb73270cb0af9ab1722ac66996eb7))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.2...domestic-payment-v0.15.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+
+### Security
+
+* **deps:** resolve micrometer-core CVE-2026-40984 without a platform bump ([#5495](https://github.com/JiRaska/open-bank-oss/issues/5495)) ([b8b8d7a](https://github.com/JiRaska/open-bank-oss/commit/b8b8d7a2f28375c29949674059613e4ed8867a09))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.1...domestic-payment-v0.14.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **domestic-payment:** add eventType/sourceService to audit-consumed events ([#5255](https://github.com/JiRaska/open-bank-oss/issues/5255)) ([3b3326c](https://github.com/JiRaska/open-bank-oss/commit/3b3326caaeb1a898ce75ef5547da73d812d67ebb))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.14.0...domestic-payment-v0.14.1) (2026-08-17)
 
 

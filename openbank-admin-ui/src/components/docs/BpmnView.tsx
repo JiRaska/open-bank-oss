@@ -22,6 +22,8 @@
 import { useState } from 'react'
 import { GitBranch, RefreshCw, CheckCircle2, XCircle, AlertCircle } from 'lucide-react'
 import type { BpmnProcess, BpmnStep } from '@/lib/docs/bpmn/schema'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const LANE_BG: Record<string, string> = {
   compliance: '#fef2f2', core: '#eff6ff', psd2: '#fffbeb', payment: '#faf5ff',
@@ -142,12 +144,15 @@ function BpmnDiagram({ process }: { process: BpmnProcess }) {
 }
 
 function ProcessLayerMap({ process }: { process: BpmnProcess }) {
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, 'up' | 'down' | 'loading' | 'unknown'>>({})
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   const stepsWithDetails = process.steps.filter(
     (s) => s.apis?.length || s.relatedServices?.length || s.emits?.length || s.consumes?.length,
   )
+  const isChecking = Object.values(statuses).some((status) => status === 'loading')
 
   const checkServices = async () => {
     const servicesToCheck = Array.from(new Set(stepsWithDetails.flatMap((s) => s.relatedServices || [])))
@@ -196,18 +201,21 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
     <div style={{ marginTop: '24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
         <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-          API & Service Coverage (Layered View)
+          {t('Pokrytí API a služeb (vrstvený pohled)', 'API & Service Coverage (layered view)')}
         </h3>
         <button
+          type="button"
           onClick={checkServices}
+          disabled={isChecking}
+          aria-busy={isChecking}
           style={{
             display: 'flex', alignItems: 'center', gap: '6px',
             padding: '6px 12px', fontSize: '12px', fontWeight: 500,
             background: 'var(--surface-2)', border: '1px solid var(--border)',
             borderRadius: '6px', color: 'var(--text-secondary)', cursor: 'pointer',
           }}>
-          <RefreshCw size={14} />
-          {lastRefresh ? `Refreshed ${lastRefresh.toLocaleTimeString()}` : 'Check Status'}
+          <RefreshCw size={14} aria-hidden="true" />
+          {lastRefresh ? `${t('Aktualizováno', 'Refreshed')} ${lastRefresh.toLocaleTimeString(dateLocale)}` : t('Ověřit stav', 'Check status')}
         </button>
       </div>
 
@@ -224,15 +232,15 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
               borderRadius: '8px', alignItems: 'center',
             }}>
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>Process Step</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{t('Krok procesu', 'Process step')}</div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>{step.label}</div>
                 {step.lane && (
-                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>Lane: {step.lane}</div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '2px' }}>{t('Doména', 'Lane')}: {step.lane}</div>
                 )}
               </div>
 
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>APIs & Events</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{t('API a události', 'APIs & events')}</div>
                 {step.apis?.length ? step.apis.map((api) => (
                   <div key={api} style={{
                     fontSize: '12px', fontFamily: 'JetBrains Mono, monospace',
@@ -253,24 +261,24 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
                   </div>
                 ))}
                 {!step.apis?.length && !events.length && (
-                  <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>No API mapped</div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('API není namapováno', 'No API mapped')}</div>
                 )}
               </div>
 
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>Services & Status</div>
+                <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', textTransform: 'uppercase', marginBottom: '4px' }}>{t('Služby a stav', 'Services & status')}</div>
                 {step.relatedServices?.length ? step.relatedServices.map((svc) => {
                   const status = statuses[svc]
                   return (
                     <div key={svc} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
                       <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)' }}>{svc}</div>
-                      {status === 'up' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#16a34a', fontWeight: 600, background: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}><CheckCircle2 size={12} /> UP</span>}
-                      {status === 'down' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#dc2626', fontWeight: 600, background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}><XCircle size={12} /> DOWN</span>}
-                      {status === 'loading' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#d97706', fontWeight: 600, background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}><RefreshCw size={12} className="animate-spin" /> ...</span>}
-                      {status === 'unknown' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#6b7280', fontWeight: 600, background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}><AlertCircle size={12} /> N/A</span>}
+                      {status === 'up' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#16a34a', fontWeight: 600, background: '#dcfce7', padding: '2px 6px', borderRadius: '4px' }}><CheckCircle2 size={12} aria-hidden="true" /> {t('AKTIVNÍ', 'UP')}</span>}
+                      {status === 'down' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#dc2626', fontWeight: 600, background: '#fee2e2', padding: '2px 6px', borderRadius: '4px' }}><XCircle size={12} aria-hidden="true" /> {t('NEDOSTUPNÉ', 'DOWN')}</span>}
+                      {status === 'loading' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#d97706', fontWeight: 600, background: '#fef3c7', padding: '2px 6px', borderRadius: '4px' }}><RefreshCw size={12} aria-hidden="true" className="animate-spin" /> {t('OVĚŘUJI', 'CHECKING')}</span>}
+                      {status === 'unknown' && <span style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: '#6b7280', fontWeight: 600, background: '#f3f4f6', padding: '2px 6px', borderRadius: '4px' }}><AlertCircle size={12} aria-hidden="true" /> {t('N/A', 'N/A')}</span>}
                     </div>
                   )
-                }) : <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>No service mapped</div>}
+                }) : <div style={{ fontSize: '12px', color: 'var(--text-tertiary)' }}>{t('Služba není namapována', 'No service mapped')}</div>}
               </div>
             </div>
           )
@@ -281,31 +289,28 @@ function ProcessLayerMap({ process }: { process: BpmnProcess }) {
 }
 
 export function BpmnView({ processes }: { processes: BpmnProcess[] }) {
+  const { t } = useLanguage()
   const [active, setActive] = useState(processes[0]?.slug)
   const process = processes.find((p) => p.slug === active) ?? processes[0]
   if (!process) return null
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>Docs</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">Business Processes</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <GitBranch size={18} style={{ color: 'var(--accent)' }} />
-            Business Process Diagrams (BPMN 2.0)
-          </h1>
-          <p className="page-subtitle">Klíčové bankovní procesy vizualizované pro business, compliance a IT týmy</p>
-        </div>
-      </div>
+          </>}
+        title="Business Process Diagrams (BPMN 2.0)"
+        subtitle="Klíčové bankovní procesy vizualizované pro business, compliance a IT týmy"
+        icon={<GitBranch aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Process tabs */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
+      <div role="group" aria-label={t('Výběr obchodního procesu', 'Business process selector')} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '20px' }}>
         {processes.map((p) => (
-          <button key={p.slug} onClick={() => setActive(p.slug)}
+          <button key={p.slug} type="button" aria-pressed={active === p.slug} onClick={() => setActive(p.slug)}
             style={{
               padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
               border: `1px solid ${active === p.slug ? 'var(--accent)' : 'var(--border)'}`,

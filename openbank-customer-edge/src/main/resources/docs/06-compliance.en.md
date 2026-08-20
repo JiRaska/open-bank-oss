@@ -86,7 +86,7 @@ sequenceDiagram
   App->>Edge: POST /domestic-payments (Idempotency-Key)
   Edge->>Edge: ownership check + enrich (debtor IBAN/BBAN, name)
   Edge->>Pay: create + screen instruction (M2M token)
-  Pay-->>App: 201 (instruction; NOT settled)
+  Pay-->>App: 201 (instruction#59; NOT settled)
   App->>Edge: POST /sca/challenges
   Edge->>Sca: challenge (partyId from JWT)
   Note over Sca: out-of-band device decision (ADR-0021)

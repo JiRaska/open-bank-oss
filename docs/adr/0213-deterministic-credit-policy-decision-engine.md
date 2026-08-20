@@ -1,7 +1,8 @@
 ---
 date: 2026-07-29
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
+followup: "#5708 — triage of the wider code-cited-but-planned ADR set; this ADR's own remaining slice is tracked there"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -11,6 +12,15 @@ summary: "Credit policy is versioned decision tables evaluated by a pure, in-mem
 ---
 
 # ADR-0213 — Deterministic credit policy decision engine: versioned decision tables, fail-closed, explainable
+
+**Delivery note (2026-08-19).** The evaluator is live on `main` and was carrying
+`delivery-status: planned` while doing so:
+`openbank-libs-domain/src/main/kotlin/com/openbank/libs/decision/PolicyEvaluator.kt`, whose own
+KDoc reads *"Pure, deterministic credit policy evaluator (ADR-0213)"* and which implements this
+ADR's decided table order (EXCLUSION → ELIGIBILITY/AFFORDABILITY → PRICING_BAND) and its
+fail-closed rule (a missing input, unevaluable rule or expired table yields REFER, never APPROVE),
+alongside `PolicyDecision`, `OriginationDecisionService` and `V11__decision_engine_inputs.sql`.
+Found by the code→ADR evidence read described in #5708; the remaining slices are triaged there.
 
 ## Context
 

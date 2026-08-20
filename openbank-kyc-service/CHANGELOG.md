@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.12...kyc-service-v0.11.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.10.12](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.11...kyc-service-v0.10.12) (2026-08-18)
+
+
+### Bug Fixes
+
+* **kyc:** add sourceService to KycEvents for audit attribution ([#5336](https://github.com/JiRaska/open-bank-oss/issues/5336)) ([3aa5e63](https://github.com/JiRaska/open-bank-oss/commit/3aa5e63af6335f04c2f773a9eae1a3429054910d)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.10.11](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.10...kyc-service-v0.10.11) (2026-08-17)
 
 

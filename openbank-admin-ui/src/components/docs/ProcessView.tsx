@@ -16,6 +16,8 @@ import { useState } from 'react'
 import type { ElementType } from 'react'
 import { ShieldCheck, Info, CheckCircle2, CircleDashed, Circle, X } from 'lucide-react'
 import { Mermaid } from '@/components/docs/Mermaid'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { overallScore, type Process, type Status, type TechNode } from '@/lib/docs/process/schema'
 
 type Mode = 'reality' | 'target'
@@ -32,7 +34,7 @@ const ICON_MAP: Record<string, ElementType> = { ShieldCheck }
 
 function StatusDot({ status }: { status: Status }) {
   const m = STATUS_META[status]
-  return <m.Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
+  return <m.Icon size={13} aria-hidden="true" style={{ color: m.color, flexShrink: 0 }} />
 }
 
 function StatusChip({ status }: { status: Status }) {
@@ -48,6 +50,7 @@ function StatusChip({ status }: { status: Status }) {
 }
 
 export function ProcessView({ proc }: { proc: Process }) {
+  const { t } = useLanguage()
   const [mode, setMode] = useState<Mode>('reality')
   const [lens, setLens] = useState<Lens>('story')
   const [selected, setSelected] = useState<TechNode | null>(null)
@@ -59,26 +62,22 @@ export function ProcessView({ proc }: { proc: Process }) {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>Docs</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{proc.title}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <TitleIcon size={18} style={{ color: 'var(--accent)' }} />
-            {proc.title}
-          </h1>
-          <p className="page-subtitle">{proc.subtitle}</p>
-        </div>
-      </div>
+          </>}
+        title={proc.title}
+        subtitle={proc.subtitle}
+        icon={<TitleIcon aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+      />
 
       {/* Honesty banner + reality/target toggle */}
       <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-        <div style={{ display: 'inline-flex', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden' }}>
+        <div role="group" aria-label={t('Režim zobrazení procesu', 'Process view mode')} style={{ display: 'inline-flex', borderRadius: '8px', border: '1px solid var(--border)', overflow: 'hidden' }}>
           {(['reality', 'target'] as Mode[]).map(m => (
-            <button key={m} onClick={() => setMode(m)} style={{
+            <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)} style={{
               padding: '6px 14px', fontSize: '13px', fontWeight: 600, border: 'none', cursor: 'pointer',
               fontFamily: 'inherit',
               background: mode === m ? 'var(--accent)' : 'var(--surface)',
@@ -93,15 +92,15 @@ export function ProcessView({ proc }: { proc: Process }) {
           </div>
         ))}
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginLeft: 'auto', fontSize: '11px', color: 'var(--text-secondary)' }}>
-          <Info size={13} />
+          <Info size={13} aria-hidden="true" />
           Skóre = produkční compliance cíl. Dev sandbox je záměrně mimo scope pro některé prod controls (TLS, secrets — řeší infra vrstva).
         </div>
       </div>
 
       {/* Lens tabs */}
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
+      <div role="group" aria-label={t('Čočka zobrazení procesu', 'Process view lens')} style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '16px' }}>
         {([['story', '① Příběh'], ['token', '② Tokeny'], ['tech', '③ Technologie']] as [Lens, string][]).map(([id, label]) => (
-          <button key={id} onClick={() => setLens(id)} style={{
+          <button key={id} type="button" aria-pressed={lens === id} onClick={() => setLens(id)} style={{
             padding: '8px 16px', fontSize: '13px', fontWeight: 600, borderRadius: '8px',
             border: `1px solid ${lens === id ? 'var(--accent)' : 'var(--border)'}`,
             background: lens === id ? 'var(--accent)' : 'var(--surface)',
@@ -156,7 +155,7 @@ export function ProcessView({ proc }: { proc: Process }) {
                       const m = STATUS_META[n.status]
                       const active = selected?.id === n.id
                       return (
-                        <button key={n.id} onClick={() => setSelected(active ? null : n)} title={n.desc} style={{
+                        <button key={n.id} type="button" aria-label={n.name} aria-pressed={active} onClick={() => setSelected(active ? null : n)} title={n.desc} style={{
                           display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px',
                           cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`,
                           boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none',
@@ -173,7 +172,7 @@ export function ProcessView({ proc }: { proc: Process }) {
                 <div className="card" style={{ padding: '14px 16px', borderLeft: `3px solid ${STATUS_META[selected.status].color}` }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
                     <span style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{selected.name}</span>
-                    <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}><X size={15} /></button>
+                    <button type="button" aria-label={t('Zavřít technologické detaily', 'Close technology details')} onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}><X size={15} aria-hidden="true" /></button>
                   </div>
                   <div style={{ marginBottom: '8px' }}><StatusChip status={selected.status} /></div>
                   <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>{selected.desc}</p>

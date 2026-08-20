@@ -41,6 +41,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 | **T**ampering | Off-market / stale rate used for conversion | Rate provenance + timestamp; staleness check; bounds/sanity limits; audit |
 | **R**epudiation | Deny publishing a bad rate | AuditEvent per rate publish + conversion |
 | **I**nfo disclosure | Rate scraping / conversion history | AuthZ; rate read is low-sensitivity but rate-limited |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/fx/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "fx.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never rate/conversion details. Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Conversion flooding | Rate limit; cache current rate |
 | **E**oP | Viewer publishes a rate | Distinct publish role; deny-by-default |
 
@@ -50,6 +51,37 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 - Conversions should pin the rate id/timestamp used (auditability + dispute defense).
 
 ## 6. Change log
+
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so an `fx.convert`
+  four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
+  id out of band — the ceremony completed only if the two operators were already talking, and the
+  24h Redis TTL then expired the request silently otherwise (issue #5679, mirroring sanctions
+  #3472, ledger, domestic-payment and sepa-instant). Added `GET /api/v1/fx/approvals` (§4 new I
+  row); additive-only OpenAPI change (1.7.0 -> 1.8.0, ADR-0048).
+  - **Checked the existing decide endpoint's own authz posture while here** (verify-by-effect, not
+    by appearance, per this sweep's own prior findings on balance-service and sepa-instant):
+    `opa eval` against the real `fx_rest_ext.rego` + `rest.rego` + `rules-data.yaml` bundle
+    (extracted from `fx-opa-bundle.yaml`) showed `fx.approval.decide` resolving `allow=true` for a
+    real ROLE_OPERATOR, `reason=operator-fx-approval-decide` — fx-service already carries a
+    dedicated ext-rego rule for this action (added 2026-08-05, #3734), independent of
+    `rules.yaml`'s `role_action_matrix` (which does not list `fx.approval.decide` at all, unlike
+    the matrix-only sepa-instant case). The new `fx.approval.read` action also resolves
+    `allow=true`/`reason=operator-read-any` — the base `rest.rego` grants any `*.read`-suffixed
+    action to ROLE_OPERATOR/ROLE_ADMIN fleet-wide, so no fx-specific rule was needed for the read
+    side either. A non-operator role (`ROLE_KYC_OPENER`) resolves `allow=false` on both actions.
+    **No matrix or ext-rego gap found** — nothing to fix in `rules.yaml` for this service.
+  - **Known residual, not fixed here**: `operator-read-any` is role-only like `matrix-allows`, and
+    the deployed realm template gives `service-account-openbank-services` `ROLE_OPERATOR` in at
+    least one environment (see root `CLAUDE.md`'s realm-drift note) — the same shape balance-service
+    and sepa-instant flagged for their own new read endpoints. Unlike `fx.approval.decide` (whose
+    2026-08-05 `prohibited` veto and `not startswith(input.principal.id, "service-account-")`
+    guards already exclude M2M), `fx.approval.read` carries no such exclusion, so a service account
+    holding `ROLE_OPERATOR` in that realm could read the pending-approvals queue. Both verified
+    fx-service M2M callers (`service-account-openbank-edge`, `service-account-openbank-services`)
+    are documented read-only rate-sheet/revaluation consumers with no reason to read this queue.
+    Building a new prohibition mechanism was out of scope for this PR; tracked as follow-up under
+    issue #5679's own money-path-first ordering, same as sepa-instant's #5694 residual.
+  - **Rollback:** the new `GET` is additive; revert the commit.
 
 - **2026-08-09** — Fraud shadow scoring's fallback is now observable (#4221). **No new trust
   boundary and no new caller**: the outbound edge to fraud-service (OIDC client-credentials + mTLS,

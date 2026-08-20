@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.8.0...sepa-instant-v0.8.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sepa-instant:** add sourceService to published events for audit attribution ([#5389](https://github.com/JiRaska/open-bank-oss/issues/5389)) ([6069ce0](https://github.com/JiRaska/open-bank-oss/commit/6069ce0fd301e4aba5d36ad1fd418e2d027225b5))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.7...sepa-instant-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
 ## [0.7.7](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.7.6...sepa-instant-v0.7.7) (2026-08-17)
 
 

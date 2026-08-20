@@ -57,14 +57,11 @@ TEST_BLOCK = re.compile(r'^"?%test"?\s*:\s*\n(.*?)(?=^\S|\Z)', re.M | re.S)
 # anywhere. Measured 2026-07-26 (#2204). This list may only SHRINK.
 BASELINE = {
     "openbank-aml-service",
-    "openbank-balance-service",
     "openbank-card-issuance-service",
     "openbank-interest-service",
-    "openbank-notification-service",
     "openbank-onboarding-service",
     "openbank-sanctions-service",
     "openbank-sdd-service",
-    "openbank-statement-service",
 }
 
 

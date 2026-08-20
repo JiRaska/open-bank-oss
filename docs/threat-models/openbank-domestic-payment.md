@@ -69,10 +69,13 @@ not bundled here (see ADR-0155).
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated transition | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/domestic-payments/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN`/`ROLE_PAYMENTS` + `@Authorize(action = "domestic-payment.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never payment/account details, which stay behind the existing read-role gate (I1 above). Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `PATCH /status` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/domestic-payments/approvals/{id} → Redis (approval:*)`
-alongside the existing `PATCH /status` edge; the maker's retry reuses the existing DFD edge.
+**DFD update:** adds `Operator (checker) → GET /api/v1/domestic-payments/approvals → Redis
+(approval:*)` and `Operator (checker) → PATCH /api/v1/domestic-payments/approvals/{id} → Redis
+(approval:*)` alongside the existing `PATCH /status` edge; the maker's retry reuses the existing
+DFD edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
 not change any existing request's outcome until explicitly flipped.
@@ -87,6 +90,27 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `domestic-payment.transitionStatus` four-eyes decision parked at 202 was discoverable only by
+  whoever had been handed its approval id out of band — the ceremony completed only if the two
+  operators were already talking, and the 24h Redis TTL then expired the request silently
+  otherwise (issue #5679, mirroring sanctions #3472 and ledger). Added
+  `GET /api/v1/domestic-payments/approvals` (§4a new I row); no new trust boundary crossed — same
+  `RedisApprovalStore`, same role gate shape as the existing decide endpoint, additive-only
+  OpenAPI change (1.4.0 -> 1.5.0, ADR-0048). Checked the existing decide endpoint's own authz
+  posture while here (verify-by-effect, not by appearance): `opa eval` against the real
+  `domestic_payment_rest_ext.rego` bundle confirms `domestic-payment.approval.decide` already
+  resolves `allow=true` for `ROLE_OPERATOR` via `operator-domestic-payment-write` (a
+  `startswith(input.action, "domestic-payment.")` prefix rule that covers the whole namespace) —
+  unlike balance-service, which had no such prefix rule and found its `approval.decide` silently
+  ungranted. No authz-matrix gap here.
+- **2026-08-17** — Recorded here only because #3931's threat-model-diff gate maps the whole
+  `openbank-infra/gitops/components/payments/network-policies.yaml` file to every money-path
+  service that lives in this directory, not to the specific block that changed. **No trust
+  boundary of this service's own changed**: the diff adds a `lending` ingress peer to
+  `transaction-service`'s block in that shared file only — this service's own ingress/egress
+  rules are byte-identical before and after. See
+  `docs/threat-models/openbank-transaction-service.md` §6 for the edge that actually changed.
 - **2026-08-09** — Settlement outage no longer completes the workflow on a non-terminal state
   (#4182). No new trust boundary and no new caller: the outbound edge to transaction-service is
   unchanged, and what changes is what this service does when that edge fails. Previously

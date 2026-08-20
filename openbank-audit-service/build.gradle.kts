@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.quarkus.scheduler)
+    implementation(libs.aws.sdk.kms)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
@@ -38,8 +39,9 @@ dependencies {
     testImplementation(libs.rest.assured.kotlin)
 
     // #1201: isolated PostgreSQL per test JVM via Testcontainers (audit-service had no IT
-    // infra before AuditOutboxClaimIT — matches the pattern already used by sibling
-    // outbox-bearing services, e.g. openbank-sdd-service).
+    // infra before this was added — matches the pattern already used by sibling
+    // outbox-bearing services, e.g. openbank-sdd-service). Now used by AuditChainRoundTripIT,
+    // DelegatedActionAuditChainIT and PartyMergeAuditAdoptionIT.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)

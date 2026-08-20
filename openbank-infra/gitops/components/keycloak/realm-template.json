@@ -94,6 +94,23 @@
   },
   "clients": [
     {
+      "clientId": "admin-cli",
+      "name": "${client_admin-cli}",
+      "description": "Keycloak's built-in CLI/direct-grant client, declared explicitly so operator password-grant tokens carry realm_access — left to Keycloak's auto-created default (fullScopeAllowed=false, no scope mappings), it mints no realm roles at all (#5498).",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": true,
+      "defaultClientScopes": [
+        "profile",
+        "email",
+        "roles"
+      ]
+    },
+    {
       "clientId": "openbank-admin-ui",
       "name": "OpenBank Admin UI",
       "enabled": true,

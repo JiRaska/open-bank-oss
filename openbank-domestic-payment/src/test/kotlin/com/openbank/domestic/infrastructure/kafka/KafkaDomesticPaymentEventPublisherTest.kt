@@ -96,6 +96,23 @@ class KafkaDomesticPaymentEventPublisherTest {
     }
 
     @Test
+    fun `paymentCreatedPayload carries eventType and sourceService for AuditConsumer attribution (issue 3994)`() {
+        val payment = payment()
+        val emitter = mockk<MutinyEmitter<String>>()
+        val publisher = KafkaDomesticPaymentEventPublisher(emitter, objectMapper, Clock.systemUTC())
+
+        val payload = publisher.paymentCreatedPayload(payment)
+        val node = objectMapper.readTree(payload)
+
+        // These are the exact keys AuditConsumer.resolveSourceService / the eventType chain read
+        // off the body (node.textOrNull("eventType") / node.textOrNull("sourceService")) — before
+        // this fix neither key existed and 124 domestic-payment rows landed as
+        // event_type="UNKNOWN", source_service="unknown".
+        assertThat(node.get("eventType").asText()).isEqualTo("DOMESTIC_PAYMENT_CREATED")
+        assertThat(node.get("sourceService").asText()).isEqualTo("domestic-payment")
+    }
+
+    @Test
     fun `statusChangedPayload serializes previous and new status with reject metadata`() {
         val previous = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
         val current = payment(
@@ -112,6 +129,20 @@ class KafkaDomesticPaymentEventPublisherTest {
         assertThat(payload).contains("\"newStatus\":\"REJECTED\"")
         assertThat(payload).contains("\"rejectReason\":\"SANCTIONS_HIT\"")
         assertThat(payload).contains("\"rejectDetail\":\"creditor on list\"")
+    }
+
+    @Test
+    fun `statusChangedPayload carries eventType and sourceService for AuditConsumer attribution (issue 3994)`() {
+        val previous = payment(status = DomesticPaymentStatus.SENT_TO_CLEARING)
+        val current = payment(status = DomesticPaymentStatus.SETTLED).copy(id = previous.id)
+        val emitter = mockk<MutinyEmitter<String>>()
+        val publisher = KafkaDomesticPaymentEventPublisher(emitter, objectMapper, Clock.systemUTC())
+
+        val payload = publisher.statusChangedPayload(previous, current)
+        val node = objectMapper.readTree(payload)
+
+        assertThat(node.get("eventType").asText()).isEqualTo("DOMESTIC_PAYMENT_STATUS_CHANGED")
+        assertThat(node.get("sourceService").asText()).isEqualTo("domestic-payment")
     }
 
     @Test

@@ -23,8 +23,9 @@ const FINOPS_AGENT = {
 }
 
 const GOVERNANCE = {
-  adrRef: 'ADR-0031', adrStatus: 'accepted', phase: 1, totalPhases: 4, phaseLabel: 'Advisory',
-  enforcement: 'audit-only', policyDefault: 'deny', agentsActing: 1, chartersAvailable: true,
+  adrRef: 'ADR-0031', adrStatus: 'accepted', phase: 2, totalPhases: 5, phaseLabel: 'Read-only oversight active',
+  controlMaturity: { current: 4, total: 5, label: 'Four core controls are built.', achieved: ['D1', 'D2', 'D3', 'D4'], remaining: 'D5 needs independent provenance.' },
+  enforcement: 'block', policyDefault: 'deny', agentsActing: 0, chartersAvailable: true,
   agentCount: 1, agents: [FINOPS_AGENT], toolTiers: {}, decisions: [],
   decisionSummary: { built: 0, partial: 0, planned: 0, total: 0 }, compliance: [],
   auditTrail: { capture: [], pipeline: [], live: [], planned: [] },
@@ -45,6 +46,40 @@ afterEach(() => {
 })
 
 describe('AIOps agent card interactions', () => {
+  it('describes the enforced policy gate without overstating phase 2 autonomy', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
+
+    render(<IAOpsPage />)
+
+    expect(await screen.findByText(/Phase 1 is enforced while the PDP is available/i)).toBeVisible()
+    expect(screen.getByText(/A PDP outage degrades the gate to advisory/i)).toBeVisible()
+    expect(screen.getByText(/Phase 2 remains read-only and proposal-only/i)).toBeVisible()
+    expect(screen.queryByText(/enforcement \(OPA block\) is not yet live/i)).not.toBeInTheDocument()
+  })
+
+  it('distinguishes mature protective controls from permission for autonomous change', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(GOVERNANCE)))
+
+    render(<IAOpsPage />)
+
+    expect(await screen.findByText('Governance controls')).toBeVisible()
+    expect(screen.getByText('4/5')).toBeVisible()
+    expect(screen.getByText(/Controls, not authority for autonomous change/i)).toBeVisible()
+    expect(screen.getByText(/This is not permission for autonomous change/i)).toBeVisible()
+  })
+
+  it('renders the declared control maturity instead of hard-coding four of five', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response({
+      ...GOVERNANCE,
+      controlMaturity: { current: 3, total: 5, label: 'Three core controls are built.', achieved: ['D1', 'D2', 'D3'], remaining: 'D4 and D5 need evidence.' },
+    })))
+
+    render(<IAOpsPage />)
+
+    expect(await screen.findByText('3 of 5 protective control families are built.')).toBeVisible()
+    expect(screen.queryByText('4 of 5 protective control families are built.')).not.toBeInTheDocument()
+  })
+
   it.each(['ai-swarm', 'ai-mesh', 'agent-roster'])('scrolls to the %s fragment after governance data loads', async fragment => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scrollIntoView })
@@ -70,8 +105,6 @@ describe('AIOps agent card interactions', () => {
       }
       return response({ anomalies: [] })
     }))
-    const alertSpy = vi.fn()
-    vi.stubGlobal('alert', alertSpy)
     const user = userEvent.setup()
 
     render(<IAOpsPage />)
@@ -95,12 +128,8 @@ describe('AIOps agent card interactions', () => {
     await user.keyboard('{Enter}')
     expect(linkClick).not.toHaveBeenCalled()
 
-    const trigger = screen.getByRole('button', { name: 'Trigger Analysis' })
-    trigger.focus()
-    await user.keyboard('{Enter}')
-    expect(alertSpy).toHaveBeenCalledOnce()
+    const analysisStatus = screen.getByText('Analysis is not connected to the HITL backend yet')
+    expect(analysisStatus).toBeVisible()
     expect(linkClick).not.toHaveBeenCalled()
-
-    await waitFor(() => expect(document.activeElement).toBe(trigger))
   })
 })

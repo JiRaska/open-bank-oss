@@ -22,6 +22,7 @@ import { useSession } from 'next-auth/react'
 import { CheckCircle2, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 /** Mirrors lending-service `PackActivationView`. `listActive()` synthesises id = all-zero UUID for
  *  every row (it projects the in-memory registry, not a workflow row) — never key a list on it. */
@@ -177,37 +178,31 @@ export default function CompliancePacksPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <PageHeader
+        breadcrumb={<div className="breadcrumb">
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Úvěry', 'Lending')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Compliance packy', 'Compliance packs')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <ShieldCheck size={18} style={{ color: 'var(--accent)' }} />
-            {t('Aktivace compliance packů', 'Compliance pack activation')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
-              'Jurisdikční úvěrové compliance packy (ADR-0212 D4). Maker navrhne, JINÝ compliance principál rozhodne. Aktivovaný pack platí okamžitě — bez release služby.',
-              'Jurisdictional credit compliance packs (ADR-0212 D4). A maker proposes, a DIFFERENT compliance principal decides. An activated pack takes effect immediately — no service release.',
-            )}
-          </p>
-          {actor && (
-            <p className="page-subtitle" data-testid="acting-as">
-              {t('Jednáte jako', 'Acting as')}: <strong>{actor}</strong>
-            </p>
-          )}
-        </div>
-        <button onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+          </div>}
+        icon={<ShieldCheck aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
+        title={t('Aktivace compliance packů', 'Compliance pack activation')}
+        subtitle={t(
+          'Jurisdikční úvěrové compliance packy (ADR-0212 D4). Maker navrhne, JINÝ compliance principál rozhodne. Aktivovaný pack platí okamžitě — bez release služby.',
+          'Jurisdictional credit compliance packs (ADR-0212 D4). A maker proposes, a DIFFERENT compliance principal decides. An activated pack takes effect immediately — no service release.',
+        )}
+        actions={<button onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+        </button>}
+      />
+      {actor && (
+        <p className="page-subtitle" data-testid="acting-as" style={{ marginTop: -20, marginBottom: 20 }}>
+          {t('Jednáte jako', 'Acting as')}: <strong>{actor}</strong>
+        </p>
+      )}
 
       {degraded.length > 0 && (
         <div className="card" data-testid="degraded" style={{ padding: 12, marginBottom: 16, borderLeft: '3px solid var(--warning)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <AlertTriangle size={14} />
+          <AlertTriangle aria-hidden="true" size={14} />
           {t(
             `Nepřečteno (403 / nedostupné): ${degraded.join(', ')} — prázdný seznam NEZNAMENÁ, že nic nečeká.`,
             `Not read (403 / unavailable): ${degraded.join(', ')} — an empty list does NOT mean nothing is pending.`,
@@ -226,7 +221,7 @@ export default function CompliancePacksPage() {
       )}
 
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <CheckCircle2 size={15} /> {t('Aktivní packy', 'Active packs')} ({active.length})
+        <CheckCircle2 aria-hidden="true" size={15} /> {t('Aktivní packy', 'Active packs')} ({active.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -264,7 +259,7 @@ export default function CompliancePacksPage() {
       </div>
 
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <Clock size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
+        <Clock aria-hidden="true" size={15} /> {t('Čeká na druhý pár očí', 'Awaiting a checker')} ({pending.length})
       </div>
       <div className="card" style={{ padding: 0, overflow: 'hidden', marginBottom: 24 }}>
         {pending.map(p => (
@@ -309,7 +304,7 @@ export default function CompliancePacksPage() {
       </div>
 
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <ScrollText size={15} /> {t('Navrhnout pack (maker)', 'Propose a pack (maker)')}
+        <ScrollText aria-hidden="true" size={15} /> {t('Navrhnout pack (maker)', 'Propose a pack (maker)')}
       </div>
       <div className="card" style={{ padding: 14 }}>
         <p style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 0 }}>

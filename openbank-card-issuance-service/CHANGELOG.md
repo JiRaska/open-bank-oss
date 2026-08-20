@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.24.0...card-issuance-service-v0.24.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **card-issuance:** add sourceService to card domain events ([#5382](https://github.com/JiRaska/open-bank-oss/issues/5382)) ([ed655a0](https://github.com/JiRaska/open-bank-oss/commit/ed655a0595190e23ac16e7f4f08b6b7f6d060f49)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.23.0...card-issuance-service-v0.24.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.22.0...card-issuance-service-v0.23.0) (2026-08-17)
+
+
+### Features
+
+* **card-issuance:** re-encrypt batch job for a rotated OpenBao DEK ([#5347](https://github.com/JiRaska/open-bank-oss/issues/5347)) ([13fedea](https://github.com/JiRaska/open-bank-oss/commit/13fedea50cfc44aa00b930acbb9bca290a2c72c7))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.21.0...card-issuance-service-v0.22.0) (2026-08-17)
 
 

@@ -80,6 +80,14 @@ object TopicAttribution {
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
         "openbank.lending.events" to "lending-service",
+        // Issue #5338: audit-service was not subscribed to this topic at all (absent from both
+        // this table and application.yaml's topics list), so SCA device enrollment
+        // (DEVICE_ENROLLED) was never audited — a real PSD2/SCA gap, since sca-service is
+        // money-path. PR #5337 adds "sourceService" to the enroll payload so this row resolves
+        // AttributionSource.EVENT rather than TOPIC once it merges; until then the topic-derived
+        // value below is still correct (ScaService.kt's outbox payload sets no source field yet,
+        // and "sca-service" is what it will say when it does).
+        "openbank.sca.events" to "sca-service",
     )
 
     /** Topics with a verified producer entry. Visible for the coverage test. */

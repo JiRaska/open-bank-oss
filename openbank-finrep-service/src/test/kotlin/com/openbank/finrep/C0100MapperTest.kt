@@ -21,11 +21,11 @@ class C0100MapperTest {
         // deposits, interest and fee income/expense — no EQUITY-typed lines, because the
         // ledger's chart of accounts does not seed any capital-structure accounts.
         val lines = listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
-            TrialBalanceLineDto(code = "1001", accountType = "ASSET", net = BigDecimal("120000")),
-            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("580000")),
-            TrialBalanceLineDto(code = "3000", accountType = "INCOME", net = BigDecimal("15000")),
-            TrialBalanceLineDto(code = "4000", accountType = "EXPENSE", net = BigDecimal("5000")),
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "1001", accountType = "ASSET", net = BigDecimal("120000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("580000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "3000", accountType = "INCOME", net = BigDecimal("15000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "4000", accountType = "EXPENSE", net = BigDecimal("5000"), currency = "CZK"),
         )
 
         val template = C0100Mapper.map(lines, LocalDate.of(2026, 6, 30))
@@ -55,8 +55,8 @@ class C0100MapperTest {
         // capital-structure accounts (EQUITY-typed lines), the mapper must pick them up
         // automatically without code changes, and stop flagging the rows as gaps.
         val lines = listOf(
-            TrialBalanceLineDto(code = "3900", accountType = "EQUITY", net = BigDecimal("1000000")),
-            TrialBalanceLineDto(code = "3901", accountType = "EQUITY", net = BigDecimal("250000")),
+            TrialBalanceLineDto(code = "3900", accountType = "EQUITY", net = BigDecimal("1000000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "3901", accountType = "EQUITY", net = BigDecimal("250000"), currency = "CZK"),
         )
 
         val template = C0100Mapper.map(lines, LocalDate.of(2026, 6, 30))

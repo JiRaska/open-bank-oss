@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.9.6](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.5...dispute-service-v0.9.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **dispute:** add sourceService to audit-attribution outbox payloads ([#5344](https://github.com/JiRaska/open-bank-oss/issues/5344)) ([35ce80e](https://github.com/JiRaska/open-bank-oss/commit/35ce80efe7e5d8f4076cf89655887513ac90d704)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.9.5](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.4...dispute-service-v0.9.5) (2026-08-18)
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.9.3...dispute-service-v0.9.4) (2026-08-17)
 
 

@@ -43,6 +43,7 @@ class CaseWorkflowImpl : CaseWorkflow {
 
     private val synthesis = Workflow.newActivityStub(CaseSynthesisActivity::class.java, longOptions)
     private val proposals = Workflow.newActivityStub(CaseProposalActivity::class.java, shortOptions)
+    private val deliveryProposals = Workflow.newActivityStub(CaseProposalDeliveryActivity::class.java, shortOptions)
     private val persistence = Workflow.newActivityStub(CasePersistenceActivity::class.java, shortOptions)
 
     private var status = CaseStatus.OPEN
@@ -143,7 +144,19 @@ class CaseWorkflowImpl : CaseWorkflow {
         contested: Boolean,
     ): CaseOutcome {
         persistence.recordContributions(start.caseId, contributions)
-        val proposalId = proposals.emitProposal(start.caseId, eventType, summary, contested)
+        val proposalId = if (Workflow.getVersion(DELIVERY_MODE_CHANGE_ID, Workflow.DEFAULT_VERSION, 1) ==
+            Workflow.DEFAULT_VERSION
+        ) {
+            proposals.emitProposal(start.caseId, eventType, summary, contested)
+        } else {
+            deliveryProposals.emitProposalWithDelivery(
+                start.caseId,
+                eventType,
+                summary,
+                contested,
+                start.deliveryMode.name == "SHADOW",
+            )
+        }
         persistence.recordCaseClosed(start.caseId, status.name, Workflow.currentTimeMillis())
         return CaseOutcome(
             caseId = start.caseId,
@@ -162,5 +175,9 @@ class CaseWorkflowImpl : CaseWorkflow {
     } else {
         "TIMEOUT: case reached its deadline with ${contributions.size} contributions, " +
             "${participants.size} participants, no synthesis requested"
+    }
+
+    private companion object {
+        const val DELIVERY_MODE_CHANGE_ID = "case-proposal-delivery-mode-v1"
     }
 }

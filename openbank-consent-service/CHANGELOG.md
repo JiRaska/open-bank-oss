@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.1...consent-service-v0.18.2) (2026-08-19)
+
+
+### Bug Fixes
+
+* **consent:** map SuppressionEntity to the columns V6 actually created ([#5711](https://github.com/JiRaska/open-bank-oss/issues/5711)) ([87473a5](https://github.com/JiRaska/open-bank-oss/commit/87473a5f2189093d819a1bd8b4808f288d192e33))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.0...consent-service-v0.18.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **consent:** add sourceService to consent domain events for audit attribution ([#5376](https://github.com/JiRaska/open-bank-oss/issues/5376)) ([300a223](https://github.com/JiRaska/open-bank-oss/commit/300a223b69be937a8a55a9991ba55b5f8c8b75bc))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.3...consent-service-v0.18.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.17.2...consent-service-v0.17.3) (2026-08-17)
 
 

@@ -84,11 +84,13 @@ dedicated instance — no new trust boundary or NetworkPolicy edge is introduced
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated reversal | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals transaction/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/transactions/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `Roles.OPERATOR`/`Roles.ADMIN` + `@Authorize(action = "transaction.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never transaction amounts, counterparty or merchant data, which stay behind the existing read-role gate. Limit clamped to 200 (`MAX_PENDING_LIMIT`) — an unbounded query parameter over a Redis scan is a trivially reachable amplification, and this Redis is shared with three other services' idempotency traffic. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `POST /{transactionId}/reverse` to exhaust the shared payments Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire; the Redis instance is already shared/sized for three other services' idempotency traffic |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/transactions/approvals/{id} → Redis
-(approval:*, redis.payments.svc)` alongside the existing `POST /{transactionId}/reverse` edge; the
-maker's retry reuses the existing DFD edge.
+**DFD update:** adds `Operator (checker) → GET /api/v1/transactions/approvals → Redis
+(approval:*, redis.payments.svc)` and `Operator (checker) → PATCH
+/api/v1/transactions/approvals/{id} → Redis (approval:*, redis.payments.svc)` alongside the
+existing `POST /{transactionId}/reverse` edge; the maker's retry reuses the existing DFD edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
 change any existing request's outcome until explicitly flipped.
@@ -197,6 +199,29 @@ what the catalogue may hold.
 
 ## 6. Change log
 
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `transaction.reverse` four-eyes decision parked at 202 was discoverable only by whoever had been
+  handed its approval id out of band — the ceremony completed only if the two operators were
+  already talking, and the 24h Redis TTL then expired the request silently otherwise (issue #5679,
+  mirroring sanctions #3472). Added `GET /api/v1/transactions/approvals` (§4a new I row); no new
+  trust boundary crossed — same `RedisApprovalStore`, same role gate shape as the existing decide
+  endpoint, additive-only OpenAPI change (ADR-0048). Rollback: revert the commit — the decide
+  endpoint and the store are untouched.
+
+- **2026-08-17** — **New inbound trust edge: the `lending` namespace.** #3931 added `lending` as
+  an allowed ingress peer in this component's `network-policies.yaml`, so `lending-service` can
+  now reach `POST /api/v1/transactions` from inside the cluster — the disbursement's
+  customer-facing credit leg (the loan book's own ledger journal only ever posts to internal GL
+  accounts and cannot move a customer's balance; see
+  `docs/threat-models/openbank-lending-service.md` §2 items 7-8 for the calling side and why it
+  exists). Same M2M `openbank-services` client, `Roles.OPERATOR`, already the caller identity for
+  every other `initiateTransaction` edge (welcome bonus, SEPA/SWIFT/domestic settlement legs) —
+  this adds a caller, not a new grant shape. Risk class = **elevation of privilege**: a NetworkPolicy
+  decides reach, not permission, so the actual control is unchanged (`@RolesAllowed(Roles.OPERATOR)`
+  + idempotent posting, §3) — this edge widens who may attempt the call. `type=CREDIT` with no
+  `rail` books same-day per `SettlementScope` (#5225); the amount and target account are entirely
+  determined by lending-service's own disbursement flow, not caller-suppliable beyond that.
+  Rollback: drop the `namespaceSelector` entry for `lending`.
 - **2026-08-07** — Merchant enrichment (D5). `GET /api/v1/transactions` answers an optional `merchant` object (clean name, logo, category, shop geo) resolved from the new `merchant_catalog` table via an exact match on the normalised acquirer descriptor. STRIDE supplement in §4c. No new endpoint, caller, role or Kafka topic. Three properties are load-bearing rather than incidental: matching is **exact** (fuzzy matching would hand one merchant's identity and coordinates to a similarly-named other, which is a fabrication with a trust cost, not a UX nicety); the field is `NON_NULL`, so a transaction with no catalogue entry produces a body byte-identical to before (serialising `"merchant": null` is a wire change for every existing consumer and did in fact fail the sepa-payment Pact verification); and `description` is passed through untouched, because disputes and SPAYD are built from the raw acquirer text and must never inherit a prettified name. Geo is null for card-not-present merchants, with a CHECK constraint keeping lat/lon both-or-neither so a half-filled row cannot render as a pin at 0°. Rollback: revert.
 
 - **2026-08-03** — Missing required query/header parameter answered 500, not 400 (#3104). A required `@QueryParam`/`@HeaderParam` declared with a non-nullable Kotlin type was fed `null` by JAX-RS when the caller omitted it, and answered **500** rather than 400 (#3104). Kotlin's null-safety is compile-time only, so the declared type only decided where the failure landed: a non-suspend handler threw `Intrinsics.checkNotNullParameter` at the method boundary, and a **suspend** handler got no intrinsic at all, so the null flowed into the body. `accountId` on listTransactions. Listing "transactions for an account" with no account is a malformed request; the null reached `ListTransactionsQuery` and answered 500. The sibling searchTransactions endpoint already declares `accountId` nullable by design (search is deliberately multi-criteria) and is untouched. No new caller or boundary; `@RolesAllowed` and `@Authorize(action = "transaction.list")` are unchanged and still run first. Rollback: revert.

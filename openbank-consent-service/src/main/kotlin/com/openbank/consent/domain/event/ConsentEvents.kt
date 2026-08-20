@@ -21,6 +21,19 @@ data class ConsentGranted(
     val scopes: Set<ConsentScope>,
     val validTo: OffsetDateTime,
     override val occurredAt: Instant,
+    /**
+     * Producing service, read by `AuditConsumer.resolveSourceService` as the strongest
+     * (EVENT-sourced) attribution (#3994/#5256). `eventType` ("ConsentGranted" etc., via
+     * [DomainEvent]) is not touched — nothing outside consent-service reads any of this module's
+     * event-type strings by name (verified fleet-wide), so there is no load-bearing-rename risk;
+     * `sourceService` has no such consumer, so it is safe to add net-new. Value matches the
+     * fleet's audit convention: the module directory without the `openbank-` prefix, the same
+     * spelling `TopicAttribution` already maps `openbank.consent.events` to. This is a serialised
+     * data class, not a hand-built map — `ConsentRepositoryImpl.outboxMessage` calls
+     * `objectMapper.writeValueAsString(event)` directly, so the wire key exists only as this
+     * Kotlin property name.
+     */
+    val sourceService: String = "consent-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Consent"
     override val eventType = "ConsentGranted"
@@ -41,6 +54,8 @@ data class ConsentRevoked(
     val scopes: Set<ConsentScope>,
     val reason: String,
     override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Consent"
     override val eventType = "ConsentRevoked"
@@ -52,6 +67,8 @@ data class ConsentExpired(
     val partyId: UUID,
     val granteeId: String,
     override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Consent"
     override val eventType = "ConsentExpired"
@@ -64,6 +81,8 @@ data class ConsentRejected(
     val granteeId: String,
     val reason: String,
     override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Consent"
     override val eventType = "ConsentRejected"
@@ -83,6 +102,8 @@ data class SuppressionCreated(
     val reason: SuppressionReason,
     val source: String,
     override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Suppression"
     override val eventType = "SuppressionCreated"
@@ -96,6 +117,8 @@ data class SuppressionRevoked(
     val scope: SuppressionScope,
     val value: String?,
     override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
 ) : DomainEvent(occurredAt) {
     override val aggregateType = "Suppression"
     override val eventType = "SuppressionRevoked"

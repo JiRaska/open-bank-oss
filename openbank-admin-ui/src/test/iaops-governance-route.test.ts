@@ -26,6 +26,10 @@ describe('GET /api/iaops/governance', () => {
       totalPhases: 5,
       phaseLabel: 'Read-only oversight active — HITL proposal queue live; HolmesGPT + copilot deployed (proposal-only, no autonomous state-changing action)',
       agentsActing: 0,
+      controlMaturity: {
+        current: 4, total: 5, label: 'Four core controls are built.',
+        achieved: ['D1', 'D2', 'D3', 'D4'], remaining: 'D5 needs independent provenance.',
+      },
       phaseRoadmap: [
         { number: 1, status: 'complete', title: 'Safety foundations', outcome: 'Enforced.' },
         { number: 2, status: 'active', title: 'Read-only oversight', outcome: 'Human decides.' },
@@ -55,6 +59,7 @@ describe('GET /api/iaops/governance', () => {
     expect(body.phase).toBe(2)
     expect(body.phaseLabel).toContain('Read-only oversight active')
     expect(body.phaseRoadmap[1]).toMatchObject({ number: 2, status: 'active' })
+    expect(body.controlMaturity).toMatchObject({ current: 4, total: 5 })
     expect(body.enforcement).toBe('block')
     expect(body.policyDefault).toBe('deny')
     expect(body.chartersAvailable).toBe(true)

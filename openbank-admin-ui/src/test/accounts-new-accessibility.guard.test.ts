@@ -24,4 +24,16 @@ describe('new account form accessibility', () => {
   it('requires account-creation permission before rendering the form', () => {
     expect(page).toContain('<AuthGuard permission="accounts:create">')
   })
+
+  it('resolves an existing party before the money-path submit', () => {
+    expect(page).toContain("import { PartySearch, type PartyHit } from '@/components/party/PartySearch'")
+    expect(page).toContain('<PartySearch')
+    expect(page).toContain('onSelect={selectParty}')
+    expect(page).toContain('accountPartySelection(party)')
+    expect(page).toContain('partyId: selection.partyId')
+    expect(page).toContain('legalName: selection.legalName')
+    expect(page).toContain('accountApi.open({')
+    expect(page).toContain('partyId:     form.partyId.trim()')
+    expect(page).toContain('legalName:   form.legalName.trim()')
+  })
 })

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.8.1...flaky-test-hunter-v0.9.0) (2026-08-18)
+
+
+### Features
+
+* **admin-ui:** trigger bounded flaky test check ([#5497](https://github.com/JiRaska/open-bank-oss/issues/5497)) ([89f1a9f](https://github.com/JiRaska/open-bank-oss/commit/89f1a9fc3394d4d3a266880f107e6d89015bfbaf))
+
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.8.0...flaky-test-hunter-v0.8.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **flaky-test-hunter:** map GITHUB_TOKEN env into the config the adapter reads ([#5475](https://github.com/JiRaska/open-bank-oss/issues/5475)) ([c6c927d](https://github.com/JiRaska/open-bank-oss/commit/c6c927dbbd80c8521df3b8f337f7138f7f251979))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.7.0...flaky-test-hunter-v0.8.0) (2026-08-17)
+
+
+### Features
+
+* **flaky-test-hunter:** wire AI-attributed audit + adapter contract proof for the GitHub PR path ([#5326](https://github.com/JiRaska/open-bank-oss/issues/5326)) ([9758e8c](https://github.com/JiRaska/open-bank-oss/commit/9758e8c1b66f3fedd8ed791af372168bd12551ed)), closes [#5281](https://github.com/JiRaska/open-bank-oss/issues/5281)
+
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.6.0...flaky-test-hunter-v0.7.0) (2026-08-17)
+
+
+### Features
+
+* **flaky-test-hunter:** add bounded development PR path ([#5289](https://github.com/JiRaska/open-bank-oss/issues/5289)) ([66e02f0](https://github.com/JiRaska/open-bank-oss/commit/66e02f0e6cf95f50fe78b310d4c31b3a305bb387))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.5.0...flaky-test-hunter-v0.6.0) (2026-08-06)
 
 

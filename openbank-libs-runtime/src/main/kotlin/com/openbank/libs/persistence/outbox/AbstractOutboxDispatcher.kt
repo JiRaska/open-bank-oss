@@ -5,19 +5,21 @@
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
-import jakarta.inject.Inject
 import org.jboss.logging.Logger
 
 /**
  * Shared outbox dispatch loop (ADR-0049 D3 / ADR-0050 N1).
  *
- * A concrete subclass binds the service's [OutboxRepository] and [OutboxEventPublisher] ports:
+ * A concrete subclass binds the service's [OutboxRepository] and [OutboxEventPublisher] ports
+ * and threads `metrics: DomainMetrics` through to the super constructor (mirrors
+ * [AbstractOutboxBacklogGauge], #5128 finding 2):
  * ```
  * @ApplicationScoped
  * class AuditOutboxDispatcher(
  *     private val repository: AuditOutboxRepository,
  *     private val publisher: AuditOutboxEventPublisher,
- * ) : AbstractOutboxDispatcher() {
+ *     metrics: DomainMetrics,
+ * ) : AbstractOutboxDispatcher(metrics) {
  *     override val outboxRepository: OutboxRepository get() = repository
  *     override val outboxEventPublisher: OutboxEventPublisher get() = publisher
  *
@@ -59,14 +61,22 @@ abstract class AbstractOutboxDispatcher {
     /**
      * `service` tag for [DomainMetrics.outboxDispatched] / `.outboxDead` (#5049). Defaults to a
      * kebab-case derivation of the concrete class's simple name — `PartyOutboxDispatcher`
-     * becomes `party` — which was verified (2026-08-16) to reproduce the `service` string every
-     * one of the 31 sibling [AbstractOutboxBacklogGauge] subclasses already hardcodes, so the
-     * outbox-dispatch and outbox-backlog panels of the same dashboard share one label
-     * vocabulary. Three dispatchers whose derivation would silently disagree with their own
-     * gauge override it explicitly: `CardOutboxDispatcher` (`card-issuance`, not `card`),
-     * `TppOutboxDispatcher` (`tpp-registry`, not `tpp`), `DomesticPaymentOutboxDispatcher`
-     * (`domestic`, not `domestic-payment`). A new dispatcher whose class name does not already
-     * match its own gauge's `service` must override this the same way.
+     * becomes `party` — chosen (2026-08-16) to reproduce the `service` string most sibling
+     * [AbstractOutboxBacklogGauge] subclasses already hardcode, so the outbox-dispatch and
+     * outbox-backlog panels of the same dashboard share one label vocabulary. Three dispatchers
+     * whose derivation would silently disagree with their own gauge override it explicitly:
+     * `CardOutboxDispatcher` (`card-issuance`, not `card`), `TppOutboxDispatcher`
+     * (`tpp-registry`, not `tpp`), `DomesticPaymentOutboxDispatcher` (`domestic`, not
+     * `domestic-payment`). A new dispatcher whose class name does not already match its own
+     * gauge's `service` must override this the same way.
+     *
+     * **Not CI-enforced (#5128 finding 5/8).** Nothing compares this derivation against the
+     * fleet's actual gauge labels, so agreement rests on the 3 overrides above staying complete
+     * and correct by hand — a prior version of this comment claimed a specific verified count of
+     * sibling gauges, which itself went stale (grep patterns for a hand-written class hierarchy
+     * are fragile across formatting styles). Verify directly instead of trusting a number here:
+     * `grep -rl ': AbstractOutboxBacklogGauge' --include='*.kt' .` for the gauge side,
+     * [deriveServiceName] for the dispatcher side.
      *
      * **`this::class.java.simpleName` is NOT the class you wrote (issue #5143).** This getter is
      * inherited from the abstract base, so `this` at the call site is Quarkus Arc's generated
@@ -82,23 +92,40 @@ abstract class AbstractOutboxDispatcher {
      * immune only by coincidence (they exist for a naming disagreement, not this). See
      * [deriveServiceName] for the fix.
      */
-    protected open val service: String get() = deriveServiceName(this::class.java.simpleName)
+    // Lazy, not a plain val: it must still read `this::class.java.simpleName` at first access
+    // (Arc's proxy is only fully constructed by then), but every subsequent outbox row on every
+    // scheduled tick reuses the cached result instead of recompiling deriveServiceName's Regex
+    // and re-walking the class name (#5128 finding 6) — the value cannot change for the life of
+    // the bean, so recomputing it per-row was pure waste on a fleet-wide hot path.
+    protected open val service: String by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        deriveServiceName(this::class.java.simpleName)
+    }
 
     /**
-     * Metrics facade, deliberately **field**-injected rather than threaded through the
-     * constructor (contrast [AbstractOutboxBacklogGauge], whose concrete subclasses already
-     * accept a `metrics: DomainMetrics` constructor parameter) so this change touches none of
-     * the ~34 concrete dispatchers' constructors (#5049).
-     *
-     * `null` means either "not CDI-managed" — every dispatcher unit test in the fleet
-     * (`AbstractOutboxDispatcherTest` included) constructs its dispatcher directly with `class
-     * Foo(...) : AbstractOutboxDispatcher()`, bypassing the container entirely — or a
-     * not-yet-resolved bean. [dispatchScheduledBatch] treats either as "skip metrics, never
-     * crash", the same graceful-degradation contract [DomainMetrics.reg] uses for a missing
-     * `MeterRegistry`. Visible to this package's tests via direct field assignment (protected).
+     * Metrics facade, **constructor**-injected — matches [AbstractOutboxBacklogGauge]'s existing
+     * pattern instead of the field-injection this class originally shipped with (#5128 finding 2).
+     * Field injection (`@Inject protected var metrics: DomainMetrics? = null`) on an *abstract*
+     * class extended by ~34 `@ApplicationScoped` subclasses across separate Gradle modules had no
+     * precedent elsewhere in the fleet and no test proving CDI actually resolves it across that
+     * module boundary — a silent-null risk if Arc's field discovery on an inherited superclass
+     * field ever behaved unexpectedly. Constructor injection instead fails FAST: a concrete
+     * subclass that doesn't pass `metrics` through to `super(metrics)` is a compile error, not a
+     * runtime maybe. See `PartyOutboxDispatcherCdiIT` (openbank-party-service) and
+     * `DocumentOutboxDispatcherCdiIT` (openbank-document-service) for the real-CDI proof — driven
+     * through a booted `@QuarkusTest` container, in two different Gradle modules — that this
+     * cross-module field injection actually resolved even before this change, and that
+     * constructor injection resolves it too.
      */
-    @Inject
-    protected var metrics: DomainMetrics? = null
+    protected lateinit var metrics: DomainMetrics
+
+    constructor(metrics: DomainMetrics) {
+        this.metrics = metrics
+    }
+
+    // Required by Quarkus CDI for proxy subclass generation — never called at runtime, and
+    // `metrics` is never read on this path (mirrors AbstractOutboxBacklogGauge's identical
+    // second constructor).
+    protected constructor()
 
     /**
      * Core dispatch loop. Call this from the concrete subclass's `@Scheduled` method.
@@ -107,16 +134,14 @@ abstract class AbstractOutboxDispatcher {
      * on the concrete override of [publishWithResilience] — so CDI proxying kicks in when the
      * `@Scheduled` method on the concrete bean calls through the proxy.
      */
-
     protected open suspend fun dispatchScheduledBatch() {
         val result = OutboxDispatch.dispatchOnce(outboxRepository) { entry ->
             publishWithResilience(entry)
         }
-        val m = metrics ?: return
         for (outcome in result.outcomes) {
             when (outcome) {
-                is OutboxDispatchOutcome.Dispatched -> m.outboxDispatched(service, outcome.entry.eventType)
-                is OutboxDispatchOutcome.Failed -> if (outcome.terminal) m.outboxDead(service)
+                is OutboxDispatchOutcome.Dispatched -> metrics.outboxDispatched(service, outcome.entry.eventType)
+                is OutboxDispatchOutcome.Failed -> if (outcome.terminal) metrics.outboxDead(service)
             }
         }
     }

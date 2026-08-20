@@ -14,6 +14,16 @@ vi.mock('@/components/feedback/DataUnavailable', () => ({ DataUnavailable: () =>
 afterEach(() => vi.unstubAllGlobals())
 
 describe('AIOps case list', () => {
+  it('exposes the selected status filter without relying on colour', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ available: true, cases: [] }) }))
+
+    render(<IaopsCasesPage />)
+
+    expect(await screen.findByRole('group', { name: 'Filter swarm cases by status' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getByRole('button', { name: 'Gathering inputs' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
   it('explains a synthesized thread as a recorded proposal, not an approval outcome', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,

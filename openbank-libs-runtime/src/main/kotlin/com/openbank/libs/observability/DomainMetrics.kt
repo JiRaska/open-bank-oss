@@ -54,6 +54,15 @@ class DomainMetrics {
 
     private fun reg(): MeterRegistry? = if (registryInstance.isResolvable) registryInstance.get() else null
 
+    companion object {
+        /**
+         * Gauge name for [registerStuckPaymentSagas]. Exposed so the emitting service and its
+         * tests name the same series the alert rule does — a metric name repeated as a literal in
+         * two places is how a rule ends up watching a series nothing emits (#5733).
+         */
+        const val STUCK_PAYMENT_SAGAS = "openbank.transaction.sagas.stuck"
+    }
+
     // ── Payments ─────────────────────────────────────────────────────────────
 
     /**
@@ -393,6 +402,40 @@ class DomainMetrics {
         reg()?.let { r ->
             Gauge.builder("openbank.outbox.dead_lettered", deadLettered) { it.invoke().toDouble() }
                 .tag("service", service)
+                .strongReference(true)
+                .register(r)
+        }
+    }
+
+    /**
+     * Register the **stuck payment saga** gauge: how many payment sagas have sat in a
+     * non-terminal state (`PENDING` / `PROCESSING`) for longer than the service's stuck
+     * threshold. A payment saga that wedges leaves money in a terminal-unknown state, so this
+     * is the money-path signal `TransactionSagaStuck` (severity `critical`) pages on.
+     *
+     * **Registered eagerly, at startup, not on first non-zero reading.** A lazily created meter
+     * publishes no series at all while the value is zero, and an absent series makes every
+     * comparison in a rule match *nothing* rather than match zero — the alert would then be
+     * silent in exactly the healthy-looking case it must distinguish from a dead scraper. Call
+     * this once from a `@Startup` bean's `@PostConstruct`; re-registration with the same name is
+     * a no-op, as for [registerOutboxBacklog].
+     *
+     * **What a fresh pod reports (the t=0 question).** `0` — a truthful healthy reading, because
+     * "no saga is stuck" is genuinely what a pod with no observed stuck sagas knows. That is the
+     * opposite of a sentinel like [java.time.Instant.EPOCH], which reads as a maximal *bad* value
+     * at t=0 and fired `WorkflowLivenessStale` fleet-wide 15 minutes after every deploy (#2239).
+     * Because the gauge only ever crosses `> 0` on a real observation, and the caller's supplier
+     * is refreshed from the database on a schedule, a boot-time reading can under-report for one
+     * refresh interval but can never over-report — the safe direction for a paging alert.
+     *
+     * @param stuck cheap, lock-free supplier of the current stuck-saga count (read from a cached
+     *              value refreshed by a scheduled query — Micrometer samples this on the scrape
+     *              thread and must not block on a reactive database call)
+     */
+    fun registerStuckPaymentSagas(stuck: () -> Number) {
+        reg()?.let { r ->
+            Gauge.builder(STUCK_PAYMENT_SAGAS, stuck) { it.invoke().toDouble() }
+                .description("Payment sagas in a non-terminal state past the stuck threshold")
                 .strongReference(true)
                 .register(r)
         }

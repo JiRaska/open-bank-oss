@@ -35,10 +35,12 @@ interface Agent {
 interface Decision { id: string; title: string; status: DStatus; detail: string }
 interface Compliance { framework: string; requirement: string; control: string; status: DStatus }
 interface PhaseRoadmap { number: number; status: PhaseStatus; title: string; outcome: string }
+interface ControlMaturity { current: number; total: number; label: string; achieved: string[]; remaining: string }
 interface GovData {
   adrRef: string; adrStatus: string; phase: number; totalPhases: number; phaseLabel: string
   enforcement: string; policyDefault: string; agentsActing: number
   phaseRoadmap: PhaseRoadmap[]
+  controlMaturity: ControlMaturity
   chartersAvailable: boolean; agentCount: number; agents: Agent[]
   toolTiers: Record<string, string[]>
   decisions: Decision[]; decisionSummary: { built: number; partial: number; planned: number; total: number }
@@ -148,6 +150,7 @@ function Chips({ items, tone }: { items: string[]; tone: 'allow' | 'deny' | 'neu
 // ── Main ────────────────────────────────────────────────────────────────────
 function IAOpsContent() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
@@ -248,7 +251,7 @@ function IAOpsContent() {
         )}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">IAOps</span></div>}
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString()}</span>}
+          {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString(dateLocale)}</span>}
           <button onClick={load} disabled={loading}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
@@ -318,7 +321,7 @@ function IAOpsContent() {
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
               <Bot size={18} style={{ color: '#6366f1' }} />
               <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-primary)' }}>
-                {t('Stav governance', 'Governance posture')}
+                {t('Schválená governance roadmapa', 'Governance-approved roadmap')}
               </span>
               <span style={{ fontSize: '11px', fontWeight: 700, padding: '2px 8px', borderRadius: '10px',
                 background: '#ede9fe', color: '#6366f1' }}>{data.adrRef} · {data.adrStatus}</span>
@@ -334,10 +337,10 @@ function IAOpsContent() {
 
             <div className="grid-4">
               {[
-                { label: t('Fáze (ADR-0031)', 'Phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: data.phaseLabel, color: '#6366f1' },
+                { label: t('Fáze roadmapy (ADR-0031)', 'Roadmap phase (ADR-0031)'), value: `${data.phase}/${data.totalPhases}`, sub: t(`${data.phaseLabel} · není živá runtime atestace`, `${data.phaseLabel} · not live runtime evidence`), color: '#6366f1' },
                 { label: t('Vynucování', 'Enforcement'), value: data.enforcement === 'advisory' ? t('Advisory (audit)', 'Advisory (audit)') : data.enforcement, sub: t(`Default: ${data.policyDefault} (deny-by-default)`, `Default: ${data.policyDefault} (deny-by-default)`), color: '#d97706' },
-                { label: t('Agentů jedná', 'Agents acting'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno`, `${data.agentCount} charters defined`), color: '#16a34a' },
-                { label: t('Roadmapa D1–D9', 'Roadmap D1–D9'), value: `${data.decisionSummary.built}/${data.decisionSummary.total}`, sub: t(`${data.decisionSummary.partial} částečně · ${data.decisionSummary.planned} plánováno`, `${data.decisionSummary.partial} partial · ${data.decisionSummary.planned} planned`), color: '#0891b2' },
+                { label: t('Autonomní změnoví agenti', 'Autonomous state-changing agents'), value: String(data.agentsActing), sub: t(`${data.agentCount} charterů definováno · není to živé počítadlo aktivity`, `${data.agentCount} charters defined · not a live activity count`), color: '#16a34a' },
+                { label: t('Governance kontroly', 'Governance controls'), value: `${data.controlMaturity.current}/${data.controlMaturity.total}`, sub: t('Kontroly, ne oprávnění k autonomní změně', 'Controls, not authority for autonomous change'), color: '#0891b2' },
               ].map(k => (
                 <div key={k.label} className="stat-card">
                   <div style={{ fontSize: '22px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '2px' }}>{k.value}</div>
@@ -345,6 +348,21 @@ function IAOpsContent() {
                   <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '2px' }}>{k.sub}</div>
                 </div>
               ))}
+            </div>
+
+            <div style={{ marginTop: '14px', padding: '12px 14px', borderRadius: '10px', background: 'rgba(8,145,178,0.06)', border: '1px solid rgba(8,145,178,0.18)' }}>
+              <div style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-primary)' }}>
+                {t(
+                  `${data.controlMaturity.current} z ${data.controlMaturity.total} ochranných pilířů je postavených.`,
+                  `${data.controlMaturity.current} of ${data.controlMaturity.total} protective control families are built.`,
+                )}
+              </div>
+              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', lineHeight: 1.55, margin: '4px 0 0' }}>
+                {t(
+                  `${data.controlMaturity.label} To není povolení k autonomní změně — ta zůstává na ${data.phase}/${data.totalPhases}, dokud neexistuje nezávisle ověřený provozní důkaz.`,
+                  `${data.controlMaturity.label} This is not permission for autonomous change — that remains at ${data.phase}/${data.totalPhases} until independently verified operational evidence exists.`,
+                )}
+              </p>
             </div>
 
             {/* What / Why / How */}
@@ -536,10 +554,9 @@ function IAOpsContent() {
                           {t('Citlivé kroky schvaluje člověk', 'Human approval for sensitive steps')}
                         </span>
                         {isFinopsAgent && (
-                          <button onClick={e => { e.stopPropagation(); alert(t('Funkce přijde v P4 (HITL backend)', 'Feature coming in P4 (HITL backend)')) }}
-                            style={{ fontSize: '10px', fontWeight: 700, padding: '3px 8px', borderRadius: '8px', border: '1px solid #6366f1', background: 'transparent', color: '#6366f1', cursor: 'pointer' }}>
-                            {t('Spustit analýzu', 'Trigger Analysis')}
-                          </button>
+                          <span role="status" style={{ fontSize: '10px', fontWeight: 650, padding: '3px 8px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)' }}>
+                            {t('Analýza zatím není připojená k HITL backendu', 'Analysis is not connected to the HITL backend yet')}
+                          </span>
                         )}
                       </div>
 
@@ -688,6 +705,7 @@ function IAOpsContent() {
             </SectionTitle>
             <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
               <textarea
+                aria-label={t('Popis alertu pro RCA', 'Alert description for RCA')}
                 value={rcaAsk}
                 onChange={e => setRcaAsk(e.target.value)}
                 disabled={rcaLoading}
@@ -797,8 +815,8 @@ function IAOpsContent() {
             </div>
             <p style={{ fontSize: '10px', color: 'var(--text-tertiary)', margin: '12px 0 0', lineHeight: 1.5 }}>
               {t(
-                'Pozn.: Fáze 1 je advisory + audit-only — kontroly jsou zavedené, ale enforcement (OPA block) ještě neběží. EU AI Act se klasifikuje per agent; oversight/dev agenti jsou proposal-only (pravděpodobně limited risk). Žádný agent se nedotýká scoringu úvěruschopnosti.',
-                'Note: Phase 1 is advisory + audit-only — controls are in place but enforcement (OPA block) is not yet live. EU AI Act is classified per agent; oversight/dev agents are proposal-only (likely limited risk). No agent touches creditworthiness scoring.',
+                'Pozn.: Fáze 1 je vynucovaná, je-li PDP dostupný: policy gate je deny-by-default a OPA blokuje nepovolené volání nástrojů. Při výpadku PDP se režim degraduje na advisory. Fáze 2 zůstává read-only a proposal-only — každý návrh rozhoduje člověk. EU AI Act se klasifikuje per agent; žádný agent se nedotýká scoringu úvěruschopnosti.',
+                'Note: Phase 1 is enforced while the PDP is available: the policy gate is deny-by-default and OPA blocks disallowed tool calls. A PDP outage degrades the gate to advisory. Phase 2 remains read-only and proposal-only — a human decides every proposal. EU AI Act is classified per agent; no agent touches creditworthiness scoring.',
               )}
             </p>
           </Card>

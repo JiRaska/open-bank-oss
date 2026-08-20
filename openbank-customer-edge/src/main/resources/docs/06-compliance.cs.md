@@ -86,7 +86,7 @@ sequenceDiagram
   App->>Edge: POST /domestic-payments (Idempotency-Key)
   Edge->>Edge: kontrola vlastnictví + obohacení (debtor IBAN/BBAN, jméno)
   Edge->>Pay: vytvoř + proscreenuj instrukci (M2M token)
-  Pay-->>App: 201 (instrukce; NESETTLOVÁNO)
+  Pay-->>App: 201 (instrukce#59; NESETTLOVÁNO)
   App->>Edge: POST /sca/challenges
   Edge->>Sca: challenge (partyId z JWT)
   Note over Sca: out-of-band rozhodnutí zařízení (ADR-0021)

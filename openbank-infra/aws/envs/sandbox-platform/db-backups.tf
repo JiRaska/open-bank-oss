@@ -245,12 +245,25 @@ locals {
     # DBs a barmanObjectStore each. Two different kinds of false statement, one effect.
     mcp     = { namespace = "platform", sa = "mcp-db" }
     litellm = { namespace = "ai-platform", sa = "litellm-db" }
+    # langfuse-db arrives with the self-hosted LLM-observability store (ADR-0265). Same reason as
+    # every entry above: its Cluster declares a barmanObjectStore into this bucket, and without the
+    # association here every WAL archive fails with "Unable to locate credentials" while the pod
+    # stays Ready — a cluster with no recovery point and nothing anywhere going red about it. The
+    # `db-backup-association` gate is what caught this one before it merged.
+    langfuse = { namespace = "ai-platform", sa = "langfuse-db" }
     # copilot-db arrives with the durable conversation-history store (#3710). Its gitops
     # manifest declares a barmanObjectStore into this bucket, so without the association here
     # every WAL archive would fail with "Unable to locate credentials" and the cluster would
     # have no recovery point at all — the #1444 failure mode, caught this time by
     # check-db-backup-associations.py before the cluster ever existed rather than days after.
     copilot = { namespace = "platform", sa = "copilot-db" }
+    # engagement-db was the last cluster in the fleet with NO backup at all — no
+    # barmanObjectStore, therefore no archive attempt, therefore no alert. The loud version of
+    # this (campaign-db, above) failed for ~48h and was visible the whole time; the silent
+    # version is worse and had been true since the cluster was created. Enumerated from the
+    # `kind: Cluster` manifests rather than from the rollout comments in this file, which have
+    # asserted "all remaining clusters" incorrectly three times now (#1444).
+    engagement = { namespace = "engagement", sa = "engagement-db" }
   }
 }
 

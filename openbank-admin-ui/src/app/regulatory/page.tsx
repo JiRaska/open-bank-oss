@@ -8,7 +8,10 @@ import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { blockReasonCopy, evaluateExportReadiness } from '@/lib/regulatory/exportReadiness'
+import { Ban } from 'lucide-react'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 type Report = (typeof REPORTS)[number]
 
@@ -284,6 +287,9 @@ export default function RegulatoryPage() {
   }
 
   function exportJson(report: Report) {
+    // Guarded at the handler, not only by the disabled button: a disabled attribute is a UI
+    // affordance, not a control. Both paths must refuse the same inputs (issue #5904).
+    if (!evaluateExportReadiness(previewData).ok) return
     const rows = buildExportRows(report, previewData)
     const data = {
       ...Object.fromEntries(rows.map(r => [r.field, r.value])),
@@ -299,6 +305,7 @@ export default function RegulatoryPage() {
   }
 
   function exportCsv(report: Report) {
+    if (!evaluateExportReadiness(previewData).ok) return
     const rows = buildExportRows(report, previewData)
     const header = `${csvCell(t('Pole', 'Field'))},${csvCell(t('Hodnota', 'Value'))}`
     const body = rows.map(r => `${csvCell(r.field)},${csvCell(r.value)}`).join('\n')
@@ -314,6 +321,10 @@ export default function RegulatoryPage() {
     setDownloadMessage(id)
     setTimeout(() => setDownloadMessage(null), 3000)
   }
+
+  // Whether an export may be produced at all. Derived from the SAME `previewData` the operator is
+  // looking at, so the buttons can never disagree with the table above them (issue #5904).
+  const exportReadiness = evaluateExportReadiness(previewData)
 
   const implementedPreviewCount = REPORTS.filter(r => dataSourceOf(r) === 'implemented').length
   const catalogueOnlyCount = REPORTS.length - implementedPreviewCount
@@ -332,23 +343,16 @@ export default function RegulatoryPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Regulatorní výkaznictví', 'Regulatory Reporting')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <FileText size={18} style={{ color: 'var(--accent)' }} />
-            {t('Regulatorní výkaznictví', 'Regulatory Reporting')}
-          </h1>
-          <p className="page-subtitle">{t('CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidenty', 'CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidents')}</p>
-        </div>
-        <a href="https://www.cnb.cz/cs/dohled-financni-trh/vykaznictvi/" target="_blank" rel="noreferrer" className="btn btn-secondary">
-          <ExternalLink size={13} />
+      <PageHeader
+        icon={<FileText size={18} aria-hidden="true" />}
+        title={t('Regulatorní výkaznictví', 'Regulatory Reporting')}
+        subtitle={t('CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidenty', 'CNB SDAT · FAÚ · COREP/FINREP · ECB · FATCA/CRS · DORA ICT incidents')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Regulatorní výkaznictví', 'Regulatory Reporting')}</span></div>}
+        actions={<a href="https://www.cnb.cz/cs/dohled-financni-trh/vykaznictvi/" target="_blank" rel="noreferrer" className="btn btn-secondary">
+          <ExternalLink size={13} aria-hidden="true" />
           {t('CNB Výkaznictví', 'CNB Reporting')}
-        </a>
-      </div>
+        </a>}
+      />
 
       {/* Summary */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: '12px', marginBottom: '20px' }}>
@@ -438,8 +442,11 @@ export default function RegulatoryPage() {
           const isSelected = selected === report.id
           return (
             <div key={report.id} className="card" style={{ overflow: 'hidden', borderLeft: `3px solid ${cfg.color}` }}>
-              <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
-                onClick={() => setSelected(s => s === report.id ? null : report.id)}>
+              <div role="button" tabIndex={0} aria-expanded={isSelected}
+                aria-label={`${report.name} — ${isSelected ? t('Sbalit detail', 'Collapse details') : t('Rozbalit detail', 'Expand details')}`}
+                style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '12px', cursor: 'pointer', flexWrap: 'wrap' }}
+                onClick={() => setSelected(s => s === report.id ? null : report.id)}
+                onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === report.id ? null : report.id) } }}>
                 {/* Status */}
                 <span style={{ color: cfg.color, flexShrink: 0 }}>{cfg.icon}</span>
 
@@ -597,15 +604,32 @@ export default function RegulatoryPage() {
             {/* Footer: note + export actions */}
             <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}>
+                {!exportReadiness.ok && (() => {
+                  const copy = blockReasonCopy(exportReadiness.reason, exportReadiness.templateIds, t('cs', 'en') as 'cs' | 'en')
+                  return (
+                    <div
+                      role="status"
+                      data-testid="export-blocked"
+                      data-block-reason={exportReadiness.reason}
+                      style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--danger)' }}
+                    >
+                      <Ban size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
+                      <span>
+                        <strong style={{ display: 'block' }}>{copy.title}</strong>
+                        <span style={{ color: 'var(--text-tertiary)' }}>{copy.detail}</span>
+                      </span>
+                    </div>
+                  )
+                })()}
                 {previewData.status === 'unsupported'
                   ? t('Tento katalogový výkaz zatím nemá implementovaný datový zdroj ani odeslání. Nezobrazuje fiktivní hodnoty.', 'This catalogue report has no implemented data source or submission path yet. It does not show fictional values.')
                   : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={previewData.status === 'loading'}>
+                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
                   <FileSpreadsheet size={13} /> {t('Export CSV', 'Export CSV')}
                 </button>
-                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={previewData.status === 'loading'}>
+                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
                   <FileJson size={13} /> {t('Export JSON', 'Export JSON')}
                 </button>
               </div>

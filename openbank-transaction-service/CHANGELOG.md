@@ -1,5 +1,47 @@
 # Changelog
 
+## [1.19.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.18.1...transaction-service-v1.19.0) (2026-08-20)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* make TransactionSagaStuck able to fire, delete 3 alerts that never could ([#5787](https://github.com/JiRaska/open-bank-oss/issues/5787)) ([55c2cdd](https://github.com/JiRaska/open-bank-oss/commit/55c2cdd0a57fc0dfeebb824194aa315f37f26ae3))
+* **transaction:** add sourceService to audit-consumed events ([#5329](https://github.com/JiRaska/open-bank-oss/issues/5329)) ([b83799b](https://github.com/JiRaska/open-bank-oss/commit/b83799b06ded82d524795e12d47cb6e6321c7a14)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [1.18.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.18.0...transaction-service-v1.18.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* make TransactionSagaStuck able to fire, delete 3 alerts that never could ([#5787](https://github.com/JiRaska/open-bank-oss/issues/5787)) ([55c2cdd](https://github.com/JiRaska/open-bank-oss/commit/55c2cdd0a57fc0dfeebb824194aa315f37f26ae3))
+
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.17.0...transaction-service-v1.18.0) (2026-08-19)
+
+
+### Features
+
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
+## [1.17.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.4...transaction-service-v1.17.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+* **transaction:** add sourceService to audit-consumed events ([#5329](https://github.com/JiRaska/open-bank-oss/issues/5329)) ([b83799b](https://github.com/JiRaska/open-bank-oss/commit/b83799b06ded82d524795e12d47cb6e6321c7a14)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [1.16.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.16.3...transaction-service-v1.16.4) (2026-08-17)
 
 

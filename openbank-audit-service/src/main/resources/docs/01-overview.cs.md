@@ -48,7 +48,6 @@ Id a typ agregátu se odvozují z příchozího payloadu (`accountId` → ACCOUN
 | Zaznamenat změnu zůstatku | Kafka `openbank.balance.events` | consume |
 | Zaznamenat party / KYC / consent událost | Kafka `openbank.party.events`, `openbank.kyc.events`, `openbank.consent.events` | consume |
 | Získat auditní stopu pro agregát | `GET /api/v1/audit/entries/{aggregateId}` | serve |
-| Re-emit zaznamenaných událostí downstream | `audit_outbox` → Kafka (dispatcher) | produce (viz [02](./02-architecture.md)) |
 
 ## Volající
 

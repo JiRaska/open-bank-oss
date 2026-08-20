@@ -11,6 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { DocsPageHeader } from '@/components/docs/DocsPageHeader'
 import {
   Boxes, Box, Lock, Network, Cpu, Globe, Shield, Key, CheckCircle2, CircleDashed, Circle,
   ChevronRight, RefreshCw, FileText, BadgeCheck, AlertTriangle, Building2, Server,
@@ -71,13 +72,16 @@ function DefenseRings({ layers, active, onPick, lang }: { layers: Layer[]; activ
   const size = 260
   const cx = size / 2
   return (
-    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: 240, height: 240, flexShrink: 0 }} role="img" aria-label={lang === 'cs' ? 'Obrana do hloubky' : 'Defense in depth'}>
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: 240, height: 240, flexShrink: 0 }} role="group" aria-label={lang === 'cs' ? 'Obrana do hloubky' : 'Defense in depth'}>
       {layers.map((l, i) => {
         const r = (cx - 6) * (1 - i / n)
         const m = STATUS[l.status]
         const on = active === l.id
         return (
-          <g key={l.id} onClick={() => onPick(l.id)} style={{ cursor: 'pointer' }}>
+          <g key={l.id} role="button" tabIndex={0} aria-label={l.label}
+            onClick={() => onPick(l.id)}
+            onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onPick(l.id) } }}
+            onFocus={() => onPick(l.id)} style={{ cursor: 'pointer' }}>
             <circle cx={cx} cy={cx} r={r} fill={on ? m.bg : 'transparent'} stroke={m.color} strokeWidth={on ? 3 : 2} opacity={on ? 1 : 0.55} />
           </g>
         )
@@ -107,7 +111,8 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
             const on = open === st.id
             const discarded = st.id === 'build'
             return (
-              <button key={st.id} onClick={() => setOpen(st.id)} style={{
+              <button key={st.id} onClick={() => setOpen(st.id)} type="button"
+                aria-expanded={on} aria-controls={on ? `cluster-anatomy-panel-${st.id}` : undefined} style={{
                 textAlign: 'left', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 7, cursor: 'pointer',
                 background: on ? 'rgba(50,108,229,0.18)' : 'rgba(255,255,255,0.03)',
                 border: `1px solid ${on ? K8S_BLUE : 'rgba(255,255,255,0.06)'}`,
@@ -116,8 +121,8 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
               }}>
                 <span style={{ width: 7, height: 7, borderRadius: '50%', background: m.color, flexShrink: 0 }} />
                 <span style={{ fontSize: 12.5, fontWeight: 600, color: '#e2e8f0', flex: 1 }}>{st.label}</span>
-                {st.id === 'sign' && <BadgeCheck size={14} style={{ color: '#34d399' }} />}
-                <ChevronRight size={13} style={{ color: '#64748b', transform: on ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
+                {st.id === 'sign' && <BadgeCheck aria-hidden="true" size={14} style={{ color: '#34d399' }} />}
+                <ChevronRight aria-hidden="true" size={13} style={{ color: '#64748b', transform: on ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
               </button>
             )
           })}
@@ -131,7 +136,7 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
       {/* detail of the open slice */}
       <div>
         {anatomy.steps.filter(s => s.id === open).map(st => (
-          <div key={st.id} className="card" style={{ padding: 16, borderLeft: `3px solid ${STATUS[st.status].color}` }}>
+          <div key={st.id} id={`cluster-anatomy-panel-${st.id}`} role="region" aria-label={st.label} className="card" style={{ padding: 16, borderLeft: `3px solid ${STATUS[st.status].color}` }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
               <h4 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', margin: 0 }}>{st.label}</h4>
               <StatusPill s={st.status} lang={lang} />
@@ -147,6 +152,7 @@ function ContainerAnatomy({ anatomy, lang }: { anatomy: Topology['imageAnatomy']
 
 export default function ClusterDossierPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [topo, setTopo] = useState<Topology | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeLayer, setActiveLayer] = useState<string | null>(null)
@@ -173,28 +179,22 @@ export default function ClusterDossierPage() {
 
   return (
     <div>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
+      <DocsPageHeader
+        crumbs={<>
             <span>OpenBank</span><span className="breadcrumb-sep">/</span>
             <span>{t('Dokumentace', 'Docs')}</span><span className="breadcrumb-sep">/</span>
             <span className="breadcrumb-current">{t('Cluster & kontejner', 'Cluster & container')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Boxes size={20} style={{ color: K8S_BLUE }} />
-            {t('Cluster & kontejner — topologie a hardening', 'Cluster & container — topology and hardening')}
-          </h1>
-          <p className="page-subtitle">
-            {t(
+          </>}
+        title={t('Cluster & kontejner — topologie a hardening', 'Cluster & container — topology and hardening')}
+        subtitle={t(
               'Jak je platforma rozdělená po namespaces, jak je zabezpečená (obrana do hloubky) a jak je poskládaný a zabezpečený výchozí image — plán vs. realita, odvozeno z GitOpsu (ADR-0081).',
               'How the platform is split across namespaces, how it is secured (defense in depth), and how the default service image is built and hardened — plan vs reality, derived from GitOps (ADR-0081).',
             )}
-          </p>
-        </div>
-        <button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
-        </button>
-      </div>
+        icon={<Boxes aria-hidden="true" size={20} style={{ color: K8S_BLUE }} />}
+        actions={<button onClick={load} disabled={loading} type="button" aria-busy={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+        </button>}
+      />
 
       {/* derived counts */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(150px,1fr))', gap: 12, marginBottom: 26 }}>
@@ -238,8 +238,10 @@ export default function ClusterDossierPage() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 8, paddingLeft: 34 }}>
                 {items.map(nsItem => {
                   const on = openNs === nsItem.name
+                  const panelId = `cluster-ns-panel-${nsItem.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`
                   return (
-                    <button key={nsItem.name} onClick={() => setOpenNs(on ? null : nsItem.name)} style={{
+                    <button key={nsItem.name} onClick={() => setOpenNs(on ? null : nsItem.name)} type="button"
+                      aria-expanded={on} aria-controls={on ? panelId : undefined} style={{
                       textAlign: 'left', cursor: 'pointer', padding: '10px 12px', borderRadius: 9,
                       background: on ? `${g.color}10` : 'var(--surface)', border: `1px solid ${on ? g.color : 'var(--border)'}`,
                       transition: 'all .12s',
@@ -249,7 +251,7 @@ export default function ClusterDossierPage() {
                         <code style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono, monospace)' }}>{nsItem.name}</code>
                       </div>
                       {on && (
-                        <div style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        <div id={panelId} role="region" aria-label={nsItem.name} style={{ marginTop: 6, fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
                           {nsItem.role}
                           <div style={{ marginTop: 4, fontSize: 10.5, color: 'var(--text-tertiary)' }}>
                             {t('Izolace: ', 'Isolation: ')}{(c.networkPolicies ?? 0) > 0 ? t('NetworkPolicy nasazeny, fleet-wide aktivace probíhá (#854)', 'NetworkPolicies deployed, fleet-wide activation in progress (#854)') : t('zatím bez NetworkPolicy', 'no NetworkPolicy yet')}
@@ -276,8 +278,11 @@ export default function ClusterDossierPage() {
             const LI = ICONS[l.icon] ?? Shield
             const on = activeLayer === l.id
             return (
-              <div key={l.id} onClick={() => setActiveLayer(l.id)} className="card" style={{ padding: 14, cursor: 'pointer', borderLeft: `3px solid ${STATUS[l.status].color}`, boxShadow: on ? '0 0 0 1px var(--accent)' : undefined }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 8 : 0 }}>
+              <div key={l.id} className="card" style={{ padding: 14, borderLeft: `3px solid ${STATUS[l.status].color}`, boxShadow: on ? '0 0 0 1px var(--accent)' : undefined }}>
+                <div role="button" tabIndex={0} aria-expanded={on} aria-label={`${l.label} — ${on ? t('Sbalit vrstvu', 'Collapse layer') : t('Rozbalit vrstvu', 'Expand layer')}`}
+                  onClick={() => setActiveLayer(current => current === l.id ? null : l.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setActiveLayer(current => current === l.id ? null : l.id) } }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: on ? 8 : 0, cursor: 'pointer' }}>
                   <span style={{ fontFamily: 'var(--font-mono,monospace)', fontSize: 11, color: 'var(--text-tertiary)', width: 18 }}>{i + 1}</span>
                   <LI size={16} style={{ color: K8S_BLUE }} />
                   <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', flex: 1 }}>{l.label}</span>
@@ -341,7 +346,7 @@ export default function ClusterDossierPage() {
       <p style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 6 }}>
         <FileText size={12} />
         {t('Odvozeno z GitOpsu + reprezentativního Dockerfile při buildu (ADR-0081). Žádná data ručně — gapy se zobrazují poctivě.', 'Derived from GitOps + a representative Dockerfile at build (ADR-0081). No hand-typed data — gaps shown honestly.')}
-        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-US')}</span>}
+        {topo?.generatedAt && <span> · {new Date(topo.generatedAt).toLocaleString(dateLocale)}</span>}
       </p>
     </div>
   )

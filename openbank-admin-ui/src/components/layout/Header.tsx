@@ -4,10 +4,10 @@
 
 'use client'
 
-import { Bell, Search, HelpCircle, LogOut, ChevronDown } from 'lucide-react'
+import { Bell, Search, HelpCircle, LogOut, ChevronDown, Menu, X } from 'lucide-react'
 import { useSession, signOut } from 'next-auth/react'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { hasPermission, ROLE_LABELS } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { CommandPalette } from '@/components/search/CommandPalette'
@@ -15,12 +15,50 @@ import styles from './Header.module.css'
 
 interface BuildInfo { version: string; gitSha: string; buildDate: string }
 
-export function Header() {
+export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolean; onMenuToggle?: () => void }) {
   const { data: session } = useSession()
   const [menuOpen, setMenuOpen] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const mobileMenuRef = useRef<HTMLButtonElement>(null)
+  const userMenuButtonRef = useRef<HTMLButtonElement>(null)
+  const userMenuRef = useRef<HTMLDivElement>(null)
+  const wasUserMenuOpen = useRef(false)
+  const wasMobileNavOpen = useRef(false)
   const { language, setLanguage, t } = useLanguage()
   const [build, setBuild] = useState<BuildInfo | null>(null)
+
+  useEffect(() => {
+    if (wasMobileNavOpen.current && !mobileNavOpen) mobileMenuRef.current?.focus()
+    wasMobileNavOpen.current = Boolean(mobileNavOpen)
+  }, [mobileNavOpen])
+
+  // Keep the small account menu keyboard-complete: focus enters the menu,
+  // Escape/outside click closes it, and focus returns to the opener. Without
+  // this, keyboard users can land behind the menu and lose their place.
+  useEffect(() => {
+    if (menuOpen) {
+      wasUserMenuOpen.current = true
+      const frame = requestAnimationFrame(() => userMenuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')?.focus())
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === 'Escape') {
+          event.preventDefault()
+          setMenuOpen(false)
+        }
+      }
+      const onPointerDown = (event: PointerEvent) => {
+        if (!userMenuRef.current?.contains(event.target as Node) && !userMenuButtonRef.current?.contains(event.target as Node)) setMenuOpen(false)
+      }
+      window.addEventListener('keydown', onKeyDown)
+      document.addEventListener('pointerdown', onPointerDown)
+      return () => {
+        cancelAnimationFrame(frame)
+        window.removeEventListener('keydown', onKeyDown)
+        document.removeEventListener('pointerdown', onPointerDown)
+      }
+    }
+    if (wasUserMenuOpen.current) userMenuButtonRef.current?.focus()
+    wasUserMenuOpen.current = menuOpen
+  }, [menuOpen])
 
   useEffect(() => {
     let mounted = true
@@ -57,13 +95,25 @@ export function Header() {
 
   return (
     <header className={styles.header}>
+      <button
+        type="button"
+        ref={mobileMenuRef}
+        className={styles.mobileMenu}
+        aria-label={mobileNavOpen ? t('Zavřít navigaci', 'Close navigation') : t('Otevřít navigaci', 'Open navigation')}
+        aria-expanded={mobileNavOpen}
+        aria-controls="admin-sidebar"
+        onClick={onMenuToggle}
+      >
+        {mobileNavOpen ? <X size={18} aria-hidden="true" /> : <Menu size={18} aria-hidden="true" />}
+      </button>
       {/* Search — ADR-0228 D3: the painted placeholder is now a real palette. */}
       <button
+        type="button"
         onClick={() => setPaletteOpen(true)}
         aria-label={t('Rychlé hledání (⌘K)', 'Quick search (⌘K)')}
         className={styles.searchTrigger}
       >
-        <Search size={14} />
+        <Search size={14} aria-hidden="true" />
         <span style={{ fontSize: '13px' }}>{t('Rychlé hledání…', 'Quick search…')}</span>
         <kbd style={{
           fontSize: '10px', padding: '1px 5px',
@@ -109,6 +159,9 @@ export function Header() {
           </Link>
         )}
         <button
+          type="button"
+          aria-label={t('Přepnout na angličtinu', 'Switch to Czech')}
+          title={t('Přepnout jazyk', 'Switch language')}
           onClick={() => setLanguage(language === 'en' ? 'cs' : 'en')}
           style={{
             width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -121,17 +174,19 @@ export function Header() {
         >
           {language.toUpperCase()}
         </button>
-        {canReadDocs && <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} /></HeaderLink>}
-        {canViewApprovals && <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} /></HeaderLink>}
+        {canReadDocs && <HeaderLink href="/docs" label={t('Nápověda a dokumentace', 'Help and documentation')}><HelpCircle size={15} aria-hidden="true" /></HeaderLink>}
+        {canViewApprovals && <HeaderLink href="/approvals" label={t('Schvalování', 'Approvals')}><Bell size={15} aria-hidden="true" /></HeaderLink>}
         <div style={{ width: '1px', height: '20px', background: 'var(--border)', margin: '0 6px' }} />
 
         {/* User menu */}
         <div style={{ position: 'relative' }}>
           <button
             type="button"
+            ref={userMenuButtonRef}
             onClick={() => setMenuOpen(v => !v)}
             aria-expanded={menuOpen}
             aria-haspopup="menu"
+            aria-controls={menuOpen ? 'admin-user-menu' : undefined}
             aria-label={t('Otevřít uživatelskou nabídku', 'Open user menu')}
             style={{
               display: 'flex', alignItems: 'center', gap: '8px',
@@ -161,12 +216,12 @@ export function Header() {
                 </span>
               )}
             </div>
-            <ChevronDown size={12} style={{ color: 'var(--text-tertiary)', marginLeft: '2px' }} />
+            <ChevronDown aria-hidden="true" size={12} style={{ color: 'var(--text-tertiary)', marginLeft: '2px' }} />
           </button>
 
           {/* Dropdown */}
           {menuOpen && (
-            <div role="menu" aria-label={t('Uživatelská nabídka', 'User menu')} style={{
+            <div id="admin-user-menu" ref={userMenuRef} role="menu" aria-label={t('Uživatelská nabídka', 'User menu')} style={{
               position: 'absolute', top: 'calc(100% + 6px)', right: 0,
               width: '240px', background: 'var(--surface)', border: '1px solid var(--border)',
               borderRadius: '10px', boxShadow: 'var(--shadow-lg)', padding: '8px',
@@ -199,6 +254,8 @@ export function Header() {
               {/* Sign out — federated (ADR-0080 P1 / F-AUTH-04): clear the local session AND
                   the Keycloak SSO session, otherwise navigating Back silently re-authenticates. */}
               <button
+                type="button"
+                role="menuitem"
                 onClick={async () => {
                   setMenuOpen(false)
                   let kcLogoutUrl: string | null = null
@@ -218,7 +275,7 @@ export function Header() {
                 onMouseEnter={e => (e.currentTarget.style.background = '#fef2f2')}
                 onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
               >
-                <LogOut size={14} />
+                <LogOut size={14} aria-hidden="true" />
                 {t('Odhlásit se', 'Sign out')}
               </button>
             </div>

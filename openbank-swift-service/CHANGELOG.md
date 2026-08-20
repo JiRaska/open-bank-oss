@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.8.0...swift-service-v0.9.0) (2026-08-19)
+
+
+### Features
+
+* **swift:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5696](https://github.com/JiRaska/open-bank-oss/issues/5696)) ([9824471](https://github.com/JiRaska/open-bank-oss/commit/98244714c936eae8f713cbe6c3b462dc19e5b573))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.6...swift-service-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.7.6](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.5...swift-service-v0.7.6) (2026-08-18)
+
+
+### Bug Fixes
+
+* **swift:** add sourceService for AuditConsumer attribution ([#5349](https://github.com/JiRaska/open-bank-oss/issues/5349)) ([2c6975c](https://github.com/JiRaska/open-bank-oss/commit/2c6975c09a13c8a5d3454fc6ef5ecf277f30000a)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.7.5](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.7.4...swift-service-v0.7.5) (2026-08-17)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.65.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.0...customer-edge-v0.65.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
+## [0.65.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.64.0...customer-edge-v0.65.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
 ## [0.64.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.63.2...customer-edge-v0.64.0) (2026-08-17)
 
 

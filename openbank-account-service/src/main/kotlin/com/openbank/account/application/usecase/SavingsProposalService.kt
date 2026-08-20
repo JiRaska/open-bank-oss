@@ -128,6 +128,7 @@ class SavingsProposalService(
                     approvalId = approvalId,
                     scaSessionId = scaSessionId,
                     occurredAt = clock.instant(),
+                    sourceService = "account-service",
                 ),
             )
         } else {

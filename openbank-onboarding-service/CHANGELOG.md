@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.0...onboarding-service-v0.8.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **campaign,onboarding:** stop swallowing transient consumer failures as an ack ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5757](https://github.com/JiRaska/open-bank-oss/issues/5757)) ([4f2d6e5](https://github.com/JiRaska/open-bank-oss/commit/4f2d6e5eb84bf3435c393d5c2fc0be79db20817e))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.3...onboarding-service-v0.8.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.7.2...onboarding-service-v0.7.3) (2026-08-16)
 
 

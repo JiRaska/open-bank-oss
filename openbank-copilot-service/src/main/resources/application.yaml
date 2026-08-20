@@ -84,6 +84,22 @@ copilot:
   guardrail:
     # block (default) stops the turn on a prompt-injection hit; advisory only audits (ADR-0089 D3).
     mode: ${COPILOT_GUARDRAIL_MODE:block}
+  # Model-based content safety (Llama Guard via the LiteLLM gateway, ADR-0031 guardrails / ADR-0174).
+  # Complements the deterministic prompt-injection guard above; neither replaces the other.
+  # Disabled by default so no environment silently starts calling a classifier on upgrade — when
+  # disabled every classification reports `unavailable`, never `safe`, so the state is visible in
+  # openbank_guardrail_classifications{decision="unavailable"} instead of looking clean.
+  content-safety:
+    enabled: ${COPILOT_CONTENT_SAFETY_ENABLED:false}
+    # In-cluster gateway; the provider key never reaches this pod (ADR-0175).
+    endpoint: ${COPILOT_CONTENT_SAFETY_ENDPOINT:}
+    model: ${COPILOT_CONTENT_SAFETY_MODEL:meta-llama/llama-guard-4-12b}
+    api-key: ${COPILOT_CONTENT_SAFETY_API_KEY:}
+    # What an UNAVAILABLE verdict means on THIS surface. false for customer help: refusing to answer
+    # a balance question because a classifier is unreachable is worse than answering it, and the
+    # injection guard + OPA tool gate + SCA still stand between the customer and any action. Flip to
+    # true on any state-changing surface.
+    fail-closed: ${COPILOT_CONTENT_SAFETY_FAIL_CLOSED:false}
   # The ModelGateway seam is constant; only the backend changes per environment (ADR-0089 D6).
   #   sandbox    -> public free / mock provider (synthetic data only)
   #   production -> in-cluster vLLM or EU zero-retention (deferred, FinOps ADR-0027)
@@ -112,6 +128,25 @@ copilot:
     # Backend API key for the openai-compat provider. Empty in dev; ESO/OpenBao in deploy.
     # Shared across backends — update OpenBao copilot-service/MODEL_API_KEY when switching providers.
     api-key: ${COPILOT_MODEL_API_KEY:}
+  # Hybrid retrieval over the help corpus (ADR-0183, ADR-0265 slice 4). Off by default: with it off
+  # the copilot keeps the keyword-only behaviour it has always had, and every retrieval increments
+  # openbank_copilot_retrieval_total{mode="keyword_only"} so the state is visible rather than assumed.
+  retrieval:
+    semantic-enabled: ${COPILOT_SEMANTIC_RETRIEVAL_ENABLED:false}
+    embedding-endpoint: ${COPILOT_EMBEDDING_ENDPOINT:}
+    embedding-model: ${COPILOT_EMBEDDING_MODEL:BAAI/bge-m3}
+    # MUST match the migration's vector(1024). A mismatch is caught in the adapter, not by the DB.
+    embedding-dimensions: ${COPILOT_EMBEDDING_DIMENSIONS:1024}
+    embedding-api-key: ${COPILOT_EMBEDDING_API_KEY:}
+    # Re-checks content hashes; embeds only what changed, so the steady-state cost is one query.
+    #
+    # An INTERVAL with an initial delay, not a cron: a cron leaves a freshly deployed environment
+    # with an empty index — and therefore keyword-only search — until the next scheduled hour. The
+    # 90s delay is deliberate rather than 0: at boot the gateway route, the projected secret and the
+    # database connection may all still be settling, and a failed run here is harmless because the
+    # next tick retries it.
+    index-interval: ${COPILOT_INDEX_INTERVAL:6h}
+    index-initial-delay: ${COPILOT_INDEX_INITIAL_DELAY:90s}
   # OPA per-tool gate (ADR-0089 D3, ADR-0034). Off by default (advisory); flip to true in gitops
   # once copilot-opa-bundle.yaml is deployed and the sidecar is live (issue #998 advisory→enforce).
   opa:
@@ -149,6 +184,12 @@ authz:
     datasource:
       devservices:
         enabled: true
+        # pgvector is required by V3 (semantic retrieval). The default Dev Services image is stock
+        # postgres, which has no `vector` extension, so Flyway aborts at V3 and EVERY @QuarkusTest in
+        # this module reports as an error rather than a migration problem. In the deployed cluster
+        # the extension comes from the CNPG image plus the Database resource; under test it comes
+        # from this image, which is stock postgres plus pgvector and nothing else.
+        image-name: pgvector/pgvector:pg18
     # No broker under test: the PARTY_ERASED consumer is covered by a plain unit test, and a Kafka
     # Dev Services container would only slow every @QuarkusTest in this module down. health-enabled
     # false keeps the unreachable channel from failing readiness in the boot smoke test.

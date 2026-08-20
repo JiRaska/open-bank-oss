@@ -64,10 +64,179 @@ spec:
           json_output: true
           json_include_output_property: true
           log_syslog: false
-          # Stock rules only (falco_rules.yaml from the falcoctl artifact
-          # follow); tuning exceptions land here as values once the first
-          # week of sandbox noise is triaged.
+          # Stock rules (falco_rules.yaml from the falcoctl artifact), plus the
+          # tuning exceptions in `customRules` below. `notice` stays the floor:
+          # the two highest-volume stock rules here are NOTICE, and the SOC
+          # dashboard + Loki retention are the consumers that want them.
           priority: notice
+
+        # ==========================================================================
+        # TUNING (issue #5734). The triage this file promised for "the first week of
+        # sandbox noise" — 15 months late, and it had to happen BEFORE any alert was
+        # added, because an alert over an untuned ruleset is muted within a day.
+        #
+        # BASELINE, measured over 24h of sandbox Loki on 2026-08-19, with each rule's
+        # STOCK PRIORITY (falcosecurity/rules falco_rules.yaml, Falco 0.44.1) — the
+        # priority is the load-bearing column, because it decides which of these an
+        # alert can ever see:
+        #
+        #   29465  Contact K8S API Server From Container   NOTICE
+        #    3150  Run shell untrusted                     NOTICE
+        #     450  Drop and execute new binary in container CRITICAL
+        #       5  Falco internal: syscall event drop      CRITICAL (Falco-internal)
+        #
+        # So the ~33k/day headline and the alertable volume are NOT the same number:
+        # a `priority=~Critical|Emergency` alert sees 455/day, not 33k. Tuning the two
+        # NOTICE rules buys log volume and dashboard signal; tuning `Drop and execute`
+        # is what makes an alert survivable. Both are done here, for different reasons.
+        #
+        # HOW THESE ARE WRITTEN. Every stock rule above ships a purpose-built tuning
+        # hook — a `user_known_*` macro defaulting to `never_true`, or an empty list.
+        # Overriding the hook is the sanctioned mechanism and leaves the rule itself
+        # untouched, so a chart bump cannot silently drop the exception (it would drop
+        # the whole file, loudly). `/etc/falco/rules.d` loads AFTER falco_rules.yaml
+        # (chart values `falco.rules_files`), so these overrides win.
+        #
+        # NOT DONE, DELIBERATELY: `Run shell untrusted` (3150/day) is left NOISY. Its
+        # condition requires a `protected_shell_spawner` ancestor (an http/db/nosql/
+        # mail server binary, or a JVM running kafka/tomcat/elasticsearch/...), and
+        # NOTHING in this repo identifies which of those is spawning a shell every
+        # ~30s. Every CronJob and sidecar this repo does declare has a plain
+        # entrypoint parent and so cannot be the source. An exception written from a
+        # guess would silence the rule that catches general RCE, which is the same
+        # write-only control with extra steps. It needs one Loki query against the
+        # live events (see the PR body for #5734) and then a tuning it can justify.
+        # It is NOTICE, so leaving it noisy costs log volume and nothing else — no
+        # alert below can see it.
+        # ==========================================================================
+        customRules:
+          openbank-tuning.yaml: |-
+            # ---------------------------------------------------------------
+            # Contact K8S API Server From Container  (29465/day, NOTICE)
+            #
+            # WHAT IT ACTUALLY DETECTS: any container connecting to
+            # kubernetes.default.svc. Stock excludes only ns kube-system and a
+            # fixed list of third-party operator images (`k8s_containers`) —
+            # none of which this estate runs. So every controller we DO run
+            # trips it continuously, which is the whole 29k.
+            #
+            # WHAT IS PRESERVED: the coverage that has value here is the ~60
+            # openbank APP namespaces (accounts, payments, ledger, sanctions,
+            # fraud, ...), where a connection to the API server is anomalous by
+            # construction — no openbank service carries a Kubernetes client
+            # dependency (no fabric8, no client-go) and no openbank
+            # ServiceAccount except admin-ui has any Role or ClusterRole bound.
+            # Not one of those namespaces is excepted below.
+            #
+            # (1) Pure platform/controller namespaces. Whole-namespace scope is
+            # honest here: these hold no business data path, every pod in them
+            # talks to the API server as its JOB, and the other ~90 stock rules
+            # — shell spawn, sensitive mount, drop-and-execute — still cover
+            # them. kube-system is already excluded upstream.
+            - macro: openbank_controller_namespaces
+              condition: >
+                (k8s.ns.name in (argocd, argo-rollouts, arc-runners, arc-systems,
+                                 cert-manager, cnpg-system, external-dns,
+                                 external-secrets, falco, ingress-nginx, keda,
+                                 kyverno, observability, vault, vpa))
+
+            # (2) The kubectl CronJobs, by IMAGE rather than by namespace —
+            # they run in `admin-ui`, `iam` and `finops-scaledown`, which are
+            # NOT namespaces to hand a blanket exception to. Every one of them
+            # is a `docker.io/alpine/k8s` pod whose entire purpose is to call
+            # the API server: finops scale-down/up, cost-collector,
+            # tier-classifier, sbom-drift-scanner, infra-vuln-scanner,
+            # keycloak-realm-drift.
+            - macro: openbank_kubectl_cronjob_image
+              condition: (container.image.repository endswith "alpine/k8s")
+
+            # (3) The admin-ui BFF, by IMAGE for the same reason — ns admin-ui
+            # also hosts the CronJobs above and would be a bad blanket. It is
+            # the one openbank service that genuinely calls the API server
+            # (src/lib/discovery.ts), its ClusterRole is read-only
+            # (get/list/watch on deployments/rollouts/services/endpoints) and
+            # is bound per-namespace, never cluster-wide.
+            # RESIDUAL, stated: code execution INSIDE the admin-ui container
+            # would no longer trip THIS rule. It still trips the shell-spawn,
+            # drop-and-execute and sensitive-file rules, and the RBAC above
+            # caps what the token can do. Scoping by image keeps every other
+            # container in ns admin-ui covered.
+            - macro: openbank_admin_ui_bff
+              condition: (container.image.repository endswith "openbank-admin-ui")
+
+            # (4) Strimzi's cluster operator — ns `messaging` also holds the
+            # Kafka brokers and Apicurio, which have no business calling the
+            # API server, so this is pod-scoped rather than namespace-scoped.
+            - macro: openbank_strimzi_operator
+              condition: >
+                (k8s.ns.name = "messaging"
+                 and k8s.pod.name startswith "strimzi-cluster-operator")
+
+            - macro: user_known_contact_k8s_api_server_activities
+              condition: >
+                (openbank_controller_namespaces
+                 or openbank_kubectl_cronjob_image
+                 or openbank_admin_ui_bff
+                 or openbank_strimzi_operator)
+              override:
+                condition: replace
+
+            # ---------------------------------------------------------------
+            # Drop and execute new binary in container  (450/day, CRITICAL)
+            #
+            # This is the rule that gates the alert, and the ONLY one of the
+            # four whose priority an alert on Critical can see. It fires on
+            # `proc.is_exe_upper_layer=true` — an executable that was written
+            # into the container's writable overlay layer AFTER image build and
+            # then exec'd. That is real malware behaviour, so the exception has
+            # to be tight enough that a genuine drop-and-execute anywhere else
+            # still fires.
+            #
+            # WHERE THE 450 COMES FROM. Candidates were enumerated from the
+            # repo and all but one are eliminated by the rule's own condition:
+            #   - JNI/native extraction (ONNX in fraud-service, netty epoll
+            #     fleet-wide, lz4) `dlopen`s a .so; the rule needs
+            #     `spawned_process`, so it cannot match.
+            #   - the pyroscope initContainer copies a JAR (run by the JVM from
+            #     the image), and litellm's initContainer stages prisma into an
+            #     emptyDir — an emptyDir is a separate mount, not the overlay
+            #     UPPER layer, so `is_exe_upper_layer` is false.
+            #   - ARC runners and their dind sidecar, the obvious suspects, are
+            #     NOT OBSERVABLE: Falco tolerates only workload=observability,
+            #     while the runner pool carries openbank.io/runner=true:NoSchedule
+            #     (arc-runners.tf), so no Falco pod runs on a runner node. The
+            #     header comment above says this and it checks out.
+            # What survives is `arc-stuck-runner-reaper` — a CronJob in ns
+            # arc-runners that is deliberately scheduled on the DEFAULT nodes
+            # (arc-runner-reaper.tf: "so the guard never itself provokes a
+            # runner-pool scale-up"), i.e. squarely in Falco's view. Its script
+            # opens with `apk add --no-cache jq curl` and then runs them:
+            # binaries installed into the writable layer of a running container
+            # and executed. That is the textbook shape of this rule.
+            # Arithmetic, which is why this is an identification and not a
+            # hypothesis: schedule */10 = 144 runs/day, each exec'ing at least
+            # curl (twice), jq and apk from the upper layer -> ~430/day against
+            # a measured 450/day.
+            #
+            # SCOPE: namespace AND pod-name prefix AND the three process names.
+            # Another pod in arc-runners still fires; a different binary
+            # dropped into the reaper pod itself still fires.
+            #
+            # THE PROPER FIX IS NOT THIS. `apk add` at runtime is the defect;
+            # baking jq+curl into the reaper image removes the detection at
+            # source and makes this macro dead. That is a Terraform change to
+            # local.arc_reaper_image and is out of scope for a gitops PR —
+            # tracked in the #5734 PR body. Delete this macro when it lands.
+            - macro: openbank_arc_reaper_apk_bootstrap
+              condition: >
+                (k8s.ns.name = "arc-runners"
+                 and k8s.pod.name startswith "arc-stuck-runner-reaper"
+                 and proc.name in (apk, jq, curl))
+
+            - macro: known_drop_and_execute_activities
+              condition: (openbank_arc_reaper_apk_bootstrap)
+              override:
+                condition: replace
 
         falcosidekick:
           enabled: false

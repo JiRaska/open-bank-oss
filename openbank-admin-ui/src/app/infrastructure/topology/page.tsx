@@ -6,7 +6,7 @@
 import { useState, useEffect } from 'react'
 import {
   Network, RefreshCw, Play, Pause, CheckCircle2, XCircle, HelpCircle,
-  Cloud, GitBranch, Database, Eye, Server,
+  Cloud, GitBranch, Database, Eye, Server, X,
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { edgeGeometry, mixHex, pathId } from '@/components/topology/geometry'
@@ -14,6 +14,7 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -233,29 +234,19 @@ export default function InfraTopologyPage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
-      <div className="page-header">
-        <div>
-          <div className="breadcrumb">
-            <span>OpenBank</span><span className="breadcrumb-sep">/</span>
-            <span>{t('Infrastruktura', 'Infrastructure')}</span><span className="breadcrumb-sep">/</span>
-            <span className="breadcrumb-current">{t('Topologie', 'Topology')}</span>
-          </div>
-          <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Network size={18} style={{ color: 'var(--accent)' }} />
-            {t('Topologie infrastruktury', 'Infrastructure Topology')}
-          </h1>
-          <p className="page-subtitle">
-            {t('Jak jsou platformní komponenty zapojené — architektura toku dat s živým stavem. Hrany jsou zdokumentovaná architektura (ne odvozená data); uzly nesou živý stav z prób.',
-               'How the platform components are wired — a data-flow architecture with live status. Edges are the documented architecture (not derived data); nodes carry live probe status.')}
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        icon={<Network size={18} aria-hidden="true" />}
+        title={t('Topologie infrastruktury', 'Infrastructure Topology')}
+        subtitle={t('Jak jsou platformní komponenty zapojené — architektura toku dat s živým stavem. Hrany jsou zdokumentovaná architektura (ne odvozená data); uzly nesou živý stav z prób.',
+          'How the platform components are wired — a data-flow architecture with live status. Edges are the documented architecture (not derived data); nodes carry live probe status.')}
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span>{t('Infrastruktura', 'Infrastructure')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Topologie', 'Topology')}</span></div>}
+      />
 
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div role="group" aria-label={t('Filtrování vrstev infrastruktury', 'Infrastructure layer filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {(['all', ...GROUP_ORDER] as const).map(key => (
-            <button key={key} onClick={() => setFilter(key)}
+            <button key={key} type="button" onClick={() => setFilter(key)} aria-pressed={filter === key}
               style={{
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                 border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
@@ -267,18 +258,18 @@ export default function InfraTopologyPage() {
           ))}
         </div>
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-          <button onClick={() => setFlow(v => !v)} aria-pressed={flow} title={t('Přepnout tok dat', 'Toggle data flow')}
+          <button type="button" onClick={() => setFlow(v => !v)} aria-pressed={flow} aria-label={t(flow ? 'Pozastavit tok dat' : 'Spustit tok dat', flow ? 'Pause data flow' : 'Start data flow')} title={t('Přepnout tok dat', 'Toggle data flow')}
             style={{
               display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
               borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
               border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
               background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
             }}>
-            {flow ? <Pause size={13} /> : <Play size={13} />}{t('Tok dat', 'Data flow')}
+            {flow ? <Pause aria-hidden="true" size={13} /> : <Play aria-hidden="true" size={13} />}{t('Tok dat', 'Data flow')}
           </button>
-          <button onClick={load} disabled={isChecking} className="btn btn-secondary"
+          <button type="button" onClick={load} disabled={isChecking} aria-busy={isChecking} aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')} className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-            <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+            <RefreshCw aria-hidden="true" size={14} className={isChecking ? 'animate-spin' : ''} />
             {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav', 'Refresh Status')}
           </button>
         </div>
@@ -349,8 +340,11 @@ export default function InfraTopologyPage() {
               const st = statusOf(n.id)
               const x = p.cx - p.w / 2, y = p.cy - PILL_H / 2
               return (
-                <g key={n.id} style={{ cursor: 'pointer', transition: 'opacity 0.15s' }} opacity={emphasized ? 1 : 0.25}
+                <g key={n.id} role="button" tabIndex={0} aria-label={n.label} aria-pressed={isSel} aria-controls={isSel ? 'infra-topology-selection' : undefined}
+                  style={{ cursor: 'pointer', transition: 'opacity 0.15s' }} opacity={emphasized ? 1 : 0.25}
                   onClick={() => setSelected(s => s === n.id ? null : n.id)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(s => s === n.id ? null : n.id) } }}
+                  onFocus={() => setHovered(n.id)}
                   onMouseEnter={() => setHovered(n.id)} onMouseLeave={() => setHovered(h => h === n.id ? null : h)}>
                   <rect x={x} y={y} width={p.w} height={PILL_H} rx={PILL_H / 2}
                     fill={isSel ? meta.color : 'var(--surface)'} stroke={meta.color} strokeWidth={isSel ? 1.9 : 1.3}
@@ -376,7 +370,7 @@ export default function InfraTopologyPage() {
                ['data', t('Data (spravuje · používá · zálohuje)', 'Data (manages · uses · backs up)')],
                ['flow', t('Tok (škálování · telemetrie · alerty)', 'Flow (scale · telemetry · alerts)')]] as [EdgeCat, string][]).map(([cat, lbl]) => (
               <div key={cat} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                <svg width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke={CAT_COLOR[cat]} strokeWidth="1.6" strokeDasharray={CAT_DASHED[cat] ? '5,3' : undefined} markerEnd={`url(#ix-arrow-${cat})`} /></svg>
+                <svg aria-hidden="true" width="30" height="10"><line x1="0" y1="5" x2="30" y2="5" stroke={CAT_COLOR[cat]} strokeWidth="1.6" strokeDasharray={CAT_DASHED[cat] ? '5,3' : undefined} markerEnd={`url(#ix-arrow-${cat})`} /></svg>
                 {lbl}
               </div>
             ))}
@@ -388,21 +382,24 @@ export default function InfraTopologyPage() {
 
         {/* Detail panel */}
         {selectedNode && (
-          <div className="card" style={{ padding: '20px', alignSelf: 'start' }}>
+          <div id="infra-topology-selection" className="card" role="region" aria-label={t('Detail infrastrukturní komponenty', 'Infrastructure component details')} style={{ padding: '20px', alignSelf: 'start' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px' }}>
               <div style={{ width: '28px', height: '28px', borderRadius: '8px', background: `${GROUPS[selectedNode.group].color}1a`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: GROUPS[selectedNode.group].color }}>
-                {(() => { const I = GROUPS[selectedNode.group].Icon; return <I size={16} /> })()}
+                {(() => { const I = GROUPS[selectedNode.group].Icon; return <I aria-hidden="true" size={16} /> })()}
               </div>
               <div style={{ fontSize: '14px', fontWeight: 700, color: 'var(--text-primary)' }}>{selectedNode.label}</div>
+              <button type="button" aria-label={t('Zavřít detail infrastruktury', 'Close infrastructure details')} onClick={() => setSelected(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--text-secondary)', cursor: 'pointer', padding: '2px' }}>
+                <X aria-hidden="true" size={16} />
+              </button>
               {statusOf(selectedNode.id) && (
                 <div style={{
                   marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '4px', padding: '2px 8px',
                   borderRadius: '12px', fontSize: '11px', fontWeight: 600,
                   background: `${statusColor(statusOf(selectedNode.id)!)}22`, color: statusColor(statusOf(selectedNode.id)!),
                 }}>
-                  {statusOf(selectedNode.id) === 'UP' && <CheckCircle2 size={12} />}
-                  {statusOf(selectedNode.id) === 'DOWN' && <XCircle size={12} />}
-                  {statusOf(selectedNode.id) === 'UNKNOWN' && <HelpCircle size={12} />}
+                  {statusOf(selectedNode.id) === 'UP' && <CheckCircle2 aria-hidden="true" size={12} />}
+                  {statusOf(selectedNode.id) === 'DOWN' && <XCircle aria-hidden="true" size={12} />}
+                  {statusOf(selectedNode.id) === 'UNKNOWN' && <HelpCircle aria-hidden="true" size={12} />}
                   {statusOf(selectedNode.id)}
                 </div>
               )}
@@ -458,7 +455,7 @@ export default function InfraTopologyPage() {
                 background: 'var(--accent-bg)', color: 'var(--accent)', borderRadius: 'var(--r-md)', fontSize: '12px',
                 fontWeight: 600, textDecoration: 'none', marginTop: '4px', border: '1px solid var(--accent-border, transparent)',
               }}>
-                <Server size={14} /> {t('Otevřít přehled infrastruktury', 'Open infrastructure overview')}
+                <Server aria-hidden="true" size={14} /> {t('Otevřít přehled infrastruktury', 'Open infrastructure overview')}
               </a>
             </div>
           </div>

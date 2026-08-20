@@ -142,7 +142,13 @@ mp:
         # directly rather than assuming from the port/publisher shape alone). #1035's AML-case
         # design for this topic is a SEPARATE, additional consumer with real business logic
         # (case-opening criteria) — this audit-trail consumer does not replace or block that work.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events
+        # openbank.sca.events (issue #5338): sca-service's own DEVICE_ENROLLED producer
+        # (ScaService.enroll, KafkaScaOutboxEventPublisher) is a genuine outbox-row write, not
+        # a stub — verified directly in ScaService.kt rather than assumed from the port shape
+        # alone (#1034's lesson). audit-service was the only one of the topic's two documented
+        # consumers (the other being onboarding-service's projection, #4353) that had never
+        # subscribed.
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:
@@ -172,8 +178,6 @@ openbank:
     commit: "${GIT_COMMIT:unknown}"
   gdpr:
     audit-retention-days: 3650
-  outbox:
-    dispatch-enabled: true
   retention:
     # ADR-0118 §2/§5, issue #268: session/access-log TTL cleanup.
     # SAFETY: enabled defaults to false and dry-run defaults to true — this scheduler ships
@@ -192,8 +196,11 @@ openbank:
       enabled: true
       interval: 1h
       initial-delay: 30s
-      # Held outside the audit DB (env/Vault). Production replaces the default HMAC signer with a
-      # KMS/cosign-keyed adapter (follow-up); this key is the in-cluster fallback.
+      # hmac is local development only. Production switches to the dedicated ECC_NIST_P256 KMS
+      # key, so the private key never enters the workload.
+      signer: ${AUDIT_ANCHOR_SIGNER:hmac}
+      signing-required: ${AUDIT_ANCHOR_SIGNING_REQUIRED:false}
+      kms-key-id: ${AUDIT_ANCHOR_KMS_KEY_ID:}
       signing-key: ${AUDIT_ANCHOR_SIGNING_KEY:CHANGE_ME_LOCAL_DEV_ONLY}
     chain-verify:
       # ADR-0133: recompute the whole hash chain on a cadence and publish the verdict as metrics.

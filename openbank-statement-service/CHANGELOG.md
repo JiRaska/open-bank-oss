@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.7...statement-service-v0.9.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.8.7](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.6...statement-service-v0.8.7) (2026-08-18)
+
+
+### Bug Fixes
+
+* **statement-service:** add sourceService to outbox events for audit attribution ([#5392](https://github.com/JiRaska/open-bank-oss/issues/5392)) ([a77c8f5](https://github.com/JiRaska/open-bank-oss/commit/a77c8f51f338597494d63e6dd56e24377a7b1945)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.8.6](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.5...statement-service-v0.8.6) (2026-08-17)
+
+
+### Bug Fixes
+
+* **statement:** track scheduled close liveness ([#5357](https://github.com/JiRaska/open-bank-oss/issues/5357)) ([78adec3](https://github.com/JiRaska/open-bank-oss/commit/78adec3f5ab86d8e912a510592e772f8b90b8964))
+
 ## [0.8.5](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.4...statement-service-v0.8.5) (2026-08-17)
 
 

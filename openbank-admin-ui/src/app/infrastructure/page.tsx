@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { LifecycleStrip, type CompLifecycle } from '@/components/infra/LifecycleStrip'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 type InfraStatus = 'UP' | 'DOWN' | 'UNKNOWN'
 
@@ -91,6 +92,7 @@ function StatusBadge({ status }: { status: InfraStatus }) {
 
 export default function InfrastructurePage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [statuses, setStatuses] = useState<Record<string, StatusResult>>({})
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [loading, setLoading] = useState(true)
@@ -172,19 +174,15 @@ export default function InfrastructurePage() {
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      <div style={{ marginBottom: '28px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-            {t('Infrastruktura', 'Infrastructure')}
-          </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {t('Zdraví, životní cyklus a zranitelnosti komponent platformy — patch & EoL evidence (ADR-0079, DORA)', 'Component health, lifecycle & vulnerabilities — patch & EoL evidence (ADR-0079, DORA)')}
-          </p>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+      <PageHeader
+        breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platforma', 'Platform')}</span></div>}
+        icon={<Server size={20} aria-hidden="true" />}
+        title={t('Infrastruktura', 'Infrastructure')}
+        subtitle={t('Zdraví, životní cyklus a zranitelnosti komponent platformy — patch & EoL evidence (ADR-0079, DORA)', 'Component health, lifecycle & vulnerabilities — patch & EoL evidence (ADR-0079, DORA)')}
+        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString()}
+              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
           {!loading && !unavailable && (
@@ -206,8 +204,8 @@ export default function InfrastructurePage() {
             <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
-        </div>
-      </div>
+        </div>}
+      />
 
       {unavailable && (
         <div style={{
@@ -277,7 +275,7 @@ export default function InfrastructurePage() {
                             {t('Ověřeno', 'Checked')}
                           </div>
                           <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontFamily: 'monospace' }}>
-                            {new Date(st.checkedAt).toLocaleTimeString()}
+                            {new Date(st.checkedAt).toLocaleTimeString(dateLocale)}
                           </div>
                         </div>
                       )}
@@ -285,7 +283,7 @@ export default function InfrastructurePage() {
                   )}
 
                   {lifecycle[comp.id] && (
-                    <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} />
+                    <LifecycleStrip data={lifecycle[comp.id]} name={comp.name} t={t} dateLocale={dateLocale} />
                   )}
                 </div>
               )

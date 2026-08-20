@@ -7,10 +7,12 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.domain.model.AdverseState
+import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.util.UUID
 
 /**
@@ -67,5 +69,26 @@ class DisputeOpenedEventConsumerTest {
         consumer.consume("""{"eventType":"dispute.opened","partyId":"not-a-uuid"}""")
         coVerify(exactly = 0) { adverseState.setActive(any(), any(), any()) }
         coVerify(exactly = 0) { adverseState.clearActive(any(), any()) }
+    }
+
+    /** The #5698 half a malformed-payload test can never reach — the write must ESCAPE. */
+    @Test
+    fun `a transient write failure is retried and RETHROWN so the connector dead-letters`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { adverseState.setActive(any(), any(), any()) } throws TransientDbFailure()
+
+        assertThrows<TransientDbFailure> { runBlocking { consumer.consume(opened(partyId)) } }
+
+        coVerify(exactly = 3) { adverseState.setActive(partyId, AdverseState.DISPUTE_OPENED, any()) }
+    }
+
+    @Test
+    fun `a transient failure lifting the exclusion is also RETHROWN`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { adverseState.clearActive(any(), any()) } throws TransientDbFailure()
+
+        assertThrows<TransientDbFailure> { runBlocking { consumer.consume(resolved(partyId)) } }
+
+        coVerify(exactly = 3) { adverseState.clearActive(partyId, AdverseState.DISPUTE_OPENED) }
     }
 }

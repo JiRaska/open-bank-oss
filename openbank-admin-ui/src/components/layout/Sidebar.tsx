@@ -16,9 +16,9 @@ import {
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
-  Megaphone,
+  Megaphone, Radar,
   Target,
-  Share2,
+  Share2, Bug,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -67,7 +67,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Inkasa (SDD)',      nameEn: 'Direct Debits',    href: '/sdd',               icon: Repeat,    permission: 'payments:view' },
   { nameCs: 'FX',                nameEn: 'FX',               href: '/fx',                icon: DollarSign,permission: 'payments:view' },
   { nameCs: 'SWIFT',             nameEn: 'SWIFT',            href: '/swift',             icon: Globe,     permission: 'payments:view' },
-  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'payments:view' },
+  { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
   { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payments:view' },
   { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'payments:view' },
   { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view' },
@@ -103,6 +103,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
+  { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
   { nameCs: 'Cluster & kontejner', nameEn: 'Cluster & Container', href: '/docs/cluster', icon: Boxes, permission: 'docs:view' },
@@ -119,6 +120,7 @@ const platformNav: NavItem[] = [
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
   { nameCs: 'IAOps',    nameEn: 'IAOps',    href: '/iaops',    icon: Bot,        permission: 'system:view' },
+  { nameCs: 'Flaky testy', nameEn: 'Flaky Tests', href: '/iaops/flaky-test-hunter', icon: Bug, permission: 'system:view' },
   { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
   { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },
   { nameCs: 'Observability', nameEn: 'Observability', href: '/observability', icon: Activity, permission: 'system:view' },
@@ -156,7 +158,7 @@ const ALL_NAV: NavItem[] = [
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
-export function Sidebar() {
+export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose?: () => void }) {
   const pathname = usePathname()
   const { data: session } = useSession()
   const { t, language } = useLanguage()
@@ -165,6 +167,9 @@ export function Sidebar() {
   const isLocked = (item: NavItem) =>
     (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
     (!!item.deniedRole && roles.includes(item.deniedRole))
+  const currentHref = ALL_NAV
+    .filter(item => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // is untouched. Each link inherits its permission from the same destination's nav entry.
@@ -202,12 +207,12 @@ export function Sidebar() {
   }, [])
 
   return (
-    <aside className={styles.sidebar}>
+    <aside id="admin-sidebar" aria-label={t('Hlavní navigace', 'Main navigation')} className={`${styles.sidebar} ${mobileOpen ? styles.mobileOpen : ''}`}>
       {/* Brand */}
       <div className={styles.brand}>
         <div className={styles.brandLockup}>
           <div className={styles.brandMark}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/>
             </svg>
           </div>
@@ -221,31 +226,31 @@ export function Sidebar() {
       {/* Nav — the only scrollable region; brand + footer stay pinned. */}
       <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
         <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
-        <NavSection items={filter(workspace)} pathname={pathname} />
-        <NavSection items={filter(coreNav)} pathname={pathname} />
+        <NavSection items={filter(workspace)} currentHref={currentHref} announceCurrent={false} />
+        <NavSection items={filter(coreNav)} currentHref={currentHref} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
-        <NavSection items={filter(revenueNav)} pathname={pathname} />
+        <NavSection items={filter(revenueNav)} currentHref={currentHref} />
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
-        <NavSection items={filter(customerNav)} pathname={pathname} />
+        <NavSection items={filter(customerNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>
-        <NavSection items={filter(paymentsNav)} pathname={pathname} />
+        <NavSection items={filter(paymentsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Compliance', 'Compliance')}</SectionLabel>
-        <NavSection items={filter(complianceNav)} pathname={pathname} />
+        <NavSection items={filter(complianceNav)} currentHref={currentHref} />
         <SectionLabel>{t('Operace', 'Operations')}</SectionLabel>
-        <NavSection items={filter(opsNav)} pathname={pathname} />
+        <NavSection items={filter(opsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platforma', 'Platform')}</SectionLabel>
-        <NavSection items={filter(platformNav)} pathname={pathname} />
+        <NavSection items={filter(platformNav)} currentHref={currentHref} />
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
-        <NavSection items={filter(docsNav)} pathname={pathname} />
+        <NavSection items={filter(docsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
-        <NavSection items={filter(toolsNav)} pathname={pathname} isLocked={isLocked} />
+        <NavSection items={filter(toolsNav)} currentHref={currentHref} isLocked={isLocked} />
         <SectionLabel>{t('Systém', 'System')}</SectionLabel>
-        <NavSection items={filter(sysNav)} pathname={pathname} isLocked={isLocked} />
+        <NavSection items={filter(sysNav)} currentHref={currentHref} isLocked={isLocked} />
       </nav>
 
       {/* Footer */}
       <div className={styles.footer}>
-        <div className={styles.footerVersion}>OpenBank v2.0</div>
+        <div className={styles.footerVersion}>{t('OpenBank Admin portál', 'OpenBank Admin Portal')}</div>
         <div className={styles.footerScope}>EBA · PSD2 · CNB · GDPR</div>
       </div>
     </aside>
@@ -260,14 +265,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname: string; isLocked?: (item: NavItem) => boolean }) {
+function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { items: NavItem[]; currentHref?: string; announceCurrent?: boolean; isLocked?: (item: NavItem) => boolean }) {
   const { language } = useLanguage()
 
   if (!items.length) return null
   return (
     <>
       {items.map(item => {
-        const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+        const active = announceCurrent && item.href === currentHref
         const locked = isLocked?.(item) ?? false
         const Icon = item.icon
         const displayName = language === 'cs' ? item.nameCs : item.nameEn
@@ -275,16 +280,16 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
         if (locked) {
           return (
             <div key={item.href} title={language === 'cs' ? 'Přístup není povolen pro demo účet' : 'Not available for demo account'} className={`${styles.navItem} ${styles.locked}`}>
-              <Icon size={16} className={styles.navIcon} />
+              <Icon aria-hidden="true" size={16} className={styles.navIcon} />
               <span className={styles.navLabel}>{displayName}</span>
-              <Lock size={11} className={styles.lockIcon} />
+              <Lock aria-hidden="true" size={11} className={styles.lockIcon} />
             </div>
           )
         }
 
         const row = (
             <div className={`${styles.navItem} ${active ? styles.active : ''}`}>
-              <Icon size={16} className={styles.navIcon} />
+              <Icon aria-hidden="true" size={16} className={styles.navIcon} />
               <span className={styles.navLabel}>{displayName}</span>
               {item.badge && (
                 <span className={styles.navBadge}>{item.badge}</span>
@@ -296,9 +301,9 @@ function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname:
         // next/link would client-side navigate and 404 (ADR-0234). Plain <a>,
         // same origin, so the session cookie reaches the edge gate.
         return item.external ? (
-          <a key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</a>
+          <a key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</a>
         ) : (
-          <Link key={item.href} href={item.href} style={{ textDecoration: 'none' }}>{row}</Link>
+          <Link key={item.href} href={item.href} aria-current={active ? 'page' : undefined} style={{ textDecoration: 'none' }}>{row}</Link>
         )
       })}
     </>

@@ -273,9 +273,9 @@ export default function SecurityPage() {
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Výsledky skenování', 'Scan Results')} <span style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}>({results.length})</span>
                 </span>
-                <div style={{ display: 'flex', gap: '4px', background: 'var(--surface-2)', padding: '4px', borderRadius: '6px' }}>
+                <div role="group" aria-label={t('Filtr závažnosti nálezů', 'Finding severity filters')} style={{ display: 'flex', gap: '4px', background: 'var(--surface-2)', padding: '4px', borderRadius: '6px' }}>
                   {(['ALL', 'CRITICAL', 'HIGH'] as const).map(f => (
-                    <button key={f} onClick={() => setFilter(f)}
+                    <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}
                       style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
                         background: filter === f ? 'var(--surface-1)' : 'transparent',
                         color: filter === f ? 'var(--text-primary)' : 'var(--text-tertiary)',
@@ -301,7 +301,8 @@ export default function SecurityPage() {
                     {filteredResults.map((r, i) => {
                       const isSelected = selected?.serviceName === r.serviceName
                       return (
-                        <tr key={`${r.serviceName}-${i}`} onClick={() => setSelected(r)}
+                        <tr key={`${r.serviceName}-${i}`} tabIndex={0} aria-label={t(`Vybrat službu ${r.serviceName}`, `Select service ${r.serviceName}`)} onClick={() => setSelected(r)}
+                          onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(r) } }}
                           style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer',
                             background: isSelected ? 'var(--accent-light)' : 'transparent',
                             transition: 'background 0.15s' }}

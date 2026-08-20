@@ -76,7 +76,7 @@ sequenceDiagram
   AML->>Aud: aml.case.created.v1 (outbox → Kafka)
 
   An->>AML: PUT /aml/cases/{id}/decision
-  Note over AML: validate transition;<br/>decidedBy required;<br/>decisionReason required if BLOCKED
+  Note over AML: validate transition#59;<br/>decidedBy required#59;<br/>decisionReason required if BLOCKED
 
   alt Cleared
     AML->>Aud: aml.case.status_changed.v1 (CLEARED)

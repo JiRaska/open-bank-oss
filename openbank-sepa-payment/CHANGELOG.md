@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.1...sepa-payment-v0.11.0) (2026-08-20)
+
+
+### Features
+
+* **sepa-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5691](https://github.com/JiRaska/open-bank-oss/issues/5691)) ([dc737f5](https://github.com/JiRaska/open-bank-oss/commit/dc737f572a2dc368231d255ec4741137e6cd5531))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.0...sepa-payment-v0.10.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sepa-payment:** add sourceService to outbox events for audit attribution ([#5388](https://github.com/JiRaska/open-bank-oss/issues/5388)) ([de59515](https://github.com/JiRaska/open-bank-oss/commit/de59515cfe02746b9af2de75472b7826feb5cae9)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.4...sepa-payment-v0.10.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.9.3...sepa-payment-v0.9.4) (2026-08-17)
 
 

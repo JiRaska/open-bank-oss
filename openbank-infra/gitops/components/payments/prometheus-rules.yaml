@@ -36,7 +36,14 @@ spec:
             description: "transaction-service outbox has >100 unrelayed rows for >15m — payment events are not being dispatched."
         - alert: TransactionSagaStuck
           # A saga stuck >5m = payment is in a terminal-unknown state.
-          expr: openbank_transaction_sagas_stuck_total > 0
+          #
+          # The series is `openbank_transaction_sagas_stuck` — a GAUGE, no `_total` suffix. It read
+          # `openbank_transaction_sagas_stuck_total` until #5733: nothing has ever emitted that
+          # name, so this critical money-path alert could not fire, and an alert that cannot fire
+          # looks exactly like one that is correctly quiet. StuckSagaGauge in transaction-service
+          # now emits it, registered eagerly at startup so the series exists at 0 rather than being
+          # absent (an absent series makes this comparison match nothing, not zero).
+          expr: openbank_transaction_sagas_stuck > 0
           for: 5m
           labels:
             severity: critical
@@ -75,17 +82,16 @@ spec:
           annotations:
             summary: "clearing outbox backlog stuck"
             description: "clearing-service outbox has >100 unrelayed rows for >15m — settlement confirmations may be delayed."
-        - alert: ClearingSettlementWindowMissed
-          expr: |
-            increase(openbank_clearing_settlements_completed_total[1h]) == 0
-            and on() hour() >= 6 and on() hour() <= 18
-          for: 30m
-          labels:
-            severity: warning
-            service: clearing
-          annotations:
-            summary: "No settlements completed in 1h (business hours)"
-            description: "clearing-service has not completed any settlement cycles in 1h during business hours."
+        # ClearingSettlementWindowMissed was REMOVED in #5733. It watched
+        # `openbank_clearing_settlements_completed_total`, which nothing emits, and instrumenting it
+        # would not have made the alert meaningful: clearing cycles are not scheduled here.
+        # `triggerClearingCycle` and `settleBatch` are on-demand REST operations (ClearingService)
+        # and the service has no `@Scheduled` sweep and no `@Incoming` consumer, so "no settlement
+        # completed in the last hour" is the NORMAL resting state, not a fault. The rule asserted a
+        # cadence the code does not have.
+        # If a scheduled clearing cycle is ever added, the right mechanism is the fleet-wide one:
+        # register it with DomainMetrics.registerWorkflowLiveness (ADR-0160) and let the existing
+        # WorkflowLivenessStale rule cover it — not a bespoke throughput alert per service.
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
@@ -117,18 +123,13 @@ spec:
           annotations:
             summary: "swift outbox backlog stuck"
             description: "swift-service outbox has >50 unrelayed rows for >15m — SWIFT confirmations are not being dispatched."
-        - alert: SwiftMtMessageProcessingStalled
-          # SWIFT MT messages must be acknowledged within SWIFT cut-off times.
-          expr: |
-            increase(openbank_swift_messages_processed_total[1h]) == 0
-            and on() hour() >= 7 and on() hour() <= 17
-          for: 30m
-          labels:
-            severity: warning
-            service: swift
-          annotations:
-            summary: "No SWIFT messages processed in 1h (business hours)"
-            description: "swift-service has not processed any MT/MX messages in 1h during business hours."
+        # SwiftMtMessageProcessingStalled was REMOVED in #5733, for the same reason as
+        # ClearingSettlementWindowMissed above. It watched `openbank_swift_messages_processed_total`,
+        # which nothing emits, and swift-service does not ingest messages on a cadence: every entry
+        # point on SwiftService (send / acknowledge / reject) is REST-driven, with no `@Scheduled`
+        # sweep and no `@Incoming` consumer. An hour with no MT/MX traffic is ordinary, so the rule
+        # could only ever have been noise had the metric existed. Cut-off adherence is a per-message
+        # property and belongs on a per-message age or latency signal, not on a throughput floor.
 ---
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule

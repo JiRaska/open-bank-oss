@@ -61,6 +61,21 @@ quarkus:
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
       connect-timeout: 2000
       read-timeout: 3000
+    # A disbursement's cash leg lands in the loan book (ledger-service, above) AND has to reach
+    # the borrower's own account — transaction-service is the only path that credits a balance
+    # (#3931). account-service resolves which of the party's accounts that is.
+    transaction-service:
+      url: ${TRANSACTION_SERVICE_URL:http://localhost:8102}
+      connect-timeout: 2000
+      read-timeout: 3000
+    account-service:
+      url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
+      connect-timeout: 2000
+      read-timeout: 3000
+    product-catalog:
+      url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 3000
   redis:
     hosts: redis://localhost:6379
   shutdown:

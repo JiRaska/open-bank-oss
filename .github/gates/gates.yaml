@@ -186,6 +186,38 @@ gates:
       echo "SUBJECTS=$total"
       exit $status
 
+
+  # ADR-0253 applied to the ADR registry itself. `delivery-status` is a control:
+  # DIGEST.md is what a reviewer, an auditor or an agent reads instead of the 1.6 MB
+  # fleet, and until now nothing compared its claim against the estate. It drifted
+  # silently twice — 0179/0181 said `planned` over live, versioned code (#5602), and
+  # ADR-0237 said `planned` while its own adoption gate below had been ENFORCED for
+  # weeks. check-adr-registry.sh validates the SCHEMA; `planned` is a well-formed lie.
+  #
+  # The evidence read here is deliberately narrow and runs artifact -> ADR: an
+  # ENFORCED gate blocks every PR, so an ADR it cites is not "planned" under any
+  # reading. Advisory citations are NOT evidence (ADR-0144 lets a gate land ahead of
+  # the decision it will enforce). The rejected alternative — "does a path this ADR
+  # mentions exist" — was measured first: 15 of 51 planned ADRs cite an existing path,
+  # almost always as prior art, and the two drifted ADRs cite none of their own
+  # artifacts, so that probe would not have caught the defect it was written for.
+  # EXCEPTIONS are checked both ways; a stale one is reported.
+  - id: adr-delivery-evidence
+    name: "ADR delivery-status is not contradicted by an enforced gate (ADR-0253)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      DIGEST.md is what a reviewer, an auditor or an agent reads instead of the 1.6 MB ADR
+      fleet, and check-adr-registry.sh validates its schema, not the truth of the value —
+      `planned` over shipped code is a well-formed lie. It happened twice unseen (#5602;
+      ADR-0237 sat `planned` while its own adoption gate was enforced).
+    review_after: "2027-02-19"
+    min_subjects: 100   # 147 enforced gates in the manifest today (2026-08-19)
+    selftest: |
+      python3 .github/scripts/check-adr-delivery-evidence.py --self-test
+    run: |
+      python3 .github/scripts/check-adr-delivery-evidence.py --root .
+
   # ==== gitops =========================================================
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
@@ -243,6 +275,41 @@ gates:
       # Falsified both ways before wiring in: 4 findings against the unpriced tree, 0 after,
       # 9 self-test cases including an explicit zero (which must NOT be treated as a price).
       python3 .github/scripts/check-litellm-model-costs.py --enforce
+
+  - id: untrusted-pg-extension
+    name: "an untrusted CREATE EXTENSION needs a CNPG Database resource (works local, crashloops deployed)"
+    group: data
+    mode: enforced
+    min_subjects: 1   # 1 untrusted CREATE EXTENSION site today (copilot V3, pgvector)
+    rationale: "A migration creating an untrusted extension passes every local path (all of which connect as superuser) and crashloops only in the cluster, where CNPG hands the app a non-superuser role — the diff gives no hint that the difference is the connecting role."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-untrusted-pg-extension.py --self-test
+    selftest_expect: pass
+    run: |
+      # Measured, not assumed (ADR-0265): against ghcr.io/cloudnative-pg/postgresql:18.1 the
+      # database OWNER gets 'permission denied to create extension "vector"' and the superuser
+      # gets CREATE EXTENSION. Every local path (Dev Services, PostgreSQLContainer, compose)
+      # connects as superuser, so this class of defect is green everywhere except the cluster.
+      # 8 self-test cases, both directions, including prose-in-a-comment near-misses.
+      python3 .github/scripts/check-untrusted-pg-extension.py --enforce
+
+  - id: litellm-config-revision
+    name: "a litellm-config change bumps the pod-roll annotation (an unrolled pod keeps its old model list)"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    min_subjects: 1
+    rationale: "LiteLLM parses its config once at startup, so a route added without a pod roll answers 'model not found' while ArgoCD reports Synced and Healthy; the manifest asked for the bump in prose since #1919 and three routes in one week relied on someone remembering."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-litellm-config-revision.py --self-test
+    selftest_expect: pass
+    run: |
+      # LiteLLM parses --config once at startup, so a ConfigMap edit alone changes nothing while
+      # ArgoCD reports Synced and Healthy — the manifest has warned about this in prose since
+      # #1919, and prose is not a control. The self-test also asserts the annotation regex matches
+      # the REAL manifest, so the gate cannot pass by never reaching its subject.
+      python3 .github/scripts/check-litellm-config-revision.py --base "${PR_DIFF_BASE}" --enforce
 
   - id: agent-virtual-keys
     name: every agent authenticates with its OWN LiteLLM virtual key, not the shared master key
@@ -362,6 +429,56 @@ gates:
       python3 .github/scripts/check-network-policy-code-edges.py --self-test
     run: |
       python3 .github/scripts/check-network-policy-code-edges.py
+
+  # Two implementations of the production-readiness scorecard both ship — the Python one via
+  # build-push-admin-ui.sh, the Node one via `prebuild`/admin-ui-deploy.yml, because the admin-ui
+  # build image has no python3. They drifted to 20-of-44 services scored differently (17 GO vs
+  # 11 GO for the same repo on the same day), each side carrying corrections the other lacked,
+  # and nothing compared them. The equivalence is what gets enforced, since the duplicate cannot
+  # be deleted and hand-auditing it is exactly what failed. ENFORCED.
+  - id: readiness-collectors-agree
+    name: "prod-readiness collectors agree (Python vs Node, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Two implementations of the readiness scorecard both ship and cannot be merged into one
+      (no python3 in the admin-ui build image); they had already drifted to 20 of 44 services
+      scored differently, so their equivalence is enforced rather than hand-audited.
+    review_after: 2027-02-19
+    selftest: |
+      python3 .github/scripts/check-readiness-collectors-agree.py --self-test
+    min_subjects: 40   # 44 services scored today (2026-08-19)
+    run: |
+      python3 .github/scripts/check-readiness-collectors-agree.py
+  # A JPA property in a service with no physical-naming-strategy maps to a column that is the
+  # property name folded to lower case — `createdAt` -> `createdat` — while every migration in this
+  # repo writes `created_at`. The mapping is then wrong for every multi-word property and right for
+  # every single-word one, so the class looks internally consistent and reviews clean.
+  #
+  # consent-service's SuppressionEntity shipped that way: six of ten columns wrong, and
+  # GET /api/v1/suppressions/party/{partyId} answered 500 on EVERY call from the day it shipped.
+  # Nothing could see it — unit tests mock the repository so no SQL is issued, health probes do not
+  # touch the table, and the two sibling entities in the same package do name their columns. It was
+  # found by schemathesis fuzzing the running service, which is not a control that runs on a PR.
+  #
+  # Scope note: this enforces the CONVENTION (a multi-word property names its column), not a diff
+  # against the DDL. Deriving "does this column exist" needs real DDL parsing — partitioned tables,
+  # custom enum types, ALTER/RENAME chains — and two attempts at it produced 12 and then ~40 false
+  # findings against correct code. A gate that cries wolf gets ignored. ENFORCED.
+  - id: entity-column-names
+    name: "JPA entity columns are named explicitly where nothing converts them (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      In a service with no physical-naming-strategy an implicit column name is the property name
+      folded to lower case, which no migration in this repo ever creates; the resulting 500 is
+      invisible to unit tests, health probes and review.
+    review_after: 2027-02-19
+    min_subjects: 100   # 147 entity classes in strategy-less services today (2026-08-19)
+    selftest: |
+      python3 .github/scripts/check-entity-column-names.py --self-test
+    run: |
+      python3 .github/scripts/check-entity-column-names.py
 
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
@@ -572,16 +689,21 @@ gates:
   # any gitops-scoped check and is written into the script header rather than left to be
   # discovered.
   #
-  # ADVISORY, not enforced, and the reason is specific rather than caution: enforcing it today
-  # would fail every PR on one open question — whether engagement-db should be backed up or is
-  # genuinely disposable — that is an owner's decision and not a contributor's to unblock. The
-  # exemption is an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`), deliberately
-  # not a list kept beside the manifests: a separate list drifts from what it describes and
-  # nothing notices, which is the defect this repo keeps re-finding.
+  # ENFORCED since 2026-08-19. It was advisory for one specific reason, written above: enforcing
+  # it would have failed every PR on a single open question — whether engagement-db should be
+  # backed up or is genuinely disposable — which is an owner's decision, not a contributor's to
+  # unblock. That question is now answered (backed up, same #863 pattern as the rest of the
+  # fleet), the gitops-visible count is 0, and an advisory gate that has correctly named the same
+  # cluster since 2026-08-16 with nothing happening is a finding nobody is required to read. The
+  # exemption remains an ANNOTATION ON THE CLUSTER (`openbank.io/backup-exempt-reason`),
+  # deliberately not a list kept beside the manifests: a separate list drifts from what it
+  # describes and nothing notices, which is the defect this repo keeps re-finding. So a future
+  # genuinely-disposable database is still one annotation away from green, and that annotation
+  # sits on the thing it describes.
   - id: cnpg-backup-declared-gate
-    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (advisory)"
+    name: "CNPG backup-declared gate — every cluster declares a backup or says why not (enforced)"
     group: gitops
-    mode: advisory
+    mode: enforced
     rationale: >-
       db-backup-association-gate only inspects clusters that already declare a
       barmanObjectStore, so a database that never asked to be backed up is invisible to it.
@@ -3062,6 +3184,26 @@ gates:
     min_subjects: 30   # 58 modules with a version.txt today (2026-08-09)
     run: |
       bash .github/scripts/check-governance-manifest.sh
+
+  # Every ```mermaid block must parse with the mermaid the admin-ui Service Docs viewer
+  # renders with. A block that does not parse is a red "Mermaid render failed: Parse error"
+  # box on the page — measured 2026-08-19, 40 of 248 blocks across 21 services were in that
+  # state and only a human opening the page ever found out. Rides `lint` because it resolves
+  # mermaid + jsdom from openbank-admin-ui/node_modules, so it shares the npm ci the
+  # governance-manifest gate above already pays for; 2.5s once the modules are warm.
+  # NOT an admin-ui vitest test: `ui-build` fires on openbank-admin-ui/ paths, and a broken
+  # diagram arrives in a DOCS-only PR that touches none of them — the #4083 absent-job shape.
+  - id: mermaid-parses
+    name: "every mermaid block parses in the renderer admin-ui uses (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "A mermaid block that does not parse renders as a red error box in the admin-ui Service Docs page and nothing else in CI looks at that page — 40 of 248 blocks across 21 services were broken when this was written, found only because a human opened one."
+    review_after: "2027-02-19"
+    selftest: bash .github/scripts/check-mermaid-parses.sh --self-test
+    selftest_expect: pass
+    min_subjects: 150   # 248 mermaid blocks today (2026-08-19)
+    run: |
+      bash .github/scripts/check-mermaid-parses.sh
 
   # The other half of check-gate-script-registration.py, which says in its own header that it
   # answers "is anything wired to this script" and deliberately not "can that invocation run".

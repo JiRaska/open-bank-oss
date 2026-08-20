@@ -78,7 +78,7 @@ def sha256_short(path: pathlib.Path) -> str:
 def validate_curated(curated: dict) -> None:
     if not isinstance(curated, dict):
         fail("ai-rollout.yaml must be a mapping")
-    for key in ["adrRef", "adrStatus", "phase", "decisions", "compliance", "auditTrail"]:
+    for key in ["adrRef", "adrStatus", "phase", "controlMaturity", "decisions", "compliance", "auditTrail"]:
         if key not in curated:
             fail(f"ai-rollout.yaml missing required key: {key}")
 
@@ -116,6 +116,26 @@ def validate_curated(curated: dict) -> None:
     if any(item["status"] == "complete" for item in roadmap if item["number"] > current):
         fail("no phase after phase.current may be marked complete")
 
+    control_maturity = curated["controlMaturity"]
+    if not isinstance(control_maturity, dict):
+        fail("controlMaturity must be a mapping")
+    for key in ["current", "total", "label", "achieved", "remaining"]:
+        if key not in control_maturity:
+            fail(f"controlMaturity missing required key: {key}")
+    maturity_current = control_maturity["current"]
+    maturity_total = control_maturity["total"]
+    if type(maturity_current) is not int or type(maturity_total) is not int or not 1 <= maturity_current <= maturity_total:
+        fail("controlMaturity.current must be an integer between 1 and controlMaturity.total")
+    if not isinstance(control_maturity["label"], str) or not control_maturity["label"].strip():
+        fail("controlMaturity.label must be a non-empty string")
+    achieved = control_maturity["achieved"]
+    if not isinstance(achieved, list) or len(achieved) != maturity_current or not all(isinstance(item, str) and re.fullmatch(r"D[1-9]", item) for item in achieved):
+        fail("controlMaturity.achieved must contain one D1–D9 decision id per completed control")
+    if len(set(achieved)) != len(achieved):
+        fail("controlMaturity.achieved must not contain duplicate decision ids")
+    if not isinstance(control_maturity["remaining"], str) or not control_maturity["remaining"].strip():
+        fail("controlMaturity.remaining must be a non-empty string")
+
     decisions = curated["decisions"]
     if not isinstance(decisions, list):
         fail("decisions must be a list")
@@ -130,6 +150,11 @@ def validate_curated(curated: dict) -> None:
                 fail(f"decision {item!r} missing required key: {key}")
         if item["status"] not in ALLOWED_D_STATUSES:
             fail(f"decision {item['id']} has invalid status {item['status']!r}")
+
+    decision_statuses = {item["id"]: item["status"] for item in decisions}
+    for decision_id in achieved:
+        if decision_statuses.get(decision_id) != "built":
+            fail(f"controlMaturity.achieved {decision_id} must reference a built decision")
 
     for row_name in ["compliance"]:
         rows = curated[row_name]
@@ -326,6 +351,7 @@ def build_snapshot() -> dict:
         "phaseLabel": curated["phase"]["label"],
         "agentsActing": curated["phase"]["agentsActing"],
         "phaseRoadmap": curated["phase"]["roadmap"],
+        "controlMaturity": curated["controlMaturity"],
         "decisions": decisions,
         "decisionSummary": decision_summary,
         "compliance": curated["compliance"],
@@ -386,6 +412,10 @@ def self_test() -> int:
                 {"number": 5, "status": "planned", "title": "five", "outcome": "later"},
             ],
         },
+        "controlMaturity": {
+            "current": 4, "total": 5, "label": "four controls built",
+            "achieved": ["D1", "D2", "D3", "D4"], "remaining": "D5 evidence",
+        },
         "decisions": [
             {"id": f"D{i}", "title": f"t{i}", "status": "built", "detail": f"d{i}"}
             for i in range(1, 10)
@@ -416,7 +446,7 @@ def self_test() -> int:
         fails.append(f"a well-formed curated document was rejected: {sink.getvalue().strip()}")
 
     # Top-level keys: each one absent means a section of the published page has no source.
-    for key in ("adrRef", "adrStatus", "phase", "decisions", "compliance", "auditTrail"):
+    for key in ("adrRef", "adrStatus", "phase", "controlMaturity", "decisions", "compliance", "auditTrail"):
         rejects(f"a missing top-level {key!r}", lambda d, k=key: d.pop(k))
 
     # The phase block drives the headline number on the page.
@@ -428,6 +458,17 @@ def self_test() -> int:
     rejects("an inactive current phase", lambda d: d["phase"]["roadmap"][1].update(status="blocked"))
     rejects("an incomplete prior phase", lambda d: d["phase"]["roadmap"][0].update(status="blocked"))
     rejects("a complete phase after current", lambda d: d["phase"]["roadmap"][2].update(status="complete"))
+
+    # This is a separate ruler from release autonomy. It must not become a free-form, unvalidated
+    # score that renders a stronger governance claim than its input supports.
+    for key in ("current", "total", "label", "achieved", "remaining"):
+        rejects(f"a missing controlMaturity.{key}", lambda d, k=key: d["controlMaturity"].pop(k))
+    rejects("a non-mapping controlMaturity", lambda d: d.update(controlMaturity=["not", "a", "map"]))
+    rejects("a control maturity above total", lambda d: d["controlMaturity"].update(current=6))
+    rejects("a control maturity with too few achieved controls", lambda d: d["controlMaturity"].update(achieved=["D1"]))
+    rejects("a control maturity with duplicate achieved controls", lambda d: d["controlMaturity"].update(achieved=["D1", "D1", "D3", "D4"]))
+    rejects("a control maturity citing a partial decision", lambda d: d["decisions"][2].update(status="partial"))
+    rejects("a control maturity with a blank remaining statement", lambda d: d["controlMaturity"].update(remaining=""))
 
     # D1-D9 must appear EXACTLY, in order. A dropped decision is the failure that matters most
     # here: the page renders eight rows and reads as complete, because a row that is not there
@@ -449,6 +490,10 @@ def self_test() -> int:
     for ok_status in sorted(ALLOWED_D_STATUSES):
         doc = copy.deepcopy(good)
         doc["decisions"][0]["status"] = ok_status
+        if ok_status != "built":
+            # This loop exercises the documented decision-status vocabulary, not a contradictory
+            # maturity claim. A non-built D1 cannot remain in the achieved-controls list.
+            doc["controlMaturity"].update(current=3, achieved=["D2", "D3", "D4"])
         sink = io.StringIO()
         try:
             with contextlib.redirect_stderr(sink):

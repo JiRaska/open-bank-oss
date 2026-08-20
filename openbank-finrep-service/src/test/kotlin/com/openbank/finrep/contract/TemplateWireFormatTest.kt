@@ -62,12 +62,37 @@ class TemplateWireFormatTest {
 
     private val mapper = ObjectMapper()
 
-    /** One line per GL account type so every mapper row is populated with a non-zero value. */
+    /**
+     * One line per GL account type so every mapper row is populated with a non-zero value, in
+     * ledger's own `net = totalDebit - totalCredit` sign (credit-normal accounts negative), and
+     * tying out to zero so the rendered `isBalanced` is `true` for a reason rather than by
+     * construction (issue #5987).
+     */
     private val trialBalance = listOf(
-        TrialBalanceLineDto(code = "1100-CASH-CZK", accountType = "ASSET", net = BigDecimal("150000.00")),
-        TrialBalanceLineDto(code = "2100-DEPOSITS-CZK", accountType = "LIABILITY", net = BigDecimal("120000.00")),
-        TrialBalanceLineDto(code = "4100-FEE-INCOME-CZK", accountType = "INCOME", net = BigDecimal("8000.00")),
-        TrialBalanceLineDto(code = "5100-STAFF-COST-CZK", accountType = "EXPENSE", net = BigDecimal("3000.00")),
+        TrialBalanceLineDto(
+            code = "1100-CASH-CZK",
+            accountType = "ASSET",
+            net = BigDecimal("150000.00"),
+            currency = "CZK",
+        ),
+        TrialBalanceLineDto(
+            code = "2100-DEPOSITS-CZK",
+            accountType = "LIABILITY",
+            net = BigDecimal("-125000.00"),
+            currency = "CZK",
+        ),
+        TrialBalanceLineDto(
+            code = "4100-FEE-INCOME-CZK",
+            accountType = "INCOME",
+            net = BigDecimal("-28000.00"),
+            currency = "CZK",
+        ),
+        TrialBalanceLineDto(
+            code = "5100-STAFF-COST-CZK",
+            accountType = "EXPENSE",
+            net = BigDecimal("3000.00"),
+            currency = "CZK",
+        ),
     )
 
     @BeforeEach
@@ -103,12 +128,12 @@ class TemplateWireFormatTest {
         assertThat(cells.first().keys).containsExactlyInAnyOrder("rowRef", "colRef", "value", "currency")
         assertThat(cells.map { it["rowRef"] }).containsExactly("r010", "r380", "r490")
         assertThat(cells.first()["currency"]).isEqualTo("CZK")
-        // r010 total assets, r380 total liabilities, r490 derived equity — proves the cells are
+        // r010 total assets, r380 total liabilities, r490 total equity — proves the cells are
         // really derived from the ledger trial balance, not a fixed skeleton. `value` is a JSON
         // NUMBER (schema `type: number`), so compare numerically — an untyped parse of `150000.00`
         // yields a Double whose toString drops the scale.
         assertThat(cells.map { (it["value"] as Number).toDouble() })
-            .containsExactly(150_000.00, 120_000.00, 30_000.00)
+            .containsExactly(150_000.00, 125_000.00, 25_000.00)
     }
 
     @Test

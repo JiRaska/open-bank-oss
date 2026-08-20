@@ -6,8 +6,8 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
 
 type PageHeaderProps = {
-  title: string
-  subtitle?: string
+  title: ReactNode
+  subtitle?: ReactNode
   /** Leading icon beside the title. */
   icon?: ReactNode
   /** Optional hierarchy label rendered above the title. */

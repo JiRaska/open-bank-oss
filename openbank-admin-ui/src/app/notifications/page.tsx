@@ -31,6 +31,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function NotificationsPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
   const canApprove = hasPermission(roles, 'opsmessage:approve')
   const [items, setItems]     = useState<Notification[]>([])
@@ -74,7 +75,7 @@ export default function NotificationsPage() {
         title={t('Oznámení', 'Notifications')}
         subtitle={t('Odchozí oznámení — e-maily, upozornění, webhooky', 'Outbound notification log — emails, alerts, webhooks')}
         actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
-          <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <RefreshCw aria-hidden="true" size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           {t('Obnovit', 'Refresh')}
         </button>}
       />
@@ -138,7 +139,7 @@ export default function NotificationsPage() {
               const Icon = TYPE_ICON[n.type] ?? Bell
               return (
                 <tr key={n.id}>
-                  <td><div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Icon size={13} style={{ color: 'var(--accent)' }} /><span className="tag">{n.type}</span></div></td>
+                  <td><div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><Icon aria-hidden="true" size={13} style={{ color: 'var(--accent)' }} /><span className="tag">{n.type}</span></div></td>
                   <td><span className="tag">{n.channel}</span></td>
                   <td style={{ fontSize: '12px', fontFamily: 'var(--font-mono)' }}>{n.recipient}</td>
                   <td style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{n.subject ?? '—'}</td>
@@ -148,7 +149,7 @@ export default function NotificationsPage() {
                     </span>
                   </td>
                   <td style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    {n.sentAt ? new Date(n.sentAt).toLocaleString() : '—'}
+                    {n.sentAt ? new Date(n.sentAt).toLocaleString(dateLocale) : '—'}
                   </td>
                 </tr>
               )
@@ -201,7 +202,7 @@ function OperatorMessageApprovals() {
   return (
     <div className="card" style={{ overflow: 'hidden', marginBottom: '16px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-        <Clock size={15} style={{ color: 'var(--yellow)' }} />
+        <Clock aria-hidden="true" size={15} style={{ color: 'var(--yellow)' }} />
         <span style={{ fontWeight: 600, fontSize: '13px' }}>
           {t('Schválení zpráv (princip čtyř očí)', 'Message approvals (four-eyes)')}
         </span>
@@ -215,6 +216,7 @@ function OperatorMessageApprovals() {
         </span>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
           <input
+            aria-label={t('ID schválení notifikace', 'Notification approval ID')}
             className="input"
             style={{ flex: 1, minWidth: '240px', fontFamily: 'var(--font-mono)' }}
             value={approvalId}
@@ -227,7 +229,7 @@ function OperatorMessageApprovals() {
             onClick={() => decide(true)}
             disabled={busy || !approvalId.trim()}
           >
-            <Check size={13} /> {t('Schválit', 'Approve')}
+            <Check aria-hidden="true" size={13} /> {t('Schválit', 'Approve')}
           </button>
           <button
             className="btn btn-secondary"
@@ -235,7 +237,7 @@ function OperatorMessageApprovals() {
             onClick={() => decide(false)}
             disabled={busy || !approvalId.trim()}
           >
-            <X size={13} /> {t('Zamítnout', 'Reject')}
+            <X aria-hidden="true" size={13} /> {t('Zamítnout', 'Reject')}
           </button>
         </div>
         {result && (

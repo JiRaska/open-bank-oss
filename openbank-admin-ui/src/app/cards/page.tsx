@@ -6,11 +6,13 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { useSession } from 'next-auth/react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import {
   CreditCard, Search, RefreshCw, CheckCircle2, XCircle, Clock, ChevronRight, Plus, ShieldCheck,
 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
@@ -37,7 +39,12 @@ const ALL = '__ALL__'
 
 export default function CardsPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const router = useRouter()
+  const { data: session } = useSession()
+  const canIssue = hasPermission(session?.user?.roles ?? [], 'cards:issue')
+  const canManage = hasPermission(session?.user?.roles ?? [], 'cards:manage')
+  const canBlock = hasPermission(session?.user?.roles ?? [], 'cards:block')
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>(ALL)
   const [typeFilter, setTypeFilter] = useState<string>(ALL)
@@ -97,7 +104,7 @@ export default function CardsPage() {
   })
 
   return (
-    <AuthGuard>
+    <AuthGuard permission="cards:view">
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
         <PageHeader
           icon={<CreditCard size={20} aria-hidden="true" />}
@@ -116,9 +123,11 @@ export default function CardsPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
-              <Plus size={13} /> {t('Vydat kartu', 'Issue a card')}
-            </button>
+            {canIssue && (
+              <button className="btn btn-primary btn-sm" onClick={() => { ops.setFeedback(null); setIssuing(true) }}>
+                <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
               <RefreshCw size={13} /> {t('Obnovit', 'Refresh')}
             </button>
@@ -152,14 +161,14 @@ export default function CardsPage() {
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div role="group" aria-label={t('Filtr podle stavu', 'Filter by status')} style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                <button style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
+                <button type="button" aria-pressed={statusFilter === ALL} style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
                   {t('Vše', 'All')} · {cards.length}
                 </button>
                 {CARD_STATUSES.filter(s => countBy(s) > 0).map(s => {
                   const c = cardStatusColor(s)
                   const active = statusFilter === s
                   return (
-                    <button key={s} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
+                    <button key={s} type="button" aria-pressed={active} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
                       style={{ ...chip(active), background: active ? c.bg : 'var(--surface-2)', color: active ? c.text : 'var(--text-secondary)', borderColor: active ? c.border : 'var(--border)' }}>
                       {s} · {countBy(s)}
                     </button>
@@ -170,7 +179,7 @@ export default function CardsPage() {
                 {CARD_TYPES.filter(ct => cards.some(c => c.cardType === ct)).map(ct => {
                   const active = typeFilter === ct
                   return (
-                    <button key={ct} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
+                    <button key={ct} type="button" aria-pressed={active} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
                       {ct}
                     </button>
                   )
@@ -237,9 +246,9 @@ export default function CardsPage() {
                         </td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.expiryDate}</td>
                         <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-secondary)' }}>{c.cardholderName || '—'}</td>
-                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(language === 'cs' ? 'cs-CZ' : 'en-US') : '—'}</td>
+                        <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{c.createdAt ? new Date(c.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                         <td style={{ padding: '10px 16px' }} onClick={e => e.stopPropagation()}>
-                          <CardTransitionButtons card={c} busy={ops.busy} onSelect={tr => onSelectTransition(c, tr)} />
+                          {(canManage || canBlock) && <CardTransitionButtons card={c} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={tr => onSelectTransition(c, tr)} />}
                         </td>
                         <td style={{ padding: '10px 12px', color: 'var(--text-tertiary)' }}><ChevronRight size={14} /></td>
                       </tr>

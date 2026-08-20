@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.0...document-service-v0.12.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.3...document-service-v0.12.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.2...document-service-v0.11.3) (2026-08-18)
+
+
+### Bug Fixes
+
+* **document-service:** add sourceService to outbox events for audit attribution ([#5391](https://github.com/JiRaska/open-bank-oss/issues/5391)) ([e89923a](https://github.com/JiRaska/open-bank-oss/commit/e89923acc9d091fb397eec3fe2a57742ff603fe1)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.11.1...document-service-v0.11.2) (2026-08-17)
 
 

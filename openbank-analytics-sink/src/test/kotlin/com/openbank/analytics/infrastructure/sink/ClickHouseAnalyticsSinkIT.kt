@@ -5,6 +5,7 @@
 package com.openbank.analytics.infrastructure.sink
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.infrastructure.clickhouse.ClickHouseClient
 import com.openbank.analytics.infrastructure.support.KGenericContainer
 import com.openbank.libs.analytics.AnalyticsEnvelope
@@ -24,7 +25,8 @@ import java.util.Optional
 import java.util.UUID
 
 /**
- * End-to-end verification of [ClickHouseAnalyticsSink] (ADR-0022 / ADR-0023 F1) against a real
+ * End-to-end verification of the ClickHouse-native write adapters — [ClickHouseAnalyticsSink]
+ * (ADR-0022 / ADR-0023 F1) and [ClickHouseDeadLetterSink] (ADR-0022 quarantine) — against a real
  * ClickHouse server. Unlike the unit test (which stubs the [ClickHouseAnalyticsSink.send] seam), this
  * exercises the **actual** HTTP insert path: the JDK HttpClient request, the JSONEachRow encoding, the
  * `X-ClickHouse-User/Key` auth headers, and the bronze schema from the real production DDL — all of
@@ -185,6 +187,67 @@ class ClickHouseAnalyticsSinkIT {
                 "AND table = 'gold_campaign_engagement' ORDER BY name FORMAT TabSeparated",
         )
         assertThat(columns).doesNotContain("party_id").doesNotContain("interaction_ref")
+    }
+
+    // ---------------------------------------------------------------- dead-letter quarantine (#5761)
+
+    private fun dlq() = ClickHouseDeadLetterSink().apply {
+        clickhouse = reader
+        mapper = this@ClickHouseAnalyticsSinkIT.mapper
+    }
+
+    /**
+     * The assertion #5761 was missing: a quarantined record must be **readable back out of the
+     * table**. The unit test can only prove the emitted JSONEachRow body is well shaped; only a real
+     * server proves the column contract matches the shipped DDL and that the row is actually there.
+     * Note what could not have caught this before — `LoggingDeadLetterSink.quarantine()` also returns
+     * normally, so nothing short of reading the table distinguishes a durable write from a log line.
+     */
+    @Test
+    fun `quarantine writes a row that is readable back from dead_letter_events`() = runBlocking<Unit> {
+        val hash = "sha256:${UUID.randomUUID()}"
+        val payload = """{"eventType":"account.opened","aggregateVersion":"""
+
+        dlq().quarantine(
+            DeadLetterRecord(
+                contentHash = hash,
+                rawPayload = payload,
+                error = "JsonParseException: unexpected end of input",
+                failedAt = Instant.parse("2026-05-30T12:00:00.000Z"),
+            ),
+        )
+
+        val row = reader.query(
+            "SELECT raw_payload, error, failed_at FROM $DB.dead_letter_events " +
+                "WHERE content_hash = '$hash' FORMAT TabSeparated",
+        ).trim()
+
+        val cols = row.split("\t")
+        // ClickHouse TabSeparated escapes the payload's quotes-free control chars only; the payload
+        // itself round-trips verbatim, which is what makes the documented replay possible.
+        assertThat(cols[0]).isEqualTo(payload)
+        assertThat(cols[1]).contains("JsonParseException")
+        assertThat(cols[2]).isEqualTo("2026-05-30 12:00:00.000")
+    }
+
+    /**
+     * [DeadLetterRecord]'s KDoc promises the DLQ is idempotent on the content hash so an
+     * at-least-once re-delivery of the same poison message does not inflate the queue — which the
+     * readiness probe (`ANALYTICS_MAX_DEAD_LETTERS`) and the Grafana panel both count. That promise
+     * is the table engine's, so only a real server can verify it.
+     */
+    @Test
+    fun `re-delivered poison message collapses to one dead-letter row at FINAL`() = runBlocking<Unit> {
+        val hash = "sha256:${UUID.randomUUID()}"
+        val record = DeadLetterRecord(hash, "{oops", "boom", Instant.parse("2026-05-30T12:00:00.000Z"))
+
+        dlq().quarantine(record)
+        dlq().quarantine(record)
+
+        val count = reader.query(
+            "SELECT count() FROM $DB.dead_letter_events FINAL WHERE content_hash = '$hash' FORMAT TabSeparated",
+        ).trim()
+        assertThat(count).isEqualTo("1")
     }
 
     private fun campaignEvent(eventType: String, payload: Map<String, Any>): AnalyticsEnvelope = AnalyticsEnvelope(

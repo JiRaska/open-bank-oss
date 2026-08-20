@@ -32,7 +32,17 @@ dependencies {
     api("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
 
     // Framework APIs — compileOnly (services provide impls via Quarkus platform BOM).
-    // Versions MUST equal what quarkus-bom:3.33.2 ships.
+    // Versions MUST equal what the CURRENT quarkus-bom (libs.versions.toml: quarkus) ships —
+    // these literals do not float with a platform bump, so they rot silently. Caught live
+    // 2026-08: this block's io.micrometer:micrometer-core stayed pinned to 1.14.5 across the
+    // Quarkus 3.33.2->3.38.0 bump (#2700), long after quarkus-bom:3.38.0 started managing
+    // 1.17.0 for every service. Nothing here failed to compile — compileOnly/testImplementation
+    // don't reach a consuming service's runtime classpath — but this module's OWN dependency
+    // graph submission still reported the stale 1.14.5, and a later-disclosed GHSA against
+    // the 1.14.x line (CVE-2026-40984, no patched release on that line at all) turned six
+    // months of unnoticed drift into a fleet-wide dependency-review failure on every PR
+    // (issue #5482). Re-check this whole block against the BOM's actual managed versions on
+    // every Quarkus platform bump, not just the ones a compile error would catch.
     compileOnly("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     compileOnly("jakarta.annotation:jakarta.annotation-api:3.0.0")
     compileOnly("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
@@ -50,7 +60,17 @@ dependencies {
     compileOnly("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
     compileOnly("io.quarkus:quarkus-scheduler:3.33.2")
     compileOnly("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
-    compileOnly("io.micrometer:micrometer-core:1.14.5")
+    // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH, DoS in Micrometer's HTTP
+    // server instrumentations). The 1.14.x line has NO fix (advisory's first_patched_version
+    // is null for 1.14.0-1.14.14); the fix landed in 1.15.12+/1.16.6+. This module doesn't apply
+    // the Quarkus platform BOM (it's a plain kotlin-jvm library, not a Quarkus service), so this
+    // literal is what actually reaches the dependency graph dependency-review scans — NOT the
+    // quarkus-bom:3.38.0 constraint every real service resolves through
+    // (`./gradlew :openbank-account-service:dependencyInsight --dependency io.micrometer:micrometer-core`
+    // confirms real services already land on 1.17.0). 1.17.0 matches that resolved version
+    // exactly, consistent with this block's "MUST equal what quarkus-bom ships" convention.
+    // Issue #5482.
+    compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
 
@@ -73,7 +93,8 @@ dependencies {
     testImplementation("org.jboss.resteasy:resteasy-core:6.2.12.Final")
     testImplementation("org.jboss.logging:jboss-logging:3.6.2.Final")
     testImplementation("jakarta.enterprise:jakarta.enterprise.cdi-api:4.1.0")
-    testImplementation("io.micrometer:micrometer-core:1.14.5")
+    // Kept in sync with the compileOnly pin above — CVE-2026-40984, issue #5482.
+    testImplementation("io.micrometer:micrometer-core:1.17.0")
     // RedisApprovalStoreTest drives the REAL store — the four-eyes self-approval guard is the
     // single fleet-wide enforcement point for segregation of duties (#3349), and until that test
     // existed deleting it left every suite green. Both are compileOnly above, so the test source
@@ -86,7 +107,7 @@ dependencies {
     // REAL PrometheusNamingConvention rather than trusting the hand-rolled dot -> underscore
     // rendering that the sentinel's PromQL depends on. The registry itself is never used at runtime
     // here — each service brings quarkus-micrometer-registry-prometheus itself.
-    testImplementation("io.micrometer:micrometer-registry-prometheus:1.14.5")
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

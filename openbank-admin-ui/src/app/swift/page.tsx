@@ -13,6 +13,7 @@ import { useServiceResource } from '@/lib/services/useServiceResource'
 import { stashRow } from '@/lib/services/rowHandoff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
+import { PageHeader } from '@/components/ui/PageHeader'
 
 interface SwiftMessage {
   id: string; messageType: string; senderBic: string; receiverBic: string
@@ -28,6 +29,8 @@ const STATUS_COLORS: Record<string, { bg: string; text: string; border: string }
 
 export default function SwiftPage() {
   const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const numberLocale = dateLocale
   const router = useRouter()
   const [search, setSearch] = useState('')
   const { data, loading, unavailable, waking } = useServiceResource<SwiftMessage[]>(
@@ -46,16 +49,12 @@ export default function SwiftPage() {
   return (
     <AuthGuard>
       <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '28px' }}>
-          <div>
-            <h1 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginBottom: '4px' }}>
-              {t('SWIFT zprávy', 'SWIFT Messaging')}
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {t('Mezinárodní platby a SWIFT MT/MX zprávy — ISO 20022', 'International payments and SWIFT MT/MX messages — ISO 20022')}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+        <PageHeader
+          breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('SWIFT', 'SWIFT')}</span></div>}
+          icon={<Globe size={20} aria-hidden="true" />}
+          title={t('SWIFT zprávy', 'SWIFT Messaging')}
+          subtitle={t('Mezinárodní platby a SWIFT MT/MX zprávy — ISO 20022', 'International payments and SWIFT MT/MX messages — ISO 20022')}
+          actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <ServiceStatusBadge
               label="swift-service :8122"
               loading={loading}
@@ -71,8 +70,8 @@ export default function SwiftPage() {
             <span role="status" style={{ padding: '5px 9px', borderRadius: '6px', border: '1px solid var(--warning-border)', background: 'var(--warning-bg)', color: 'var(--warning-text)', fontSize: '11px', fontWeight: 600 }}>
               {t('Odeslání zprávy není připojeno', 'Message submission is not connected')}
             </span>
-          </div>
-        </div>
+          </div>}
+        />
 
         <div className="grid-4" style={{ marginBottom: '24px' }}>
           {[
@@ -94,7 +93,7 @@ export default function SwiftPage() {
           <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'center' }}>
             <div style={{ position: 'relative', flex: 1 }}>
               <Search size={13} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-tertiary)' }} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat BIC, referenci, typ zprávy…', 'Search BIC, reference, message type…')}
+              <input value={search} onChange={e => setSearch(e.target.value)} placeholder={t('Hledat BIC, referenci, typ zprávy…', 'Search BIC, reference, message type…')} aria-label={t('Hledat SWIFT zprávy', 'Search SWIFT messages')}
                 style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                   border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
             </div>
@@ -122,7 +121,10 @@ export default function SwiftPage() {
                 const sc = STATUS_COLORS[m.status] ?? STATUS_COLORS.PENDING
                 return (
                   <tr key={m.id} style={{ borderBottom: '1px solid var(--border)', cursor: 'pointer' }}
+                    tabIndex={0}
+                    aria-label={t(`Otevřít detail zprávy ${m.messageType}`, `Open ${m.messageType} message detail`)}
                     onClick={() => { stashRow('swift', m.id, m); router.push(`/swift/${m.id}`) }}
+                    onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); stashRow('swift', m.id, m); router.push(`/swift/${m.id}`) } }}
                     title={t('Zobrazit detail zprávy', 'View message detail')}
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
@@ -130,14 +132,14 @@ export default function SwiftPage() {
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>{m.senderBic}</td>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--text-primary)' }}>{m.receiverBic}</td>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-primary)' }}>
-                      {m.amount?.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })} {m.currency}
+                      {m.amount?.toLocaleString(numberLocale, { minimumFractionDigits: 2 })} {m.currency}
                     </td>
                     <td style={{ padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{m.reference}</td>
                     <td style={{ padding: '12px 16px' }}>
                       <span style={{ padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 600,
                         background: sc.bg, color: sc.text, border: `1px solid ${sc.border}` }}>{m.status}</span>
                     </td>
-                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString('cs-CZ') : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontSize: '12px', color: 'var(--text-tertiary)' }}>{m.createdAt ? new Date(m.createdAt).toLocaleDateString(dateLocale) : '—'}</td>
                     <td style={{ padding: '12px 8px', textAlign: 'right' }}><ChevronRight size={14} style={{ color: 'var(--text-tertiary)' }} /></td>
                   </tr>
                 )

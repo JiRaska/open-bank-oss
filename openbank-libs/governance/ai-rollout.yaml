@@ -45,6 +45,21 @@ phase:
       title: Independently verifiable provenance
       outcome: Needs asymmetric third-party-verifiable audit anchors and AI attribution in release evidence.
 
+# This is deliberately a DIFFERENT ruler from phase.current. It measures whether the
+# protective governance control families exist; it never grants an agent permission to
+# change state. Keeping both numbers visible prevents the usual false choice between
+# "the platform is only at 2/5" and "agents may autonomously act".
+controlMaturity:
+  current: 4
+  total: 5
+  label: Four core governance control families are built; independently verifiable provenance remains partial.
+  achieved:
+    - D1
+    - D2
+    - D3
+    - D4
+  remaining: D5 still needs asymmetric, third-party-verifiable audit anchors and AI-attribution in release evidence.
+
 decisions:
   - id: D1
     title: Agents as code (agents.yaml + charter)

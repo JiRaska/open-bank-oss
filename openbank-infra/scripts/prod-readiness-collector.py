@@ -165,10 +165,18 @@ def attest_fresh(att: dict, svc: str, key: str, today: str) -> bool:
         ttl = int(rec.get("ttl_days", "365"))
     except ValueError:
         ttl = 365
-    # crude date diff (YYYY-MM-DD) — good enough for decay flag
-    d = [int(x) for x in rec["date"].split("-")]
-    t = [int(x) for x in today.split("-")]
-    days = (t[0] - d[0]) * 365 + (t[1] - d[1]) * 30 + (t[2] - d[2])
+    # Exact calendar arithmetic. The previous form approximated a year as 365 days and a month
+    # as 30, which let a TTL run PAST its own expiry — the one thing this mechanism exists to
+    # prevent. consent's 21-day pentest, dated 2026-07-28, is 22 real days old on 2026-08-19 and
+    # the approximation scored it (19-28)+... = 21 days, i.e. still fresh, so consent read
+    # C7=Bank-grade off an expired attestation. The Node collector already used exact dates
+    # (#2365); this is the same correction on the copy that had not received it.
+    try:
+        d = date.fromisoformat(rec["date"])
+        t = date.fromisoformat(today)
+    except ValueError:
+        return False
+    days = (t - d).days
     return 0 <= days <= ttl
 
 

@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.2...sanctions-service-v0.10.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.1...sanctions-service-v0.9.2) (2026-08-18)
+
+
+### Bug Fixes
+
+* **sanctions:** add sourceService to audit-attribution outbox payload ([#5343](https://github.com/JiRaska/open-bank-oss/issues/5343)) ([74b609f](https://github.com/JiRaska/open-bank-oss/commit/74b609f52ab65c13aa7ec591a0136729b5e11fb2)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.9.0...sanctions-service-v0.9.1) (2026-08-17)
 
 

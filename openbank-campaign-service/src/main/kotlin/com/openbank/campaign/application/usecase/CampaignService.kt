@@ -4,8 +4,10 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.CampaignMetricsPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.CampaignScheduler
+import com.openbank.campaign.application.port.out.EnrolmentAttempt
 import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
@@ -31,6 +33,7 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -63,6 +66,7 @@ class CampaignService @Inject constructor(
     private val segmentEvaluation: SegmentEvaluationPort,
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
+    private val metrics: CampaignMetricsPort,
     /**
      * Explicit graphs remain off until their isolated Temporal worker queue is deployed and proven
      * healthy. Their workflow type never shares a queue with legacy journeys, so a rollback pauses
@@ -262,6 +266,9 @@ class CampaignService @Inject constructor(
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol (state: ${campaign.state})" }
         val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
             ?: throw NoSuchElementException("segment ${campaign.segmentRef} not found")
+        // Measured around the whole sweep, segment evaluation included: the silver-layer query is
+        // the slow half and the part that degrades first.
+        val sweepStartedAt = Instant.now()
         val partyIds = segmentEvaluation.evaluate(segment)
         var started = 0
         var failed = 0
@@ -287,6 +294,7 @@ class CampaignService @Inject constructor(
                         ),
                     )
                     started++
+                    metrics.enrolmentRecorded(EnrolmentAttempt.HOLDOUT)
                 } else {
                     // Start FIRST, persist on success. The workflow id is the idempotency key
                     // (ADR-0200 D1) — `startJourney` swallows WorkflowExecutionAlreadyStarted — so a
@@ -311,15 +319,18 @@ class CampaignService @Inject constructor(
                         ),
                     )
                     started++
+                    metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
                 }
             } catch (e: Exception) {
                 // Per party, so one bad party is local rather than fatal: the loop used to abort on
                 // the first failure, leaving every party after it unenrolled by a fault that had
                 // nothing to do with them. The count returned is what actually started.
                 failed++
+                metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
                 log.errorf(e, "campaign.enrol failed campaign=%s party=%s", id, partyId)
             }
         }
+        metrics.enrolmentBatchCompleted(Duration.between(sweepStartedAt, Instant.now()))
         return EnrolmentOutcome(enrolled = started, failed = failed)
     }
 

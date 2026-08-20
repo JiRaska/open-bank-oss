@@ -156,6 +156,7 @@ function DecisionForm({
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
         <select
+          aria-label={t('Verdikt případu identity', 'Identity case verdict')}
           className="input"
           value={verdict}
           onChange={e => setVerdict(e.target.value as Verdict)}
@@ -169,6 +170,7 @@ function DecisionForm({
 
         {verdict === 'LINK_TO_EXISTING' && (
           <select
+            aria-label={t('Propojit s existující party', 'Link to existing party')}
             className="input"
             value={linkPartyId}
             onChange={e => setLinkPartyId(e.target.value)}
@@ -184,6 +186,7 @@ function DecisionForm({
         )}
 
         <input
+          aria-label={t('Poznámka k rozhodnutí', 'Decision notes')}
           className="input"
           placeholder={t('Poznámka (volitelné)', 'Notes (optional)')}
           value={notes}
@@ -192,13 +195,13 @@ function DecisionForm({
           style={{ fontSize: '13px', padding: '6px 8px', flex: '1 1 160px', minWidth: '140px' }}
         />
 
-        <button className="btn btn-primary" onClick={submit} disabled={busy} style={{ fontSize: '13px' }}>
-          <Check size={14} style={{ marginRight: '4px' }} />
+        <button type="button" aria-busy={busy} className="btn btn-primary" onClick={submit} disabled={busy} style={{ fontSize: '13px' }}>
+          <Check size={14} aria-hidden="true" style={{ marginRight: '4px' }} />
           {isSecond ? t('Potvrdit a rozhodnout', 'Confirm & decide') : t('Odeslat hlas', 'Submit vote')}
         </button>
 
         {isSecond && (
-          <button className="btn btn-secondary" onClick={reopen} disabled={busy} style={{ fontSize: '13px' }}>
+          <button type="button" aria-busy={busy} className="btn btn-secondary" onClick={reopen} disabled={busy} style={{ fontSize: '13px' }}>
             {t('Znovu otevřít', 'Reopen')}
           </button>
         )}
@@ -246,8 +249,8 @@ export default function IdentityCasesPage() {
         icon={<Fingerprint size={20} aria-hidden="true" />}
         title={t('Ověření identity — čtyři oči', 'Identity Verification — Four-Eyes')}
         subtitle={t('Nejednoznačné identity z onboardingu (kolize RČ nebo jmenovci). Rozhodnutí vyžaduje dva různé schvalovatele (ADR-0072 / ADR-0030).', 'Ambiguous onboarding identities (RČ collisions or namesakes). A decision requires two distinct approvers (ADR-0072 / ADR-0030).')}
-        actions={<button className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
-          <RefreshCw size={14} style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
+        actions={<button type="button" aria-busy={loading} className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
+          <RefreshCw size={14} aria-hidden="true" style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
         </button>}
       />
       {unavail ? (

@@ -21,6 +21,7 @@ import { ArrowLeft, ShieldQuestion, Lock } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
+import { PageHeader } from '@/components/ui/PageHeader'
 import { EntityChip } from '@/components/entities/EntityChip'
 import {
   DelegationStatusBadge,
@@ -34,6 +35,7 @@ type CheckOutcome = { granted: boolean; reason?: string | null; code?: string | 
 
 export default function DelegationDetailPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const params = useParams<{ id: string }>()
   const id = params?.id
 
@@ -57,18 +59,13 @@ export default function DelegationDetailPage() {
 
   return (
     <div>
-      <Link href="/delegations" className="btn btn-secondary" style={{ marginBottom: '16px', fontSize: '12px' }}>
-        <ArrowLeft size={14} />
-        {t('Zpět na delegace', 'Back to delegations')}
-      </Link>
-
-      <h1 className="page-title">{t('Detail delegace', 'Delegation detail')}</h1>
-      <p className="page-subtitle">
-        {t(
-          'Udělená práva, stropy a časová osa stavu (ADR-0232).',
-          'Granted rights, ceilings and status timeline (ADR-0232).',
-        )}
-      </p>
+      <PageHeader
+        icon={<ShieldQuestion size={18} aria-hidden="true" />}
+        breadcrumb={<div className="breadcrumb"><Link href="/delegations">{t('Delegace', 'Delegations')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Detail', 'Detail')}</span></div>}
+        title={t('Detail delegace', 'Delegation detail')}
+        subtitle={t('Udělená práva, stropy a časová osa stavu (ADR-0232).', 'Granted rights, ceilings and status timeline (ADR-0232).')}
+        actions={<Link href="/delegations" className="btn btn-secondary"><ArrowLeft size={14} aria-hidden="true" />{t('Zpět na delegace', 'Back to delegations')}</Link>}
+      />
 
       {unavail && (
         <DataUnavailable
@@ -102,13 +99,13 @@ export default function DelegationDetailPage() {
               <dd>{grant.approvalPolicy ?? '—'}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Strop na transakci', 'Per-transaction cap')}</dt>
-              <dd>{formatCeiling(grant.perTransactionLimit)}</dd>
+              <dd>{formatCeiling(grant.perTransactionLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Denní strop', 'Daily cap')}</dt>
-              <dd>{formatCeiling(grant.dailyLimit)}</dd>
+              <dd>{formatCeiling(grant.dailyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Měsíční strop', 'Monthly cap')}</dt>
-              <dd>{formatCeiling(grant.monthlyLimit)}</dd>
+              <dd>{formatCeiling(grant.monthlyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Platnost od', 'Valid from')}</dt>
               <dd>{grant.validFrom ?? '—'}</dd>

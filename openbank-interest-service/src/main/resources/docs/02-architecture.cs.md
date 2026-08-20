@@ -5,7 +5,7 @@
 ```mermaid
 graph LR
   admin[admin-ui / operátor]
-  sched[scheduler<br/>@Scheduled cron]
+  sched["scheduler<br/>@Scheduled cron"]
   tax[daňový/reporting konzument<br/>platí finančnímu úřadu]
   ledger[ledger-service]
   audit[audit-service]
@@ -39,7 +39,7 @@ graph TB
     uc[Application<br/>InterestService<br/>WithholdingRemittanceService]
     dom[Domain<br/>InterestRateConfig / InterestAccrual / InterestCapitalization<br/>WithholdingTaxPolicy / WithholdingRemittancePolicy]
     persist[Persistence<br/>*RepositoryImpl<br/>Hibernate Reactive / Panache]
-    outbox[Outbox<br/>InterestOutboxDispatcher<br/>@Scheduled každých 5s]
+    outbox["Outbox<br/>InterestOutboxDispatcher<br/>@Scheduled každých 5s"]
     kafka[Kafka publisher<br/>KafkaInterestOutboxEventPublisher<br/>+ fault tolerance]
     tax[TaxProfilePort<br/>DefaultTaxProfileProvider]
   end

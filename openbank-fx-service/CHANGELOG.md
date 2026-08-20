@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.11.1...fx-service-v0.12.0) (2026-08-19)
+
+
+### Features
+
+* **fx:** expose pending four-eyes approvals via approval inbox ([#5695](https://github.com/JiRaska/open-bank-oss/issues/5695)) ([81c159c](https://github.com/JiRaska/open-bank-oss/commit/81c159ce49cb4671e03171a3e2ccec1068cb3929))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.11.0...fx-service-v0.11.1) (2026-08-18)
+
+
+### Bug Fixes
+
+* **fx-service:** add sourceService to outbox events for audit attribution ([#5390](https://github.com/JiRaska/open-bank-oss/issues/5390)) ([842497b](https://github.com/JiRaska/open-bank-oss/commit/842497b9b6f4627ba0e8b2098d14849197d324d4))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.10.0...fx-service-v0.11.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.9.8...fx-service-v0.10.0) (2026-08-17)
 
 

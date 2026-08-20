@@ -59,6 +59,18 @@ treated as hard requirements: if a chart cannot be pulled, this gate FAILS rathe
 than passing quietly, because "could not check" and "checked and clean" must never
 render the same — that equivalence is the whole defect class above.
 
+NETWORK RETRIES (#5094). `helm pull` hits real upstream repos (kyverno.github.io,
+charts.fairwinds.com, etc.) and a transient reset there is not this gate's business —
+three PRs (#5065, #5068, #5086) failed on it and cleared on a bare re-run with zero
+code change. `_pull_chart` now retries the pull a bounded number of times with a short
+backoff before giving up, and the FAIL line it prints in that case says explicitly that
+the upstream was unreachable, in a form that does not overlap the wording used for a
+real values-key mismatch (`IGNORED by`) or a template-render failure (`helm template
+failed`) — grep for `could not reach` to find the network case specifically. This does
+NOT touch `ignored_top_level_keys`/`_render`, which never hit the network (they run
+`helm template` against an already-pulled local chart directory): a chart that
+genuinely has a mismatched values key still fails, retries or not.
+
 Usage:
     check-helm-values-keys.py              # check the fleet
     check-helm-values-keys.py --self-test  # offline detector self-test (no network)
@@ -72,8 +84,15 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import yaml
+
+# Retry budget for the network fetch step only (`helm pull`). Kept small: this is
+# meant to ride out a transient reset within the gate's own 180s budget_seconds, not
+# to mask a genuinely dead or renamed chart repo behind minutes of silent waiting.
+PULL_RETRY_ATTEMPTS = 3
+PULL_RETRY_BACKOFF_SECONDS = 2.0
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gatelib
@@ -117,6 +136,29 @@ def _render(chart_dir: str, values: dict) -> str | None:
     finally:
         pathlib.Path(values_path).unlink(missing_ok=True)
     return proc.stdout if proc.returncode == 0 else None
+
+
+def _pull_chart(chart: str, repo_url: str, version: str, chart_root: pathlib.Path,
+                 attempts: int = PULL_RETRY_ATTEMPTS,
+                 backoff_seconds: float = PULL_RETRY_BACKOFF_SECONDS) -> str | None:
+    """`helm pull` with retries. Returns None on success, or the last stderr on failure.
+
+    Only retries the network fetch — a chart that pulls fine and then fails the
+    values-key comparison is a different failure and is never routed through here.
+    """
+    last_stderr = ""
+    for attempt in range(1, attempts + 1):
+        pull = subprocess.run(
+            ["helm", "pull", chart, "--repo", repo_url, "--version", version,
+             "--untar", "--untardir", str(chart_root)],
+            capture_output=True, text=True,
+        )
+        if pull.returncode == 0:
+            return None
+        last_stderr = pull.stderr.strip()
+        if attempt < attempts:
+            time.sleep(backoff_seconds * attempt)
+    return last_stderr
 
 
 def ignored_top_level_keys(chart_dir: str, values: dict) -> list[str] | None:
@@ -179,14 +221,12 @@ def check_fleet() -> int:
         for name, chart, repo_url, version, values in iter_helm_sources():
             chart_root = cache / f"{chart}-{version}"
             if not chart_root.exists():
-                pull = subprocess.run(
-                    ["helm", "pull", chart, "--repo", repo_url, "--version", version,
-                     "--untar", "--untardir", str(chart_root)],
-                    capture_output=True, text=True,
-                )
-                if pull.returncode != 0:
-                    print(f"FAIL {name}: could not pull {chart}@{version} from {repo_url}: "
-                          f"{pull.stderr.strip()[:300]}", file=sys.stderr)
+                pull_error = _pull_chart(chart, repo_url, version, chart_root)
+                if pull_error is not None:
+                    print(f"FAIL {name}: could not reach {repo_url} to pull "
+                          f"{chart}@{version} after {PULL_RETRY_ATTEMPTS} attempts — this is "
+                          f"an upstream network failure, not a values-key finding: "
+                          f"{pull_error[:300]}", file=sys.stderr)
                     return 1
 
             chart_yamls = list(chart_root.glob("*/Chart.yaml"))
@@ -235,8 +275,70 @@ def check_fleet() -> int:
     return 0
 
 
+class _FakeCompletedProcess:
+    def __init__(self, returncode: int, stderr: str = ""):
+        self.returncode = returncode
+        self.stderr = stderr
+        self.stdout = ""
+
+
+def _self_test_pull_retry() -> str | None:
+    """Offline check of `_pull_chart`'s retry/backoff and its distinct failure text.
+
+    No real `helm pull` runs here — `subprocess.run` is monkeypatched so the whole
+    thing stays network-free like the rest of the self-test. Two cases, both of which
+    the #5094 fix must get right or it regresses into one of the two failure modes it
+    was written to avoid: retrying forever (never surfacing a real dead repo), or
+    swallowing a genuine values-key defect as if it were a network blip.
+
+    Returns None on success, or a description of what went wrong.
+    """
+    import unittest.mock as mock
+
+    # Case 1: every attempt fails (a genuinely unreachable/renamed repo) — must retry
+    # exactly PULL_RETRY_ATTEMPTS times, not "forever", and must return an error.
+    calls = {"n": 0}
+
+    def _always_fail(*_args, **_kwargs):
+        calls["n"] += 1
+        return _FakeCompletedProcess(1, "dial tcp: connection reset by peer")
+
+    with mock.patch("subprocess.run", side_effect=_always_fail), \
+         mock.patch("time.sleep", return_value=None):  # keep the self-test fast
+        err = _pull_chart("probe", "https://example.invalid/charts", "1.0.0",
+                           pathlib.Path("/tmp/does-not-matter"))
+    if calls["n"] != PULL_RETRY_ATTEMPTS:
+        return (f"_pull_chart made {calls['n']} attempt(s), expected exactly "
+                f"{PULL_RETRY_ATTEMPTS} — it must not retry forever nor give up early")
+    if err is None:
+        return "_pull_chart reported success against a source that failed every attempt"
+
+    # Case 2: a transient failure that clears within the retry budget — must succeed
+    # and must NOT report the earlier failures as the final outcome.
+    calls2 = {"n": 0}
+
+    def _fail_once_then_succeed(*_args, **_kwargs):
+        calls2["n"] += 1
+        if calls2["n"] == 1:
+            return _FakeCompletedProcess(1, "connection reset by peer")
+        return _FakeCompletedProcess(0, "")
+
+    with mock.patch("subprocess.run", side_effect=_fail_once_then_succeed), \
+         mock.patch("time.sleep", return_value=None):
+        err2 = _pull_chart("probe", "https://example.invalid/charts", "1.0.0",
+                            pathlib.Path("/tmp/does-not-matter"))
+    if err2 is not None:
+        return (f"_pull_chart did not recover from a transient failure within "
+                f"{PULL_RETRY_ATTEMPTS} attempts: {err2}")
+    if calls2["n"] != 2:
+        return f"_pull_chart made {calls2['n']} attempt(s) on the recovering source, expected 2"
+
+    return None
+
+
 def self_test() -> int:
-    """Offline detector self-test: a synthetic chart with one honoured and one ignored key.
+    """Offline detector self-test: a synthetic chart with one honoured and one ignored key,
+    plus a network-free check of the retry/backoff path (#5094).
 
     This is what makes a PASS from this gate mean something. The gate's own failure
     mode is that it reaches nothing and prints success, so the detector is exercised
@@ -244,6 +346,11 @@ def self_test() -> int:
     """
     if shutil.which("helm") is None:
         print("FAIL self-test: `helm` is not on PATH", file=sys.stderr)
+        return 1
+
+    retry_error = _self_test_pull_retry()
+    if retry_error is not None:
+        print(f"FAIL self-test (network retry): {retry_error}", file=sys.stderr)
         return 1
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="helm-values-selftest-"))
@@ -276,7 +383,8 @@ def self_test() -> int:
             print("FAIL self-test: detector flagged 'honoured' (known negative)", file=sys.stderr)
             return 1
 
-        print("PASS self-test: detector flags an ignored key and clears an honoured one.")
+        print("PASS self-test: detector flags an ignored key and clears an honoured one; "
+              "network-unreachable and real-defect failures stay distinguishable (#5094).")
         return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)

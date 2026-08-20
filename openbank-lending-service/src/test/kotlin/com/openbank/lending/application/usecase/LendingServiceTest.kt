@@ -4,6 +4,10 @@
 
 package com.openbank.lending.application.usecase
 
+import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
+import com.openbank.lending.application.port.out.BorrowerCreditPort
+import com.openbank.lending.application.port.out.CatalogLoanProfile
+import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -17,6 +21,7 @@ import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.application.port.out.StarterCreditPolicy
+import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -78,6 +83,9 @@ class LendingServiceTest {
     }
     private val clock = Clock.fixed(Instant.parse("2024-01-01T00:00:00Z"), ZoneOffset.UTC)
     private val provisioning = mockk<ProvisioningRepository>()
+    private val borrowerAccounts = mockk<BorrowerAccountLookupPort>()
+    private val borrowerCredit = mockk<BorrowerCreditPort>()
+    private val catalogLoanProfiles = mockk<CatalogLoanProfilePort>()
 
     private val service = LendingService(
         applications,
@@ -99,6 +107,9 @@ class LendingServiceTest {
             CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
             clock,
         ),
+        borrowerAccounts,
+        borrowerCredit,
+        catalogLoanProfiles,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -278,6 +289,8 @@ class LendingServiceTest {
                 CompliancePackGuard(CompliancePackRegistry(), clock, enforced = false),
                 clock,
             ),
+            borrowerAccounts,
+            borrowerCredit,
         )
         val slot: CapturingSlot<LoanApplication> = slot()
         every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
@@ -323,6 +336,28 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `catalog offering overrides client price and persists immutable snapshot`() {
+        val slot: CapturingSlot<LoanApplication> = slot()
+        val offeringId = UUID.fromString("10000000-0000-0000-0000-000000000012")
+        val snapshot = CatalogLoanSnapshot(
+            offeringId,
+            UUID.fromString("20000000-0000-0000-0000-000000000012"),
+            "b".repeat(64),
+            2,
+        )
+        every { catalogLoanProfiles.resolvePublished(offeringId) } returns Uni.createFrom().item(
+            CatalogLoanProfile(snapshot, "EUR", 12, AmortizationMethod.ANNUITY, BigDecimal("0.0699"), null, null),
+        )
+        every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+
+        val result = service.apply(sampleRequest().copy(catalogOfferingId = offeringId), "alice").await().indefinitely()
+
+        assertThat(result.nominalAnnualRate).isEqualByComparingTo("0.0699")
+        assertThat(result.catalogSnapshot).isEqualTo(snapshot)
+        verify(exactly = 1) { catalogLoanProfiles.resolvePublished(offeringId) }
+    }
+
+    @Test
     fun `decide rejects a four-eyes violation when approver equals proposer`() {
         val app = proposedApplication(proposer = "alice")
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
@@ -348,6 +383,15 @@ class LendingServiceTest {
         verifyClaims(1)
     }
 
+    private val borrowerAccountId = UUID.fromString("22222222-2222-2222-2222-222222222222")
+
+    /** The disbursement's happy-path customer-credit leg: an EUR CURRENT account is found and paid. */
+    private fun stubBorrowerCreditSucceeds() {
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
+            Uni.createFrom().item(borrowerAccountId)
+        every { borrowerCredit.credit(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+    }
+
     @Test
     fun `disburse books the loan, persists a 12-row schedule and posts the disbursement`() {
         val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
@@ -360,6 +404,7 @@ class LendingServiceTest {
         stubClaim()
         every { ledger.post(capture(postingSlot)) } returns Uni.createFrom().item(Unit)
         every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
 
         val loan = service.disburse(app.id, "dave").await().indefinitely()
 
@@ -368,10 +413,68 @@ class LendingServiceTest {
         // The whole contractual schedule is persisted and closes to zero.
         assertThat(rowsSlot.captured).hasSize(12)
         assertThat(rowsSlot.captured.last().closingBalance).isEqualTo(eur("0.00"))
-        // Cash leaves the bank exactly once, for the full principal.
+        // Cash leaves the bank exactly once, for the full principal — booked to the loan's own
+        // internal GL accounts.
         assertThat(postingSlot.captured.amount).isEqualTo(eur("12000.00"))
         verify(exactly = 1) { ledger.post(any()) }
+        // ...and separately, the borrower is actually paid: this is the fix for #3931, where the
+        // ledger journal above used to be the ONLY booking a disbursement made — an asset for the
+        // bank, and nothing for the customer, who ended up owing a loan they never received.
+        verify(exactly = 1) { borrowerAccounts.findCurrentAccount(partyId, "EUR") }
+        verify(exactly = 1) { borrowerCredit.credit(any(), borrowerAccountId, eur("12000.00")) }
         verify(exactly = 2) { events.emit(any<LendingOutboxMessage>()) }
+    }
+
+    /**
+     * The ledger books the loan asset (money never mutates via `ledger.post`, so this half cannot
+     * be "undone" by this fix — #3850 already tracks making the origination claim and the money
+     * movement atomic together), but if the borrower has nowhere to receive the money, disbursement
+     * must fail loud rather than quietly leave a loan booked with the customer unpaid.
+     */
+    @Test
+    fun `disburse fails when the borrower has no CURRENT account to credit`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("no active")
+            .hasMessageContaining("was not paid")
+
+        verify(exactly = 0) { borrowerCredit.credit(any(), any(), any()) }
+        // Exactly one emit, not zero: the origination-transition event ("disbursement booked")
+        // already committed before the ledger post/credit even run. Only the SECOND event —
+        // "loan.disbursed" — is conditional on the borrower actually getting paid.
+        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
+    }
+
+    /** The transaction-service credit call itself failing must surface, not be swallowed. */
+    @Test
+    fun `disburse fails when the customer-credit call itself fails`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
+            Uni.createFrom().item(borrowerAccountId)
+        every { borrowerCredit.credit(any(), any(), any()) } returns
+            Uni.createFrom().failure(IllegalStateException("transaction-service unavailable"))
+
+        assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        // Same shape as the no-account case above: one emit (the transition already committed),
+        // and specifically no "loan.disbursed" — that event is the promise the money moved.
+        verify(exactly = 1) { events.emit(any<LendingOutboxMessage>()) }
+        verify(exactly = 0) { events.emit(match { it.eventType == "loan.disbursed" }) }
     }
 
     @Test
@@ -1688,6 +1791,7 @@ class LendingServiceTest {
         stubClaim()
         every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
         every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
 
         val loan = service.disburse(app.id, "dave").await().indefinitely()
 
@@ -1815,5 +1919,164 @@ class LendingServiceTest {
             .isEqualTo(expectedEventTime)
         assertThat(occurredAtOf(emitted.single { it.eventType == "loan.provisioned" }))
             .isEqualTo(expectedEventTime)
+    }
+
+    // --- sourceService (issue #3994/#5256, fleet follow-up to #5255 and the eighteen prior slices) ---
+    //
+    // `sourceService` is the strongest (EVENT-sourced) attribution `AuditConsumer.resolveSourceService`
+    // reads. `EventAttribution.TopicAttribution` already maps `openbank.lending.events` ->
+    // `lending-service` correctly, but only as TOPIC-sourced — and audit-service subscribes to that
+    // topic today (`openbank-audit-service`'s `application.yaml` consumed-topics list; all nine lending
+    // event types share this single outbox channel/topic, `KafkaLendingOutboxEventPublisher`'s
+    // `lending-events-out` -> `openbank.lending.events`), so this is a live attribution upgrade for
+    // every event type below, not a forward-looking one. lending-service is a money-path service
+    // (`rules.yaml: money_path_services`).
+    //
+    // The literal value is `"lending"`, matching the 3 event types that already carried it before this
+    // PR (`credit.application.transition`, `credit.decision.evaluated`, `credit.loan.transition`) —
+    // not `"lending-service"`, the string `EventAttribution`'s topic-fallback table uses for this
+    // producer. That is a pre-existing inconsistency this PR preserves rather than introduces: every
+    // lending-service event now agrees with every OTHER lending-service event, which is a strictly
+    // better state than adding a second, different self-reported string for these six.
+
+    private fun sourceServiceOf(message: LendingOutboxMessage): String =
+        com.fasterxml.jackson.databind.ObjectMapper().readTree(message.payload).get("sourceService").asText()
+
+    @Test
+    fun `loan disbursed carries sourceService on the wire`() {
+        val app = proposedApplication().copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        every { loans.save(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        stubClaim()
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerCreditSucceeds()
+
+        service.disburse(app.id, "dave").await().indefinitely()
+
+        val disbursed = emitted.single { it.eventType == "loan.disbursed" }
+        assertThat(sourceServiceOf(disbursed)).isEqualTo("lending")
+        assertThat(disbursed.payload).contains("\"sourceService\":\"lending\"")
+    }
+
+    @Test
+    fun `loan interest_accrued carries sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val due = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { installments.findAccruable(any(), any()) } returns Uni.createFrom().item(due)
+        every { installments.markAccrued(any(), any()) } returns Uni.createFrom().item(1)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.accrueDueInterest(LocalDate.parse("2026-08-01"), 500).await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.interest_accrued" }))
+            .isEqualTo("lending")
+    }
+
+    @Test
+    fun `loan written_off carries sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { loans.update(any()) } answers { Uni.createFrom().item(firstArg<Loan>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.writeOff(loanId, WriteOffRequest(writtenOffBy = "carol", reason = "insolvency"))
+            .await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.written_off" }))
+            .isEqualTo("lending")
+    }
+
+    @Test
+    fun `loan rescheduled carries sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = twoInstallmentSchedule(loanId)
+        mockRescheduleHappyPath(loanId, loan, schedule)
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { installments.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<LoanInstallment>>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.reschedule(loanId, rescheduleRequest(), "carol").await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.rescheduled" }))
+            .isEqualTo("lending")
+    }
+
+    @Test
+    fun `loan stage_changed and loan provisioned carry sourceService on the wire`() {
+        val loanId = LoanId.random()
+        val loan = activeLoan(loanId)
+        val schedule = listOf(
+            LoanInstallment(
+                loanId = loanId,
+                number = 1,
+                dueDate = firstDue,
+                openingBalance = eur("12000.00"),
+                principal = eur("946.19"),
+                interest = eur("120.00"),
+                payment = eur("1066.19"),
+                closingBalance = eur("11053.81"),
+            ),
+        )
+        val asOf = firstDue.plusDays(40)
+        val prior = LoanProvisioningRecord(
+            loanId = loanId,
+            period = "2026-06",
+            asOf = firstDue,
+            outstandingBalance = eur("12000.00"),
+            daysPastDue = 0,
+            bucket = com.openbank.libs.lending.DelinquencyBucket.CURRENT,
+            stage = Ifrs9Stage.STAGE_1,
+            expectedCreditLoss = eur("108.00"),
+            createdAt = fixedNow,
+        )
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { loans.findActive(any()) } returns Uni.createFrom().item(listOf(loan))
+        every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
+        mockRiskParameters(loan, "0.02")
+        every { provisioning.findByLoanAndPeriod(loanId, "2026-07") } returns Uni.createFrom().nullItem()
+        every { provisioning.findLatestBefore(loanId, "2026-07") } returns Uni.createFrom().item(prior)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        every { provisioning.save(any()) } answers { Uni.createFrom().item(firstArg<LoanProvisioningRecord>()) }
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.runProvisioningCycle("2026-07", asOf, 500).await().indefinitely()
+
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.stage_changed" }))
+            .isEqualTo("lending")
+        assertThat(sourceServiceOf(emitted.single { it.eventType == "loan.provisioned" }))
+            .isEqualTo("lending")
     }
 }

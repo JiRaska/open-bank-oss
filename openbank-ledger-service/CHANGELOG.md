@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.22.0...ledger-service-v1.23.0) (2026-08-19)
+
+
+### Features
+
+* **ledger:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5687](https://github.com/JiRaska/open-bank-oss/issues/5687)) ([c0d5dee](https://github.com/JiRaska/open-bank-oss/commit/c0d5dee48e379bdc89e26b3ad852edd5084bdab4))
+
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.21.2...ledger-service-v1.22.0) (2026-08-18)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [1.21.2](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.21.1...ledger-service-v1.21.2) (2026-08-17)
 
 
