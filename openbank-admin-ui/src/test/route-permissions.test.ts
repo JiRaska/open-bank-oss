@@ -33,7 +33,7 @@ describe('route permission projection (ADR-0229 D3)', () => {
     expect(permissionForPath('/dashboard')).toBe('dashboard:view')
     expect(permissionForPath('/accounts/new')).toBe('accounts:create')
     expect(permissionForPath('/cards/sample')).toBe('cards:view')
-    expect(permissionForPath('/lending/compliance-packs')).toBe('compliance:view')
+    expect(permissionForPath('/lending/compliance-packs')).toBe('lending:compliance:view')
     expect(permissionForPath('/system/config')).toBe('system:config')
   })
 })
