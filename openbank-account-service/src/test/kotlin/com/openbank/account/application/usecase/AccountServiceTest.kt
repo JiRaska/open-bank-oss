@@ -125,7 +125,7 @@ class AccountServiceTest {
                 )
             }
 
-            // Balance init is event-driven (ADR-0073, #550): openAccount no longer makes a
+            // Balance init is event-driven (ADR-0266, #550): openAccount no longer makes a
             // synchronous balancePort.initialize REST call — balance-service's BalanceInitConsumer
             // seeds the zero balance from the AccountCreated event above. Encode that contract.
             coVerify(exactly = 0) { balancePort.initialize(any(), any(), any()) }
