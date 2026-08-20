@@ -400,6 +400,31 @@ jobs:
                 sel="$(grep -aoE 'Selected: [0-9]+/[0-9]+' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | head -1 || true)"
                 blocked="$(grep -aoE 'Authentication failed: [0-9]+ operation' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | grep -oE '[0-9]+' | head -1 || true)"
                 echo "==> [${svc}] ${label}: ${sel:-Selected: ?} auth-blocked=${blocked:-0}"
+
+                # A CENSUS OF CAUSES, printed next to the count. schemathesis reports "Server
+                # error: N" and the response body is a generic INTERNAL_ERROR, so the count alone
+                # cannot distinguish a defect from a dependency this job does not run — and this
+                # lane has now produced three different dependencies that masquerade as findings
+                # (Redis, OPA, and an OIDC client fetching a token from a Keycloak that is absent).
+                #
+                # Two of those I first reported as defects and had to withdraw. The triage that
+                # corrected them was exactly this: read the exception classes out of the boot log.
+                # Doing it in the job means the next person reads it in the failure output instead
+                # of downloading artifacts and correlating by hand.
+                #
+                # Deliberately NOT filtered or suppressed. An OidcClientException here does not
+                # prove the finding beside it is environmental — measured on run 32364265056,
+                # balance-service logged 2 of those AND 4 genuine DataExceptions, and ledger-service
+                # 2 alongside a real NullPointerException. The census informs triage; it does not
+                # perform it, and it must never be turned into an exclusion rule that quietly drops
+                # a real finding sharing a service with an absent dependency.
+                if grep -aq "Unhandled exception" "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null; then
+                  echo "==> [${svc}] ${label}: exception classes seen (triage aid, NOT a verdict):"
+                  grep -a "Unhandled exception" "fuzz-reports/${svc}-boot${logsuffix}.log" \
+                    | sed 's/\x1b\[[0-9;]*m//g' \
+                    | grep -oE '\): [a-zA-Z.]+(Exception|Error)' | sed 's/^): //' \
+                    | sort | uniq -c | sort -rn | sed 's/^/      /'
+                fi
               fi
 
               # Stop this pass's JVM before the next one re-binds the dev port.
