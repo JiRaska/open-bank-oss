@@ -152,7 +152,7 @@ class PartyResource {
     @RolesAllowed("ROLE_API")
     @Operation(summary = "Match phone-number hashes against parties who opted into being discoverable")
     suspend fun lookupDirectory(req: DirectoryLookupRequest): Response =
-        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.phoneHashes))).build()
+        Response.ok(mapOf("matches" to partyUseCase.lookupByPhoneHashes(req.hashes()))).build()
 
     /** Turn this party's pay-to-phone findability on or off. Revocable at any time. */
     @PUT
@@ -756,7 +756,20 @@ private const val GDPR_EXPORT_SCOPE =
         "subject-access response is a tracked follow-up (ADR-0118 §6)."
 
 /** Address-book hashes to match. See PhoneDirectory for what the hashing does and does not buy. */
-data class DirectoryLookupRequest(val phoneHashes: List<String> = emptyList())
+/**
+ * `List<String?>`, deliberately. Kotlin's non-null element type is a COMPILE-TIME property and
+ * Jackson does not enforce it inside a collection, so `{"phoneHashes":["abc",null]}` produced a
+ * `List<String>` holding a null and the first dereference threw
+ * `Parameter specified as non-null is null` — a 500 for malformed input (#5913). Declaring the
+ * element nullable makes the null representable, so it can be REJECTED instead of exploding; the
+ * rejection lives in [DirectoryLookupRequest.hashes].
+ */
+data class DirectoryLookupRequest(val phoneHashes: List<String?> = emptyList()) {
+    /** @throws IllegalArgumentException mapped to 400 by libs-runtime's shared mapper (never a service-local one, #526). */
+    fun hashes(): List<String> = phoneHashes.map {
+        requireNotNull(it) { "phoneHashes must not contain null entries" }
+    }
+}
 
 data class DiscoverableRequest(val discoverable: Boolean = false)
 
