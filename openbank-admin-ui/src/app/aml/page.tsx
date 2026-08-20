@@ -28,7 +28,7 @@ export default function AmlPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [search, setSearch] = useState('')
-  const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
+  const { data, loading, unavailable, waking } = useServiceResource<AmlCase[]>(
     svcUrl('aml-service', '/api/v1/aml/cases'),
     { select: (raw) => (Array.isArray(raw) ? (raw as AmlCase[]) : ((raw as { cases?: AmlCase[] }).cases ?? [])) },
   )
