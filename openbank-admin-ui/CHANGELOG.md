@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.174.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.174.0...admin-ui-v0.174.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose AML scan state ([#5909](https://github.com/JiRaska/open-bank-oss/issues/5909)) ([8e1c904](https://github.com/JiRaska/open-bank-oss/commit/8e1c904a83b3a1a5ed2d1bda0e1d69dd2757dfcc))
+* **admin-ui:** label security severity filters ([#5910](https://github.com/JiRaska/open-bank-oss/issues/5910)) ([5d35317](https://github.com/JiRaska/open-bank-oss/commit/5d35317efcf5fee2589dbd0bc9fab6f5906e217d))
+
 ## [0.174.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.2...admin-ui-v0.174.0) (2026-08-20)
 
 
