@@ -72,7 +72,7 @@ class HelpKnowledgeBase : com.openbank.copilot.application.port.out.CorpusSource
                 // Identity is (source, ordinal), NOT the content hash: keying by hash would make an
                 // edited paragraph a new row and leave the old one orphaned until the prune, and the
                 // prune is exactly the step that must not be load-bearing.
-                chunkId = sha256("${'$'}{p.source}#${'$'}n"),
+                chunkId = sha256("${p.source}#$n"),
                 source = p.source,
                 docTitle = p.docTitle,
                 ordinal = n,
