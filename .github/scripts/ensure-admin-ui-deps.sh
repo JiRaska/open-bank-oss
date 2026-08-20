@@ -54,7 +54,12 @@ ensure_admin_ui_deps() {
     fi
     sleep 2
     waited=$((waited + 2))
-    if _deps_present; then return 0; fi
+    # Do not inspect node_modules while the holder still owns the lock. npm ci creates
+    # package entry points before it has finished writing transitive files; resolving the
+    # four top-level packages at that point lets a concurrent gate import a half-written
+    # tree (for example mermaid -> es-toolkit/compat) and fail nondeterministically.
+    # Re-check only after the holder has released the lock.
+    if [ ! -d "$lock" ] && _deps_present; then return 0; fi
   done
   trap 'rm -rf "$lock"' EXIT
 
