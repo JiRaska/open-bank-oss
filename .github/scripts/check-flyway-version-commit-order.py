@@ -109,19 +109,40 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
     # therefore green. It was only visible because the KNOWN_VIOLATIONS both-ways check then
     # reported every baseline entry as stale -- the ratchet catching the checker, which is the
     # single reason that idiom is worth its cost.
+    # The mainline is FETCHED, never guessed. An earlier version tried a candidate chain ending
+    # in HEAD, and that is unsound by construction: on a PR run HEAD is the merge commit, so
+    # `rev-list HEAD` includes the branch's own commits and the gate silently stops measuring
+    # "order on main" and starts measuring "order including this PR" -- a different question,
+    # answered confidently. That is how the same commit produced 349 ordered / 2 violations
+    # locally and 350 / 0 in CI. A gate that cannot obtain its ground truth must fail, not
+    # substitute the nearest available history.
+    mainline = "FETCH_HEAD"
+    fetched = subprocess.run(
+        ["git", "fetch", "--quiet", "origin", "main"],
+        cwd=REPO, capture_output=True, text=True, check=False,
+    )
     revs: list[str] = []
-    mainline = ""
-    for ref in ("origin/main", "FETCH_HEAD", "main", "HEAD"):
+    if fetched.returncode == 0:
         try:
             revs = subprocess.run(
-                ["git", "rev-list", "--reverse", ref],
+                ["git", "rev-list", "--reverse", "FETCH_HEAD"],
                 cwd=REPO, capture_output=True, text=True, check=True,
             ).stdout.splitlines()
         except subprocess.CalledProcessError:
-            continue
-        if revs:
-            mainline = ref
-            break
+            revs = []
+    if not revs:
+        # Offline or no remote: fall back to a local mainline ref, but NEVER to HEAD.
+        for ref in ("origin/main", "main"):
+            try:
+                revs = subprocess.run(
+                    ["git", "rev-list", "--reverse", ref],
+                    cwd=REPO, capture_output=True, text=True, check=True,
+                ).stdout.splitlines()
+            except subprocess.CalledProcessError:
+                continue
+            if revs:
+                mainline = ref
+                break
     position = {sha: i for i, sha in enumerate(revs)}
 
     wanted = {str(p.relative_to(REPO)) for p in paths}
@@ -253,8 +274,6 @@ def main() -> int:
     if args.selftest:
         return selftest()
 
-    subprocess.run(["git", "fetch", "-q", "origin", "main"], cwd=REPO, check=False)
-
     all_files = migration_files(REPO)
     order = first_commit_order([p for p, _ in all_files])
 
@@ -266,9 +285,11 @@ def main() -> int:
     if all_files and not order:
         # Never report "clean" from a scan that resolved nothing. A gate that cannot see its
         # corpus must say so, not agree with it.
-        print("::error::could not resolve any migration's add-commit against the mainline "
-              "(no usable git history for origin/main, FETCH_HEAD, main or HEAD). The check did "
-              "not run -- this is a broken scan, not a clean result.")
+        print("::error::could not obtain main's history (git fetch origin main failed and no "
+              "local origin/main or main ref resolved), so no migration could be ordered. The "
+              "check did not run -- this is a broken scan, not a clean result. HEAD is "
+              "deliberately NOT used as a substitute: on a PR it is the merge commit, and "
+              "ordering against it answers a different question than this gate asks.")
         gatelib.subjects(0, "migrations ordered")
         return 1
 
