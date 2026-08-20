@@ -4,6 +4,7 @@
 
 package com.openbank.audit.infrastructure.signing
 
+import com.openbank.audit.application.port.out.AnchorSignature
 import com.openbank.audit.application.port.out.AnchorSigner
 import java.security.MessageDigest
 import java.util.Base64
@@ -20,19 +21,22 @@ class LocalHmacAnchorSigner(private val signingKey: String) : AnchorSigner {
 
     override val keyId: String = "local-hmac-sha256"
 
-    override fun sign(digest: ByteArray): String {
+    override fun sign(digest: ByteArray): AnchorSignature {
         val mac = Mac.getInstance(ALGO)
         mac.init(SecretKeySpec(signingKey.toByteArray(Charsets.UTF_8), ALGO))
-        return Base64.getEncoder().encodeToString(mac.doFinal(digest))
+        return AnchorSignature(Base64.getEncoder().encodeToString(mac.doFinal(digest)), keyId)
     }
 
-    override fun verify(digest: ByteArray, signature: String): Boolean = runCatching {
-        // Constant-time comparison: never branch on signature content.
-        MessageDigest.isEqual(
-            sign(digest).toByteArray(Charsets.UTF_8),
-            signature.toByteArray(Charsets.UTF_8),
-        )
-    }.getOrDefault(false)
+    override fun verify(digest: ByteArray, signature: String, keyId: String): Boolean? {
+        if (keyId != this.keyId) return null
+        return runCatching {
+            // Constant-time comparison: never branch on signature content.
+            MessageDigest.isEqual(
+                sign(digest).value.toByteArray(Charsets.UTF_8),
+                signature.toByteArray(Charsets.UTF_8),
+            )
+        }.getOrDefault(false)
+    }
 
     private companion object {
         const val ALGO = "HmacSHA256"

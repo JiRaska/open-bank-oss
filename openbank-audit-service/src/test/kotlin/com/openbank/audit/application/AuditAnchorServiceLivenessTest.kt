@@ -5,6 +5,7 @@
 package com.openbank.audit.application
 
 import com.openbank.audit.application.port.out.AnchorSigner
+import com.openbank.audit.domain.model.AuditAnchor
 import com.openbank.audit.infrastructure.persistence.AuditAnchorRepository
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.ChainHead
@@ -18,6 +19,7 @@ import io.mockk.mockk
 import io.mockk.verify
 import io.quarkus.runtime.StartupEvent
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
@@ -91,5 +93,36 @@ class AuditAnchorServiceLivenessTest {
 
         coVerify(exactly = 0) { anchorRepository.save(any()) }
         verify(exactly = 0) { liveness.recordSuccess() }
+    }
+
+    @Test
+    fun `no anchors is not reported as intact evidence`(): Unit = runBlocking {
+        coEvery { anchorRepository.all() } returns emptyList()
+
+        val result = service(enabled = true).verifyAnchors()
+
+        assertThat(result.status).isEqualTo("NO_ANCHORS")
+    }
+
+    @Test
+    fun `historical key that cannot be verified is not reported as intact`(): Unit = runBlocking {
+        val anchor = AuditAnchor(
+            lastEntryId = java.util.UUID.randomUUID(),
+            lastRecordHash = "a".repeat(64),
+            chainedCount = 1,
+            chainStatus = "INTACT",
+            anchorDigest = "unused",
+            signature = "signature",
+            keyId = "legacy-hmac",
+            signedAt = Instant.parse("2026-08-16T05:00:00Z"),
+        )
+        coEvery { anchorRepository.all() } returns listOf(anchor)
+        every { signer.verify(any(), any(), "legacy-hmac") } returns null
+        coEvery { auditRepository.recordHashOf(anchor.lastEntryId!!) } returns anchor.lastRecordHash
+
+        val result = service(enabled = true).verifyAnchors()
+
+        assertThat(result.status).isEqualTo("UNVERIFIED")
+        assertThat(result.unverifiableCount).isEqualTo(1)
     }
 }

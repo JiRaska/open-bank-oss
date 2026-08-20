@@ -51,16 +51,6 @@ spec:
             - name: management
               containerPort: 8085
           env:
-            # ADR-0031 D5: pod identity may sign only audit anchors with this dedicated KMS key.
-            # No private key or AWS static credential is injected into the workload.
-            - name: AWS_REGION
-              value: eu-north-1
-            - name: AUDIT_ANCHOR_SIGNER
-              value: kms
-            - name: AUDIT_ANCHOR_SIGNING_REQUIRED
-              value: "true"
-            - name: AUDIT_ANCHOR_KMS_KEY_ID
-              value: alias/openbank-audit-anchor
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://audit-db-rw.audit.svc:5432/openbank_audit
             - name: QUARKUS_DATASOURCE_REACTIVE_URL

@@ -29,9 +29,15 @@ class AwsKmsAnchorSignerTest {
         val request = slot<SignRequest>()
         every { kms.sign(capture(request)) } returns SignResponse.builder()
             .signature(SdkBytes.fromUtf8String("signature"))
+            .keyId("arn:aws:kms:region:account:key/immutable")
             .build()
 
-        assertThat(signer.sign(digest)).isEqualTo("c2lnbmF0dXJl")
+        assertThat(signer.sign(digest)).isEqualTo(
+            com.openbank.audit.application.port.out.AnchorSignature(
+                "c2lnbmF0dXJl",
+                "arn:aws:kms:region:account:key/immutable",
+            ),
+        )
         assertThat(request.captured.keyId()).isEqualTo("alias/openbank-audit-anchor")
         assertThat(request.captured.message().asByteArray()).isEqualTo(digest)
         assertThat(request.captured.signingAlgorithmAsString()).isEqualTo("ECDSA_SHA_256")
@@ -42,10 +48,10 @@ class AwsKmsAnchorSignerTest {
         val request = slot<VerifyRequest>()
         every { kms.verify(capture(request)) } returns VerifyResponse.builder().signatureValid(true).build()
 
-        assertThat(signer.verify(digest, "c2lnbmF0dXJl")).isTrue()
-        assertThat(request.captured.keyId()).isEqualTo("alias/openbank-audit-anchor")
+        assertThat(signer.verify(digest, "c2lnbmF0dXJl", "arn:aws:kms:region:account:key/history")).isTrue()
+        assertThat(request.captured.keyId()).isEqualTo("arn:aws:kms:region:account:key/history")
         assertThat(request.captured.message().asByteArray()).isEqualTo(digest)
-        assertThat(signer.verify(digest, "not-base64!")).isFalse()
+        assertThat(signer.verify(digest, "not-base64!", "arn:aws:kms:region:account:key/history")).isFalse()
     }
 
     @Test

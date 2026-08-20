@@ -339,12 +339,12 @@ components:
 
     AnchorVerificationResponse:
       type: object
-      required: [status, anchorCount, verifiedCount, unsignedCount]
+      required: [status, anchorCount, verifiedCount, unsignedCount, unverifiableCount]
       properties:
         status:
           type: string
-          enum: [INTACT, BROKEN]
-          description: INTACT when every anchor's signature and attested head verify.
+          enum: [INTACT, BROKEN, UNVERIFIED, NO_ANCHORS]
+          description: INTACT only when every anchor's signature and attested head verify; UNVERIFIED means a signature or historical key cannot be verified, and NO_ANCHORS means no independent evidence exists.
         anchorCount:
           type: integer
           format: int64
@@ -356,6 +356,10 @@ components:
           type: integer
           format: int64
           description: Anchors stored without a signature (signer unavailable at capture).
+        unverifiableCount:
+          type: integer
+          format: int64
+          description: Signed anchors whose historical key cannot be verified by this runtime.
         firstBroken:
           nullable: true
           description: The first anchor that failed verification; null when status is INTACT.
