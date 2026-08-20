@@ -61,7 +61,11 @@ class DeviceTokenSweepJob {
     // TooGenericExceptionCaught: a non-critical nightly sweep must not surface as a Quarkus
     // Scheduler failure — ANY fault is logged and tomorrow's tick sweeps the same rows again.
     @Suppress("TooGenericExceptionCaught")
-    @Scheduled(cron = "0 0 3 * * ?", identity = "device-token-stale-sweep", concurrentExecution = SKIP)
+    @Scheduled(
+        cron = "{openbank.notification.device-token-stale-sweep.cron:0 0 3 * * ?}",
+        identity = "device-token-stale-sweep",
+        concurrentExecution = SKIP,
+    )
     suspend fun sweepStaleTokens() {
         val threshold = Instant.now(clock).minus(STALE_DAYS, ChronoUnit.DAYS)
         try {

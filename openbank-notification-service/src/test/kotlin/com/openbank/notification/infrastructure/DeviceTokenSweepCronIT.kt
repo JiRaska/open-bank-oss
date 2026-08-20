@@ -36,7 +36,7 @@ class DeviceTokenSweepCronIT {
     class FastCronProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.scheduler.enabled" to "true",
-            "quarkus.scheduler.cron.device-token-stale-sweep" to "*/1 * * * * ?",
+            "openbank.notification.device-token-stale-sweep.cron" to "*/1 * * * * ?",
             "quarkus.hibernate-orm.enabled" to "true",
             "quarkus.datasource.jdbc.enabled" to "true",
         )
