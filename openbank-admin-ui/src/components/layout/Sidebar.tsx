@@ -16,7 +16,7 @@ import {
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
-  Megaphone,
+  Megaphone, Radar,
   Target,
   Share2, Bug,
 } from 'lucide-react'
@@ -103,6 +103,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
+  { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
   { nameCs: 'Cluster & kontejner', nameEn: 'Cluster & Container', href: '/docs/cluster', icon: Boxes, permission: 'docs:view' },
@@ -166,6 +167,9 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   const isLocked = (item: NavItem) =>
     (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
     (!!item.deniedRole && roles.includes(item.deniedRole))
+  const currentHref = ALL_NAV
+    .filter(item => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // is untouched. Each link inherits its permission from the same destination's nav entry.
@@ -222,26 +226,26 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       {/* Nav — the only scrollable region; brand + footer stay pinned. */}
       <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
         <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
-        <NavSection items={filter(workspace)} pathname={pathname} />
-        <NavSection items={filter(coreNav)} pathname={pathname} />
+        <NavSection items={filter(workspace)} currentHref={currentHref} announceCurrent={false} />
+        <NavSection items={filter(coreNav)} currentHref={currentHref} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
-        <NavSection items={filter(revenueNav)} pathname={pathname} />
+        <NavSection items={filter(revenueNav)} currentHref={currentHref} />
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
-        <NavSection items={filter(customerNav)} pathname={pathname} />
+        <NavSection items={filter(customerNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>
-        <NavSection items={filter(paymentsNav)} pathname={pathname} />
+        <NavSection items={filter(paymentsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Compliance', 'Compliance')}</SectionLabel>
-        <NavSection items={filter(complianceNav)} pathname={pathname} />
+        <NavSection items={filter(complianceNav)} currentHref={currentHref} />
         <SectionLabel>{t('Operace', 'Operations')}</SectionLabel>
-        <NavSection items={filter(opsNav)} pathname={pathname} />
+        <NavSection items={filter(opsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platforma', 'Platform')}</SectionLabel>
-        <NavSection items={filter(platformNav)} pathname={pathname} />
+        <NavSection items={filter(platformNav)} currentHref={currentHref} />
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
-        <NavSection items={filter(docsNav)} pathname={pathname} />
+        <NavSection items={filter(docsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
-        <NavSection items={filter(toolsNav)} pathname={pathname} isLocked={isLocked} />
+        <NavSection items={filter(toolsNav)} currentHref={currentHref} isLocked={isLocked} />
         <SectionLabel>{t('Systém', 'System')}</SectionLabel>
-        <NavSection items={filter(sysNav)} pathname={pathname} isLocked={isLocked} />
+        <NavSection items={filter(sysNav)} currentHref={currentHref} isLocked={isLocked} />
       </nav>
 
       {/* Footer */}
@@ -261,14 +265,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname: string; isLocked?: (item: NavItem) => boolean }) {
+function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { items: NavItem[]; currentHref?: string; announceCurrent?: boolean; isLocked?: (item: NavItem) => boolean }) {
   const { language } = useLanguage()
 
   if (!items.length) return null
   return (
     <>
       {items.map(item => {
-        const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+        const active = announceCurrent && item.href === currentHref
         const locked = isLocked?.(item) ?? false
         const Icon = item.icon
         const displayName = language === 'cs' ? item.nameCs : item.nameEn

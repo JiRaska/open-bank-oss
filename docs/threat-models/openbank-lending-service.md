@@ -51,6 +51,11 @@
    active loans, 6.6M CZK principal, none of it reaching an account). Client-credentials
    (`ROLE_OPERATOR`, accepted by `transaction.create`). Build-time gated by
    `LENDING_BORROWER_CREDIT_BACKEND=rest` (§3), same pattern as item 2's `LENDING_LEDGER_BACKEND`.
+9. **Service → product-catalog (synchronous REST, new — #668).** `ProductCatalogLoanClient` reads one
+   exact `/api/v2/products/{offeringId}` published revision over OIDC client credentials. It never
+   writes catalog state. The adapter accepts only the banking loan schema, a matching offering id,
+   canonical decimal amounts/rates, and a 64-hex content hash; malformed, unavailable, draft or
+   mismatched data fails the application request closed rather than falling back to caller pricing.
 
 ## 3. Controls in place (this slice)
 
@@ -71,6 +76,12 @@
   an APPROVED application. Illegal transitions return 409, not a silent mutation.
 - **Offline-buildable defaults.** No-op `@Default` ports mean the service boots with zero external
   dependency; real integrations are explicit build-time opt-ins.
+- **Catalog-originated loan terms (#668, new).** When an application specifies a catalog offering,
+  `LendingService` resolves the published immutable revision and derives rate, tenor, currency and
+  amortization constraints from it. It persists offering id, revision id, schema version and content
+  hash on the application; subsequent catalog edits cannot reprice the already-originated decision.
+  A catalog response that is unavailable, malformed, non-published or outside supported limits fails
+  closed before application persistence.
 - **Secrets.** No hardcoded credentials; config values are env-var placeholders.
 - **Provisioning cycle integrity (ADR-0028 Phase 3, new this slice).** The scheduled IFRS 9 provisioning
   pass (`ProvisioningCycleScheduler` → `LendingService.runProvisioningCycle`) is a system-actor process,
@@ -339,6 +350,15 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
   becomes load-bearing if that blanket operator grant is narrowed.
 
 ## 10. Change log
+
+- **2026-08-20** — Catalog-governed loan origination (#668). Adds the product-catalog OIDC read edge
+  described in §2 item 9. The caller may select an offering, never a revision or a rate: the service
+  validates the exact published banking-loan revision, persists its immutable identity/hash, and
+  rejects currency, tenor, amortization or principal-range mismatches before creating an application.
+  This closes price/configuration tampering at the money-path intake boundary; a catalog outage is a
+  fail-closed validation error, never a fallback to request-supplied economics. Consumer and provider
+  Pact coverage replay the full response seam. Rollback: leave `catalogOfferingId` absent and legacy
+  applications preserve their existing server-side rate flow.
 
 - **2026-08-17** — Disbursement customer-credit leg (#3931). **New trust boundaries added to §2
   (items 7-8).** The loan book's ledger journal only ever posted to internal GL accounts (Loans

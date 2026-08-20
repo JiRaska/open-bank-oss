@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.22.0...ledger-service-v1.23.0) (2026-08-19)
+
+
+### Features
+
+* **ledger:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5687](https://github.com/JiRaska/open-bank-oss/issues/5687)) ([c0d5dee](https://github.com/JiRaska/open-bank-oss/commit/c0d5dee48e379bdc89e26b3ad852edd5084bdab4))
+
 ## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.21.2...ledger-service-v1.22.0) (2026-08-18)
 
 

@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.1...copilot-service-v0.13.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** give every help chunk its own id — the index held ONE row, not 13 ([#5954](https://github.com/JiRaska/open-bank-oss/issues/5954)) ([f4ba956](https://github.com/JiRaska/open-bank-oss/commit/f4ba95694f2f2ffbb195a2be962f0dcca134a5ca)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.0...copilot-service-v0.13.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** index the help corpus 90s after boot, not on the next 6h cron ([#5935](https://github.com/JiRaska/open-bank-oss/issues/5935)) ([eba367a](https://github.com/JiRaska/open-bank-oss/commit/eba367a3c0b5af7c11c69ca60d9b9327f2ae9b55)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.1...copilot-service-v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.0...copilot-service-v0.12.1) (2026-08-19)
+
+
+### Bug Fixes
+
+* stop swallowing transient event-consumer failures as an ack across 4 services ([#5698](https://github.com/JiRaska/open-bank-oss/issues/5698)) ([#5725](https://github.com/JiRaska/open-bank-oss/issues/5725)) ([3219c5d](https://github.com/JiRaska/open-bank-oss/commit/3219c5de3944c39f22a94b4c44532b8521f8a6b5))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.11.2...copilot-service-v0.12.0) (2026-08-18)
 
 

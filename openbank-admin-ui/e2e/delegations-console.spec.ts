@@ -97,6 +97,9 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test('finds a party through entity resolution and renders its grants', async ({ page }) => {
+  // Keep the fixture language explicit: the display is intentionally locale-aware now,
+  // while this assertion exercises the Czech copy and formatting contract.
+  await page.addInitScript(() => window.localStorage.setItem('openbank-admin-lang', 'cs'))
   const seen = await stubBff(page)
   await page.goto('/delegations')
 

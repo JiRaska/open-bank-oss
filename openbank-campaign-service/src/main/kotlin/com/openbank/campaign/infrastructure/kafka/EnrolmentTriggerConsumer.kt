@@ -9,6 +9,7 @@ import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.usecase.TriggeredEnrolment
 import com.openbank.campaign.application.usecase.TriggeredEnrolmentService
 import com.openbank.campaign.domain.model.TriggerCatalog
+import com.openbank.libs.messaging.EventRetry
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -50,65 +51,115 @@ class EnrolmentTriggerConsumer(
     @Incoming("card-triggers-in")
     suspend fun onCardEvent(message: Message<String>) = handle(message, "openbank.cards.events")
 
+    /**
+     * Ack is now the SUCCESS path, not the only path.
+     *
+     * The record is acked when the work is done, and when the payload is a poison pill no
+     * redelivery could ever fix (unparseable JSON, no usable `partyId`, no matching trigger) —
+     * those are dropped deliberately and named as such. Anything else is a dependency failing, not
+     * the event: [EventRetry] retries it a bounded number of times and then rethrows, and the
+     * record is NACKED so the platform, rather than a log line nobody pages on, owns the outcome.
+     *
+     * The previous `finally { message.ack() }` acked every one of those, so a campaigns-DB blip
+     * or a Temporal outage meant the party was never enrolled and never would be — `reset: latest`
+     * rules out replay and nothing in lag, the DLQ or any dashboard showed a thing.
+     *
+     * **What the nack does next is the CONNECTOR's decision, not this class's.** The handler's
+     * contract ends at "the work did not happen, and the platform was told". What follows depends
+     * entirely on the channel's configured `failure-strategy`: `dead-letter-queue` parks the record
+     * on the channel's DLQ topic for replay, while SmallRye's default `fail` stops the channel
+     * instead. Both are better than an ack, which loses the party silently; they are not the same
+     * incident, so read the channel's config in `application.yaml` before predicting one.
+     * (#5751 wires `failure-strategy: dead-letter-queue` for `account-triggers-in` and
+     * `card-triggers-in`, with explicit `openbank.dlq.campaign.<channel>` topics.)
+     */
     @Suppress("TooGenericExceptionCaught")
     private suspend fun handle(message: Message<String>, topic: String) {
-        try {
-            val event = try {
-                mapper.readTree(message.payload)
-            } catch (e: Exception) {
-                log.errorf(e, "Unparseable %s event — dropped", topic)
-                return
-            }
-
-            val partyId = event.path("partyId").takeIf { !it.isMissingNode && !it.isNull }
-                ?.let { runCatching { UUID.fromString(it.asText()) }.getOrNull() }
-                ?: return
-
-            // Header first, payload second — the two producers put the type in different places
-            // (see TriggerCatalog). `openbank.cards.events` is shared, so without this a limit
-            // change would enrol the party into a card-issuance campaign.
-            val eventType = headerEventType(message) ?: event.path("eventType").asText().ifBlank { null }
-            val triggers = TriggerCatalog.matching(topic, eventType)
-            if (triggers.isEmpty()) return
-
-            for (trigger in triggers) {
-                for (campaign in campaigns.findActiveByTrigger(trigger)) {
-                    enrol(campaign.id, partyId, trigger)
-                }
-            }
-        } finally {
-            // Acked in every case, including the failures logged below. A poison event that cannot
-            // enrol anyone would otherwise be redelivered forever and stall the partition, blocking
-            // every later party's trigger behind it. The cost of the alternative is worse than the
-            // event being lost: this consumer starts journeys, so a wedged partition is silent
-            // non-delivery for everyone.
+        val event = try {
+            mapper.readTree(message.payload)
+        } catch (e: Exception) {
+            // Poison pill: replaying it fails identically forever, so acking is the right answer.
+            log.errorf(e, "Unparseable %s event — dropped", topic)
             message.ack()
+            return
         }
+
+        val partyId = event.path("partyId").takeIf { !it.isMissingNode && !it.isNull }
+            ?.let { runCatching { UUID.fromString(it.asText()) }.getOrNull() }
+        if (partyId == null) {
+            // Nothing to enrol. Not a fault: the shared topics carry records with no party at all.
+            message.ack()
+            return
+        }
+
+        // Header first, payload second — the two producers put the type in different places
+        // (see TriggerCatalog). `openbank.cards.events` is shared, so without this a limit
+        // change would enrol the party into a card-issuance campaign.
+        val eventType = headerEventType(message) ?: event.path("eventType").asText().ifBlank { null }
+        val triggers = TriggerCatalog.matching(topic, eventType)
+        if (triggers.isEmpty()) {
+            message.ack()
+            return
+        }
+
+        try {
+            enrolAll(triggers, partyId)
+        } catch (e: Exception) {
+            message.nack(e)
+            return
+        }
+        message.ack()
+    }
+
+    /**
+     * Attempts every (trigger, campaign) pair for this party, then rethrows the FIRST transient
+     * failure once they have all been tried.
+     *
+     * The original per-campaign catch existed so one campaign's failure did not cost the others
+     * their enrolment of the same party; that intent is kept by continuing the loop. What changes
+     * is the ending: the failure is no longer discarded. Redelivery is safe because
+     * `TriggeredEnrolmentService.enrol` returns `ALREADY_ENROLLED` for anything that did succeed.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun enrolAll(triggers: Collection<String>, partyId: UUID) {
+        var firstFailure: Exception? = null
+        for (trigger in triggers) {
+            for (campaign in campaigns.findActiveByTrigger(trigger)) {
+                val failure = enrolOrFailure(campaign.id, partyId, trigger)
+                if (firstFailure == null) firstFailure = failure
+            }
+        }
+        firstFailure?.let { throw it }
     }
 
     @Suppress("TooGenericExceptionCaught")
+    private suspend fun enrolOrFailure(campaignId: UUID, partyId: UUID, trigger: String): Exception? = try {
+        enrol(campaignId, partyId, trigger)
+        null
+    } catch (e: Exception) {
+        e
+    }
+
     private suspend fun enrol(campaignId: UUID, partyId: UUID, trigger: String) {
-        try {
-            when (val outcome = triggered.enrol(campaignId, partyId)) {
-                TriggeredEnrolment.ENROLLED ->
-                    log.infof("Trigger %s enrolled party=%s into campaign=%s", trigger, partyId, campaignId)
-                // The ordinary answers. A product event arrives for every party in the bank and
-                // almost none are in any given segment, so these are logged at debug — at info they
-                // would be the loudest thing in the service and would bury the enrolments.
-                TriggeredEnrolment.NOT_IN_SEGMENT,
-                TriggeredEnrolment.ALREADY_ENROLLED,
-                TriggeredEnrolment.NOT_ACTIVE,
-                ->
-                    log.debugf("Trigger %s: campaign=%s party=%s -> %s", trigger, campaignId, partyId, outcome)
-                // These two mean the definition is broken rather than the party unqualified.
-                TriggeredEnrolment.SEGMENT_GONE,
-                TriggeredEnrolment.CAMPAIGN_GONE,
-                ->
-                    log.warnf("Trigger %s: campaign=%s party=%s -> %s", trigger, campaignId, partyId, outcome)
-            }
-        } catch (e: Exception) {
-            // One campaign's failure must not cost the others their enrolment of this same party.
-            log.errorf(e, "Trigger %s failed for campaign=%s party=%s", trigger, campaignId, partyId)
+        val outcome = EventRetry.withRetry(log, "Triggered enrolment", "campaign=$campaignId party=$partyId") {
+            triggered.enrol(campaignId, partyId)
+        }
+        when (outcome) {
+            TriggeredEnrolment.ENROLLED ->
+                log.infof("Trigger %s enrolled party=%s into campaign=%s", trigger, partyId, campaignId)
+            // The ordinary answers. A product event arrives for every party in the bank and
+            // almost none are in any given segment, so these are logged at debug — at info they
+            // would be the loudest thing in the service and would bury the enrolments.
+            TriggeredEnrolment.NOT_IN_SEGMENT,
+            TriggeredEnrolment.ALREADY_ENROLLED,
+            TriggeredEnrolment.NOT_ACTIVE,
+            ->
+                log.debugf("Trigger %s: campaign=%s party=%s -> %s", trigger, campaignId, partyId, outcome)
+            // These two mean the definition is broken rather than the party unqualified.
+            TriggeredEnrolment.SEGMENT_GONE,
+            TriggeredEnrolment.CAMPAIGN_GONE,
+            ->
+                log.warnf("Trigger %s: campaign=%s party=%s -> %s", trigger, campaignId, partyId, outcome)
         }
     }
 

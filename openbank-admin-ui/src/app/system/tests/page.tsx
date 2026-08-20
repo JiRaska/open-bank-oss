@@ -587,17 +587,19 @@ export default function TestCoveragePage() {
               {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
-          <button onClick={load} disabled={testLoading || qualityLoading} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} style={{ animation: (testLoading || qualityLoading) ? 'spin 0.8s linear infinite' : 'none' }} />
+          <button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} className="btn btn-secondary btn-sm">
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: (testLoading || qualityLoading) ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
       />
 
-      <div style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
+      <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
         {tabs.map(tabDef => (
           <button
             key={tabDef.id}
+            type="button"
+            aria-pressed={tab === tabDef.id}
             onClick={() => setTab(tabDef.id)}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px',
@@ -609,7 +611,7 @@ export default function TestCoveragePage() {
               cursor: 'pointer', marginBottom: '-1px', transition: 'color 0.15s',
             }}
           >
-            {tabDef.icon}
+            <span aria-hidden="true">{tabDef.icon}</span>
             {tabDef.label}
             {tabDef.count !== undefined && tabDef.count > 0 && (
               <span style={{ fontSize: '10px', background: 'var(--surface-3)', borderRadius: '10px', padding: '1px 6px', color: 'var(--text-secondary)', fontWeight: 500 }}>

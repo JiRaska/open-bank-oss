@@ -25,8 +25,28 @@ import org.eclipse.microprofile.reactive.messaging.Incoming
  *   - DISTINCT_NEW     → create the party + register the (no-RČ) identity into pid.
  *   - REJECT           → audit only; the applicant is not onboarded.
  *
- * Best-effort and idempotent-ish (the pending record is deleted after handling). Flag-gated off by
- * default. The plaintext RČ is never available here (never stored) — resume uses name + birthdate.
+ * Flag-gated off by default. The plaintext RČ is never available here (never stored) — resume uses
+ * name + birthdate.
+ *
+ * ## Failure handling — the pending record must outlive a failed attempt (#5698)
+ *
+ * This used to be `try { resume(...) } catch (e: Exception) { Log.error(...) } finally { delete }`,
+ * which is the catch-and-ack defect of #5698 with an extra turn of the screw. [resume] fans out to
+ * `upstream.post` (party-service, pid-service) and `keycloakAdmin.setPartyIdAttribute`; a connection
+ * refused from any of them was logged and the handler returned normally, acking the Kafka message —
+ * and the `finally` then deleted the [PendingOnboarding] anyway. So even a manual replay of the
+ * decision event found nothing to resume: the applicant was stranded with an operator verdict
+ * recorded in pid and no party ever created, and the only trace was one ERROR line.
+ *
+ * Now the attempt is bounded-retried and, if it still fails, RETHROWN — the connector dead-letters,
+ * which is a signal someone can see — and the pending record is deleted **only on success**, so a
+ * redelivery or a replay has something to work with. `resume` is safe to repeat: the party create
+ * carries the idempotency key `onboarding-resume-<caseId>`, the Keycloak sub link is idempotent by
+ * construction, and the pid identity registration is keyed on the party id.
+ *
+ * A malformed or foreign event still returns early without deleting anything (nothing was written),
+ * and an unknown verdict is treated as handled — replaying it produces the same unknown verdict
+ * forever, so it is the poison-pill case and the record is cleared.
  */
 @ApplicationScoped
 @Suppress("LongParameterList") // CDI-injected collaborators + two service URLs + the feature flag
@@ -46,9 +66,11 @@ class OnboardingResumeService(
 
     @Incoming("party-events-in")
     @Blocking
-    @Suppress("TooGenericExceptionCaught") // a consumer must never die on a single bad/foreign event
     fun onPartyEvent(payload: String) {
         if (!resumeEnabled) return
+        // Everything down to `linkPartyId` is parsing/routing: a malformed or foreign event returns
+        // early and is acked, because replaying it can only fail the same way. Nothing was written,
+        // so nothing is deleted either.
         val node = runCatching { objectMapper.readTree(payload) }.getOrNull() ?: return
         if (node["eventType"]?.asText() != DECIDED_EVENT) return
         val caseId = node["aggregateId"]?.asText()?.takeIf { it.isNotBlank() } ?: return
@@ -56,12 +78,48 @@ class OnboardingResumeService(
         val p = node["payload"]
         val verdict = p?.get("verdict")?.asText() ?: return
         val linkPartyId = p?.get("linkPartyId")?.takeIf { !it.isNull }?.asText()
-        try {
-            resume(pending, verdict, linkPartyId)
-        } catch (e: Exception) {
-            Log.error("onboarding resume failed for case=$caseId verdict=$verdict: ${e.message}", e)
-        } finally {
-            pendingStore.delete(caseId)
+
+        // The downstream half. On success the pending record is cleared; on a persistent failure the
+        // exception escapes so the connector dead-letters AND the record survives for the replay.
+        withBoundedRetry(caseId, verdict) { resume(pending, verdict, linkPartyId) }
+        pendingStore.delete(caseId)
+    }
+
+    /**
+     * Retry [block] a bounded number of times, then RETHROW so the connector dead-letters.
+     *
+     * The rethrow is the point. A caught-and-logged failure acks the message, and an acked message
+     * that did no work is indistinguishable from one that succeeded — from Kafka, from the consumer
+     * lag metric, and from every dashboard built on either.
+     *
+     * The sleep is a plain [Thread.sleep] because this handler is `@Blocking`: Quarkus dispatches it
+     * on a worker thread, never on the event loop, so blocking it delays only this partition.
+     */
+    @Suppress("TooGenericExceptionCaught") // the retry is type-agnostic on purpose: any failure of
+    // the fan-out is a failure to resume, and the bounded rethrow (not a swallow) keeps it visible.
+    private fun withBoundedRetry(caseId: String, verdict: String, block: () -> Unit) {
+        var attempt = 1
+        while (true) {
+            try {
+                block()
+                return
+            } catch (e: Exception) {
+                if (attempt >= MAX_ATTEMPTS) {
+                    Log.error(
+                        "onboarding resume failed for case=$caseId verdict=$verdict after $attempt " +
+                            "attempts (${e.javaClass.simpleName}: ${e.message}) — dead-lettering, " +
+                            "the pending record is kept so a replay can resume it",
+                        e,
+                    )
+                    throw e
+                }
+                Log.warn(
+                    "onboarding resume failed for case=$caseId verdict=$verdict " +
+                        "(attempt $attempt/$MAX_ATTEMPTS, ${e.javaClass.simpleName}: ${e.message}) — retrying",
+                )
+                Thread.sleep(RETRY_BACKOFF_MS * attempt)
+                attempt++
+            }
         }
     }
 
@@ -172,5 +230,7 @@ class OnboardingResumeService(
 
     companion object {
         private const val DECIDED_EVENT = "IdentityVerificationCaseDecided"
+        private const val MAX_ATTEMPTS = 3
+        private const val RETRY_BACKOFF_MS = 500L
     }
 }

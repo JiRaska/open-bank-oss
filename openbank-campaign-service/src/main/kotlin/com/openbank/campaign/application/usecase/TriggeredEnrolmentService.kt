@@ -63,9 +63,24 @@ class TriggeredEnrolmentService(
         if (!segmentEvaluation.matches(segment, partyId)) return TriggeredEnrolment.NOT_IN_SEGMENT
 
         // Same order as the sweep, for the same reason (#2953): start the journey first, persist on
-        // success. A crash between the two costs a duplicate start, which the workflow id makes a
-        // no-op; the reverse order costs the party forever, because the committed row makes every
-        // later attempt skip them.
+        // success. The reverse order costs the party forever, because the committed row makes
+        // every later attempt skip them.
+        //
+        // A failure between the two leaves a running journey with no enrolment row, and is repaired
+        // by REDELIVERY: the caller nacks, the record comes back, `findByCampaignAndParty` still
+        // finds nothing, and `startJourney` runs again against the same workflow id. Until #5745
+        // that redelivery could not happen — `EnrolmentTriggerConsumer` acked the failure — so this
+        // comment described a recovery that was structurally unreachable.
+        //
+        // The idempotency it relies on is real but CONDITIONAL, and the condition is worth naming:
+        // `TemporalJourneySignaller` catches `WorkflowExecutionAlreadyStarted`, which Temporal
+        // raises only while an execution with that id is still RUNNING. No `WorkflowIdReusePolicy`
+        // is set, so the default `ALLOW_DUPLICATE` applies and a start against a COMPLETED journey
+        // opens a second execution. For a campaign with no steps the journey completes at once, so
+        // that window is not hypothetical. It is not tightened to `REJECT_DUPLICATE` here because
+        // that would also block a legitimate later re-enrolment of the same party into the same
+        // campaign; the bounded cost is a repeat of a journey whose sends are still gated by the
+        // ADR-0219 contact rules (suppression, caps, quiet hours, live consent).
         journeys.startJourney(campaignId, partyId, campaign.journeyType())
         enrolments.save(
             Enrolment(

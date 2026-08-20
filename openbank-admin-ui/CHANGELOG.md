@@ -1,5 +1,158 @@
 # Changelog
 
+## [0.178.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.177.0...admin-ui-v0.178.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify approval decision controls ([#5976](https://github.com/JiRaska/open-bank-oss/issues/5976)) ([2ab1ac1](https://github.com/JiRaska/open-bank-oss/commit/2ab1ac143dc1712949c5937587a8ffbdde511963))
+* **admin-ui:** improve API catalog discovery ([#5964](https://github.com/JiRaska/open-bank-oss/issues/5964)) ([5e42849](https://github.com/JiRaska/open-bank-oss/commit/5e42849023316e4a8aedee4ec7f87f7b52c2213f))
+
+## [0.177.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.176.0...admin-ui-v0.177.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify BPMN process controls ([#5955](https://github.com/JiRaska/open-bank-oss/issues/5955)) ([d40acf5](https://github.com/JiRaska/open-bank-oss/commit/d40acf5244b02e3e48c4b07506f5f6ea46cb3410))
+
+## [0.176.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.175.0...admin-ui-v0.176.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** filter service documentation ([#5945](https://github.com/JiRaska/open-bank-oss/issues/5945)) ([7227681](https://github.com/JiRaska/open-bank-oss/commit/722768181381e1b9d451d98a1d3fb9d10e1e44b1))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose identity case action state ([#5921](https://github.com/JiRaska/open-bank-oss/issues/5921)) ([2544f38](https://github.com/JiRaska/open-bank-oss/commit/2544f3899af0be15114b7d09e4aa38f0d2169f14))
+* **admin-ui:** expose service config state ([#5930](https://github.com/JiRaska/open-bank-oss/issues/5930)) ([0d5584e](https://github.com/JiRaska/open-bank-oss/commit/0d5584edcfbe0598c544cc4a96fed5453ca7c70a))
+* **admin-ui:** expose system agent tool state ([#5927](https://github.com/JiRaska/open-bank-oss/issues/5927)) ([52e482a](https://github.com/JiRaska/open-bank-oss/commit/52e482a4d85f709cba038b4c9c1f76d2d2276244))
+* **admin-ui:** label code quality controls ([#5942](https://github.com/JiRaska/open-bank-oss/issues/5942)) ([db6aa47](https://github.com/JiRaska/open-bank-oss/commit/db6aa47c9a87534ac1001ae20a8a89708a731961))
+
+## [0.175.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.174.1...admin-ui-v0.175.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
+
+### Bug Fixes
+
+* **admin-ui:** label consent lookup actions ([#5916](https://github.com/JiRaska/open-bank-oss/issues/5916)) ([49607d0](https://github.com/JiRaska/open-bank-oss/commit/49607d0ffd1ec145a8788e6a36e5d7bc70264593))
+
+## [0.174.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.174.0...admin-ui-v0.174.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose AML scan state ([#5909](https://github.com/JiRaska/open-bank-oss/issues/5909)) ([8e1c904](https://github.com/JiRaska/open-bank-oss/commit/8e1c904a83b3a1a5ed2d1bda0e1d69dd2757dfcc))
+* **admin-ui:** label security severity filters ([#5910](https://github.com/JiRaska/open-bank-oss/issues/5910)) ([5d35317](https://github.com/JiRaska/open-bank-oss/commit/5d35317efcf5fee2589dbd0bc9fab6f5906e217d))
+
+## [0.174.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.2...admin-ui-v0.174.0) (2026-08-20)
+
+
+### Features
+
+* **case-coordinator:** isolate incident shadow pilot ([#5861](https://github.com/JiRaska/open-bank-oss/issues/5861)) ([c78a10d](https://github.com/JiRaska/open-bank-oss/commit/c78a10d78732c186c390382aed5c7e6e36d0e777))
+* **sepa-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5691](https://github.com/JiRaska/open-bank-oss/issues/5691)) ([dc737f5](https://github.com/JiRaska/open-bank-oss/commit/dc737f572a2dc368231d255ec4741137e6cd5531))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose onboarding stage filter state ([#5876](https://github.com/JiRaska/open-bank-oss/issues/5876)) ([7feecf9](https://github.com/JiRaska/open-bank-oss/commit/7feecf9baa52f317b8e0e620743ebd06448312a4))
+* **admin-ui:** label agent dock controls ([#5852](https://github.com/JiRaska/open-bank-oss/issues/5852)) ([fce3954](https://github.com/JiRaska/open-bank-oss/commit/fce39542b5559e5c18ee0f8eccb487e27334246d))
+* **admin-ui:** label party detail tabs ([#5871](https://github.com/JiRaska/open-bank-oss/issues/5871)) ([d821d41](https://github.com/JiRaska/open-bank-oss/commit/d821d419a9e32b14f598408b1dd50606ecef51ae))
+* **admin-ui:** label payment detail disclosure ([#5865](https://github.com/JiRaska/open-bank-oss/issues/5865)) ([c0210ac](https://github.com/JiRaska/open-bank-oss/commit/c0210ac0aa23c18b8024d9e898e0ff7847844163))
+* **admin-ui:** label payment scope tabs ([#5856](https://github.com/JiRaska/open-bank-oss/issues/5856)) ([24265a2](https://github.com/JiRaska/open-bank-oss/commit/24265a21d1f9f24e9ee4dd7965bdca14ccc6e110))
+* **admin-ui:** label ProcessView controls ([#5854](https://github.com/JiRaska/open-bank-oss/issues/5854)) ([5e24405](https://github.com/JiRaska/open-bank-oss/commit/5e244059b55027e0143eb14d18b254da1c665a41))
+* **admin-ui:** label product detail tabs ([#5863](https://github.com/JiRaska/open-bank-oss/issues/5863)) ([947d29f](https://github.com/JiRaska/open-bank-oss/commit/947d29f1229d6858aaba0b86f1d7059ab819fab5))
+* **admin-ui:** name catalog actions ([#5840](https://github.com/JiRaska/open-bank-oss/issues/5840)) ([c1a92e0](https://github.com/JiRaska/open-bank-oss/commit/c1a92e056b608b0533c9bec6d6a4c8f258beccb5))
+* **admin-ui:** name document row actions ([#5834](https://github.com/JiRaska/open-bank-oss/issues/5834)) ([52a9541](https://github.com/JiRaska/open-bank-oss/commit/52a9541d05889415ced3b7b7abc7ad10cd6f9d0e))
+
+## [0.173.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.1...admin-ui-v0.173.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** complete settings tab semantics ([#5821](https://github.com/JiRaska/open-bank-oss/issues/5821)) ([3195d9d](https://github.com/JiRaska/open-bank-oss/commit/3195d9db26c3f2a16366e92cf651bf3d93826d15))
+
+## [0.173.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.0...admin-ui-v0.173.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** respect locale in shared displays ([#5807](https://github.com/JiRaska/open-bank-oss/issues/5807)) ([d0ec7a9](https://github.com/JiRaska/open-bank-oss/commit/d0ec7a977b4eabb45ec222ffbc8166c5a759e4d8))
+
+## [0.173.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.3...admin-ui-v0.173.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** distinguish governance controls from autonomy ([#5805](https://github.com/JiRaska/open-bank-oss/issues/5805)) ([9a1a8c1](https://github.com/JiRaska/open-bank-oss/commit/9a1a8c1c8b64aa484fcc20e073cbb08eabe6effc))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose FX tab state ([#5810](https://github.com/JiRaska/open-bank-oss/issues/5810)) ([4019caa](https://github.com/JiRaska/open-bank-oss/commit/4019caa48353f6fd57d5bc3ba8972bf6f313762f))
+
+## [0.172.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.2...admin-ui-v0.172.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose unwired approval queues ([#5804](https://github.com/JiRaska/open-bank-oss/issues/5804)) ([15cb73a](https://github.com/JiRaska/open-bank-oss/commit/15cb73a15cd9f7989f4c74c914d15bcb914e5b53))
+
+## [0.172.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.1...admin-ui-v0.172.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify AIOps navigation state ([#5796](https://github.com/JiRaska/open-bank-oss/issues/5796)) ([f952539](https://github.com/JiRaska/open-bank-oss/commit/f9525395fc211da4b18f07714af74104cb6cc664))
+
+## [0.172.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.0...admin-ui-v0.172.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** clear stale party screening name ([#5793](https://github.com/JiRaska/open-bank-oss/issues/5793)) ([78655f1](https://github.com/JiRaska/open-bank-oss/commit/78655f1ea53b3524665f4c4c6c91ff7fb11ad5ca))
+
+## [0.172.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.171.0...admin-ui-v0.172.0) (2026-08-19)
+
+
+### Features
+
+* **ledger:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5687](https://github.com/JiRaska/open-bank-oss/issues/5687)) ([c0d5dee](https://github.com/JiRaska/open-bank-oss/commit/c0d5dee48e379bdc89e26b3ad852edd5084bdab4))
+* **swift:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5696](https://github.com/JiRaska/open-bank-oss/issues/5696)) ([9824471](https://github.com/JiRaska/open-bank-oss/commit/98244714c936eae8f713cbe6c3b462dc19e5b573))
+
+## [0.171.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.170.0...admin-ui-v0.171.0) (2026-08-19)
+
+
+### Features
+
+* **fx:** expose pending four-eyes approvals via approval inbox ([#5695](https://github.com/JiRaska/open-bank-oss/issues/5695)) ([81c159c](https://github.com/JiRaska/open-bank-oss/commit/81c159ce49cb4671e03171a3e2ccec1068cb3929))
+
+## [0.170.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.169.0...admin-ui-v0.170.0) (2026-08-19)
+
+
+### Features
+
+* **clearing:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5693](https://github.com/JiRaska/open-bank-oss/issues/5693)) ([dc25d40](https://github.com/JiRaska/open-bank-oss/commit/dc25d40b3de7f3f0460800c05e50eb24347a17ad))
+* **domestic-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5692](https://github.com/JiRaska/open-bank-oss/issues/5692)) ([73b584e](https://github.com/JiRaska/open-bank-oss/commit/73b584e972ddb73270cb0af9ab1722ac66996eb7))
+
+## [0.169.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.168.0...admin-ui-v0.169.0) (2026-08-19)
+
+
+### Features
+
+* **transaction:** expose pending four-eyes approvals via approval inbox ([#5684](https://github.com/JiRaska/open-bank-oss/issues/5684)) ([909b017](https://github.com/JiRaska/open-bank-oss/commit/909b0171666646cce2abe4eaaf84175a57ea5e51))
+
+
+### Bug Fixes
+
+* **admin-ui:** reconcile the two production-readiness collectors ([#5702](https://github.com/JiRaska/open-bank-oss/issues/5702)) ([101a56b](https://github.com/JiRaska/open-bank-oss/commit/101a56b3386e172564485d23958cfb7f8e4051de))
+
 ## [0.168.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.167.0...admin-ui-v0.168.0) (2026-08-19)
 
 

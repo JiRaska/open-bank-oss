@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.casecoordinator.application.port.out.CaseCoordinatorLlmPort
 import com.openbank.casecoordinator.application.workflow.CasePersistenceActivity
 import com.openbank.casecoordinator.application.workflow.CaseProposalActivity
+import com.openbank.casecoordinator.application.workflow.CaseProposalDeliveryActivity
 import com.openbank.casecoordinator.application.workflow.CaseSynthesisActivity
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.Contribution
@@ -37,6 +38,7 @@ class CaseActivitiesImpl(
     private val objectMapper: ObjectMapper,
 ) : CaseSynthesisActivity,
     CaseProposalActivity,
+    CaseProposalDeliveryActivity,
     CasePersistenceActivity {
 
     override fun synthesize(caseId: String, caseClass: String, contributions: List<Contribution>): String? {
@@ -56,7 +58,16 @@ class CaseActivitiesImpl(
         return runBlocking { llm.synthesizeConvergence(context) }
     }
 
-    override fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String {
+    override fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String =
+        emitProposalWithDelivery(caseId, proposalType, summary, contested, shadow = false)
+
+    override fun emitProposalWithDelivery(
+        caseId: String,
+        proposalType: String,
+        summary: String,
+        contested: Boolean,
+        shadow: Boolean,
+    ): String {
         val eventId = UUID.randomUUID()
         val now = Instant.now(clock)
         val payload = objectMapper.writeValueAsString(
@@ -65,6 +76,7 @@ class CaseActivitiesImpl(
                 "proposalType" to proposalType,
                 "summary" to summary,
                 "contested" to contested,
+                "deliveryMode" to if (shadow) "SHADOW" else "HITL",
                 "occurredAt" to now.toString(),
             ),
         )
@@ -80,7 +92,9 @@ class CaseActivitiesImpl(
                 ps.setObject(P2, caseUuid(caseId))
                 ps.setString(P3, proposalType)
                 ps.setString(P4, payload)
-                ps.setString(P5, OutboxStatus.PENDING.name)
+                // SHADOW is intentionally not a processable outbox state, so no dispatcher can
+                // publish it to proposal-events or expose it to the human approval channel.
+                ps.setString(P5, if (shadow) SHADOW_STATUS else OutboxStatus.PENDING.name)
                 ps.setTimestamp(P6, Timestamp.from(now))
                 ps.setTimestamp(P7, Timestamp.from(now))
                 ps.executeUpdate()
@@ -165,6 +179,7 @@ class CaseActivitiesImpl(
     private companion object {
         /** incident-response budget from agents.yaml case_classes; token accounting lands with evals. */
         const val TOKENS_PER_CASE = 200_000
+        const val SHADOW_STATUS = "SHADOW"
 
         const val P1 = 1
         const val P2 = 2

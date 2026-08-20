@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "3873e6a51337db5f"
+    openbank.tech/policy-checksum: "4c06b0068d94d981"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1395,6 +1395,7 @@ data:
             - sepaPayment.handleReturn
             - sepaPayment.transitionStatus
             - settlement.create
+            - swift.approval.decide
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

@@ -5,6 +5,7 @@
 package com.openbank.onboarding.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
@@ -17,6 +18,9 @@ import io.mockk.mockk
 import io.mockk.runs
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatCode
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -185,4 +189,104 @@ class OnboardingEventConsumerTest {
                 )
             }
         }
+
+    // ── Transient failure vs poison pill (#5745, #5698) ───────────────────────
+
+    /**
+     * The compliance case. `PARTY_ERASED` is emitted once, nothing in this service re-seeds the read
+     * model, and acking a failed erasure leaves personal data in a projection after Art. 17 erasure
+     * was executed everywhere else. So a persistent failure must reach the platform, not a log line.
+     */
+    @Test
+    fun `a persistent eraseParty failure is rethrown after bounded attempts`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        var attempts = 0
+        coEvery { projection.eraseParty(partyId) } answers {
+            attempts++
+            throw DownstreamDown("read-model DB unreachable")
+        }
+
+        assertThatThrownBy {
+            runBlocking { consumer.consumePartyEvent("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""") }
+        }.isInstanceOf(DownstreamDown::class.java).hasMessage("read-model DB unreachable")
+
+        assertThat(attempts).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+    }
+
+    /** A blip must not cost a nack — otherwise every hiccup becomes a stopped channel. */
+    @Test
+    fun `a transient eraseParty failure that recovers is retried to success`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        var attempts = 0
+        coEvery { projection.eraseParty(partyId) } answers {
+            attempts++
+            if (attempts < EventRetry.DEFAULT_MAX_ATTEMPTS) throw DownstreamDown("connection reset")
+        }
+
+        consumer.consumePartyEvent("""{"eventType":"PARTY_ERASED","partyId":"$partyId"}""")
+
+        assertThat(attempts).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+    }
+
+    /**
+     * The projection half: a KYC/SCA transition lost here never reaches the funnel, and the record
+     * is acked as done. Also asserts the FAILED counter still fires — the dashboards read it, and a
+     * rethrow that skipped it would trade one silent failure for another.
+     */
+    @Test
+    fun `a persistent applyEvent failure is rethrown after bounded attempts`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        var attempts = 0
+        coEvery { projection.applyEvent(any()) } answers {
+            attempts++
+            throw DownstreamDown("read-model DB unreachable")
+        }
+        val payload = """{"eventType":"DEVICE_ENROLLED","partyId":"$partyId","credentialId":"c1"}"""
+
+        assertThatThrownBy { runBlocking { consumer.consumeScaEvent(payload) } }
+            .isInstanceOf(DownstreamDown::class.java)
+
+        assertThat(attempts).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+        verify { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.FAILED) }
+    }
+
+    /** Same channel, recovering dependency: retried, projected, no nack. */
+    @Test
+    fun `a transient applyEvent failure that recovers is retried to success`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        var attempts = 0
+        coEvery { projection.applyEvent(any()) } answers {
+            attempts++
+            if (attempts < EventRetry.DEFAULT_MAX_ATTEMPTS) throw DownstreamDown("connection reset")
+        }
+
+        consumer.consumeScaEvent("""{"eventType":"DEVICE_ENROLLED","partyId":"$partyId","credentialId":"c1"}""")
+
+        assertThat(attempts).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+        verify { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.PROJECTED) }
+    }
+
+    /**
+     * Poison pills stay acked on all three channels, and the projection is never asked. This must
+     * hold on BOTH sides of the fix: a blanket rethrow would break it, and no redelivery can help a
+     * payload that fails to parse identically forever.
+     */
+    @Test
+    fun `a malformed payload is still acked on every channel and never reaches the projection`(): Unit = runBlocking {
+        assertThatCode {
+            runBlocking {
+                consumer.consumePartyEvent("{not json at all")
+                consumer.consumeKycEvent("{not json at all")
+                consumer.consumeScaEvent("{not json at all")
+                // Well-formed JSON, no usable partyId: also unretryable.
+                consumer.consumePartyEvent("""{"eventType":"PARTY_ERASED","partyId":"nope"}""")
+            }
+        }.doesNotThrowAnyException()
+
+        coVerify(exactly = 0) { projection.eraseParty(any()) }
+        coVerify(exactly = 0) { projection.applyEvent(any()) }
+    }
 }
+
+/** A downstream dependency failing — the transient case, named so the tests read as intent. */
+private class DownstreamDown(message: String) : RuntimeException(message)

@@ -23,14 +23,14 @@ that is balance-service).
                                                                 |
                                                                 +--> [sanctions-service] (OIDC M2M, sync, ADR-0032)
                                                                 |
-                                                                +--> [product-catalog] (unauthenticated read, sync, fail-open, ADR-0158)
+                                                                +--> [product-catalog] (OIDC M2M read, sync, fail-open, ADR-0158)
 [Kafka party events] --in--> [account-service PartyEventConsumer] --activate--> [account-service]
                                                                 |
                                                                 +--M2M client_credentials (ROLE_OPERATOR)--> [transaction-service POST /api/v1/transactions]   (welcome bonus, sandbox-only)
 ```
 
 - **External entities:** operators/admins (human, OIDC via Keycloak), downstream consumers of account events, party-service (event source).
-- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (new, unauthenticated read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
+- **Trust boundaries:** UI↔service (mTLS + OIDC + OPA authz, ADR-0034); service↔Postgres; service↔Kafka (outbox + party-events-in); **service↔transaction-service (outbound M2M, new — welcome-bonus grant)**; **account-service↔sanctions-service** (new, OIDC M2M, ADR-0032 §C); **account-service↔product-catalog** (OIDC M2M read, ADR-0158 — fail-**open**, a deliberately different posture from the sanctions gate: an unreachable product catalogue is reference-data unavailability, not a compliance risk, and must never block account opening).
 - **Assets:** account identity, IBAN, freeze/closure state, ownership linkage, **the oidc-client M2M secret** (grants ROLE_OPERATOR on the money path).
 
 ## 3. Authn/Authz
@@ -46,6 +46,7 @@ that is balance-service).
 |---|---|---|
 | **S**poofing | Caller impersonates operator | OIDC bearer + mTLS; no anonymous mutation |
 | **T**ampering | Forced freeze/close, IBAN reassignment | RBAC on all mutations; state-machine guards; DB constraints; audit trail |
+| **T**ampering | Open an account in a currency incompatible with its selected product | Confirmed catalog product responses are checked server-side for product identity and currency. A missing product rejects the request; an unavailable catalog stays explicitly fail-open as reference-data unavailability, with skipped validation logged. |
 | **R**epudiation | Operator denies freezing an account | AuditEvent per lifecycle transition (immutable, ADR audit) |
 | **I**nfo disclosure | IBAN / account enumeration via `/iban/{iban}` | AuthZ on lookup; rate limiting at gateway; no PII in IBAN response beyond need |
 | **I**nfo disclosure / **IDOR** | Customer reads another party's account/balance via a guessed id (reads are gated by role, not ownership; the edge calls with a ROLE_OPERATOR M2M token) | Primary control is at the customer-edge (resolves ownership before proxying, finding A1). **Defense-in-depth here:** when a call carries `X-Customer-Party-Id` the read must belong to that party, else 404 (no existence oracle) — catches an edge bug/new route that forwards the header but skips its own check. Operator/service reads (no header) unaffected. |
@@ -93,6 +94,14 @@ not change any existing request's outcome until explicitly flipped.
   it is a strict improvement over the prior state of no guard at all.
 
 ## 6. Change log
+
+- **2026-08-20** — Product-catalog product/currency enforcement (#668). This existing reference-data
+  edge now authenticates with the `openbank-services` OIDC client and validates a confirmed product's
+  currency before account creation. It deliberately preserves ADR-0158's fail-open posture only for
+  network/5xx unavailability: a definite 404 or incompatible currency cannot create an account.
+  Product-catalog cannot mutate accounts, and account-service never accepts a catalog currency from the
+  caller. Tests cover compatible, missing and mismatched currency responses. Rollback: revert the
+  validation while retaining the OIDC client filter required by catalog reads.
 
 - **2026-08-17** — **New inbound trust edge: the `lending` namespace.** #3931 added `lending` as
   an allowed ingress peer in this component's `network-policies.yaml`, so `lending-service` can

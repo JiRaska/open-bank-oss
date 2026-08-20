@@ -266,6 +266,23 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Node 26, for the same reason ui-build pins it: it is what openbank-admin-ui's
+      # dependency tree is resolved against (Dockerfile: node:26-alpine). The gates shard
+      # had no setup-node at all, so it ran on whatever the runner image ships, and the
+      # mermaid-parses gate — which imports admin-ui's own mermaid — died there while
+      # passing everywhere else:
+      #
+      #   ERR_UNSUPPORTED_DIR_IMPORT: Directory import '.../node_modules/es-toolkit/compat'
+      #   is not supported resolving ES modules imported from .../mermaid/dist/mermaid.core.mjs
+      #
+      # es-toolkit declares a correct "./compat" exports entry, so this is the older Node
+      # failing to apply it, not a broken package. The gate reported UNFALSIFIED rather than
+      # passing — its own self-test could not run — which is how a runtime mismatch that
+      # reproduces nowhere else got caught at all.
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
       # be installed inside the gen-network-policies gate, which happened to be the first
       # step that needed it; now that gates run concurrently there is no "first step", so
