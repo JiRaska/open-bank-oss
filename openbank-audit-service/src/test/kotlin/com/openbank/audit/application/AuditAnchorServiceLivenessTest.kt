@@ -4,6 +4,7 @@
 
 package com.openbank.audit.application
 
+import com.openbank.audit.application.port.out.AnchorPublicKeyResolver
 import com.openbank.audit.application.port.out.AnchorSigner
 import com.openbank.audit.infrastructure.persistence.AuditAnchorRepository
 import com.openbank.audit.infrastructure.persistence.AuditRepository
@@ -25,6 +26,7 @@ class AuditAnchorServiceLivenessTest {
     private val auditRepository = mockk<AuditRepository>()
     private val anchorRepository = mockk<AuditAnchorRepository>()
     private val signer = mockk<AnchorSigner>()
+    private val publicKeys = mockk<AnchorPublicKeyResolver>()
     private val metrics = mockk<DomainMetrics>()
     private val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
 
@@ -32,6 +34,7 @@ class AuditAnchorServiceLivenessTest {
         auditRepo = auditRepository,
         anchorRepo = anchorRepository,
         signer = signer,
+        publicKeys = publicKeys,
         clock = Clock.fixed(Instant.parse("2026-08-16T05:00:00Z"), ZoneOffset.UTC),
         enabled = enabled,
         domainMetrics = metrics,

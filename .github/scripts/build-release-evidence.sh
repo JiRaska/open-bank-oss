@@ -146,11 +146,34 @@ if [ -f "$CL" ]; then
 fi
 
 # ── AI attribution: authors + Co-Authored-By since previous component tag ────────
+#
+# Coverage, not just a name list (issue #5838). The previous version emitted a bare
+# `contributors` array and nothing else, so the two cases that matter were indistinguishable
+# from a good bundle: a range that produced no commits at all (a first release, a wrong
+# module path, a shallow clone with no tags) and a range whose commits carry no AI
+# attribution both rendered as `contributors: []` — an empty success. ADR-0031 D5 requires
+# AI attribution to be *reported*, and a control that cannot report its own absence is not a
+# control. So the bundle now carries a status the reader can act on:
+#
+#   REPORTED      — commits were found and classified; counts below are meaningful
+#   NO_ATTRIBUTION— commits were found and NONE carries an AI trailer (a real finding)
+#   UNAVAILABLE   — the commit range could not be established; nothing is claimed
+#
+# UNAVAILABLE is deliberately not merged into NO_ATTRIBUTION: "we looked and found none" and
+# "we could not look" need different follow-ups.
 PREV_TAG="$(git tag --sort=-creatordate 2>/dev/null | grep -E "^${COMPONENT}-v" | sed -n '2p' || true)"
 RANGE="HEAD"; [ -n "$PREV_TAG" ] && RANGE="${PREV_TAG}..HEAD"
 ATTRIB="$( { git log "$RANGE" --pretty='%an <%ae>' -- "$MODULE_DIR" 2>/dev/null;
              git log "$RANGE" --pretty='%(trailers:key=Co-authored-by,valueonly)' -- "$MODULE_DIR" 2>/dev/null; } \
            | sed '/^$/d' | sort -u )"
+
+# One line per commit: "<sha> <co-authored-by trailers, space separated>". Commits with no
+# trailer still emit their sha, so the denominator is every commit in range, never only the
+# attributed ones (a coverage figure whose denominator is its own numerator is always 100%).
+COMMIT_TRAILERS="$(git log "$RANGE" --pretty=$'%H\x1f%(trailers:key=Co-authored-by,valueonly,separator=%x20)' \
+                     -- "$MODULE_DIR" 2>/dev/null || true)"
+GIT_RANGE_OK=1
+git rev-list --count "$RANGE" -- "$MODULE_DIR" >/dev/null 2>&1 || GIT_RANGE_OK=0
 
 # ── Evidence bundle manifest ────────────────────────────────────────────────────
 EV_OUT="${TAG}.evidence.json"
@@ -158,11 +181,59 @@ TS="$TS" COMPONENT="$COMPONENT" VERSION="$VERSION" TAG="$TAG" SHA="$SHA" REPO="$
 SBOM_BASENAME="$(basename "$SBOM_FILE")" SBOM_SHA="$SBOM_SHA" \
 SLSA_OUT="$SLSA_OUT" VEX_OUT="$VEX_OUT" RUN_URL="$RUN_URL" \
 CHANGELOG_EXCERPT="$CHANGELOG_EXCERPT" ATTRIB="$ATTRIB" \
+COMMIT_TRAILERS="$COMMIT_TRAILERS" GIT_RANGE_OK="$GIT_RANGE_OK" RANGE="$RANGE" \
 python3 - > "$EV_OUT" <<'PY'
 import json, os, hashlib
 def sha(p):
     return hashlib.sha256(open(p, "rb").read()).hexdigest()
 attrib = [a for a in os.environ.get("ATTRIB", "").splitlines() if a.strip()]
+
+# Markers that identify an AI co-author trailer. Kept as substrings (case-insensitive) rather
+# than exact addresses so a model or harness rename does not silently drop coverage to zero
+# while still reporting REPORTED.
+AI_MARKERS = ("noreply@anthropic.com", "claude", "copilot", "openai", "ai-agent", "aider")
+
+def is_ai(trailers: str) -> bool:
+    low = trailers.lower()
+    return any(m in low for m in AI_MARKERS)
+
+lines = [ln for ln in os.environ.get("COMMIT_TRAILERS", "").splitlines() if ln.strip()]
+commits_total = len(lines)
+commits_ai = sum(1 for ln in lines if is_ai(ln.split("\x1f", 1)[1] if "\x1f" in ln else ""))
+
+if os.environ.get("GIT_RANGE_OK") != "1" or commits_total == 0:
+    # Nothing was measured. Say so — never render an unmeasured range as a clean result.
+    attribution = {
+        "status": "UNAVAILABLE",
+        "reason": "commit range %s produced no commits for %s (shallow clone, wrong path, or first release)"
+                  % (os.environ.get("RANGE", "?"), os.environ.get("COMPONENT", "?")),
+        "commits_total": commits_total,
+        "commits_ai_attributed": 0,
+        "coverage_pct": None,
+        "contributors": attrib,
+    }
+elif commits_ai == 0:
+    attribution = {
+        "status": "NO_ATTRIBUTION",
+        "reason": "no commit in range carries an AI co-author trailer",
+        "commits_total": commits_total,
+        "commits_ai_attributed": 0,
+        "coverage_pct": 0.0,
+        "contributors": attrib,
+    }
+else:
+    attribution = {
+        "status": "REPORTED",
+        "commits_total": commits_total,
+        "commits_ai_attributed": commits_ai,
+        "coverage_pct": round(100.0 * commits_ai / commits_total, 1),
+        "contributors": attrib,
+    }
+attribution["note"] = (
+    "AI-attribution coverage over commits touching this module since the previous component "
+    "tag (ADR-0029 D6 / ADR-0031 D5). status UNAVAILABLE means the range could not be "
+    "measured — it is NOT a passing result."
+)
 bundle = {
     "schema": "openbank.evidence/v1",
     "component": os.environ["COMPONENT"],
@@ -178,8 +249,7 @@ bundle = {
     "vex": {"file": os.environ["VEX_OUT"], "format": "openvex/0.2.0",
             "sha256": sha(os.environ["VEX_OUT"]), "signature": os.environ["VEX_OUT"] + ".sig"},
     "changelog": os.environ.get("CHANGELOG_EXCERPT", "").strip(),
-    "ai_attribution": {"contributors": attrib,
-                       "note": "authors + Co-Authored-By trailers since previous component tag (ADR-0029 D6/0031)"},
+    "ai_attribution": attribution,
     # Referenced, not embedded: these live on the CI run that produced them.
     "scan_results": {"trivy": os.environ["RUN_URL"],
                      "codeql": "n/a — GHAS code-scanning gated while repo is private (security.yml)"},

@@ -196,9 +196,22 @@ openbank:
       enabled: true
       interval: 1h
       initial-delay: 30s
-      # Held outside the audit DB (env/Vault). Production replaces the default HMAC signer with a
-      # KMS/cosign-keyed adapter (follow-up); this key is the in-cluster fallback.
-      signing-key: ${AUDIT_ANCHOR_SIGNING_KEY:CHANGE_ME_LOCAL_DEV_ONLY}
+      # Asymmetric signer (issue #5838). The predecessor was HMAC-SHA256, whose verification
+      # needed the signing secret — anyone who could verify an anchor could forge one, so the
+      # control was never independently verifiable. Signing is now an OpenBao `transit` ECDSA
+      # P-256 key reached under workload identity (the projected ServiceAccount token), the same
+      # mechanism document-service's client-PKI signing already uses; the private key never
+      # leaves OpenBao and verification needs only the exported public key.
+      #
+      # There is no local key and no dev fallback ON PURPOSE: an unavailable key must make
+      # signing FAIL, not silently produce a self-signed anchor. An environment that does not
+      # anchor sets enabled=false (as %test below does); one that does must provision the key,
+      # or the service refuses to start.
+      signing:
+        bao-addr: ${AUDIT_ANCHOR_BAO_ADDR:http://openbao.vault.svc:8200}
+        role: ${AUDIT_ANCHOR_BAO_ROLE:audit-service-anchor}
+        transit-mount: ${AUDIT_ANCHOR_TRANSIT_MOUNT:transit}
+        key-name: ${AUDIT_ANCHOR_KEY_NAME:audit-anchor}
     chain-verify:
       # ADR-0133: recompute the whole hash chain on a cadence and publish the verdict as metrics.
       # Defaults ON, unlike the retention scheduler above — that one DELETES, so its dangerous

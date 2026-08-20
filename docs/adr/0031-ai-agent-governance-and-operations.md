@@ -20,7 +20,13 @@ summary: "AI agents run as least-privilege workloads declared in agents.yaml, pa
   - `agent.model.complete` (`ModelGateway`): captures `model_id`, `model_version`, `prompt_hash` — ✅
   - `agent.run` (`AgentRunAuditor`): captures `model_id`, `prompt_hash`, `tool_calls[]` — ✅
   - `agent.mcp.tool_call` (`AgentPolicyGate`): captures `policy_decision` (ALLOW/DENY) — ✅; `model_id` NOT YET captured — fix in flight on branch `feat/agent-charter-model-id` (issue #3667; `prompt_hash` and `tool_calls` are architecturally N/A at the gate — the gate runs before any LLM call)
-  - Production KMS/cosign-keyed anchor signer (asymmetric, third-party-verifiable) — ⬜ Planned
+  - Asymmetric, third-party-verifiable anchor signer — 🟡 Implemented in-repo, NOT yet deployed
+    (issue #5838). The HMAC signer is gone: anchors are now signed by an OpenBao `transit` ECDSA
+    P-256 key reached under workload identity, verification uses public material only, and capture
+    fails closed. D5 stays **partial** until a deployed environment publishes an anchor that a
+    third party has actually verified from the published public key — implementation is not
+    evidence, and this repo has a standing habit of ADRs crediting controls that were never
+    deployed.
 - **D6 (technology stack)** — See D6 section; amended 2026-08-03 (issue #3676).
 - **D8 (AGPL agent-runtime public repo)** — ⬜ Planned (issue JiRaska/open-bank#224).
 
@@ -155,8 +161,22 @@ We will run AI agents as **governed, least-privilege workloads** whose every act
   hitherto-empty `ai_attribution` field of the release evidence bundle (ADR-0029 D6). 🟡 audit envelope
   exists; 🟢 per-event hash chain live (`audit_entries.record_hash`/`prev_hash`, V5) **and** periodic
   externally-signed anchors over the chain head (`audit_anchor`, V6) — `GET /api/v1/audit/anchors/verify`
-  detects a wholesale rewrite that an internal-consistency walk alone would miss; the default in-cluster
-  signer is HMAC-SHA256 with the key held outside the audit DB.
+  detects a wholesale rewrite that an internal-consistency walk alone would miss.
+- **Anchor signing is asymmetric (issue #5838).** It was HMAC-SHA256, which made the control
+  *tamper-evident to its own operator and to nobody else*: verifying required the signing secret,
+  so every party able to check an anchor was equally able to forge one. Anchors are now signed with
+  an OpenBao `transit` ECDSA P-256 key, authenticated by the pod's projected ServiceAccount token —
+  the same OpenBao/Kubernetes-auth mechanism `openbank-document-service` already uses for
+  client-PKI signing, not a new key-handling scheme. The private key never leaves OpenBao. The
+  signature is ASN.1/DER `SHA256withECDSA`, base64 — the shape `cosign` produces for a
+  `hashivault://` key — and `GET /api/v1/audit/anchors/public-key` publishes the SPKI PEM, so an
+  auditor verifies an anchor with public material alone.
+- **Capture fails closed.** An unavailable or invalid key aborts the capture; no unsigned
+  checkpoint is stored, and `POST /api/v1/audit/anchors/capture` answers 503. The predecessor
+  stored the checkpoint unsigned "rather than losing the captured head", which put rows that read
+  as evidence into an append-only table in exactly the situation where an attacker benefits most.
+  Verification reports a third state, `UNVERIFIABLE`, for an anchor whose key has no published
+  public material — never folded into the verified count.
 
 **Per-operation capture status (verified 2026-08-03):**
 
@@ -170,8 +190,12 @@ We will run AI agents as **governed, least-privilege workloads** whose every act
 LLM call, so there is no prompt or tool invocation to hash. `model_id` threading to the gate is being
 fixed (issue #3667).
 
-⬜ Remaining: AI-attribution payload fields on `agent.mcp.tool_call` (issue #3667) and the production
-KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable).
+⬜ Remaining: AI-attribution payload fields on `agent.mcp.tool_call` (issue #3667), and **deployment**
+of the asymmetric anchor signer — provisioning the `transit` key and the `audit-service-anchor`
+Kubernetes-auth role, then verifying a real published anchor from the published public key alone.
+The signer, its fail-closed behaviour and public-key-only verification are implemented and tested
+in-repo (issue #5838); none of that is deployed evidence, so D5 remains 🟡 and the published control
+maturity is unchanged.
 
 ### D6 — Open, model-agnostic technology stack
 

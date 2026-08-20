@@ -5,6 +5,7 @@
 package com.openbank.audit.infrastructure.rest
 
 import com.openbank.audit.application.AuditAnchorService
+import com.openbank.audit.application.port.out.AnchorSigningException
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -12,6 +13,7 @@ import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
@@ -247,6 +249,56 @@ class AuditResource {
             "failing anchor if a signature is invalid or the chain was rewritten.",
     )
     suspend fun verifyAnchors(): Response = Response.ok(anchors.verifyAnchors()).build()
+
+    /**
+     * Publish the **public** material for the current anchor signing key (ADR-0031 D5). This is
+     * what makes an anchor independently verifiable: an auditor fetches the PEM here and checks
+     * any anchor offline, with no access to the signer and no ability to produce one. Returns 503
+     * when the key cannot be published — an unavailable key is reported as unavailable, never as
+     * an empty-but-successful body.
+     */
+    @GET
+    @Path("/anchors/public-key")
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @Authorize(action = "audit.verify", resource = "")
+    @Operation(
+        summary = "Public key material for the audit anchor signer (ADR-0031 D5)",
+        description = "Returns the PEM-encoded SPKI public key for the current anchor signing " +
+            "key. Anchor signatures are ECDSA P-256 (SHA256withECDSA, ASN.1/DER, base64) and can " +
+            "be verified with this key alone.",
+    )
+    suspend fun anchorPublicKey(): Response {
+        val material = anchors.signingKeyMaterial()
+        return if (material.publicKeyPem == null) {
+            Response.status(Response.Status.SERVICE_UNAVAILABLE).entity(material).build()
+        } else {
+            Response.ok(material).build()
+        }
+    }
+
+    /**
+     * Capture a signed anchor now (ADR-0031 D5), in addition to the scheduled hourly capture.
+     * Fails with 503 when the anchor cannot be signed: capture is fail-closed, so an unavailable
+     * or invalid key yields no anchor row at all rather than an unsigned checkpoint.
+     */
+    @POST
+    @Path("/anchors/capture")
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN")
+    @Authorize(action = "audit.verify", resource = "")
+    @Operation(
+        summary = "Capture a signed audit anchor now (ADR-0031 D5)",
+        description = "Signs the current chain head with the external key. 503 when the signer " +
+            "is unavailable — no unsigned anchor is ever stored.",
+    )
+    suspend fun captureAnchor(): Response = try {
+        anchors.captureAnchor()
+            ?.let { Response.status(Response.Status.CREATED).entity(it).build() }
+            ?: Response.noContent().build()
+    } catch (e: AnchorSigningException) {
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .entity(mapOf("status" to "SIGNER_UNAVAILABLE", "detail" to e.message))
+            .build()
+    }
 }
 
 /**

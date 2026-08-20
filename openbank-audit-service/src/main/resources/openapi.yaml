@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.6.0
+  version: 1.7.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -247,6 +247,64 @@ paths:
         '403':
           description: Caller does not have an audit-reading role
 
+  /api/v1/audit/anchors/public-key:
+    get:
+      tags: [Audit]
+      summary: Public key material for the audit anchor signer (ADR-0031 D5)
+      operationId: anchorPublicKey
+      description: >
+        Returns the PEM-encoded SPKI public key for the current anchor signing key. Anchor
+        signatures are ECDSA P-256 (SHA256withECDSA, ASN.1/DER, base64), so a third party can
+        verify any anchor with this key alone and with no access to the signer. 503 when the key
+        cannot be published — an unavailable key is reported as unavailable, never as an empty
+        success.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Public key material for the current signing key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorKeyMaterialResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller does not have an audit-reading role
+        '503':
+          description: The signing key's public material could not be published
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorKeyMaterialResponse'
+
+  /api/v1/audit/anchors/capture:
+    post:
+      tags: [Audit]
+      summary: Capture a signed audit anchor now (ADR-0031 D5)
+      operationId: captureAnchor
+      description: >
+        Signs the current chain head with the external key, in addition to the scheduled hourly
+        capture. Fail-closed: an unavailable or invalid key yields 503 and NO anchor row — an
+        unsigned checkpoint is never stored.
+      security:
+        - bearerAuth: []
+      responses:
+        '201':
+          description: A signed anchor was captured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditAnchorResponse'
+        '204':
+          description: The audit chain is empty; there is nothing to attest
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller does not have an audit-writing role
+        '503':
+          description: The anchor could not be signed; no anchor was stored
+
 components:
   securitySchemes:
     bearerAuth:
@@ -305,7 +363,10 @@ components:
         signature:
           type: string
           nullable: true
-          description: Base64 signature over anchorDigest; null when the signer was unavailable.
+          description: >
+            Base64 ECDSA P-256 (ASN.1/DER) signature over anchorDigest, verifiable with the public
+            key from /api/v1/audit/anchors/public-key. Null only for legacy rows captured before
+            signing became fail-closed; a capture that cannot sign now stores nothing.
         keyId:
           type: string
           description: Identifier of the key that produced the signature.
@@ -315,12 +376,16 @@ components:
 
     AnchorVerificationResponse:
       type: object
-      required: [status, anchorCount, verifiedCount, unsignedCount]
+      required: [status, anchorCount, verifiedCount, unsignedCount, unverifiableCount]
       properties:
         status:
           type: string
-          enum: [INTACT, BROKEN]
-          description: INTACT when every anchor's signature and attested head verify.
+          enum: [INTACT, UNVERIFIABLE, BROKEN]
+          description: >
+            INTACT when every anchor's signature and attested head verify; UNVERIFIABLE when some
+            anchor could not be checked at all (no public key material, or a legacy unsigned row);
+            BROKEN when one failed. UNVERIFIABLE is deliberately its own state — an anchor nobody
+            can check is not an anchor that passed.
         anchorCount:
           type: integer
           format: int64
@@ -331,12 +396,34 @@ components:
         unsignedCount:
           type: integer
           format: int64
-          description: Anchors stored without a signature (signer unavailable at capture).
+          description: >
+            Legacy anchors stored without a signature. Capture is fail-closed, so this can only be
+            non-zero for rows written before that change.
+        unverifiableCount:
+          type: integer
+          format: int64
+          description: >
+            Signed anchors whose keyId has no published public material in this deployment — never
+            counted as verified.
         firstBroken:
           nullable: true
           description: The first anchor that failed verification; null when status is INTACT.
           allOf:
             - $ref: '#/components/schemas/AnchorBreak'
+
+    AnchorKeyMaterialResponse:
+      type: object
+      required: [keyId]
+      properties:
+        keyId:
+          type: string
+          description: Identifier of the anchor signing key (e.g. openbao-transit:transit/audit-anchor).
+        publicKeyPem:
+          type: string
+          nullable: true
+          description: >
+            PEM-encoded SPKI public key. Null (with HTTP 503) when the material cannot be
+            published. Only public material ever appears here.
 
     AnchorBreak:
       type: object

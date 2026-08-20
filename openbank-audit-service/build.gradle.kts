@@ -36,6 +36,7 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.quarkus.test.security)
 
     // #1201: isolated PostgreSQL per test JVM via Testcontainers (audit-service had no IT
     // infra before this was added — matches the pattern already used by sibling
