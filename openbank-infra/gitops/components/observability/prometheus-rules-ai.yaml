@@ -72,6 +72,73 @@ spec:
             model: deepseek-ai/DeepSeek-V3.2
             kind: completion
             price_source: nearest-sibling
+        # openai/gpt-oss-120b — the model the gateway ACTUALLY serves traffic on, and it was
+        # missing from this file. Measured 2026-08-19: 32660 tokens in 24h on this model and 1306
+        # on BAAI/bge-m3, while the only two priced models (llama-3.3-70b-versatile,
+        # deepseek-ai/DeepSeek-V3.2) carried ZERO. So 100% of real spend was invisible:
+        # openbank:llm_cost_usd_24h:total had no series at all, and AiFleetDailySpendHigh — the
+        # 25 USD/day ceiling that "actually protects the card" — could not fire, because a
+        # threshold over an absent series matches nothing (the #5733 shape, one file over).
+        #
+        # The design caught this on its own: AiSpendUnpriced has been FIRING for
+        # openai/gpt-oss-120b. `unless on (model)` did exactly the job its comment claims. Nobody
+        # actioned it, which is why the gap survived — the falsifiability check worked and the
+        # response to it did not.
+        #
+        # Authoritative: BerriAI/litellm model_prices_and_context_window.json, entry
+        # `deepinfra/openai/gpt-oss-120b` — $0.05/M input, $0.45/M output. Exact match for the
+        # provider this gateway routes to (litellm-config: model `deepinfra/openai/gpt-oss-120b`),
+        # not a sibling.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000005)
+          labels:
+            model: openai/gpt-oss-120b
+            kind: prompt
+            price_source: litellm-map
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000045)
+          labels:
+            model: openai/gpt-oss-120b
+            kind: completion
+            price_source: litellm-map
+        # meta-llama/llama-guard-4-12b. Authoritative: litellm entry
+        # `deepinfra/meta-llama/Llama-Guard-4-12B` — $0.18/M both directions. Zero traffic today,
+        # priced anyway: the point of this file is that turning a served model on must not also
+        # turn the cost figures into an understatement.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000018)
+          labels:
+            model: meta-llama/llama-guard-4-12b
+            kind: prompt
+            price_source: litellm-map
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000018)
+          labels:
+            model: meta-llama/llama-guard-4-12b
+            kind: completion
+            price_source: litellm-map
+        # BAAI/bge-m3, embeddings. APPROXIMATE: litellm's map has no DeepInfra entry for it. The
+        # nearest published siblings are the SAME model on other hosts — `novita/baai/bge-m3` and
+        # `libertai/bge-m3`, both $0.01/M input — so this is a same-model, different-host estimate
+        # rather than a different-model guess, which is the strongest nearest-sibling this file
+        # carries. Replace when DeepInfra's rate card is read directly, or when the invoice
+        # disagrees; the invoice is the authority.
+        #
+        # `prompt` only, deliberately: an embeddings call generates no completion, and measurement
+        # agrees — BAAI/bge-m3 emits kind="prompt" and nothing else. A completion entry here would
+        # be a price for tokens that cannot exist.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000001)
+          labels:
+            model: BAAI/bge-m3
+            kind: prompt
+            price_source: nearest-sibling
+        # deepseek-ai/DeepSeek-V4-Pro is served by the gateway and is deliberately NOT priced
+        # here: litellm's map has no DeepInfra entry for it and no DeepInfra DeepSeek newer than
+        # V3.1, so there is no same-provider sibling to reason from, and the cross-provider
+        # figures for V4-Pro span 1.74e-06 to 2.4e-06 input — a 38% spread that would be a guess
+        # dressed as a price. It carries no traffic today; if it starts, AiSpendUnpriced fires and
+        # names it, which is the correct behaviour rather than a silently wrong number.
 
     # ── Derived spend ─────────────────────────────────────────────────────────
     - name: openbank.ai.spend
