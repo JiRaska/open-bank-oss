@@ -10,11 +10,14 @@ import com.openbank.libs.audit.AuditResult
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
+import com.openbank.settlement.application.port.out.ReverseCreditPort
+import com.openbank.settlement.application.port.out.ReverseDebitPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
+import io.temporal.failure.ApplicationFailure
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,6 +42,8 @@ open class SettlementActivitiesImpl(
     private val creditPort: CreditPort,
     private val ledgerPort: LedgerPort,
     private val auditPublisher: AuditEventPublisher,
+    private val reverseDebitPort: ReverseDebitPort,
+    private val reverseCreditPort: ReverseCreditPort,
 ) : SettlementActivities {
 
     private val log = Logger.getLogger(SettlementActivitiesImpl::class.java)
@@ -68,33 +73,100 @@ open class SettlementActivitiesImpl(
     }
 
     override fun reverseDebit(settlementId: UUID): Unit = runOnVertxContext {
-        log.warnf(
-            "Reversing debit for settlement %s (compensation — stub: wire reversal to balance-service)",
-            settlementId,
-        )
-        val settlement = settlementRepository.updateStatus(settlementId, SettlementStatus.REVERSED)
-        audit("settlement.reverse-debit", settlement)
-        Unit
+        compensate(
+            settlementId = settlementId,
+            operation = "settlement.reverse-debit",
+            onSuccess = SettlementStatus.REVERSED,
+        ) { reverseDebitPort.reverseDebit(settlementId) }
     }
 
     override fun reverseCredit(settlementId: UUID): Unit = runOnVertxContext {
-        log.warnf(
-            "Reversing credit for settlement %s (compensation — stub: wire reversal to balance-service)",
-            settlementId,
-        )
-        val settlement = settlementRepository.updateStatus(settlementId, SettlementStatus.CREDITED_REVERSED)
-        audit("settlement.reverse-credit", settlement)
-        Unit
+        compensate(
+            settlementId = settlementId,
+            operation = "settlement.reverse-credit",
+            onSuccess = SettlementStatus.CREDITED_REVERSED,
+        ) { reverseCreditPort.reverseCredit(settlementId) }
     }
 
+    /**
+     * NOT IMPLEMENTED — fails loudly rather than reporting a reversal that did not happen.
+     *
+     * ledger-service does expose `POST /api/v1/journals/{journalId}/reverse`, but settlement-service
+     * cannot use it as things stand, for three independent reasons, each needing a decision this
+     * service cannot make on its own (issue #6037):
+     *
+     *  1. **Maker-checker.** `ledger.reverse` is an approval-gated action — a call from
+     *     settlement-service's service account lands in ledger's PENDING approval queue rather than
+     *     posting. Granting a machine that action is a `rules.yaml: shared_m2m_matrix_write_grants`
+     *     decision, not a code change, and an *automatic* GL reversal driven by a failed saga is
+     *     precisely the thing maker-checker exists to prevent.
+     *  2. **No journal id is retained.** `bookToLedger` discards the `JournalResponse`, so the id
+     *     would have to be persisted (a migration) or re-resolved via
+     *     `GET /api/v1/journals/transaction/{transactionId}`.
+     *  3. **Period locks.** The endpoint answers 409 when the original entry's fiscal period is
+     *     ATTESTED, so a reversal is not always available and the saga needs a defined behaviour
+     *     for that case — correcting forward in the open period is the accounting convention, which
+     *     is a different posting from a reversal.
+     *
+     * Throwing a **non-retryable** failure is deliberate: a retryable one would burn all five
+     * attempts (~75 s of backoff) delaying the two compensations that *do* work, and would still
+     * end in the same place. `SettlementWorkflowImpl` catches `ActivityFailure` per compensation and
+     * continues, so this failure does not block `reverseCredit`/`reverseDebit`.
+     *
+     * The status is recorded first, so the row says
+     * [SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED] — an operator sees *which* half of the unwind
+     * did not happen — rather than the old `LEDGER_REVERSED`, which claimed it had.
+     */
     override fun reverseBookToLedger(settlementId: UUID): Unit = runOnVertxContext {
-        log.warnf(
-            "Reversing ledger booking for settlement %s (compensation — stub: wire reversal to ledger-service)",
+        log.errorf(
+            "Ledger booking for settlement %s was NOT reversed: settlement-service cannot reverse a " +
+                "journal (ledger.reverse is maker-checker gated and no journal id is retained). " +
+                "The GL still carries this settlement's posting and needs a manual correcting entry.",
             settlementId,
         )
-        val settlement = settlementRepository.updateStatus(settlementId, SettlementStatus.LEDGER_REVERSED)
-        audit("settlement.reverse-ledger-book", settlement)
-        Unit
+        val settlement =
+            settlementRepository.updateStatus(settlementId, SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED)
+        audit("settlement.reverse-ledger-book", settlement, result = AuditResult.FAILURE)
+        throw ApplicationFailure.newNonRetryableFailure(
+            "Ledger reversal is not implemented for settlement $settlementId; GL correction required",
+            "LedgerReversalUnsupported",
+        )
+    }
+
+    /**
+     * Runs one balance-service compensation and records **what actually happened**.
+     *
+     * Order matters and mirrors the forward activities: the money call goes first, and the status
+     * is written only once it has returned. A status written before the call — which is all the
+     * pre-#6037 stubs did — is a claim the code has not yet earned.
+     *
+     * On failure the row is moved to [SettlementStatus.REVERSAL_FAILED] (money still moved), a
+     * FAILURE audit event is published, and the exception is **rethrown** so Temporal retries and
+     * the workflow sees the failure. A later successful attempt overwrites the status with the real
+     * outcome, so `REVERSAL_FAILED` is the resting state only when every attempt failed.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun compensate(
+        settlementId: UUID,
+        operation: String,
+        onSuccess: SettlementStatus,
+        movement: suspend () -> Unit,
+    ) {
+        try {
+            movement()
+        } catch (ex: Throwable) {
+            log.errorf(
+                ex,
+                "Compensation %s FAILED for settlement %s — the money has NOT been returned",
+                operation,
+                settlementId,
+            )
+            val failed = settlementRepository.updateStatus(settlementId, SettlementStatus.REVERSAL_FAILED)
+            audit(operation, failed, result = AuditResult.FAILURE)
+            throw ex
+        }
+        val settlement = settlementRepository.updateStatus(settlementId, onSuccess)
+        audit(operation, settlement)
     }
 
     override fun rejectSettlement(settlementId: UUID): Unit = runOnVertxContext {
