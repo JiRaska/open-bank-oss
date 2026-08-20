@@ -1,5 +1,6 @@
 package com.openbank.notification.infrastructure
 
+import com.openbank.libs.observability.WorkflowLivenessMetrics
 import com.openbank.notification.it.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
@@ -56,7 +57,7 @@ class DeviceTokenSweepCronIT {
         while (System.nanoTime() < deadline && (status == "ACTIVE" || heartbeat != 1.0)) {
             Thread.sleep(200)
             status = statusOf(id)
-            heartbeat = meterRegistry.find("openbank_workflow_success_recorded")
+            heartbeat = meterRegistry.find(WorkflowLivenessMetrics.SUCCESS_RECORDED)
                 .tag("workflow", "device-token-stale-sweep").gauge()?.value()
         }
         assertThat(status).isEqualTo("INACTIVE")
