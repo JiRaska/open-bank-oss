@@ -35,9 +35,9 @@ class ShadowPilotPreflightTest {
         every { config.case() } returns caseGroup
         every { caseGroup.deliveryMode() } returns CaseDeliveryMode.SHADOW
         every { caseGroup.shadowRolloutId() } returns Optional.of("shadow-test")
-        val connection = mockk<Connection>()
-        val statement = mockk<PreparedStatement>()
-        val result = mockk<ResultSet>()
+        val connection = mockk<Connection>(relaxed = true)
+        val statement = mockk<PreparedStatement>(relaxed = true)
+        val result = mockk<ResultSet>(relaxed = true)
         every { dataSource.connection } returns connection
         every { connection.prepareStatement(any()) } returns statement
         every { statement.setString(any(), any()) } returns Unit
