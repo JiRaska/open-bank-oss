@@ -10,6 +10,7 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.sql.Connection
+import java.sql.Timestamp
 import java.time.Instant
 import javax.sql.DataSource
 
@@ -72,14 +73,15 @@ class DeviceTokenSweepCronIT {
             """.trimIndent(),
         ).use { s ->
             val old = Instant.now().minusSeconds(91 * 24 * 3600)
+            val oldTimestamp = Timestamp.from(old)
             s.setObject(1, id)
             s.setObject(2, java.util.UUID.randomUUID())
             s.setObject(3, id)
-            s.setObject(4, old)
-            s.setObject(5, old)
-            s.setObject(6, old)
-            s.setObject(7, old)
-            s.setObject(8, old)
+            s.setTimestamp(4, oldTimestamp)
+            s.setTimestamp(5, oldTimestamp)
+            s.setTimestamp(6, oldTimestamp)
+            s.setTimestamp(7, oldTimestamp)
+            s.setTimestamp(8, oldTimestamp)
             s.executeUpdate()
         }
     }
