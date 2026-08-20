@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.180.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.179.0...admin-ui-v0.180.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify service map controls ([#6000](https://github.com/JiRaska/open-bank-oss/issues/6000)) ([798ec15](https://github.com/JiRaska/open-bank-oss/commit/798ec153da9ee5bfed7bee9d3d1d17aa3619497d))
+
 ## [0.179.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.178.0...admin-ui-v0.179.0) (2026-08-20)
 
 
