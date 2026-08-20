@@ -146,6 +146,17 @@ spec:
               figure on the AI dashboard UNDERSTATES the real cost by this model's share. Add the
               model to the price-book group in prometheus-rules-ai.yaml.
 
+        # No absence alert here, on purpose (#5736). The obvious companion to the rule below —
+        # `sum(rate(openbank_llm_requests_total{outcome="success"}[15m])) == 0` — is blind exactly
+        # when the path breaks completely: with no success series in existence the expression has
+        # no vector to compare and returns nothing, which is the same output as a healthy fleet.
+        # It would need `absent_over_time` guarding (same shape as #5733), and even guarded it
+        # cannot be written safely yet: LLM calls here are made by cron-scheduled agents and an
+        # interactive assistant, so silence is the RESTING state and an absence alert would fire
+        # continuously while nothing is wrong. Add one only once a synthetic call runs on a known
+        # interval, so that absence means something. Until then AiCallErrorRateHigh below is the
+        # detector, and it only works while SOME calls are being attempted.
+        #
         # Reliability. Deliberately excludes not_configured: a never-seeded agent is a different
         # problem with a different fix, and folding it in here would make the error rate unusable.
         - alert: AiCallErrorRateHigh
