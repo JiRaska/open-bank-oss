@@ -353,17 +353,21 @@ class ProductCatalogResourceTest {
     }
 
     @Test
-    fun `GET product by canonical account UUID resolves the seeded product (ADR-0105)`() {
+    fun `GET product by canonical account UUID resolves and returns the canonical identity (ADR-0105)`() {
         // account-service references the CZK current/savings products by the UUID it stamps on
         // accounts.product_id; the catalogue must resolve those UUIDs to the same products.
         val current = (
-            Given { this } When { get("/api/v1/products/00000000-0000-0000-0000-0000000000c2") } Then
-                { statusCode(200) }
+            Given { this } When { get("/api/v1/products/00000000-0000-0000-0000-0000000000c2") } Then {
+                statusCode(200)
+                body("id", equalTo("00000000-0000-0000-0000-0000000000c2"))
+            }
             ).extract().body().asString()
         assertThat(current).contains("CURRENT_CZK")
         val savings = (
-            Given { this } When { get("/api/v1/products/00000000-0000-0000-0000-0000000000c3") } Then
-                { statusCode(200) }
+            Given { this } When { get("/api/v1/products/00000000-0000-0000-0000-0000000000c3") } Then {
+                statusCode(200)
+                body("id", equalTo("00000000-0000-0000-0000-0000000000c3"))
+            }
             ).extract().body().asString()
         assertThat(savings).contains("SAVINGS_CZK")
     }
