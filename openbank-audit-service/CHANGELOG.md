@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.0...audit-service-v0.17.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **audit:** make anchor kms-key-id optional so the service boots ([#5944](https://github.com/JiRaska/open-bank-oss/issues/5944)) ([87b9c00](https://github.com/JiRaska/open-bank-oss/commit/87b9c00caec1ad7bff983ce953e5156f2509222a)), closes [#5844](https://github.com/JiRaska/open-bank-oss/issues/5844)
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.16.0...audit-service-v0.17.0) (2026-08-20)
 
 
