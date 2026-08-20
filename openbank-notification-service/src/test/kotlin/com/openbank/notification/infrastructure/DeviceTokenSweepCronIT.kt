@@ -26,6 +26,7 @@ class DeviceTokenSweepCronIT {
     }
 
     @Inject lateinit var dataSource: DataSource
+
     @Inject lateinit var meterRegistry: MeterRegistry
 
     @Test
@@ -52,16 +53,24 @@ class DeviceTokenSweepCronIT {
     }
 
     private fun insertStale(c: Connection, id: java.util.UUID) {
-        c.prepareStatement("""
+        c.prepareStatement(
+            """
             insert into device_tokens
               (device_id, party_id, app_instance, platform, token, status,
                last_used_at, registered_at, refreshed_at, created_at, updated_at)
             values (?, ?, 'cron-it', 'IOS', 'cron-it-token-' || ?, 'ACTIVE',
                     ?, ?, ?, ?, ?)
-        """.trimIndent()).use { s ->
+            """.trimIndent(),
+        ).use { s ->
             val old = Instant.now().minusSeconds(91 * 24 * 3600)
-            s.setObject(1, id); s.setObject(2, java.util.UUID.randomUUID()); s.setObject(3, id)
-            s.setObject(4, old); s.setObject(5, old); s.setObject(6, old); s.setObject(7, old); s.setObject(8, old)
+            s.setObject(1, id)
+            s.setObject(2, java.util.UUID.randomUUID())
+            s.setObject(3, id)
+            s.setObject(4, old)
+            s.setObject(5, old)
+            s.setObject(6, old)
+            s.setObject(7, old)
+            s.setObject(8, old)
             s.executeUpdate()
         }
     }
