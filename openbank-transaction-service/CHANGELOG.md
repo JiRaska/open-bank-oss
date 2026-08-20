@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.18.0...transaction-service-v1.18.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* make TransactionSagaStuck able to fire, delete 3 alerts that never could ([#5787](https://github.com/JiRaska/open-bank-oss/issues/5787)) ([55c2cdd](https://github.com/JiRaska/open-bank-oss/commit/55c2cdd0a57fc0dfeebb824194aa315f37f26ae3))
+
 ## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.17.0...transaction-service-v1.18.0) (2026-08-19)
 
 

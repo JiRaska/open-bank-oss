@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.12.0...fraud-service-v0.12.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **fraud:** dedupe velocity_aggregates on redelivery ([#5716](https://github.com/JiRaska/open-bank-oss/issues/5716)) ([#5786](https://github.com/JiRaska/open-bank-oss/issues/5786)) ([1fd2170](https://github.com/JiRaska/open-bank-oss/commit/1fd21708c799c625447923c3bd1ac2d574005d2c))
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.11.2...fraud-service-v0.12.0) (2026-08-18)
 
 
