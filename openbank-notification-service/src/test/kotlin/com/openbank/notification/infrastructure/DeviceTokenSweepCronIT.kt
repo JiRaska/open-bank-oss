@@ -52,15 +52,15 @@ class DeviceTokenSweepCronIT {
 
         val deadline = System.nanoTime() + 15_000_000_000L
         var status = "ACTIVE"
-        while (System.nanoTime() < deadline && status == "ACTIVE") {
+        var heartbeat: Double? = null
+        while (System.nanoTime() < deadline && (status == "ACTIVE" || heartbeat != 1.0)) {
             Thread.sleep(200)
             status = statusOf(id)
+            heartbeat = meterRegistry.find("openbank_workflow_success_recorded")
+                .tag("workflow", "device-token-stale-sweep").gauge()?.value()
         }
         assertThat(status).isEqualTo("INACTIVE")
-        assertThat(
-            meterRegistry.find("openbank_workflow_success_recorded")
-                .tag("workflow", "device-token-stale-sweep").gauge()?.value(),
-        ).isEqualTo(1.0)
+        assertThat(heartbeat).isEqualTo(1.0)
     }
 
     private fun statusOf(id: java.util.UUID): String {
