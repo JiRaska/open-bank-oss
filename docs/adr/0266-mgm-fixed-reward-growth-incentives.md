@@ -55,8 +55,11 @@ events; it will never mint codes, decide reward eligibility, or post money.
    commit (or release), keyed by an idempotency token; a retry cannot consume inventory twice.
 3. **Ledger/account** remains authoritative for monetary reward posting and reversal. The incentive
    context may request a posting with a stable reward reference, but cannot mark a reward as paid
-   from its own database. Non-monetary points may continue to use engagement's rewards hub, but
-   points and money must not share a success state.
+   from its own database. Its state machine therefore records `REWARD_REQUESTED` first and moves to
+   `REWARDED` only from an authenticated ledger-accepted outcome; a rejection or timeout records a
+   retryable/rejected outcome and never a local payment success. A reconciler correlates the durable
+   request, ledger response and reversal event by the same reward reference. Non-monetary points may
+   continue to use engagement's rewards hub, but points and money must not share a success state.
 4. **Campaign Studio** owns audience selection, content, journey execution and measurement. A
    campaign stores an immutable `incentiveOfferRef`/`referralProgramRef` plus attribution metadata;
    it records exposure and conversion evidence from events, not a copied reward amount or a mutable
@@ -110,11 +113,14 @@ The implementation is not complete until a real HTTP/integration path proves:
   intentionally non-monetary and opt-in; making it a money or referral authority would violate its
   current boundary and blur points with posted value.
 - **Start with arbitrary percentage discounts.** Rejected: a fixed reward proves attribution,
-  idempotency and ledger handoff first; a discount engine adds pricing, stacking, tax and product
-  scope decisions before the core MGM invariant is proven.
-- **Use a signed customer identifier in the invite URL.** Rejected: an opaque server-owned token
-  is the minimum necessary reference and avoids leaking party identity through links, logs or
-  analytics.
+  idempotency and ledger handoff first; an arbitrary discount engine would require evaluating
+  pricing, stacking, tax and product scope before the core MGM invariant is proven. Stacking policy
+  remains a governed field for later published offers, but is not evaluated by this first fixed-reward
+  slice.
+- **Use a signed customer identifier in the invite URL.** Rejected: an opaque server-owned token is
+  the minimum necessary reference and keeps party identity out of the URL and ordinary client-side
+  analytics. It does not prevent server-side correlation, so token values must still be redacted from
+  application logs and analytics exports and the attribution store must enforce its retention policy.
 
 ## Consequences
 
