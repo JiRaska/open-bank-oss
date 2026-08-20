@@ -386,7 +386,50 @@ class SepaPaymentActivitiesImplTest {
         }
     }
 
+    // --- #3994/#5256: audit attribution on the Temporal-path payloads -------------------------
+    //
+    // The fleet sweep added `sourceService` to this service's non-Temporal path (a serialised data
+    // class, SepaPaymentEvents.kt) and missed these five hand-built payload strings on the SAME
+    // topic. Asserting the key on the payload the PRODUCTION code actually builds is the point: a
+    // test that only asserts a field on a data class cannot see a hand-built string, and a grep for
+    // the quoted key cannot see a data class.
+
+    @Test
+    fun `every Temporal-path payload self-reports sepa-payment as its source service`() {
+        val outboxes = mutableListOf<SepaPaymentOutboxMessage>()
+        coEvery { paymentRepository.update(any(), capture(outboxes)) } answers { firstArg() }
+
+        val activities = fixedClockActivities()
+
+        coEvery { paymentRepository.findById(paymentId) } returns payment
+        activities.validatePayment(paymentId)
+        activities.rejectPayment(paymentId)
+
+        // Scheme accept -> PROCESSING + COMPLETED.
+        coEvery { paymentRepository.findById(paymentId) } returns payment.copy(status = SepaPaymentStatus.VALIDATED)
+        coEvery { schemeGatewayPort.submit(any()) } returns SchemeSubmissionOutcome(accepted = true, reasonCode = null)
+        activities.submitToScheme(paymentId)
+
+        // Scheme reject -> REJECTED.
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = false, reasonCode = "AM04")
+        activities.submitToScheme(paymentId)
+
+        assertThat(outboxes).hasSize(EXPECTED_TEMPORAL_PAYLOADS)
+        assertThat(outboxes.map { objectMapper.readTree(it.payload).get("status").asText() })
+            .containsExactly("VALIDATED", "REJECTED", "PROCESSING", "COMPLETED", "REJECTED")
+        // Read the parsed JSON, not a substring: a `contains` would also pass on a key that is
+        // present but nested, or on a value that merely starts with the expected text.
+        assertThat(outboxes.map { objectMapper.readTree(it.payload).get("sourceService")?.asText() })
+            .containsOnly("sepa-payment")
+    }
+
     private val objectMapper = ObjectMapper()
+
+    private companion object {
+        /** validate + reject + (processing, completed) + scheme-reject. */
+        const val EXPECTED_TEMPORAL_PAYLOADS = 5
+    }
 }
 
 /**

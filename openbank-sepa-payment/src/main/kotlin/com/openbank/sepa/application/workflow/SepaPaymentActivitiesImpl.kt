@@ -123,6 +123,15 @@ open class SepaPaymentActivitiesImpl(
         decision
     }
 
+    // Issue #3994/#5256: every payload below also carries `sourceService`, so AuditConsumer
+    // attributes the row from the producer's own claim (AttributionSource.EVENT) rather than
+    // falling through to its topic-derived table — a silent, successful default visible only by
+    // grouping `audit_entries` on a live database. The fleet sweep patched only the non-Temporal
+    // path (SepaPaymentEvents.kt, a serialised data class); these five hand-built payload strings
+    // are the SAME topic (`openbank.sepa.payment.events`, via `events-out`) and were missed
+    // because a grep for the quoted key cannot see a data class and a reader of the data class
+    // cannot see these strings.
+    //
     // #3914: every payload below carries `occurredAt` = the transitioned aggregate's `updatedAt`,
     // which `SepaPayment.transitionTo` stamps with `Instant.now(clock)` AT the state change. That
     // is the business event time; `SepaPaymentOutboxMessage.createdAt` next to it is the outbox
@@ -139,7 +148,8 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"VALIDATED","occurredAt":"${updated.updatedAt}"}""",
+                payload = """{"paymentId":"$paymentId","status":"VALIDATED",""" +
+                    """"occurredAt":"${updated.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -156,7 +166,7 @@ open class SepaPaymentActivitiesImpl(
                 aggregateId = updated.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
                 payload = """{"paymentId":"$paymentId","status":"REJECTED","reason":"SANCTIONS_HIT",""" +
-                    """"occurredAt":"${updated.updatedAt}"}""",
+                    """"occurredAt":"${updated.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -222,7 +232,8 @@ open class SepaPaymentActivitiesImpl(
                 outboxMessage = SepaPaymentOutboxMessage(
                     aggregateId = rejected.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                    payload = """{"paymentId":"$paymentId","status":"REJECTED","occurredAt":"${rejected.updatedAt}"}""",
+                    payload = """{"paymentId":"$paymentId","status":"REJECTED",""" +
+                        """"occurredAt":"${rejected.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                     createdAt = Instant.now(clock),
                 ),
             )
@@ -241,7 +252,8 @@ open class SepaPaymentActivitiesImpl(
             outboxMessage = SepaPaymentOutboxMessage(
                 aggregateId = processing.id,
                 eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = """{"paymentId":"$paymentId","status":"PROCESSING","occurredAt":"${processing.updatedAt}"}""",
+                payload = """{"paymentId":"$paymentId","status":"PROCESSING",""" +
+                    """"occurredAt":"${processing.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                 createdAt = Instant.now(clock),
             ),
         )
@@ -259,7 +271,7 @@ open class SepaPaymentActivitiesImpl(
                     aggregateId = completed.id,
                     eventType = PAYMENT_STATUS_CHANGED_EVENT,
                     payload = """{"paymentId":"$paymentId","status":"COMPLETED",""" +
-                        """"occurredAt":"${completed.updatedAt}"}""",
+                        """"occurredAt":"${completed.updatedAt}","sourceService":"$SOURCE_SERVICE"}""",
                     createdAt = Instant.now(clock),
                 ),
             )
@@ -324,3 +336,10 @@ open class SepaPaymentActivitiesImpl(
         CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 }
+
+/**
+ * This service's audit attribution (issue #3994/#5256) — the module directory without the
+ * `openbank-` prefix, matching `SepaPaymentEvents.kt`'s non-Temporal payloads and the value
+ * audit-service's own topic table maps `openbank.sepa.payment.events` to.
+ */
+private const val SOURCE_SERVICE = "sepa-payment"
