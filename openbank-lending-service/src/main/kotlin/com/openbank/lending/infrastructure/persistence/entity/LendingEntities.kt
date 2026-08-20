@@ -113,6 +113,18 @@ class LoanApplicationEntity : PanacheEntityBase() {
     @Column(name = "decided_engine_at")
     var decidedEngineAt: OffsetDateTime? = null
 
+    @Column(name = "catalog_offering_id", columnDefinition = "uuid")
+    var catalogOfferingId: UUID? = null
+
+    @Column(name = "catalog_revision_id", columnDefinition = "uuid")
+    var catalogRevisionId: UUID? = null
+
+    @Column(name = "catalog_content_hash", length = 64)
+    var catalogContentHash: String? = null
+
+    @Column(name = "catalog_schema_version")
+    var catalogSchemaVersion: Int? = null
+
     @Column(name = "proposed_by")
     var proposedBy: String = ""
 

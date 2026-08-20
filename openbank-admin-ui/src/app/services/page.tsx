@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { BookOpen, FileText, ArrowRight, AlertCircle, Package } from 'lucide-react'
+import { BookOpen, FileText, ArrowRight, AlertCircle, Package, Search } from 'lucide-react'
 import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
@@ -129,6 +129,9 @@ export default function ServicesDocsOverviewPage() {
   const [statuses, setStatuses] = useState<Record<string, DocsStatus>>({})
   const [loading, setLoading] = useState(true)
   const [fleetCount, setFleetCount] = useState<number | null>(null)
+  const [query, setQuery] = useState('')
+  const [groupFilter, setGroupFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'documented' | 'missing'>('all')
 
   // Fleet size for the openbank-libs card copy, derived from the catalog snapshot.
   // Degrades to a count-free description if the snapshot is absent (graceful-state
@@ -201,8 +204,19 @@ export default function ServicesDocsOverviewPage() {
     return () => { mounted = false }
   }, [])
 
-  const withDocs = candidates.filter(c => statuses[c.id]?.hasDocs)
-  const withoutDocs = candidates.filter(c => !statuses[c.id]?.hasDocs)
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filteredCandidates = candidates.filter(candidate => {
+    const matchesQuery = !normalizedQuery || [candidate.label, candidate.id, candidate.group]
+      .some(value => value.toLocaleLowerCase().includes(normalizedQuery))
+    const matchesGroup = groupFilter === 'all' || candidate.group === groupFilter
+    const hasDocs = statuses[candidate.id]?.hasDocs === true
+    const matchesStatus = statusFilter === 'all'
+      || (statusFilter === 'documented' && hasDocs)
+      || (statusFilter === 'missing' && !hasDocs)
+    return matchesQuery && matchesGroup && matchesStatus
+  })
+  const withDocs = filteredCandidates.filter(c => statuses[c.id]?.hasDocs)
+  const withoutDocs = filteredCandidates.filter(c => !statuses[c.id]?.hasDocs)
 
   // openbank-libs is the one card with editorial copy; its fleet count is derived,
   // never hardcoded.
@@ -258,6 +272,44 @@ export default function ServicesDocsOverviewPage() {
 
       {/* Serverless tiers & plan (scale-to-zero) — ADR-0057 / ADR-0083 */}
       <ServerlessLegend />
+
+      <section aria-label={t('Filtry dokumentace služeb', 'Service documentation filters')} style={{
+        display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap',
+        padding: '12px 14px', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)',
+      }}>
+        <div style={{ position: 'relative', flex: '1 1 260px', minWidth: '220px' }}>
+          <label htmlFor="service-docs-query" style={{ position: 'absolute', width: '1px', height: '1px', padding: 0, margin: '-1px', overflow: 'hidden', clip: 'rect(0, 0, 0, 0)', whiteSpace: 'nowrap', border: 0 }}>
+            {t('Hledat službu', 'Search services')}
+          </label>
+          <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: '10px', top: '9px', color: 'var(--text-tertiary)' }} />
+          <input
+            id="service-docs-query"
+            type="search"
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            placeholder={t('Hledat podle názvu nebo skupiny…', 'Search by service or group…')}
+            style={{ width: '100%', padding: '7px 10px 7px 32px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '12px' }}
+          />
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          <span>{t('Skupina', 'Group')}</span>
+          <select value={groupFilter} onChange={event => setGroupFilter(event.target.value)} style={{ padding: '7px 28px 7px 9px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '12px' }}>
+            <option value="all">{t('Všechny', 'All')}</option>
+            {Object.entries(GROUP_LABELS).map(([id, group]) => <option key={id} value={id}>{t(group.label, group.label)}</option>)}
+          </select>
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+          <span>{t('Stav', 'Status')}</span>
+          <select value={statusFilter} disabled={loading} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} style={{ padding: '7px 28px 7px 9px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '12px' }}>
+            <option value="all">{t('Všechny', 'All')}</option>
+            <option value="documented">{t('S dokumentací', 'Documented')}</option>
+            <option value="missing">{t('Bez dokumentace', 'Missing docs')}</option>
+          </select>
+        </label>
+        <span role="status" aria-live="polite" style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-tertiary)' }}>
+          {t(`${filteredCandidates.length} z ${candidates.length} služeb`, `${filteredCandidates.length} of ${candidates.length} services`)}
+        </span>
+      </section>
 
       {/* Documented services */}
       {withDocs.length > 0 && (
@@ -338,6 +390,11 @@ export default function ServicesDocsOverviewPage() {
             </div>
           </div>
         </section>
+      )}
+      {!loading && filteredCandidates.length === 0 && (
+        <div role="status" style={{ padding: '36px 20px', textAlign: 'center', color: 'var(--text-secondary)', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-lg)' }}>
+          {t('Žádná služba neodpovídá zvoleným filtrům.', 'No services match the selected filters.')}
+        </div>
       )}
       <CatalogDriftBanner present={candidates.map(catalogShortFor)} />
     </div>

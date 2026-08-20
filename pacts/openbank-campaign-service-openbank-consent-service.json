@@ -1,0 +1,138 @@
+{
+  "consumer": {
+    "name": "openbank-campaign-service"
+  },
+  "interactions": [
+    {
+      "description": "GET whether an active consent covers a party for a grantee and scope",
+      "providerStates": [
+        {
+          "name": "an ACTIVE MARKETING_COMMS_EMAIL consent covers the pact consented party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/consents/party/c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2/grantee/party-service:marketing-comms/active",
+        "query": {
+          "scope": [
+            "MARKETING_COMMS_EMAIL"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "granted": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the active suppressions for a party",
+      "providerStates": [
+        {
+          "name": "an ALL-scope suppression is active for the pact suppressed party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/suppressions/party/c1c1c1c1-c1c1-c1c1-c1c1-c1c1c1c1c1c1"
+      },
+      "response": {
+        "body": [
+          {
+            "createdAt": "2026-01-15T10:00:00Z",
+            "createdBy": "pact-operator",
+            "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "partyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+            "reason": "CUSTOMER_OPTOUT",
+            "scope": "ALL",
+            "source": "preference-centre",
+            "value": null
+          }
+        ],
+        "generators": {
+          "body": {
+            "$[0].id": {
+              "type": "Uuid"
+            },
+            "$[0].partyId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$[0].createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[0].createdBy": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[0].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[0].partyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[0].reason": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[0].source": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-consent-service"
+  }
+}

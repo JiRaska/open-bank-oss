@@ -156,13 +156,35 @@ spec:
         # continuously while nothing is wrong. Add one only once a synthetic call runs on a known
         # interval, so that absence means something. Until then AiCallErrorRateHigh below is the
         # detector, and it only works while SOME calls are being attempted.
-        #
-        # Reliability. Deliberately excludes not_configured: a never-seeded agent is a different
+
+        # A call whose token usage the provider never reported. Same family as AiSpendUnpriced
+        # above and a trust alert about the cost figures rather than a cost alert: streaming
+        # backends may send no usage chunk at all, and recording 0 there would be a silent
+        # understatement, so those calls are counted here instead (#5878).
+        - alert: AiSpendUnmeasured
+          expr: sum by (model) (increase(openbank_llm_tokens_unreported_total[24h])) > 0
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }} LLM calls to {{ $labels.model }} reported no token usage"
+            description: >-
+              These calls completed but the backend sent no `usage`, so their tokens are absent from
+              openbank_llm_tokens_total and every spend figure derived from it UNDERSTATES the real
+              cost by their share. Usually a streaming call against a backend that omits the final
+              usage chunk — set `stream_options.include_usage` for that model, or price the path
+              from the provider invoice instead of the dashboard.
+
+        # Reliability. `stream_aborted` (#5878) is in the numerator: a stream that dies after its
+        # 200 delivered a truncated answer to a waiting user, which is a failure — and it is the
+        # SSE path's characteristic failure, so leaving it out would make the interactive path the
+        # one this alert cannot see. Deliberately excludes not_configured: a never-seeded agent is a different
         # problem with a different fix, and folding it in here would make the error rate unusable.
         - alert: AiCallErrorRateHigh
           expr: |
             100 * (
-              sum by (model) (rate(openbank_llm_requests_total{outcome=~"http_error|exception"}[15m]))
+              sum by (model) (rate(openbank_llm_requests_total{outcome=~"http_error|exception|stream_aborted"}[15m]))
               /
               sum by (model) (rate(openbank_llm_requests_total{outcome!="not_configured"}[15m]))
             ) > 20

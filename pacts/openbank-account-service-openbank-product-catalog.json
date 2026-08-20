@@ -20,6 +20,7 @@
       "response": {
         "body": {
           "code": "CURRENT_PERSONAL",
+          "currency": "EUR",
           "id": "3f20a53e-5ea4-307a-8a0f-9605728381ba",
           "status": "ACTIVE"
         },
@@ -29,6 +30,14 @@
         "matchingRules": {
           "body": {
             "$.code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
               "combine": "AND",
               "matchers": [
                 {

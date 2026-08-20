@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/v0.33.3...v0.34.0) (2026-08-20)
+
+
+### Features
+
+* **campaign:** emit domain metrics and alert on them ([#5705](https://github.com/JiRaska/open-bank-oss/issues/5705)) ([#5744](https://github.com/JiRaska/open-bank-oss/issues/5744)) ([e27ad1b](https://github.com/JiRaska/open-bank-oss/commit/e27ad1b1663ec00d2af0ae613bd285fe63af6bcd))
+
 ## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/v0.33.2...v0.33.3) (2026-08-20)
 
 

@@ -53,6 +53,10 @@ class OpenAiCompatibleLlmGatewayClient(
     // stays a plain constructible class — `DomainMetrics` is the CDI bean that implements it, and
     // producing one from here would drag Micrometer into every consumer's Arc type closure.
     private val metrics: LlmCallMetricsPort = LlmCallMetricsPort.NONE,
+    // Defaults ON, because a correlation id nobody wires up is a correlation id that does not exist
+    // — and this is the one place all nine gateway callers pass through. The provider answers null
+    // wherever OpenTelemetry is absent, so switching it on costs nothing where there is no trace.
+    private val traceIds: TraceIdProvider = OtelTraceIdProvider,
 ) : LlmGatewayPort {
 
     private val log = Logger.getLogger(OpenAiCompatibleLlmGatewayClient::class.java)
@@ -75,11 +79,23 @@ class OpenAiCompatibleLlmGatewayClient(
             return null
         }
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
+        // LiteLLM forwards `metadata` verbatim to its logging callbacks, so `trace_id` is what the
+        // gateway hands Langfuse instead of minting one — that is the whole join between the two
+        // evidence trails. Omitted entirely when there is no valid trace: an absent key leaves
+        // LiteLLM's own id generation in charge, whereas a placeholder would fuse unrelated calls
+        // onto one trace. Every other OpenAI-compatible backend ignores an unknown top-level field,
+        // and it is NON_NULL-serialized, so a null adds nothing to the wire.
+        // runCatching, not a bare call: [TraceIdProvider] documents that it must never throw, and a
+        // documented obligation is not an enforced one — a caller-supplied provider that breaks would
+        // otherwise propagate out of chat() and cost a completion for want of a correlation id. This
+        // read sits OUTSIDE the request try/catch, so nothing else would have caught it.
+        val traceId = runCatching { traceIds.currentTraceId() }.getOrNull()?.takeIf { isValidTraceId(it) }
         val body = ChatRequest(
             model = model,
             messages = listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userPrompt)),
             temperature = temperature,
             maxTokens = maxTokens,
+            metadata = traceId?.let { ChatMetadata(traceId = it) },
         )
         // Nanos, not a Timer.Sample: the metrics port is a pure-domain interface and may not carry a
         // Micrometer type. Measured around the whole attempt, so a timeout — the slowest and most
@@ -148,7 +164,18 @@ internal data class ChatRequest(
     val temperature: Double = 0.2,
     @JsonProperty("max_tokens") val maxTokens: Int = 700,
     val stream: Boolean = false,
+    val metadata: ChatMetadata? = null,
 )
+
+/**
+ * The LiteLLM proxy's pass-through metadata block (ADR-0265 slice 3 tail, #5671).
+ *
+ * Only [traceId] is carried. It is the caller's own W3C trace id, which makes the Langfuse trace
+ * addressable by something the calling service already knows — both for incident reconstruction and
+ * as the only falsifiable ingestion probe available on Langfuse v2.
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
+internal data class ChatMetadata(@JsonProperty("trace_id") val traceId: String)
 
 internal data class ChatMessage(val role: String, val content: String)
 

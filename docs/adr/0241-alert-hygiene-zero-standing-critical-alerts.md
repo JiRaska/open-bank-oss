@@ -1,13 +1,14 @@
 ---
 date: 2026-08-04
-decision-status: proposed
-delivery-status: planned
+decision-status: accepted
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
+followup: "#5924 — MTTR history, weekly RCA and live receipt evidence"
 tags: [observability, governance, resilience]
-summary: "Standing critical alerts rot into normalised failure. We will keep the mean-time-to-resolve for critical alerts under 4 hours and surface unresolved criticals in a daily Slack digest, with weekly root-cause review."
+summary: "Standing critical alerts rot into normalised failure. A fail-closed daily Alertmanager digest now surfaces unresolved criticals; MTTR history and weekly RCA automation remain operational follow-ups."
 ---
 
 # ADR-0241 — Alert hygiene: zero standing critical alerts
@@ -38,11 +39,11 @@ ADR-0237's severity choice for staleness alerts). Its scope is: once an alert is
 
 ## Decision
 
-1. **Target: critical alert MTTR **P90 ≤ 4 hours** from first fire to resolution.** 4 hours is a Republic of Ireland working-day window plus headroom, and is consistent with the DORA ICT incident-response expectation of timely action on severe incidents. P90 means 90 % of critical alerts resolve within the window; a single long-running SEV-0 investigation does not breach the target if the rest of the distribution is healthy.
+1. **Target: critical alert MTTR P90 ≤ 4 hours from first fire to resolution.** This remains a target, not a measured claim. The shipped digest reports standing-age P90 only; resolved-alert history is required before MTTR can be calculated honestly.
 
-2. **A daily "standing criticals" digest at 08:30 UTC per timezone-matched on-call.** The digest lists every critical alert still open after the target, grouped by service and alert name, with the current age and a link to the relevant runbook. It runs before the 09:00 stand-up so the day shift owns the chase. The digest is posted to the existing `#openbank-oncall` Slack channel; no new channel.
+2. **A daily "standing criticals" digest at 08:30 UTC.** Delivered by `.github/workflows/standing-critical-digest.yml` and `.github/scripts/standing-critical-digest.py`: it queries authenticated Alertmanager state, fails closed on missing credentials/network/schema errors, renders standing-age P90 (not MTTR), uploads a 90-day artifact, and posts to the configured Slack webhook. Live execution and on-call receipt remain operational evidence.
 
-3. **Weekly root-cause review every Monday at 10:00 UTC.** Every critical alert from the previous 7 days — resolved or still open — gets one line in a shared Google Doc (operations-runbook repository under `docs/runbooks/alert-rca/YYYY-MM.md`). Repeated criticals of the same type trigger a *rate-of-recurrence guard*: if the same alert fires three times in 14 days, it is treated as a reliability defect and must have a follow-up issue opened before the next review.
+3. **Weekly root-cause review remains planned.** The shipped workflow opens a weekly RCA issue only when standing criticals remain; it does not yet collect resolved-alert history or enforce the proposed recurrence guard.
 
 4. **Severity is protected by convention.** Critical severity is reserved for conditions that are either (a) customer-visible financial impact, (b) regulatory-reporting deadline risk, or (c) a complete loss of a money-path control plane. Non-severe conditions must not be tagged `critical` to chase attention. This is a human convention; its enforcement is the weekly review's job, not a CI gate.
 
@@ -101,5 +102,6 @@ ADR-0237's severity choice for staleness alerts). Its scope is: once an alert is
 - Issue #3343 (operational maturity tracker), #3346 (alert hygiene)
 - ADR-0061 (DORA metrics pipeline), ADR-0144 (gate graduation / advisory rules with enforcement deadline)
 - ADR-0160 (liveness standard), ADR-0163 (control-liveness sentinel), ADR-0237 (scheduler liveness)
-- `.github/workflows/alert-digest.yml` (scheduled digest, to be created)
+- `.github/workflows/standing-critical-digest.yml` and `.github/scripts/standing-critical-digest.py` (delivered digest)
+- Issue #5869 tracks the remaining MTTR-history, weekly-RCA and live-receipt evidence follow-up.
 - `docs/runbooks/templates/alert-critical-rca.md` (runbook template)

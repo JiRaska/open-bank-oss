@@ -74,6 +74,18 @@ class LlmCallMetrics : LlmCallMetricsPort {
         // data", which is the same misreading the business dashboards hit with pinned-at-0 counters.
         recordTokens(registry, model, provider, "prompt", promptTokens)
         recordTokens(registry, model, provider, "completion", completionTokens)
+        // "the provider never reported usage" is its own fact, positively counted rather than left
+        // as an absence in openbank.llm.tokens (#5878). Without it, a streaming call whose backend
+        // sends no usage chunk is a request with no tokens — visually identical to a cheap call,
+        // and every cost rule reading openbank_llm_tokens_total understates by that call's share
+        // with nothing anywhere saying so. AiSpendUnmeasured reads this series.
+        val unknown = LlmCallMetricsPort.TOKENS_UNKNOWN
+        if (promptTokens == unknown || completionTokens == unknown) {
+            Counter.builder("openbank.llm.tokens.unreported")
+                .tags("model", model, "provider", provider, "outcome", outcome)
+                .register(registry)
+                .increment()
+        }
         Timer.builder("openbank.llm.call.duration")
             .tags("model", model, "outcome", outcome, "provider", provider)
             .publishPercentiles(P50, P95, P99)
@@ -82,6 +94,7 @@ class LlmCallMetrics : LlmCallMetricsPort {
             .record(Duration.ofNanos(durationNanos))
     }
 
+    /** [LlmCallMetricsPort.TOKENS_UNKNOWN] and a real zero both add nothing here — see above. */
     private fun recordTokens(registry: MeterRegistry, model: String, provider: String, kind: String, tokens: Int) {
         if (tokens <= 0) return
         Counter.builder("openbank.llm.tokens")

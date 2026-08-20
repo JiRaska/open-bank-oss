@@ -149,9 +149,10 @@ export default function LineageFlowPage() {
         <>
           {/* Controls */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
-            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            <div role="group" aria-label={t('Filtrování domén', 'Domain filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {(['all', ...DOMAIN_ORDER] as const).map(key => (
                 <button key={key} onClick={() => setDomFilter(key)}
+                  type="button" aria-pressed={domFilter === key}
                   style={{
                     padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                     border: `1px solid ${domFilter === key ? 'var(--accent)' : 'var(--border)'}`,
@@ -163,8 +164,10 @@ export default function LineageFlowPage() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-              {(['all', 'api', 'topic', 'datastore'] as const).map(r => (
+              <div role="group" aria-label={t('Filtrování vztahů', 'Relationship filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                {(['all', 'api', 'topic', 'datastore'] as const).map(r => (
                 <button key={r} onClick={() => setRelFilter(r)} aria-pressed={relFilter === r}
+                  type="button"
                   style={{
                     padding: '4px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
                     border: `1px solid ${relFilter === r ? (r === 'all' ? 'var(--accent)' : REL_COLOR[r as Rel]) : 'var(--border)'}`,
@@ -173,18 +176,20 @@ export default function LineageFlowPage() {
                   }}>
                   {r === 'all' ? t('Vše', 'All') : relLabel(r as Rel, t)}
                 </button>
-              ))}
+                ))}
+              </div>
               <button onClick={() => setFlow(v => !v)} aria-pressed={flow} title={t('Přepnout tok dat', 'Toggle data flow')}
+                type="button" aria-label={flow ? t('Pozastavit tok dat', 'Pause data flow') : t('Spustit tok dat', 'Play data flow')}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
                   borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
                   border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
                   background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
                 }}>
-                {flow ? <Pause size={13} /> : <Play size={13} />}{t('Tok', 'Flow')}
+                {flow ? <Pause aria-hidden="true" size={13} /> : <Play aria-hidden="true" size={13} />}{t('Tok', 'Flow')}
               </button>
-              <button onClick={load} disabled={isChecking} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-                <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+              <button onClick={load} disabled={isChecking} type="button" aria-busy={isChecking} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+                <RefreshCw aria-hidden="true" size={14} className={isChecking ? 'animate-spin' : ''} />
                 {isChecking ? t('Načítám…', 'Loading...') : t('Obnovit', 'Refresh')}
               </button>
             </div>

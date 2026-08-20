@@ -28,7 +28,7 @@ data class OpenAccountCommand(
     /**
      * Initial lifecycle status. Defaults to ACTIVE for operator-opened accounts.
      * The onboarding path opens PENDING_ACTIVATION accounts that activate only once
-     * the party clears KYC + AML (ADR-0073); a PENDING_ACTIVATION account is inert
+     * the party clears KYC + AML (ADR-0267); a PENDING_ACTIVATION account is inert
      * (canDebit/canCredit both require ACTIVE).
      */
     val initialStatus: AccountStatus = AccountStatus.ACTIVE,
@@ -76,7 +76,7 @@ data class RenameAccountCommand(val accountId: UUID, val nickname: String?, val 
 interface AccountUseCase {
     suspend fun openAccount(command: OpenAccountCommand): Account
 
-    /** Transition a PENDING_ACTIVATION account to ACTIVE (KYC + AML cleared, ADR-0073). */
+    /** Transition a PENDING_ACTIVATION account to ACTIVE (KYC + AML cleared, ADR-0267). */
     suspend fun activateAccount(accountId: UUID): Account
     suspend fun closeAccount(command: CloseAccountCommand): Account
     suspend fun freezeAccount(command: FreezeAccountCommand): Account

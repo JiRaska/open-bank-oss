@@ -67,7 +67,7 @@ class VelocityAggregateRepositoryImplTest {
         val pq = mockPreparedQuery(rowSet)
         every { pool.preparedQuery(any<String>()) } returns pq
 
-        repository.recordTransaction(UUID.randomUUID(), BigDecimal("100.00"), "CZK")
+        repository.recordTransaction(UUID.randomUUID(), BigDecimal("100.00"), "CZK", UUID.randomUUID())
 
         // recordTransaction calls upsert once per window (H1, H24, D7)
         verify(exactly = 3) { pool.preparedQuery(any<String>()) }
