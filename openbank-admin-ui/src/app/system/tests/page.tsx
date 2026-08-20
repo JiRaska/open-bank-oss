@@ -103,7 +103,8 @@ function ServiceRow({ svc }: { svc: ServiceTestResult }) {
 }
 
 function TestsTab({ data, error, loading }: { data: TestResultsResponse | null; error: string | null; loading: boolean }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const totals = data?.totals
   const passRate = totals && totals.tests > 0 ? Math.round((totals.passed / totals.tests) * 100) : null
   const coverageColor = passRate == null ? 'var(--text-secondary)' : passRate === 100 ? '#16a34a' : passRate >= 80 ? '#d97706' : '#dc2626'
