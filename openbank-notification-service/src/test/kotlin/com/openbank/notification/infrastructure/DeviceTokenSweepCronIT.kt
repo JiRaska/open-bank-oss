@@ -23,8 +23,7 @@ import javax.sql.DataSource
 @TestProfile(DeviceTokenSweepCronIT.FastCronProfile::class)
 class DeviceTokenSweepCronIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory(
+        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
                 "notification-events-in",
                 "party-events-in",
                 "delegation-events-in",
