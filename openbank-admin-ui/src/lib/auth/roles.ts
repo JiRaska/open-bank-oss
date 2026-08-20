@@ -98,6 +98,10 @@ export const PERMISSIONS = {
   // further; do not add ROLES.DEMO to another line here without first confirming its
   // backend accepts VIEWER-tier reads.
   "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.DEMO],
+  // PID identity cases expose PII and four-eyes decisions only to the roles accepted by
+  // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
+  "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -211,7 +215,8 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['regulatory:view', ['/regulatory']],
   ['audit:view', ['/audit']],
   ['kyc:view', ['/kyc']],
-  ['onboarding:view', ['/onboarding', '/identity-cases']],
+  ['onboarding:view', ['/onboarding']],
+  ['identity-cases:view', ['/identity-cases']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
