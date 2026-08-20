@@ -109,5 +109,18 @@ class PostgresProductRepository(
         doc = mapper.writeValueAsString(p)
     }
 
-    private fun ProductEntity.toDomain(): Product = mapper.readValue(doc, Product::class.java).copy(revision = revision)
+    /**
+     * Reads the persisted document back into the domain, with the RELATIONAL columns winning over the
+     * JSONB body for the two fields the database owns: `id` and `row_version`.
+     *
+     * `products.id` is the canonical UUID account-service stores in `accounts.product_id` (V1
+     * migration, ADR-0105); the `doc` body merely retains whatever identifier its writer serialised —
+     * for a row authored before the canonical id existed, or restored/edited out of band, that is the
+     * `prod-NNN` legacy alias. Trusting the body there would serialise the alias out of every `/api/v1`
+     * read while the row is addressed by its UUID, so the id would not round-trip. The v2 -> v1
+     * projection already refuses a revision whose `legacyDocument` renames the canonical product
+     * (`BankV1CompatibilityProjector.validatedProjection`); this is the same invariant on the read side.
+     */
+    private fun ProductEntity.toDomain(): Product = mapper.readValue(doc, Product::class.java)
+        .copy(id = id.toString(), revision = revision)
 }

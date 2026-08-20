@@ -237,6 +237,56 @@ class ProductCatalogResourceTest {
         }
     }
 
+    /**
+     * A row whose JSONB `doc` retained the `prod-NNN` legacy alias as its `id` (a document authored
+     * before the canonical UUID existed, or restored out of band) must still answer `/api/v1` reads
+     * with the canonical UUID from `products.id` — account-service stores that UUID in
+     * `accounts.product_id` and needs it to round-trip. Same shape as the raw-insert fixture in
+     * `legacy invalid draft cannot bypass validation through activation` above.
+     */
+    @Test
+    fun `v1 reads return the canonical id even when the stored document retains the legacy alias`() {
+        val canonicalId = "00000000-0000-0000-0000-000000006012"
+        val legacyAlias = "prod-901"
+        val document =
+            """{"id":"$legacyAlias","code":"P0_LEGACY_ALIAS","name":"Legacy alias","type":"SAVINGS",""" +
+                """"currency":"EUR","status":"ACTIVE",""" +
+                """"fees":[{"id":"fee-901","name":"Maintenance","type":"MONTHLY","amount":1.0,""" +
+                """"currency":"EUR","frequency":"MONTHLY"}]}"""
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """INSERT INTO products (id, code, legacy_code, type, status, currency, doc) """ +
+                    """VALUES (CAST(? AS uuid), ?, ?, 'SAVINGS', 'ACTIVE', 'EUR', to_jsonb(CAST(? AS text)))""",
+            ).use { statement ->
+                statement.setString(1, canonicalId)
+                statement.setString(2, "P0_LEGACY_ALIAS")
+                statement.setString(3, legacyAlias)
+                statement.setString(4, document)
+                assertThat(statement.executeUpdate()).isEqualTo(1)
+            }
+        }
+
+        // Addressed by the canonical UUID.
+        Given { this } When { get("/api/v1/products/$canonicalId") } Then {
+            statusCode(200)
+            body("id", equalTo(canonicalId))
+        }
+        // Addressed by the legacy alias — same canonical id in the body.
+        Given { this } When { get("/api/v1/products/$legacyAlias") } Then {
+            statusCode(200)
+            body("id", equalTo(canonicalId))
+        }
+        // The collection read and the derived fee schedule carry the same identity.
+        Given { this } When { get("/api/v1/products") } Then {
+            statusCode(200)
+            body("find { it.code == 'P0_LEGACY_ALIAS' }.id", equalTo(canonicalId))
+        }
+        Given { this } When { get("/api/v1/fees") } Then {
+            statusCode(200)
+            body("find { it.productCode == 'P0_LEGACY_ALIAS' }.productId", equalTo(canonicalId))
+        }
+    }
+
     @Test
     fun `generic update cannot bypass status or active product immutability guards`() {
         val current = (
