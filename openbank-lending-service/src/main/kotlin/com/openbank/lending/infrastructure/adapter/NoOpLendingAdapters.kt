@@ -34,13 +34,31 @@ import java.util.UUID
  * (the platform realization pattern, ADR-0045), without touching the application service.
  */
 
+/**
+ * Offline `@Default` [LedgerPostingPort]: **refuses** the posting rather than reporting a success
+ * it did not achieve (#6057).
+ *
+ * It used to return `Uni<Unit>` — byte-for-byte the same signal [RestLedgerPostingAdapter] returns
+ * after ledger-service accepts the journal — and log the discard at `debug`, below the shipped
+ * level. That is the `PushResult.skipped()` shape: a disabled adapter sharing a success signal with
+ * a working one, with no metric and no error to disagree. Measured consequence: 44 active loans,
+ * 6.6M CZK principal, and zero journal lines on every lending GL account.
+ *
+ * Same reasoning as [NoOpBorrowerAccountLookupPort] two blocks down, which this file already
+ * applied to the customer-facing leg and not to the ledger leg: an offline build genuinely cannot
+ * write to a general ledger, so it must say so rather than pretend to.
+ */
 @ApplicationScoped
 @Default
 class NoOpLedgerPostingPort : LedgerPostingPort {
     private val log = Logger.getLogger(NoOpLedgerPostingPort::class.java)
     override fun post(posting: LedgerPosting): Uni<Unit> {
-        log.debugf("no-op ledger posting: %s ref=%s", posting.kind, posting.reference)
-        return Uni.createFrom().item(Unit)
+        log.warnf(
+            "ledger backend not configured: REFUSING %s posting ref=%s (no journal written)",
+            posting.kind,
+            posting.reference,
+        )
+        return Uni.createFrom().failure(LedgerBackendNotConfiguredException(posting.kind, posting.reference))
     }
 }
 
@@ -101,13 +119,18 @@ class NoOpBorrowerAccountLookupPort : BorrowerAccountLookupPort {
 @Default
 class NoOpBorrowerCreditPort : BorrowerCreditPort {
     private val log = Logger.getLogger(NoOpBorrowerCreditPort::class.java)
+
+    // Refuses rather than returning the real client's success value (#6057). Reachable now that
+    // the account lookup is not the only fail-loud step: a test or future caller supplying an
+    // account id must not get a "paid" answer from an adapter that pays nobody.
     override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
-        log.debugf("no-op borrower credit: %s ref=%s (unreachable: lookup already returns null)", amount, reference)
-        return Uni.createFrom().item(Unit)
+        log.warnf("borrower-credit backend not configured: REFUSING credit %s ref=%s", amount, reference)
+        return Uni.createFrom().failure(BorrowerCreditBackendNotConfiguredException("credit", reference))
     }
+
     override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
-        log.debugf("no-op borrower debit: %s ref=%s", amount, reference)
-        return Uni.createFrom().item(Unit)
+        log.warnf("borrower-credit backend not configured: REFUSING debit %s ref=%s", amount, reference)
+        return Uni.createFrom().failure(BorrowerCreditBackendNotConfiguredException("debit", reference))
     }
 }
 

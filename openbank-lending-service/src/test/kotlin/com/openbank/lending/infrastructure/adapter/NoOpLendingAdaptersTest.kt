@@ -15,6 +15,7 @@ import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.lending.AmortizationMethod
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -33,7 +34,7 @@ class NoOpLendingAdaptersTest {
     private fun eur(v: String) = Money.of(v, "EUR")
 
     @Test
-    fun `no-op ledger posting completes without side effects`() {
+    fun `no-op ledger posting refuses rather than reporting a posting it did not make`() {
         val posting = LedgerPosting(
             reference = "loan:1:disbursement",
             partyId = partyId,
@@ -41,9 +42,11 @@ class NoOpLendingAdaptersTest {
             kind = PostingKind.DISBURSEMENT,
         )
 
-        val result = NoOpLedgerPostingPort().post(posting).await().indefinitely()
-
-        assertThat(result).isEqualTo(Unit)
+        // #6057: this test previously asserted `isEqualTo(Unit)` — it pinned the defect in place.
+        // A no-op that returns the real adapter's success value is indistinguishable from a posted
+        // journal, which is how 44 live loans accrued against a ledger holding zero lending lines.
+        assertThatThrownBy { NoOpLedgerPostingPort().post(posting).await().indefinitely() }
+            .isInstanceOf(LedgerBackendNotConfiguredException::class.java)
     }
 
     @Test
