@@ -80,7 +80,7 @@ export function counterpartyLabel(name: string | null | undefined): string | und
 }
 
 /** A ceiling of `null` means UNCAPPED for that window — never render it as zero. */
-export function formatCeiling(limit: Money | null | undefined): string {
+export function formatCeiling(limit: Money | null | undefined, locale = 'en-GB'): string {
   if (!limit || typeof limit.amount !== 'number') return '—'
-  return `${limit.amount.toLocaleString('cs-CZ')} ${limit.currency}`
+  return `${limit.amount.toLocaleString(locale)} ${limit.currency}`
 }
