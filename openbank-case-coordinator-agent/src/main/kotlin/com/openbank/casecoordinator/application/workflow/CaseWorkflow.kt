@@ -56,7 +56,20 @@ interface CaseSynthesisActivity {
 /** Emits the single HITL proposal into the case outbox (D7). */
 @ActivityInterface
 interface CaseProposalActivity {
-    fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean, shadow: Boolean): String
+    /** Legacy activity name and payload; never change while old workflows can replay. */
+    fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String
+}
+
+/** New activity type keeps shadow delivery out of legacy Temporal histories. */
+@ActivityInterface
+interface CaseProposalDeliveryActivity {
+    fun emitProposalWithDelivery(
+        caseId: String,
+        proposalType: String,
+        summary: String,
+        contested: Boolean,
+        shadow: Boolean,
+    ): String
 }
 
 /** Persists case lifecycle + contribution rows to the V1 schema. */

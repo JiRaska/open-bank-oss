@@ -49,6 +49,7 @@ class CaseWorkflowTest {
     private lateinit var worker: Worker
     private lateinit var synthesis: CaseSynthesisActivity
     private lateinit var proposals: CaseProposalActivity
+    private lateinit var deliveryProposals: CaseProposalDeliveryActivity
     private lateinit var persistence: CasePersistenceActivity
 
     companion object {
@@ -78,10 +79,11 @@ class CaseWorkflowTest {
         worker.registerWorkflowImplementationTypes(CaseWorkflowImpl::class.java)
         synthesis = mockk(relaxed = true)
         proposals = mockk(relaxed = true)
+        deliveryProposals = mockk(relaxed = true)
         persistence = mockk(relaxed = true)
         every { synthesis.synthesize(any(), any(), any()) } returns "CONVERGED: restart the ingest consumer"
-        every { proposals.emitProposal(any(), any(), any(), any(), any()) } returns "proposal-1"
-        worker.registerActivitiesImplementations(synthesis, proposals, persistence)
+        every { deliveryProposals.emitProposalWithDelivery(any(), any(), any(), any(), any()) } returns "proposal-1"
+        worker.registerActivitiesImplementations(synthesis, proposals, deliveryProposals, persistence)
         env.start()
     }
 
@@ -126,7 +128,13 @@ class CaseWorkflowTest {
         assertThat(outcome.proposalId).isEqualTo("proposal-1")
         verify(exactly = 1) { synthesis.synthesize("case-incident-response-ingest-1", "INCIDENT_RESPONSE", any()) }
         verify(exactly = 1) {
-            proposals.emitProposal("case-incident-response-ingest-1", "case-synthesis", any(), false, false)
+            deliveryProposals.emitProposalWithDelivery(
+                "case-incident-response-ingest-1",
+                "case-synthesis",
+                any(),
+                false,
+                false,
+            )
         }
     }
 
@@ -138,7 +146,7 @@ class CaseWorkflowTest {
         result(stub)
 
         verify(exactly = 1) {
-            proposals.emitProposal(any(), "case-synthesis", any(), false, true)
+            deliveryProposals.emitProposalWithDelivery(any(), "case-synthesis", any(), false, true)
         }
     }
 
@@ -164,7 +172,7 @@ class CaseWorkflowTest {
                 },
             )
         }
-        verify(exactly = 1) { proposals.emitProposal(any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), any(), any(), any(), any()) }
         // Both contributions — superseded draft included — are recorded history for the thread view.
         verify(exactly = 1) {
             persistence.recordContributions(any(), match { it.size == 2 })
@@ -180,7 +188,7 @@ class CaseWorkflowTest {
 
         assertThat(outcome.status).isEqualTo(CaseStatus.CONTESTED)
         verify(exactly = 0) { synthesis.synthesize(any(), any(), any()) }
-        verify(exactly = 1) { proposals.emitProposal(any(), "case-contested", any(), true, false) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), "case-contested", any(), true, false) }
     }
 
     @Test
@@ -191,7 +199,7 @@ class CaseWorkflowTest {
 
         assertThat(outcome.status).isEqualTo(CaseStatus.CLOSED)
         verify(exactly = 0) { synthesis.synthesize(any(), any(), any()) }
-        verify(exactly = 1) { proposals.emitProposal(any(), "case-timeout", any(), false, false) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), "case-timeout", any(), false, false) }
     }
 
     @Test
@@ -207,7 +215,7 @@ class CaseWorkflowTest {
 
         assertThat(outcome.status).isEqualTo(CaseStatus.SYNTHESIZED)
         assertThat(outcome.contributionCount).isEqualTo(10)
-        verify(exactly = 1) { proposals.emitProposal(any(), any(), any(), any(), any()) }
+        verify(exactly = 1) { deliveryProposals.emitProposalWithDelivery(any(), any(), any(), any(), any()) }
         verify(exactly = 1) { persistence.recordCaseClosed(any(), "SYNTHESIZED", any()) }
     }
 }

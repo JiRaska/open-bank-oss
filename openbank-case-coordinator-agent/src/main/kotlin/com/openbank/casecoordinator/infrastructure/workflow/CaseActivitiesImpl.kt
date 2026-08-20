@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.casecoordinator.application.port.out.CaseCoordinatorLlmPort
 import com.openbank.casecoordinator.application.workflow.CasePersistenceActivity
 import com.openbank.casecoordinator.application.workflow.CaseProposalActivity
+import com.openbank.casecoordinator.application.workflow.CaseProposalDeliveryActivity
 import com.openbank.casecoordinator.application.workflow.CaseSynthesisActivity
 import com.openbank.casecoordinator.domain.model.CaseStart
 import com.openbank.casecoordinator.domain.model.Contribution
@@ -37,6 +38,7 @@ class CaseActivitiesImpl(
     private val objectMapper: ObjectMapper,
 ) : CaseSynthesisActivity,
     CaseProposalActivity,
+    CaseProposalDeliveryActivity,
     CasePersistenceActivity {
 
     override fun synthesize(caseId: String, caseClass: String, contributions: List<Contribution>): String? {
@@ -56,7 +58,10 @@ class CaseActivitiesImpl(
         return runBlocking { llm.synthesizeConvergence(context) }
     }
 
-    override fun emitProposal(
+    override fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String =
+        emitProposalWithDelivery(caseId, proposalType, summary, contested, shadow = false)
+
+    override fun emitProposalWithDelivery(
         caseId: String,
         proposalType: String,
         summary: String,

@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 export type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED'
-export type CaseEntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
+export type CaseEntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED'
 
 export interface CaseThreadEntry {
   type: CaseEntryType
