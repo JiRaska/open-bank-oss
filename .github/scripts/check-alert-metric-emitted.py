@@ -71,6 +71,7 @@ import sys
 import yaml
 
 import gatelib
+import metricsrc
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 GITOPS = REPO / "openbank-infra" / "gitops"
@@ -116,37 +117,6 @@ PROMQL_KW = {
 METRIC_RE = re.compile(r"\b(openbank[_:][a-zA-Z0-9_:]*)\b")
 # Micrometer appends these to the base name; strip at most one to recover the base.
 SUFFIXES = ("_total", "_bucket", "_count", "_sum", "_max", "_seconds")
-
-
-COMMENT_RE = re.compile(r"//[^\n]*|/\*.*?\*/", re.S)
-# Both spellings occur in this repo and mean the same series. `DomainMetrics` uses the
-# Micrometer dotted form ("openbank.payments.submitted"); CloseMetricsAdapter calls
-# `registry.counter("openbank_statement_close_failures_total", ...)` with the exported
-# Prometheus name directly; AccountingDayScheduler mixes both
-# ("openbank.ledger.accounting_day.stuck_cutoff_days"). A gate that understands only one
-# idiom reports the other two as missing -- which is what the first version of this check
-# did, flagging six live, working alerts.
-LITERAL_RE = re.compile(r'"(openbank[._][A-Za-z0-9._]*)"')
-# Suffixes the Prometheus registry appends; stripped from BOTH sides before comparing.
-SUFFIXES = ("_total", "_bucket", "_count", "_sum", "_max", "_seconds")
-
-
-def canonical(name: str) -> str:
-    """One spelling for a metric, whichever idiom it was written in.
-
-    Separators collapse to `_` and the registry's generated suffixes come off, so
-    `openbank.payments.submitted`, `openbank_payments_submitted_total` and
-    `openbank_payments_submitted_seconds_count` all reduce to the same key.
-    """
-    n = name.strip().lower().replace(".", "_").replace(":", "_")
-    changed = True
-    while changed:
-        changed = False
-        for suf in SUFFIXES:
-            if n.endswith(suf) and len(n) > len(suf):
-                n = n[: -len(suf)]
-                changed = True
-    return n
 
 
 def alert_rules() -> list[dict]:
@@ -196,30 +166,6 @@ def recorded_names() -> set[str]:
     return out
 
 
-def emitted_names() -> set[str]:
-    """Canonical metric names instrumented by service source.
-
-    Comments are stripped BEFORE the literal scan. Metric names are quoted in KDoc all over
-    this tree -- `FxFixingFreshnessPort` names three it does not emit -- and counting prose
-    as instrumentation is how a gate ends up certifying a metric that only exists in a
-    sentence (the same trap as grepping `src/test` for the word "contract").
-    """
-    out = set()
-    for svc in sorted(REPO.glob("openbank-*")):
-        src = svc / "src" / "main"
-        if not src.is_dir():
-            continue
-        for path in gatelib.rglob(src, "*.kt"):
-            try:
-                body = COMMENT_RE.sub(" ", gatelib.read_text(path))
-            except (UnicodeDecodeError, OSError):
-                continue
-            out.update(canonical(m) for m in LITERAL_RE.findall(body))
-    return out
-
-
-def metrics_in(expr: str) -> set[str]:
-    return {m for m in METRIC_RE.findall(expr) if m not in PROMQL_KW}
 
 
 def evaluate(rules: list[dict], emitted: set[str], recorded: set[str],
@@ -228,13 +174,13 @@ def evaluate(rules: list[dict], emitted: set[str], recorded: set[str],
     known_dead = KNOWN_DEAD if known_dead is None else known_dead
     violations, used, used_dead = [], set(), set()
     for r in rules:
-        for metric in sorted(metrics_in(r["expr"])):
-            if metric in recorded or canonical(metric) in {canonical(r) for r in recorded}:
+        for metric in sorted(metricsrc.metrics_in(r["expr"])):
+            if metric in recorded or metricsrc.canonical(metric) in {metricsrc.canonical(r) for r in recorded}:
                 continue
             if metric in EXTERNALLY_PROVIDED:
                 used.add(metric)
                 continue
-            if canonical(metric) in emitted:
+            if metricsrc.canonical(metric) in emitted:
                 continue
             key = f"{r['alert']}#{metric}"
             if key in known_dead:
@@ -245,9 +191,12 @@ def evaluate(rules: list[dict], emitted: set[str], recorded: set[str],
 
 
 def selftest() -> int:
-    emitted = {canonical("openbank.payments.submitted"),
-               canonical("openbank_statement_close_failures_total"),
-               canonical("openbank.ledger.accounting_day.stuck_cutoff_days")}
+    for problem in metricsrc.self_check():
+        print(f"selftest FAIL (metricsrc): {problem}")
+        return 1
+    emitted = {metricsrc.canonical("openbank.payments.submitted"),
+               metricsrc.canonical("openbank_statement_close_failures_total"),
+               metricsrc.canonical("openbank.ledger.accounting_day.stuck_cutoff_days")}
     recorded = {"openbank:llm_cost_usd_24h:total"}
     cases = [
         # (expr, expect_violation, why)
@@ -289,9 +238,6 @@ def selftest() -> int:
         return 1
 
     # The corpus scan itself must not be silently empty.
-    if not emitted_names():
-        print("selftest FAIL: found no openbank.* metric literals in src/main -- the scan is broken.")
-        return 1
     if not alert_rules():
         print("selftest FAIL: found no PrometheusRule alert rules -- the scan is broken.")
         return 1
@@ -310,7 +256,7 @@ def main() -> int:
         return selftest()
 
     rules = alert_rules()
-    emitted = emitted_names()
+    emitted = metricsrc.emitted_names()
     recorded = recorded_names()
     violations, used, used_dead = evaluate(rules, emitted, recorded)
 

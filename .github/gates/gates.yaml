@@ -2384,6 +2384,29 @@ gates:
   # since fixed by #5787) — see #5733. The dashboard half of this class was #5049; the alert half
   # is worse, because an empty panel is at least visible to whoever opens it while a rule that
   # never fires produces no artifact at all.
+  # #5049 made structural. That issue found 16 business metrics referenced across 9 dashboards and
+  # emitted by nothing — Business KPIs, Executive Overview, Compliance & AML, the panels a
+  # stakeholder or auditor is most likely to open. It was fixed by hand and closed, and until this
+  # gate no check in the repo looked at a dashboard at all, so nothing stopped it recurring.
+  #
+  # STATIC by design: it asks "does code emit this", never "is there data now". Micrometer
+  # registers a counter on its first increment, so a correct, deployed metric is genuinely absent
+  # from Prometheus until the event happens — measured 2026-08-19 on openbank_payments_submitted.
+  # A runtime check would call that a defect; this one passes it and still fails if the emitting
+  # code is deleted.
+  - id: dashboard-metric-emitted
+    name: "every dashboard panel queries a metric some code emits (issue #5049, enforced)"
+    group: data
+    mode: enforced
+    min_subjects: 150   # 235 panel queries across 27 dashboards today (2026-08-19)
+    rationale: "A panel over a metric nothing emits renders 'No data', which is indistinguishable from a metric that is merely quiet — so nobody opening the dashboard can tell it is broken."
+    review_after: "2027-02-19"
+    selftest: |
+      python3 .github/scripts/check-dashboard-metric-emitted.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-dashboard-metric-emitted.py --enforce
+
   - id: alert-metric-emitted
     name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
     group: data
