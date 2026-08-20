@@ -82,14 +82,25 @@ BASELINE: dict[str, str] = {
         "#5962 — AccountingDayStatus: undeclared OPEN",
     "openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED":
         "#5962 — CollateralStatus: spec-only EXECUTED",
-    "openbank-pid-service:ACTIVE,CLOSED,SUSPENDED":
-        "#5962 — PartyStatus: spec-only CLOSED; undeclared DECEASED/TERMINATED",
-    "openbank-pid-service:LEGAL_ENTITY,NATURAL_PERSON":
-        "#5962 — PartyType: undeclared SOLE_TRADER",
+    # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
+    # ('NATURAL_PERSON','LEGAL_ENTITY','SOLE_TRADER')), but it sits inside `CreatePartyRequest`,
+    # whose declared properties — legalName, tradingName, taxId, dateOfBirth, nationality —
+    # match none of the Kotlin DTO's (givenName, familyName, birthdate, nationalities,
+    # verificationSource, bankIdSub, birthNumberRaw, initialRole, onboardingChannel). Same
+    # reason as above: fix the schema, then the enum.
     "openbank-pid-service:INDIVIDUAL,LEGAL_ENTITY,SOLE_TRADER":
-        "#5962 — PartyType: spec-only INDIVIDUAL; undeclared NATURAL_PERSON",
+        "#5962 — CreatePartyRequest.partyType: spec-only INDIVIDUAL, inside a request schema "
+        "whose properties do not match the DTO at all; needs a schema fix first.",
+    # This one is a MIS-PAIRING, kept baselined deliberately. The values are
+    # `UpdateKycRequest.kycStatus`, and pid's `UpdateKycRequest` has no `kycStatus` property at
+    # all — it is (kycLevel: KycLevel, amlRiskScore: AmlRiskScore, pepFlag, sanctionsFlag). With
+    # no real counterpart to pair with, the matcher settled on the openid4vp
+    # `PresentationExchangeStore.Status { PENDING, COMPLETED, EXPIRED }` on the strength of two
+    # coincidental values. The defect is a whole fictional request schema, not an enum drift, so
+    # reconciling the enum alone would polish a document that still describes nothing.
     "openbank-pid-service:EXPIRED,PENDING,REJECTED,VERIFIED":
-        "#5962 — Status: spec-only REJECTED/VERIFIED; undeclared COMPLETED",
+        "#5962 — UpdateKycRequest.kycStatus: the property does not exist; needs a schema fix, "
+        "not an enum fix. The `Status` pairing is coincidental.",
     "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,UN_CONSOLIDATED":
         "#5962 — SanctionsListType: undeclared PEP_GLOBAL",
     "openbank-sepa-instant:ACCEPTED,RECALLED,REJECTED,SETTLED,SUBMITTED":
