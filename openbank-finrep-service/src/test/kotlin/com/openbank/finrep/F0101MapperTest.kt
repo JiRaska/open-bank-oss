@@ -11,19 +11,122 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
 
+/**
+ * Fixtures use ledger's real sign convention — `net = totalDebit − totalCredit`, so credit-normal
+ * accounts (LIABILITY, EQUITY, INCOME) are NEGATIVE. The previous fixtures passed a positive
+ * liability, which no real trial balance line can carry for a credit-balance account, and that is
+ * why the mapper's `assets − liabilities` derivation read as sensible while being wrong.
+ *
+ * The `isBalanced` assertions here come in falsification PAIRS on purpose (issue #5987). A check
+ * that cannot be shown to fail is not a check, and the specific way the old one could not fail —
+ * equity derived as the residual of the very identity being tested — is invisible to any test that
+ * only ever asserts `true`.
+ */
 class F0101MapperTest {
 
+    private val asOf: LocalDate = LocalDate.of(2026, 6, 30)
+
+    /** Assets 500 000 = liabilities 300 000 + equity 200 000 (retained result). Σ net == 0. */
+    private fun balancedTrialBalance() = listOf(
+        line("1000", "ASSET", "500000"),
+        line("2000", "LIABILITY", "-300000"),
+        line("4000", "INCOME", "-260000"),
+        line("5000", "EXPENSE", "60000"),
+    )
+
     @Test
-    fun `F01_01 maps assets liabilities and derives equity`() {
-        val lines = listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
-            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000")),
-        )
-        val template = F0101Mapper.map(lines, LocalDate.of(2026, 6, 30))
+    fun `F01_01 reports assets liabilities and equity as positive magnitudes`() {
+        val template = F0101Mapper.map(balancedTrialBalance(), asOf)
 
         assertThat(template.templateId).isEqualTo("F01.01")
-        assertThat(template.cells).anyMatch { it.rowRef == "r010" && it.value == BigDecimal("500000") }
-        assertThat(template.cells).anyMatch { it.rowRef == "r380" && it.value == BigDecimal("300000") }
-        assertThat(template.cells).anyMatch { it.rowRef == "r490" && it.value == BigDecimal("200000") }
+        assertThat(cell(template.cells, "r010")).isEqualByComparingTo("500000")
+        assertThat(cell(template.cells, "r380")).isEqualByComparingTo("300000")
+        assertThat(cell(template.cells, "r490")).isEqualByComparingTo("200000")
     }
+
+    @Test
+    fun `equity is sourced from EQUITY INCOME and EXPENSE, not from assets minus liabilities`() {
+        // The discriminating fixture: assets − liabilities is 500 000 − 300 000 = 200 000, but the
+        // P&L half says the result is only 150 000. A residual-derived r490 would report 200 000
+        // and could not tell these apart; a sourced one reports 150 000 AND flags the 50 000 gap.
+        val lines = listOf(
+            line("1000", "ASSET", "500000"),
+            line("2000", "LIABILITY", "-300000"),
+            line("4000", "INCOME", "-210000"),
+            line("5000", "EXPENSE", "60000"),
+        )
+
+        val template = F0101Mapper.map(lines, asOf)
+
+        assertThat(cell(template.cells, "r490")).isEqualByComparingTo("150000")
+        assertThat(template.isBalanced).isFalse()
+    }
+
+    @Test
+    fun `a trial balance that ties out is reported as balanced`() {
+        assertThat(F0101Mapper.map(balancedTrialBalance(), asOf).isBalanced).isTrue()
+    }
+
+    @Test
+    fun `an asset booked with no counterpart is reported as UNBALANCED`() {
+        // The falsifying input. One extra debit-side line and nothing to credit against it — the
+        // shape of a lost or filtered response line, or a ledger-side posting defect that survived
+        // into the frozen evidence.
+        val lines = balancedTrialBalance() + line("1001", "ASSET", "70000")
+
+        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isFalse()
+    }
+
+    @Test
+    fun `a residual in the P&L half falsifies the BALANCE SHEET template`() {
+        // Proof the check is not implied by what F01.01 itself computes: INCOME and EXPENSE feed no
+        // row this template reports as a top-line total, yet a residual introduced there is caught.
+        val lines = balancedTrialBalance() + line("5001", "EXPENSE", "12000")
+
+        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isFalse()
+    }
+
+    @Test
+    fun `a currency that does not tie out falsifies the template even when the totals cancel`() {
+        // Summing residuals across currencies would report this as balanced: EUR is +40 000 short
+        // and CZK is 40 000 long, so a single global sum is exactly zero. Grouping per currency is
+        // what stops the check being satisfiable by coincidence.
+        val lines = listOf(
+            line("1000", "ASSET", "500000"),
+            line("2000", "LIABILITY", "-460000"),
+            line("1000", "ASSET", "100000", currency = "EUR"),
+            line("2000", "LIABILITY", "-140000", currency = "EUR"),
+        )
+
+        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isFalse()
+    }
+
+    @Test
+    fun `decimal scale differences do not fake an imbalance`() {
+        // `BigDecimal("0.00") != BigDecimal.ZERO` by equals. An equals-based residual check would
+        // call every real money trial balance unbalanced.
+        val lines = listOf(
+            line("1000", "ASSET", "150000.00"),
+            line("2000", "LIABILITY", "-150000.0000"),
+        )
+
+        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isTrue()
+    }
+
+    @Test
+    fun `an empty trial balance is balanced, not unbalanced`() {
+        // An absent trial balance is an under-reporting defect with its own detector
+        // (`openbank.finrep.trial_balance.lines`); collapsing it onto this flag would make two
+        // different failures indistinguishable to a consumer acting on either.
+        val template = F0101Mapper.map(emptyList(), asOf)
+
+        assertThat(template.isBalanced).isTrue()
+        assertThat(template.cells).allMatch { it.value.compareTo(BigDecimal.ZERO) == 0 }
+    }
+
+    private fun line(code: String, accountType: String, net: String, currency: String = "CZK") =
+        TrialBalanceLineDto(code = code, accountType = accountType, net = BigDecimal(net), currency = currency)
+
+    private fun cell(cells: List<com.openbank.finrep.domain.model.FinrepCell>, rowRef: String) =
+        cells.single { it.rowRef == rowRef }.value
 }

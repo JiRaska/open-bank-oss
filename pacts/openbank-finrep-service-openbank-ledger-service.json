@@ -23,6 +23,7 @@
           "lines": [
             {
               "code": "1100-CASH-CLEARING-CZK",
+              "currency": "CZK",
               "net": 150000.0,
               "type": "ASSET"
             }
@@ -52,6 +53,14 @@
               ]
             },
             "$.lines[*].code": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.lines[*].currency": {
               "combine": "AND",
               "matchers": [
                 {

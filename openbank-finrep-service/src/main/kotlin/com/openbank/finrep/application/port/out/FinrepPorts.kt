@@ -7,7 +7,22 @@ package com.openbank.finrep.application.port.out
 import java.math.BigDecimal
 import java.time.LocalDate
 
-data class TrialBalanceLineDto(val code: String, val accountType: String, val net: BigDecimal)
+/**
+ * One GL account line of the ledger trial balance.
+ *
+ * [net] is `totalDebit − totalCredit`, ledger's own uniform convention for every account type — so
+ * it is NEGATIVE for a credit-normal account (liabilities, equity, income) and positive for a
+ * debit-normal one (assets, expenses). The mappers are responsible for presenting each FINREP row
+ * in its reporting sign; [com.openbank.finrep.domain.model.TrialBalanceIdentity] relies on the raw
+ * convention being uniform, which is what makes `Σ net == 0` the double-entry identity.
+ *
+ * [currency] is carried because the identity holds PER CURRENCY. Without it the check could be
+ * satisfied by a CZK line cancelling a lost EUR one (issue #5987). It carries NO default on
+ * purpose: a defaulted `"CZK"` would let a response that omits the field deserialize into a
+ * plausible-looking line, silently merging every currency into one residual bucket — the check
+ * would then still pass, for a reason nothing anywhere would report.
+ */
+data class TrialBalanceLineDto(val code: String, val accountType: String, val net: BigDecimal, val currency: String)
 
 interface LedgerPort {
     suspend fun getTrialBalance(asOf: LocalDate): List<TrialBalanceLineDto>

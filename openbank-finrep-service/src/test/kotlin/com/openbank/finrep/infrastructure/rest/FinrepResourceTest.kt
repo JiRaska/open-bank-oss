@@ -44,6 +44,7 @@ class FinrepResourceTest {
             templateId = "F01.01",
             period = LocalDate.now(fixedClock),
             cells = listOf(FinrepCell(rowRef = "r010", colRef = "c010", value = BigDecimal.ZERO)),
+            isBalanced = true,
         )
         val captured = slot<GetFinrepTemplateQuery>()
         coEvery { finrepUseCase.getTemplate(capture(captured)) } returns expected
@@ -63,6 +64,7 @@ class FinrepResourceTest {
             templateId = "F02.00",
             period = explicitDate,
             cells = emptyList(),
+            isBalanced = true,
         )
         val captured = slot<GetFinrepTemplateQuery>()
         coEvery { finrepUseCase.getTemplate(capture(captured)) } returns expected
