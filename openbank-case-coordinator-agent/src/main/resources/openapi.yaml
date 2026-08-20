@@ -318,7 +318,7 @@ components:
       properties:
         type:
           type: string
-          enum: [CASE_OPENED, CONTRIBUTION, PROPOSAL_EMITTED]
+          enum: [CASE_OPENED, CONTRIBUTION, PROPOSAL_EMITTED, SHADOW_RECORDED]
         atEpochMs:
           type: integer
           format: int64
@@ -341,6 +341,9 @@ components:
           type: string
         proposalType:
           type: string
+        shadow:
+          type: boolean
+          description: True when this terminal result is recorded for the bounded shadow pilot and was not delivered to HITL.
 
     CaseThread:
       type: object
