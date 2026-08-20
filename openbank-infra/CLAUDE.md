@@ -142,6 +142,18 @@ out of it (they are path-scoped, not less important — several are live-inciden
   via `fleet-attestation.yml`) — it checks every image *declared* in gitops, incl. initContainers
   and sidecars, so a gap is caught while still latent. Green gate before any Enforce graduation
   (`rules.yaml: provenance.fleet_attestation_gate`).
+- **`gen-network-policies.py` emits INGRESS only, so a new in-cluster edge also needs the CALLER's
+  hand-written EGRESS rule — and the omission is silent in both directions.** Measured 2026-08-20:
+  LiteLLM's Langfuse trace callback died on `ConnectTimeout` to `langfuse.ai-platform.svc:3000`
+  while both pods were 1/1 Running, ArgoCD was Synced/Healthy, the generated
+  `langfuse-ingress-allow-list` correctly admitted the same namespace, and LiteLLM still answered
+  200 to every caller — the only symptom anywhere was `/api/public/traces` returning an empty list.
+  Same namespace is NOT the same as allowed: a pod carrying an egress policy is deny-by-default for
+  everything that policy does not name, and `networkpolicy-litellm-egress.yaml` named DNS, 443 to
+  the internet, and its own Postgres. Isolate it in one command — run a throwaway pod with no
+  egress policy in the same namespace and curl the target (HTTP 200 there + timeout from the
+  policed pod pins it to egress, not to the Service, DNS or the ingress allow-list). Note the
+  throwaway pod needs a `restricted` PodSecurity context or the namespace refuses it.
 - **A ConfigMap a pod parses ONCE at startup needs a pod-roll annotation, or the edit is a no-op
   against a green ArgoCD.** LiteLLM reads `--config` at boot and the ConfigMap is a plain volume
   mount, so a new model route reaches the pod's filesystem and the proxy keeps serving the list it
