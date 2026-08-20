@@ -80,7 +80,6 @@ AUDIT_KAFKAUSER = "audit-service"
 # change (a new Read grant on a running consumer group) whose blast radius wants its own review,
 # and PR #5857 is already in flight for the delegation row.
 _GAP_ISSUE = {
-    "openbank-delegation-service": "#5859 / PR #5857 (in flight)",
     "openbank-ledger-service": "#6035 - the posting record itself, the largest of the five",
     "openbank-sdd-service": "#6035",
     "openbank-interest-service": "#6035",
@@ -94,7 +93,6 @@ _GAP_ISSUE = {
     "openbank-psd2-service": "#6035 - found by this check, not named in the issue",
 }
 _GAP_TOPICS = {
-    "openbank-delegation-service": "openbank.delegation.events",
     "openbank-ledger-service": "openbank.ledger.journal.posted",
     "openbank-sdd-service": "openbank.sdd.event",
     "openbank-interest-service": "openbank.interest.accrual.event",
@@ -116,6 +114,18 @@ OUT_OF_SCOPE: dict[str, str] = {
         "Auditing it would record requests to notify, not the money-path facts that caused them "
         "- those are already audited on each producer's own event topic."
     ),
+}
+
+# Gaps whose fix is an OPEN PR, so this check must accept BOTH states: still a gap while the PR is
+# open, already fixed the moment it merges. Neither is an error - failing on the fixed state would
+# red-gate `main` the instant that PR lands, purely because two PRs were in flight at once.
+#
+# This is deliberately NOT a hole in the ratchet. An entry here is reported as a ::warning naming
+# the PR the moment its gap is closed, so it announces its own removal rather than waiting to be
+# noticed, and it covers ONE topic against ONE named open PR. A new gap for a topic not listed here
+# is an error exactly as before.
+IN_FLIGHT: dict[str, str] = {
+    "openbank.delegation.events": "PR #5857 fixes all three places (#5859)",
 }
 
 PLACES = ("topics", "attribution", "acl")
@@ -339,6 +349,12 @@ def selftest(repo: pathlib.Path) -> int:
     cases.append(("and with all three present it is NOT flagged",
                   victim in subscribed and victim in attributed and acl_covers(victim, acls)))
 
+    # IN_FLIGHT must accept BOTH states and must not silently swallow an unrelated topic.
+    cases.append(("IN_FLIGHT covers only its own topics", set(IN_FLIGHT) <= set(_GAP_TOPICS.values()) | {"openbank.delegation.events"}))
+    cases.append(("IN_FLIGHT and KNOWN_GAPS do not overlap",
+                  not {k.split("#")[1] for k in KNOWN_GAPS} & set(IN_FLIGHT)))
+    cases.append(("OUT_OF_SCOPE and IN_FLIGHT do not overlap", not set(OUT_OF_SCOPE) & set(IN_FLIGHT)))
+
     failed = [name for name, ok in cases if not ok]
     if failed:
         for name in failed:
@@ -366,8 +382,14 @@ def main() -> int:
     findings: list[str] = []
     used: set[str] = set()
 
+    in_flight_open: set[str] = set()
+
     for service, topic, place in gaps:
         key = f"{service}#{topic}#{place}"
+        if topic in IN_FLIGHT:
+            in_flight_open.add(topic)
+            print(f"::notice::in flight {key}: {IN_FLIGHT[topic]}")
+            continue
         where, consequence = PLACE_CONSEQUENCE[place]
         if key in KNOWN_GAPS:
             used.add(key)
@@ -383,6 +405,12 @@ def main() -> int:
         findings.append(
             f"::error::stale KNOWN_GAPS entry {key} — that is no longer a gap (or the topic is no "
             f"longer produced). Remove it, so the list can only shrink.",
+        )
+
+    for topic in sorted(set(IN_FLIGHT) - in_flight_open):
+        print(
+            f"::warning::IN_FLIGHT entry {topic} is no longer a gap - {IN_FLIGHT[topic]} has "
+            f"landed. Delete the entry so the ratchet covers this topic again.",
         )
 
     for topic in sorted(set(OUT_OF_SCOPE) - excluded):
