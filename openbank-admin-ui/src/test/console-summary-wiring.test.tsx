@@ -22,6 +22,12 @@ import { SessionProvider } from '@/components/auth/SessionProvider'
 import LendingPage from '@/app/lending/page'
 import CampaignsPage from '@/app/campaigns/page'
 
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
+  signIn: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
 const HOUR = 3_600_000
 
 function Providers({ children }: { children: React.ReactNode }) {
