@@ -16,6 +16,7 @@ import io.temporal.client.WorkflowClientOptions
 import io.temporal.serviceclient.WorkflowServiceStubs
 import org.assertj.core.api.Assertions.assertThatIllegalStateException
 import org.junit.jupiter.api.Test
+import javax.sql.DataSource
 
 class ShadowPilotPreflightTest {
 
@@ -23,6 +24,7 @@ class ShadowPilotPreflightTest {
     private val temporal = mockk<TemporalConfig>()
     private val config = mockk<CaseCoordinatorConfig>()
     private val caseGroup = mockk<CaseCoordinatorConfig.CaseGroup>()
+    private val dataSource = mockk<DataSource>()
 
     @Test
     fun `shadow startup refuses an existing legacy case workflow`() {
@@ -38,7 +40,7 @@ class ShadowPilotPreflightTest {
             .addExecutions(io.temporal.api.workflow.v1.WorkflowExecutionInfo.getDefaultInstance())
             .build()
 
-        assertThatIllegalStateException().isThrownBy { ShadowPilotPreflight(client, temporal, config) }
+        assertThatIllegalStateException().isThrownBy { ShadowPilotPreflight(client, temporal, config, dataSource) }
             .withMessageContaining("legacy case workflow")
     }
 }

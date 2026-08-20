@@ -13,6 +13,7 @@ import io.temporal.api.filter.v1.WorkflowTypeFilter
 import io.temporal.api.workflowservice.v1.ListOpenWorkflowExecutionsRequest
 import io.temporal.client.WorkflowClient
 import jakarta.enterprise.context.ApplicationScoped
+import javax.sql.DataSource
 
 /**
  * Refuses a shadow-pilot rollout while a legacy case workflow remains open.
@@ -28,6 +29,7 @@ class ShadowPilotPreflight(
     private val workflowClient: WorkflowClient,
     private val temporalConfig: TemporalConfig,
     private val config: CaseCoordinatorConfig,
+    private val dataSource: DataSource,
 ) {
 
     init {
@@ -35,6 +37,7 @@ class ShadowPilotPreflight(
     }
 
     private fun verifyNoLegacyOpenCases() {
+        if (alreadyCompleted()) return
         check(temporalConfig.enabled()) {
             "Shadow pilot requires Temporal to be enabled for its legacy-workflow preflight"
         }
@@ -47,6 +50,17 @@ class ShadowPilotPreflight(
             .executionsCount
         check(openRuns == 0) {
             "Shadow pilot cannot start while $openRuns legacy case workflow run(s) are open"
+        }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("INSERT INTO case_shadow_pilot_preflight (id) VALUES (TRUE) ON CONFLICT DO NOTHING").use {
+                it.executeUpdate()
+            }
+        }
+    }
+
+    private fun alreadyCompleted(): Boolean = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM case_shadow_pilot_preflight WHERE id = TRUE)").use { statement ->
+            statement.executeQuery().use { result -> result.next() && result.getBoolean(1) }
         }
     }
 

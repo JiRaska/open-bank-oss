@@ -164,6 +164,12 @@ export default function IaopsCaseThreadPage() {
                   detail: t('Koordinátor vytvořil proposal event. Stav doručení a lidského rozhodnutí tato stránka nesleduje.', 'The coordinator created a proposal event. This page does not track delivery or the human decision.'),
                   tone: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)',
                 }
+              : brief.stage === 'shadow_recorded'
+                ? {
+                    title: t('Shadow výsledek zaznamenán', 'Shadow result recorded'),
+                    detail: t('Jde pouze o pilotní důkaz. Výsledek nebyl odeslán do HITL fronty ani nepředstavuje lidské rozhodnutí.', 'This is pilot evidence only. It was not sent to the HITL queue and is not a human decision.'),
+                    tone: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--border)',
+                  }
               : brief.stage === 'needs_convergence'
                 ? {
                     title: t('Neshoda zůstává viditelná', 'Dissent remains visible'),
