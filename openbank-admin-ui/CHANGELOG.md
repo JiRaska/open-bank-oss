@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.173.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.3...admin-ui-v0.173.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** distinguish governance controls from autonomy ([#5805](https://github.com/JiRaska/open-bank-oss/issues/5805)) ([9a1a8c1](https://github.com/JiRaska/open-bank-oss/commit/9a1a8c1c8b64aa484fcc20e073cbb08eabe6effc))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose FX tab state ([#5810](https://github.com/JiRaska/open-bank-oss/issues/5810)) ([4019caa](https://github.com/JiRaska/open-bank-oss/commit/4019caa48353f6fd57d5bc3ba8972bf6f313762f))
+
 ## [0.172.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.2...admin-ui-v0.172.3) (2026-08-20)
 
 
