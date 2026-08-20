@@ -37,7 +37,10 @@ class ShadowPilotPreflight(
     }
 
     private fun verifyNoLegacyOpenCases() {
-        if (alreadyCompleted()) return
+        val rolloutId = config.case().shadowRolloutId().filter { it.isNotBlank() }.orElseThrow {
+            IllegalStateException("Shadow pilot requires a distinct shadowRolloutId")
+        }
+        if (alreadyCompleted(rolloutId)) return
         check(temporalConfig.enabled()) {
             "Shadow pilot requires Temporal to be enabled for its legacy-workflow preflight"
         }
@@ -52,14 +55,16 @@ class ShadowPilotPreflight(
             "Shadow pilot cannot start while $openRuns legacy case workflow run(s) are open"
         }
         dataSource.connection.use { connection ->
-            connection.prepareStatement("INSERT INTO case_shadow_pilot_preflight (id) VALUES (TRUE) ON CONFLICT DO NOTHING").use {
+            connection.prepareStatement("INSERT INTO case_shadow_pilot_preflight (rollout_id) VALUES (?) ON CONFLICT DO NOTHING").use {
+                it.setString(1, rolloutId)
                 it.executeUpdate()
             }
         }
     }
 
-    private fun alreadyCompleted(): Boolean = dataSource.connection.use { connection ->
-        connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM case_shadow_pilot_preflight WHERE id = TRUE)").use { statement ->
+    private fun alreadyCompleted(rolloutId: String): Boolean = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM case_shadow_pilot_preflight WHERE rollout_id = ?)").use { statement ->
+            statement.setString(1, rolloutId)
             statement.executeQuery().use { result -> result.next() && result.getBoolean(1) }
         }
     }

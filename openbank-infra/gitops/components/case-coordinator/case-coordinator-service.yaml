@@ -124,6 +124,9 @@ spec:
             # them to proposal-events/HITL. Any other class is rejected by CaseOpenService.
             - name: CASE_COORDINATOR_CASE_DELIVERY_MODE
               value: SHADOW
+            # Rotate this ID for each distinct shadow rollout; startup then rechecks legacy runs.
+            - name: CASE_COORDINATOR_CASE_SHADOW_ROLLOUT_ID
+              value: incident-triage-shadow-2026-08-20
             # LiteLLM virtual key (ESO case-coordinator-litellm; reuses KEY_AGENT_SERVICE
             # until a per-service virtual key is provisioned in Vault — a Vault admin action).
             - name: CASE_COORDINATOR_MODEL_API_KEY

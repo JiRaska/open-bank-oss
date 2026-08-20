@@ -84,5 +84,7 @@ interface CaseCoordinatorConfig {
         /** Shadow mode is valid only for the bounded non-money-path incident-response pilot. */
         @WithDefault("HITL")
         fun deliveryMode(): CaseDeliveryMode
+
+        fun shadowRolloutId(): java.util.Optional<String>
     }
 }
