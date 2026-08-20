@@ -186,11 +186,11 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '2px', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
+      <div role="group" aria-label={t('Karty detailu produktu', 'Product detail sections')} style={{ display: 'flex', gap: '2px', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap', flexShrink: 0 }}>
         {tabs.map(tabItem => (
-          <button key={tabItem.id} onClick={() => setTab(tabItem.id as typeof tab)}
+          <button key={tabItem.id} type="button" aria-pressed={tab === tabItem.id} onClick={() => setTab(tabItem.id as typeof tab)}
             style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px', fontWeight: 600, borderRadius: '5px', border: 'none', cursor: 'pointer', background: tab === tabItem.id ? 'var(--accent)' : 'transparent', color: tab === tabItem.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s' }}>
-            {tabItem.icon}{tabItem.label}
+            <span aria-hidden="true">{tabItem.icon}</span>{tabItem.label}
           </button>
         ))}
       </div>
@@ -720,7 +720,7 @@ export default function ProductCatalogPage() {
               <h2 style={{ fontSize: '15px', fontWeight: 700 }}>
                 {editingProduct ? t('Upravit produkt', 'Edit Product') : t('Nový produkt', 'New Product')}
               </h2>
-              <button onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} /></button>
+              <button type="button" aria-label={t('Zavřít editor produktu', 'Close product editor')} onClick={() => setModalOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)' }}><X size={18} aria-hidden="true" /></button>
             </div>
             <form onSubmit={handleSave} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
               <div className="grid-2">
