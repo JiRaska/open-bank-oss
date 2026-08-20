@@ -4,6 +4,8 @@
 
 package com.openbank.delegation.infrastructure.persistence.repository
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.delegation.application.port.out.DelegationOutboxRepository
 import com.openbank.delegation.application.port.out.ReserveOutcome
 import com.openbank.delegation.application.port.out.SpendReservationRepository
 import com.openbank.delegation.domain.model.CountedSpend
@@ -12,6 +14,8 @@ import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.delegation.domain.model.SpendWindow
 import com.openbank.delegation.infrastructure.persistence.entity.SpendReservationEntity
+import com.openbank.libs.domain.event.DomainEvent
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.PanacheRepository
 import io.smallrye.mutiny.Uni
@@ -43,18 +47,27 @@ import java.util.UUID
  * (same serialisation, but keyed on a number with no referential integrity, so a lock could be
  * taken on a grant that does not exist).
  *
+ * ADR-0249 D4 (issue #5728) adds the third: the audit event for a reserve or a settle is written
+ * to `delegation_outbox` INSIDE these same transactions, by the same rule the grant lifecycle
+ * already follows in `DelegationRepositoryImpl`. A separate publish after the commit would be a
+ * second failure point on a money path — the reservation would be real and the audit trail would
+ * not, which is the exact overclaim ADR-0249's Consequences section made about this path.
+ *
  * Idempotency is the second, independent guarantee: `uq_delegation_spend_idempotency` makes a
  * repeated key a database fact rather than a read-then-write, so even a retry that somehow escapes
  * the lock cannot double-count — it violates the constraint instead.
  */
 @ApplicationScoped
-class SpendReservationRepositoryImpl :
-    SpendReservationRepository,
+class SpendReservationRepositoryImpl(
+    private val outboxRepository: DelegationOutboxRepository,
+    private val objectMapper: ObjectMapper,
+) : SpendReservationRepository,
     PanacheRepository<SpendReservationEntity> {
 
     override suspend fun reserve(
         candidate: SpendReservation,
         window: SpendWindow,
+        auditEvent: (SpendReservation) -> DomainEvent,
         decide: (CountedSpend) -> SpendDecision,
     ): ReserveOutcome = Panache.withTransaction {
         Panache.getSession().flatMap { session ->
@@ -63,7 +76,7 @@ class SpendReservationRepositoryImpl :
                     if (existing != null) {
                         Uni.createFrom().item(ReserveOutcome.Replayed(existing.toDomain()) as ReserveOutcome)
                     } else {
-                        countAndInsert(session, candidate, window, decide)
+                        countAndInsert(session, candidate, window, auditEvent, decide)
                     }
                 }
             }
@@ -88,6 +101,7 @@ class SpendReservationRepositoryImpl :
         reservationId: UUID,
         target: SpendReservationState,
         settledAt: OffsetDateTime,
+        auditEvent: (SpendReservation) -> DomainEvent,
     ): SpendReservation? = Panache.withTransaction {
         find("id = ?1 and grantId = ?2", reservationId, grantId).firstResult<SpendReservationEntity>()
             .flatMap { before ->
@@ -101,8 +115,14 @@ class SpendReservationRepositoryImpl :
                         reservationId,
                         grantId,
                         SpendReservationState.RESERVED,
-                    ).map { count ->
-                        if (count > 0L) before.toDomain().copy(state = target, settledAt = settledAt) else null
+                    ).flatMap { count ->
+                        if (count > 0L) {
+                            val settled = before.toDomain().copy(state = target, settledAt = settledAt)
+                            outboxRepository.persistInTransaction(outboxMessage(auditEvent(settled)))
+                                .replaceWith(settled)
+                        } else {
+                            Uni.createFrom().nullItem()
+                        }
                     }
                 }
             }
@@ -121,15 +141,25 @@ class SpendReservationRepositoryImpl :
         session: Mutiny.Session,
         candidate: SpendReservation,
         window: SpendWindow,
+        auditEvent: (SpendReservation) -> DomainEvent,
         decide: (CountedSpend) -> SpendDecision,
     ): Uni<ReserveOutcome> = countedSpend(session, candidate, window).flatMap { counted ->
         when (val decision = decide(counted)) {
             is SpendDecision.Refused -> Uni.createFrom().item(ReserveOutcome.Refused(decision) as ReserveOutcome)
 
             SpendDecision.Allowed -> session.persist(SpendReservationEntity.fromDomain(candidate))
+                .flatMap { outboxRepository.persistInTransaction(outboxMessage(auditEvent(candidate))) }
                 .replaceWith(ReserveOutcome.Created(candidate) as ReserveOutcome)
         }
     }
+
+    /** Same shape as `DelegationRepositoryImpl.outboxMessage` — one outbox, one envelope. */
+    private fun outboxMessage(event: DomainEvent): OutboxMessage = OutboxMessage(
+        aggregateId = event.aggregateId,
+        eventType = event.eventType,
+        payload = objectMapper.writeValueAsString(event),
+        createdAt = event.occurredAt,
+    )
 
     /**
      * RESERVED and CONFIRMED count, RELEASED does not, and only rows in the SAME currency as the

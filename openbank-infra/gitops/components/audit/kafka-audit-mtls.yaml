@@ -179,6 +179,16 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # Issue #5728 (ADR-0249 D4): audit-service did not subscribe to the delegation topic at
+      # all, so no grant lifecycle event was audited and the new spend-reservation events would
+      # have been ACL-denied on arrival. The KafkaTopic resource already exists (owned by its
+      # producer, components/delegation/kafka-topic.yaml) -- this is only the Read grant.
+      - resource:
+          type: topic
+          name: openbank.delegation.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service
