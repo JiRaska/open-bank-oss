@@ -97,13 +97,20 @@ class AccountService(
         when (val lookup = productCatalog.findById(command.productId)) {
             is ProductLookupResult.NotFound ->
                 throw ProductNotEligibleException(command.productId, "product does not exist")
-            is ProductLookupResult.Found ->
+            is ProductLookupResult.Found -> {
                 if (lookup.product.status != "ACTIVE") {
                     throw ProductNotEligibleException(
                         command.productId,
                         "product status is ${lookup.product.status}, not ACTIVE",
                     )
                 }
+                if (lookup.product.currency != command.currency.code) {
+                    throw ProductNotEligibleException(
+                        command.productId,
+                        "product currency is ${lookup.product.currency}, not ${command.currency.code}",
+                    )
+                }
+            }
             ProductLookupResult.Unavailable -> Unit
         }
 
