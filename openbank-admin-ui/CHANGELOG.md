@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.178.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.177.0...admin-ui-v0.178.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify approval decision controls ([#5976](https://github.com/JiRaska/open-bank-oss/issues/5976)) ([2ab1ac1](https://github.com/JiRaska/open-bank-oss/commit/2ab1ac143dc1712949c5937587a8ffbdde511963))
+* **admin-ui:** improve API catalog discovery ([#5964](https://github.com/JiRaska/open-bank-oss/issues/5964)) ([5e42849](https://github.com/JiRaska/open-bank-oss/commit/5e42849023316e4a8aedee4ec7f87f7b52c2213f))
+
 ## [0.177.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.176.0...admin-ui-v0.177.0) (2026-08-20)
 
 
