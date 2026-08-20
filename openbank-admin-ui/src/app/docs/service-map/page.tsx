@@ -573,9 +573,10 @@ export default function ServiceMapPage() {
 
       {/* Filter tabs and Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '16px' }}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div role="group" aria-label={t('Filtrování skupin služeb', 'Service group filters')} style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           {[['all', t('Vše', 'All')], ...Object.entries(GROUP_LABELS).map(([k]) => [k, groupLabel(k)])].map(([key, label]) => (
             <button key={key} onClick={() => setFilter(key)}
+              type="button" aria-pressed={filter === key}
               style={{
                 padding: '5px 12px', fontSize: '12px', fontWeight: 600, borderRadius: '20px',
                 border: `1px solid ${filter === key ? 'var(--accent)' : 'var(--border)'}`,
@@ -585,13 +586,14 @@ export default function ServiceMapPage() {
               }}>{label}</button>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div role="group" aria-label={t('Ovládání mapy služeb', 'Service map controls')} style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           {([
-            { key: 'flow', on: flow, toggle: () => setFlow(v => !v), icon: flow ? <Pause size={13} /> : <Play size={13} />, label: t('Tok dat', 'Data flow') },
-            { key: 'infra', on: showInfra, toggle: () => setShowInfra(v => !v), icon: <Server size={13} />, label: t('Infra', 'Infra') },
-            { key: 'external', on: showExternal, toggle: () => setShowExternal(v => !v), icon: <Cloud size={13} />, label: t('3. strany', '3rd parties') },
+            { key: 'flow', on: flow, toggle: () => setFlow(v => !v), icon: flow ? <Pause aria-hidden="true" size={13} /> : <Play aria-hidden="true" size={13} />, label: t('Tok dat', 'Data flow') },
+            { key: 'infra', on: showInfra, toggle: () => setShowInfra(v => !v), icon: <Server aria-hidden="true" size={13} />, label: t('Infra', 'Infra') },
+            { key: 'external', on: showExternal, toggle: () => setShowExternal(v => !v), icon: <Cloud aria-hidden="true" size={13} />, label: t('3. strany', '3rd parties') },
           ]).map(c => (
             <button key={c.key} onClick={c.toggle} aria-pressed={c.on}
+              type="button" aria-label={c.label}
               title={t('Přepnout', 'Toggle') + ' ' + c.label}
               style={{
                 display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
@@ -603,13 +605,14 @@ export default function ServiceMapPage() {
               {c.icon}{c.label}
             </button>
           ))}
-          <button
+            <button
             onClick={checkHealth}
             disabled={isChecking}
+            type="button" aria-busy={isChecking}
             className="btn btn-secondary"
             style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}
           >
-            <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+            <RefreshCw aria-hidden="true" size={14} className={isChecking ? 'animate-spin' : ''} />
             {isChecking ? t('Zjišťuji…', 'Checking...') : t('Obnovit stav', 'Refresh Status')}
           </button>
         </div>
