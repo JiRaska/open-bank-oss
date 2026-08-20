@@ -204,11 +204,17 @@ model-gateway:
     # the same virtual key — a model entry here plus a route in litellm-config, no code change.
     #
     # WHY THESE TWO AND NOT WHATEVER IS TOP OF A LEADERBOARD: they were measured against a real
-    # Czech admin prompt through the gateway before being registered. gpt-oss-120b answered in
-    # 2.9s, DeepSeek-V4-Pro in 9.6s, both cleanly. Three others that look equally reasonable on
-    # paper were rejected by the same probe — Kimi-K3 leaked its chain of thought into the reply,
-    # GLM-5.2 returned empty content, Llama-4-Maverick answered HTTP 429 "Model busy". A config
-    # review cannot see any of that.
+    # Czech admin prompt through the gateway before being registered — gpt-oss-120b in 1-3s,
+    # DeepSeek-V4-Pro in 2.6-9.6s, both cleanly. Kimi-K3 was rejected on latency (44.7s) and
+    # Llama-4-Maverick answered HTTP 429 "Model busy"; GLM-5.2 is perfectly usable at 6.9s and is
+    # simply not needed as a third option. A config review cannot see any of that.
+    #
+    # BOTH REGISTERED MODELS ARE REASONING MODELS, which constrains one number here: the token
+    # budget is spent on reasoning BEFORE any answer text, so a low max_tokens returns an EMPTY
+    # content field rather than a short answer. Measured on gpt-oss-120b: 40 -> empty
+    # (finish_reason=length), 128 -> truncated mid-sentence, 512 -> finishes in 189 tokens. The
+    # loop's MAX_OUTPUT_TOKENS is 512, so this works; lowering it to save tokens would silently
+    # turn replies into blanks, which the UI renders as "(no reply)".
     #
     # Both stay `sensitivity: hosted`: they are off-cluster US providers, so the ADR-0031 D6
     # sensitive-context routing must not choose them. That tier still needs a self-hosted model,
