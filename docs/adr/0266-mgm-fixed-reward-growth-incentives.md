@@ -45,7 +45,7 @@ events; it will never mint codes, decide reward eligibility, or post money.
 ### Bounded-context ownership
 
 1. **Referral/MGM context** owns the referral relationship and lifecycle:
-   `INVITED → ATTRIBUTED → QUALIFIED → REWARDED`, with explicit `EXPIRED`, `REJECTED` and
+   `INVITED → ATTRIBUTED → QUALIFIED → REWARD_REQUESTED → REWARDED`, with explicit `EXPIRED`, `REJECTED` and
    `REVERSED` outcomes. It owns opaque invitation tokens, immutable referrer/referee binding,
    attribution windows, self-referral and same-party checks, one-reward-per-qualification
    idempotency, and anti-abuse decisions. It stores no campaign copy.
@@ -75,7 +75,9 @@ The first implementation will deliver one fixed reward and no arbitrary discount
   duplicate attribution and expired programs;
 - consume one named qualifying event (for example, an account activation) exactly once;
 - emit `referral.qualified.v1` and `referral.reward.requested.v1` with a stable idempotency key;
-- require the ledger/account handoff to return an authoritative accepted/rejected outcome;
+- model the ledger/account handoff as a contract boundary: the first slice uses a test double or
+  contract fixture for authoritative accepted/rejected outcomes; production posting remains blocked
+  until the separate money-path ADR and threat model are approved;
 - emit a reversal outcome for an invalidated qualification, without silently deleting history.
 
 Promo-code issuance and redemption are a subsequent slice. They must not be represented by a
