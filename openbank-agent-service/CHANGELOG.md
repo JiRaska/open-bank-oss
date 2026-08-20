@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.0...agent-service-v1.20.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **agent:** correct the model-selection notes — I measured the cap, not the models ([#5923](https://github.com/JiRaska/open-bank-oss/issues/5923)) ([0e9c8af](https://github.com/JiRaska/open-bank-oss/commit/0e9c8af3399d43d32463ada59623f69dd3bc5cb2))
+
 ## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.3...agent-service-v1.20.0) (2026-08-20)
 
 

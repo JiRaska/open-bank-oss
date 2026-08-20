@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.0...copilot-service-v0.13.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** index the help corpus 90s after boot, not on the next 6h cron ([#5935](https://github.com/JiRaska/open-bank-oss/issues/5935)) ([eba367a](https://github.com/JiRaska/open-bank-oss/commit/eba367a3c0b5af7c11c69ca60d9b9327f2ae9b55)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.1...copilot-service-v0.13.0) (2026-08-20)
 
 
