@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.179.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.178.0...admin-ui-v0.179.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify lineage controls ([#5984](https://github.com/JiRaska/open-bank-oss/issues/5984)) ([91d553d](https://github.com/JiRaska/open-bank-oss/commit/91d553d96a2cb625debf4e5150bcf62fdc8216fd))
+
 ## [0.178.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.177.0...admin-ui-v0.178.0) (2026-08-20)
 
 

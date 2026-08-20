@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.12.1...fraud-service-v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **ci:** isolate provider-pact verification from main-push build (ADR-0250 Phase 2) ([#5462](https://github.com/JiRaska/open-bank-oss/issues/5462)) ([deca231](https://github.com/JiRaska/open-bank-oss/commit/deca23153b0785265e421fa3c86bde64bf80f222))
+
+
+### Bug Fixes
+
+* **fraud:** dedupe velocity_aggregates on redelivery ([#5716](https://github.com/JiRaska/open-bank-oss/issues/5716)) ([#5786](https://github.com/JiRaska/open-bank-oss/issues/5786)) ([1fd2170](https://github.com/JiRaska/open-bank-oss/commit/1fd21708c799c625447923c3bd1ac2d574005d2c))
+* **libs-runtime:** switch AbstractOutboxDispatcher.metrics to constructor injection ([#5199](https://github.com/JiRaska/open-bank-oss/issues/5199)) ([1d07563](https://github.com/JiRaska/open-bank-oss/commit/1d075635ef70004e8b9b50475cd97aa31c9beafd)), closes [#5128](https://github.com/JiRaska/open-bank-oss/issues/5128)
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.12.0...fraud-service-v0.12.1) (2026-08-20)
 
 
