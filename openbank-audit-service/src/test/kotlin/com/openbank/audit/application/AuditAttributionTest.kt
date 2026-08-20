@@ -7,6 +7,7 @@ package com.openbank.audit.application
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
+import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
@@ -397,6 +398,28 @@ class AuditAttributionTest {
 
         assertThat(entry.captured.sourceService).isEqualTo("statement-service")
         assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `statement-service's restated event is attributed to the producer too`(): Unit = runBlocking {
+        // The sweep patched period.closed.v1 and period.close_failed.v1 and missed the third type,
+        // account.statement.period.restated.v1, which lives in its own service class
+        // (StatementRestatementService) rather than in StatementService/CloseOrchestrator. It also
+        // carried no `occurredAt`, so the row was stamped with the consumer's INGEST time and that
+        // was recorded as the business time — asserted here as OccurredAtSource.EVENT.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"account.statement.period.restated.v1",""" +
+                """"accountId":"${UUID.randomUUID()}","occurredAt":"2026-02-01T02:30:00Z",""" +
+                """"sourceService":"statement-service"}""",
+            EventAddress(topic = "openbank.statement.event"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("statement-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+        assertThat(entry.captured.occurredAt).isEqualTo(Instant.parse("2026-02-01T02:30:00Z"))
+        assertThat(entry.captured.occurredAtSource).isEqualTo(OccurredAtSource.EVENT)
     }
 
     @Test
