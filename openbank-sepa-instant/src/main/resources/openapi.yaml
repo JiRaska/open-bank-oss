@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SEPA Instant (SCT Inst) Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -244,34 +244,38 @@ components:
           enum: [FRAUD, DUPLICATE, WRONG_AMOUNT, WRONG_BENEFICIARY]
 
     SctInstPaymentResponse:
+      # Field-for-field with SctInstPaymentResponse in SctInstDtos.kt, which SctInstResource
+      # .toResponse() populates directly from the SctInstPayment aggregate.
       type: object
+      required: [paymentId, status, debtorIban, creditorIban, amount, currency, endToEndId, createdAt]
       properties:
-        id:
+        paymentId:
           type: string
           format: uuid
-        endToEndId:
+        status:
           type: string
-        debtorAccountId:
+          enum: [PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED]
+        debtorIban:
           type: string
-          format: uuid
         creditorIban:
-          type: string
-        creditorName:
           type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
-        status:
+        endToEndId:
           type: string
-          enum: [SUBMITTED, ACCEPTED, SETTLED, REJECTED, RECALLED]
-        submittedAt:
+        executionTimeoutAt:
           type: string
           format: date-time
+          nullable: true
         settledAt:
           type: string
           format: date-time
           nullable: true
+        createdAt:
+          type: string
+          format: date-time
 
     ApiError:
       type: object
