@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.182.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.1...admin-ui-v0.182.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove fake AML scan action ([#6079](https://github.com/JiRaska/open-bank-oss/issues/6079)) ([3924b65](https://github.com/JiRaska/open-bank-oss/commit/3924b6555b44f313fdc03227be53b850ed849ad1))
+
 ## [0.182.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.0...admin-ui-v0.182.1) (2026-08-20)
 
 
