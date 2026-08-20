@@ -83,9 +83,13 @@ REQUIRED_FIELDS = ("date", "ttl_days", "by", "ref")
 # whether or not anyone ever executed it, so citing one says "we know how to do this",
 # which is precisely the claim ADR-0242 says the estate must stop counting as a drill.
 # Measured 2026-08-19: the fleet's ONLY drill attestation was
-# `ledger.restore_drill … ref: runbook-0003`, and runbook-0003 is the PostgreSQL 16->18
-# major-upgrade procedure — not a restore, not a drill, and dated nowhere. It raised a
-# money-path readiness dimension from 2 to 3 on that basis.
+# `ledger.restore_drill … ref: runbook-0003`, the PostgreSQL 16->18 major-upgrade
+# procedure, raising a money-path readiness dimension from 2 to 3 on that basis.
+# #5673 then read the whole document, which is the step the original finding skipped: a
+# `## Restore Drill Result` section at the end DID record a real, measured restore. The
+# rule survives the correction unchanged — a citation that resolves to a plan cannot tell
+# a reader whether the plan was executed, and here it took reading 240 lines to find out
+# that it had been. Cite the record, not the procedure that produced it.
 EXERCISE_KEYS = {"restore_drill", "dr_drill"}
 
 # A drill log entry is the durable artifact: `## YYYY-MM-DD — <scenario>` in one of these.
@@ -94,14 +98,16 @@ DRILL_LOGS = ("docs/bcp/dr-test-log.md", "docs/bcp/chaos-test-log.md")
 # Exercise attestations that predate this rule and still cite a runbook. Shrink-only and
 # checked BOTH WAYS: a new one fails, and an entry that healed is reported so the list
 # cannot rot into a permanent exemption. Key: "<service>.<attestation key>".
-EXERCISE_REF_DEBT = {
-    "ledger.restore_drill": (
-        "#5673 — cites runbook-0003 (a PG major-upgrade procedure) for a 2026-07-26 "
-        "restore drill that has no entry in docs/bcp/dr-test-log.md. Left in place rather "
-        "than deleted because the drill may genuinely have happened; the attestant must "
-        "either log it with measured RTO/RPO or drop the claim."
-    ),
-}
+#
+# EMPTY since #5673. The one entry was `ledger.restore_drill`, and resolving it found the
+# opposite of what the debt note assumed: the drill HAD happened -- runbook-0003 carried a
+# `## Restore Drill Result` section with a measured RTO (~84 s), the failed attempts and
+# their root causes. So the defect was never a fabricated claim, it was an execution record
+# filed inside a plan document, where no reader and no gate could date it. It now lives in
+# docs/bcp/dr-test-log.md and the attestation cites that. Note what the citation could not
+# express and the log now does: the RTO is the DATABASE's, no service was cut over, and the
+# RPO was never measured at all.
+EXERCISE_REF_DEBT: dict[str, str] = {}
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 ISSUE_RE = re.compile(r"^#\d+$")
@@ -392,10 +398,21 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
         ),
         (
             # This line used to be the gate's own proof that a runbook is acceptable
-            # evidence for a drill. It is not (R7) — it is the fleet's one baselined debt,
-            # and the case now tests the EXEMPTION, not the rule.
-            "BASELINED DEBT: ledger.restore_drill's runbook ref is exempt, not endorsed",
+            # evidence for a drill, and then the single baselined exemption to R7. #5673
+            # cleared the debt, so it is now what it always should have been: the rule.
+            "R7: the formerly-baselined ledger.restore_drill runbook ref now fails too",
             "ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, ref: runbook-0003 }\n",
+            "error",
+            True,
+        ),
+        (
+            # The live entry's shape after #5673. Hermetic (the fixture log carries
+            # both dates); the REAL file is checked by the ordinary run over
+            # openbank-libs/governance/attestations.yaml, which is what goes red if the
+            # `## 2026-07-26` heading is ever removed from docs/bcp/dr-test-log.md.
+            "R7 TRUE ENTRY: the live ledger.restore_drill cites a log that carries its date",
+            ("ledger:\n  restore_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, "
+             "ref: docs/bcp/dr-test-log.md }\n"),
             "clean",
             True,
         ),
@@ -406,8 +423,11 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             True,
         ),
         (
+            # Date deliberately one the log does NOT carry. It used to be 2026-07-26,
+            # which #5673 then added to the log -- turning the gate's only proof that a
+            # missing entry is caught into a vacuous pass.
             "R7: a drill log that never got the entry is not evidence",
-            ("consent:\n  dr_drill: { date: 2026-07-26, ttl_days: 180, by: jiri, "
+            ("consent:\n  dr_drill: { date: 2026-07-04, ttl_days: 180, by: jiri, "
              "ref: docs/bcp/dr-test-log.md }\n"),
             "error",
             True,
@@ -540,7 +560,8 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
         (tmp / "docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md").write_text("x")
         (tmp / "docs/bcp").mkdir(parents=True)
         (tmp / "docs/bcp/dr-test-log.md").write_text(
-            "# DR Test Log\n\n## 2026-06-30 — table-top\n- **Type**: table-top\n")
+            "# DR Test Log\n\n## 2026-06-30 — table-top\n- **Type**: table-top\n"
+            "\n## 2026-07-26 — live restore\n- **Type**: live-restore\n")
         rel = "att.yaml"
 
         for name, body, expect, expect_one in cases:
