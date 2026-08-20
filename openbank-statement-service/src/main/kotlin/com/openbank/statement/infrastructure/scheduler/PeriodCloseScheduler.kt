@@ -42,6 +42,7 @@ class PeriodCloseScheduler(
         if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun onStart(@Observes event: StartupEvent) = registerLiveness()
 
     // Europe/Prague is explicit, not incidental (#1302): an unset @Scheduled timeZone means
