@@ -53,13 +53,15 @@ events; it will never mint codes, decide reward eligibility, or post money.
    has immutable terms, product scope, effective/expiry times, total and per-party limits,
    stacking policy and a maker/checker publication state. Redemption is a reservation followed by a
    commit (or release), keyed by an idempotency token; a retry cannot consume inventory twice.
-3. **Ledger/account** remains authoritative for monetary reward posting and reversal. The incentive
+3. **Ledger/account** remains authoritative for monetary reward posting and reversal. The referral
    context may request a posting with a stable reward reference, but cannot mark a reward as paid
-   from its own database. Its state machine therefore records `REWARD_REQUESTED` first and moves to
-   `REWARDED` only from an authenticated ledger-accepted outcome; a rejection or timeout records a
-   retryable/rejected outcome and never a local payment success. A reconciler correlates the durable
-   request, ledger response and reversal event by the same reward reference. Non-monetary points may
-   continue to use engagement's rewards hub, but points and money must not share a success state.
+   from its own database. The referral context alone owns its state machine: it records
+   `REWARD_REQUESTED` first and moves to `REWARDED` only from an authenticated ledger-accepted
+   outcome; a rejection or timeout records a retryable/rejected outcome and never a local payment
+   success. Ledger/account owns only the posting outcome and reversal; it never writes the referral
+   lifecycle. A reconciler correlates the durable request, ledger response and reversal event by the
+   same reward reference. Non-monetary points may continue to use engagement's rewards hub, but
+   points and money must not share a success state.
 4. **Campaign Studio** owns audience selection, content, journey execution and measurement. A
    campaign stores an immutable `incentiveOfferRef`/`referralProgramRef` plus attribution metadata;
    it records exposure and conversion evidence from events, not a copied reward amount or a mutable
@@ -100,7 +102,8 @@ contract-test evidence before deployment.
 The implementation is not complete until a real HTTP/integration path proves:
 
 1. program draft → independent publication → invite issuance;
-2. accepted invite attribution and rejection of self-referral, duplicate and expired invites;
+2. accepted invite attribution and rejection of self-referral, duplicate and expired invites under
+   replay and concurrency;
 3. exactly-once qualification and reward request under replay/concurrency;
 4. the ledger boundary contract: an accepted/rejected/reversed handoff, duplicate-reference
    rejection and idempotent retry using a test double or contract fixture; production money-path
