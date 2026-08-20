@@ -38,4 +38,11 @@ describe('document template authoring accessibility', () => {
     expect(page).toContain('id="template-status-filter"')
     expect(page).toContain('id="document-id"')
   })
+
+  it('names every icon-only row action and keeps it a non-submit button', () => {
+    expect(page).toContain("aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')}")
+    expect(page).toContain("aria-label={t('Publikovat šablonu', 'Publish template')}")
+    expect(page).toContain("aria-label={t('Vyřadit šablonu', 'Retire template')}")
+    expect(page).toContain("<button type=\"button\" className=\"btn btn-secondary btn-sm\"")
+  })
 })
