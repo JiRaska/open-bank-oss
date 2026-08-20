@@ -4,6 +4,7 @@
 
 package com.openbank.lending.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LedgerPosting
@@ -258,6 +259,52 @@ class TerminationServiceTest {
 
         assertThatThrownBy { service.accelerate(loan.id, "risk-1").await().indefinitely() }
             .hasMessageContaining("notice period")
+    }
+
+    // --- #3994/#5256: audit attribution on the two shared-helper event types -------------------
+    //
+    // `loan.withdrawn` and `loan.accelerated` are the only event types in this module built by a
+    // shared, parameterised helper (TerminationService.emitDomainEvent) rather than by a per-event
+    // payload builder, which is why the #5399 sweep patched their nine siblings and missed them.
+    // Both reach `openbank.lending.events`, which audit-service consumes: without `sourceService`
+    // AuditConsumer falls through to its topic table and records the row as TOPIC-attributed rather
+    // than as the producer's own claim — a silent, successful default.
+    //
+    // The assertion reads the emitted payload the PRODUCTION code builds, parsed as JSON, so it
+    // cannot pass on a key that is merely present as a substring somewhere else in the string.
+
+    @Test
+    fun `loan-withdrawn self-reports lending as its source service`() {
+        val loan = loan(LoanStatus.ACTIVE)
+        stubPack()
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loan.id) } returns Uni.createFrom().item(emptyList())
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.withdraw(loan.id, "customer-1").await().indefinitely()
+
+        val withdrawn = emitted.single { it.eventType == "loan.withdrawn" }
+        val payload = ObjectMapper().readTree(withdrawn.payload)
+        assertThat(payload.get("sourceService")?.asText()).isEqualTo("lending")
+        assertThat(payload.get("eventType")?.asText()).isEqualTo("loan.withdrawn")
+    }
+
+    @Test
+    fun `loan-accelerated self-reports lending as its source service`() {
+        val loan = loan(LoanStatus.TERMINATION_NOTICED).copy(noticeEndsOn = LocalDate.parse("2026-01-01"))
+        stubPack()
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan)
+        every { installments.findByLoan(loan.id) } returns Uni.createFrom().item(emptyList())
+        val emitted = mutableListOf<LendingOutboxMessage>()
+        every { events.emit(capture(emitted)) } returns Uni.createFrom().item(Unit)
+
+        service.accelerate(loan.id, "risk-1").await().indefinitely()
+
+        val accelerated = emitted.single { it.eventType == "loan.accelerated" }
+        val payload = ObjectMapper().readTree(accelerated.payload)
+        assertThat(payload.get("sourceService")?.asText()).isEqualTo("lending")
+        assertThat(payload.get("eventType")?.asText()).isEqualTo("loan.accelerated")
     }
 
     @Test

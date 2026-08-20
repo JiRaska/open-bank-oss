@@ -357,11 +357,29 @@ class TerminationService(
         return LendingOutboxMessage(aggregateId = id, eventType = "credit.loan.transition", payload = payload)
     }
 
+    /**
+     * `loan.withdrawn` and `loan.accelerated`, the two event types this helper is parameterised
+     * over. Both land on `openbank.lending.events`, which audit-service consumes.
+     *
+     * Issue #3994/#5256: the payload carries `sourceService` so `AuditConsumer` attributes the row
+     * from the producer's own claim ([AttributionSource.EVENT]) rather than falling through to its
+     * topic-derived table — a silent, successful default that is only visible by grouping
+     * `audit_entries` on a live database. PR #5399 swept this module's other nine event types and
+     * missed these two, because they are the only ones built by a shared, parameterised helper
+     * rather than by a per-event payload builder.
+     *
+     * The value is `"lending"`, not `"lending-service"`: every other event type in this module
+     * already self-reports `"lending"`, and one producer reporting two different names for itself
+     * splits its own attribution. `eventType` is the caller's [type] verbatim — this module's
+     * discriminators are dotted lowercase (`loan.withdrawn`), matching the `ce-type` header the
+     * outbox already publishes, so it deliberately does NOT take the fleet's SCREAMING_SNAKE form.
+     */
     private fun emitDomainEvent(loan: Loan, type: String): Uni<Unit> = events.emit(
         LendingOutboxMessage(
             aggregateId = loan.id.value,
             eventType = type,
-            payload = """{"loanId":"${loan.id.value}","partyId":"${loan.partyId}","occurredAt":"${clock.instant()}"}""",
+            payload = """{"eventType":"$type","loanId":"${loan.id.value}","partyId":"${loan.partyId}",""" +
+                """"occurredAt":"${clock.instant()}","sourceService":"lending"}""",
         ),
     )
 
