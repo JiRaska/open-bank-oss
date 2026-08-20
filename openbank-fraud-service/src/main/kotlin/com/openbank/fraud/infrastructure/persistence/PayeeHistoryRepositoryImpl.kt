@@ -4,12 +4,14 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.domain.model.PayeeHistory
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Instant
 import java.util.UUID
 
@@ -20,7 +22,12 @@ import java.util.UUID
  * transaction does not double-count `payment_count`.
  */
 @ApplicationScoped
-class PayeeHistoryRepositoryImpl(private val pool: PgPool) : PayeeHistoryRepository {
+class PayeeHistoryRepositoryImpl(
+    private val pool: PgPool,
+    private val metrics: FraudMetricsPort,
+    @ConfigProperty(name = "openbank.fraud.applied-signal-window", defaultValue = "100")
+    private val appliedSignalWindow: Int,
+) : PayeeHistoryRepository {
 
     override suspend fun recordPayment(
         accountId: UUID,
@@ -28,14 +35,19 @@ class PayeeHistoryRepositoryImpl(private val pool: PgPool) : PayeeHistoryReposit
         transactionId: UUID?,
         occurredAt: Instant,
     ) {
-        pool.preparedQuery(UPSERT_SQL).execute(
+        val result = pool.preparedQuery(UPSERT_SQL).execute(
             Tuple.of(
                 accountId.toString(),
                 payeeIdentifier,
                 occurredAt.toOffsetDateTime(),
                 transactionId?.toString(),
-            ),
+            ).addInteger(appliedSignalWindow),
         ).awaitSuspending()
+        // rowCount 0 means the ON CONFLICT ... WHERE was false: this (account, payee) row has
+        // already applied this transaction id and the increment was suppressed.
+        if (result.rowCount() == 0) {
+            metrics.recordSignalReplaySuppressed(AGGREGATE_NAME)
+        }
     }
 
     override suspend fun findHistory(accountId: UUID, payeeIdentifier: String): PayeeHistory? {
@@ -53,27 +65,44 @@ class PayeeHistoryRepositoryImpl(private val pool: PgPool) : PayeeHistoryReposit
     }
 
     companion object {
-        // Idempotency guard: only increment when the incoming transaction id is either absent
-        // (transactionId == NULL — the signal carries no aggregateId, so it cannot be deduplicated;
-        // matches the existing velocity_aggregates path, which has no dedup at all) or genuinely
-        // different from the last one recorded. A redelivered Kafka message for the SAME
-        // transactionId matches payee_history.last_transaction_id and the WHERE clause is false, so
-        // the DO UPDATE is skipped entirely (Postgres leaves the existing row untouched) — no
-        // double-count, and first_seen_at is preserved (only ever set on INSERT).
+        private const val AGGREGATE_NAME = "payee_history"
+
+        // Idempotency guard, issue #5789 (superseding the V3 last-writer marker, which has shipped
+        // since V3 and only ever caught a replay that was consecutive for this row).
+        // applied_transaction_ids is the SET of ids this (account, payee) row has actually applied,
+        // trimmed to the most recent $5 entries by fraud_append_applied (V6); the WHERE tests
+        // membership of that set, so a replay is suppressed however many other payments to the same
+        // payee landed in between. A signal with no transaction id (NULL) carries no identity to
+        // deduplicate by, is applied unconditionally as before, and is not remembered.
+        //
+        // The marker is NOT merely diagnostic in the guard: it is unioned into the set being tested.
+        // That covers the cutover window a backfill alone cannot — during a rolling deploy a pod still
+        // running the V5/V3 code writes last_transaction_id and leaves applied_transaction_ids empty, so
+        // a row touched after the migration but before the last old pod drains would otherwise carry no
+        // memory of the id it just applied. Unioning makes the new guard strictly stronger than the old
+        // one in every state, never weaker; outside that window the marker is always already the last
+        // element of the set and the union adds nothing.
+        // first_seen_at is still only ever set on INSERT, so a suppressed replay cannot move it.
+        // Residual bound (a decision, not an oversight): the set is bounded by a COUNT of signals,
+        // not by elapsed time — a replay arriving after $5 further payments to the same payee is
+        // applied again. See V6__applied_signal_ledger.sql.
         private const val UPSERT_SQL =
             """
             INSERT INTO payee_history
                 (account_id, payee_identifier, first_seen_at, last_paid_at, payment_count,
-                 last_transaction_id, updated_at)
-            VALUES ($1::uuid, $2, $3, $3, 1, $4::uuid, NOW())
+                 last_transaction_id, applied_transaction_ids, updated_at)
+            VALUES ($1::uuid, $2, $3, $3, 1, $4::uuid, array_remove(ARRAY[$4::uuid], NULL), NOW())
             ON CONFLICT (account_id, payee_identifier)
             DO UPDATE SET
-                last_paid_at        = EXCLUDED.last_paid_at,
-                payment_count       = payee_history.payment_count + 1,
-                last_transaction_id = EXCLUDED.last_transaction_id,
-                updated_at          = NOW()
+                last_paid_at            = EXCLUDED.last_paid_at,
+                payment_count           = payee_history.payment_count + 1,
+                last_transaction_id     = EXCLUDED.last_transaction_id,
+                applied_transaction_ids = fraud_append_applied(
+                    payee_history.applied_transaction_ids, EXCLUDED.last_transaction_id, $5),
+                updated_at              = NOW()
             WHERE EXCLUDED.last_transaction_id IS NULL
-               OR payee_history.last_transaction_id IS DISTINCT FROM EXCLUDED.last_transaction_id
+               OR NOT (EXCLUDED.last_transaction_id = ANY (
+                       array_append(payee_history.applied_transaction_ids, payee_history.last_transaction_id)))
             """
 
         private const val SELECT_SQL =

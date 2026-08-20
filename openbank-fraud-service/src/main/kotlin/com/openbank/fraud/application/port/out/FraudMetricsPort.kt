@@ -25,4 +25,15 @@ interface FraudMetricsPort {
      * model is calibrated and safe before any enforce phase — it never reflects a honoured decision.
      */
     fun recordShadowScore(score: Double)
+
+    /**
+     * Record that a transaction signal was recognised as ALREADY APPLIED to [aggregate] and was
+     * therefore not applied again (issue #5789). This is the only series that makes redelivery
+     * visible at all: a suppressed replay writes no row, logs nothing and changes no counter, so
+     * without this the guard working and the guard being absent look identical from outside the
+     * database. Read it as "how often is the dedupe guard load-bearing" — a sustained non-zero rate
+     * is normal after a rebalance or a DLQ replay; a permanently flat zero while redeliveries are
+     * known to happen means the guard is not being reached.
+     */
+    fun recordSignalReplaySuppressed(aggregate: String)
 }

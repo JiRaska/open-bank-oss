@@ -4,7 +4,9 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
+import com.openbank.fraud.domain.model.FraudVerdict
 import com.openbank.fraud.domain.model.VelocityWindow
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -155,6 +157,98 @@ class VelocityAggregateRepositoryImplIT {
         assertThat(eur!!.transactionCount).isEqualTo(1L)
         assertThat(eur.totalAmount).isEqualByComparingTo("100.00")
     }
+
+    /**
+     * Issue #5789 — the defect the V5 last-writer marker could not catch. The marker stored the LAST
+     * id applied, not the set of ids applied, so an A, B, A delivery order found the marker holding
+     * B when the replayed A arrived, `IS DISTINCT FROM` it, and applied A a second time. This is not
+     * an exotic ordering: `openbank.transactions.transaction.initiated` is keyed by the transaction
+     * aggregateId, so two signals for one account are two different keys, and any at-least-once
+     * replay of an uncommitted offset window re-delivers A after B has already been applied.
+     *
+     * Correct total after A, B, A is two applications, not three.
+     */
+    @Test
+    fun `an out-of-order replay after another signal is not applied twice`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        repository.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+        repository.recordTransaction(accountId, BigDecimal("40.00"), CURRENCY, b)
+        // The replay of A, landing after B — the last-writer marker holds B here and let this through.
+        repository.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+
+        assertAllWindows(accountId, count = 2L, total = "140.00")
+    }
+
+    /** The same, one step longer: both ids replayed after the other, in the order Kafka replays them. */
+    @Test
+    fun `replaying a whole uncommitted window applies neither signal twice`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        repository.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+        repository.recordTransaction(accountId, BigDecimal("40.00"), CURRENCY, b)
+        // Rebalance: the consumer resumes from the last committed offset and re-delivers A then B.
+        repository.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+        repository.recordTransaction(accountId, BigDecimal("40.00"), CURRENCY, b)
+
+        assertAllWindows(accountId, count = 2L, total = "140.00")
+    }
+
+    /**
+     * A suppressed replay writes no row, logs nothing and moves no counter, so before #5789 the guard
+     * working and the guard being absent were indistinguishable from outside the database. This is the
+     * series that tells them apart: one increment per suppressed row-write, i.e. three per suppressed
+     * signal (one per velocity window).
+     */
+    @Test
+    fun `a suppressed replay is counted`(): Unit = runBlocking {
+        val suppressed = mutableListOf<String>()
+        val repo = VelocityAggregateRepositoryImpl(pool, Clock.systemUTC(), recordingMetrics(suppressed), 100)
+        val accountId = UUID.randomUUID()
+        val a = UUID.randomUUID()
+
+        repo.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+        assertThat(suppressed).describedAs("a first application is not a suppression").isEmpty()
+
+        repo.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+
+        assertThat(suppressed).containsExactly("velocity_aggregates", "velocity_aggregates", "velocity_aggregates")
+    }
+
+    /**
+     * The stated residual bound, asserted rather than only documented: the applied-signal set is
+     * bounded by a COUNT of signals to the same row, not by elapsed time. With the window set to 1 the
+     * guard degrades exactly to the old last-writer marker, and the A, B, A replay double-counts again
+     * — which is what the default of 100 buys, and what a smaller value would give back.
+     */
+    @Test
+    fun `the applied-signal window bounds how far back a replay can be suppressed`(): Unit = runBlocking {
+        val repo = VelocityAggregateRepositoryImpl(pool, Clock.systemUTC(), noopMetrics(), 1)
+        val accountId = UUID.randomUUID()
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        repo.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+        repo.recordTransaction(accountId, BigDecimal("40.00"), CURRENCY, b)
+        repo.recordTransaction(accountId, BigDecimal("100.00"), CURRENCY, a)
+
+        // A has been evicted from a one-entry set, so it applies again: 3 applications, 240.00.
+        assertAllWindows(accountId, count = 3L, total = "240.00")
+    }
+
+    private fun recordingMetrics(sink: MutableList<String>): FraudMetricsPort = object : FraudMetricsPort {
+        override fun recordVerdict(verdict: FraudVerdict, rail: String) = Unit
+        override fun recordShadowScore(score: Double) = Unit
+        override fun recordSignalReplaySuppressed(aggregate: String) {
+            sink.add(aggregate)
+        }
+    }
+
+    private fun noopMetrics(): FraudMetricsPort = recordingMetrics(mutableListOf())
 
     private companion object {
         const val CURRENCY = "CZK"

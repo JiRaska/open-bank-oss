@@ -4,9 +4,12 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
+import com.openbank.fraud.domain.model.FraudVerdict
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.vertx.mutiny.pgclient.PgPool
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -26,6 +29,9 @@ class PayeeHistoryRepositoryImplIT {
 
     @Inject
     lateinit var repository: PayeeHistoryRepository
+
+    @Inject
+    lateinit var pool: PgPool
 
     @Test
     fun `a payee with no recorded payment is new (findHistory returns null)`(): Unit = runBlocking {
@@ -119,4 +125,74 @@ class PayeeHistoryRepositoryImplIT {
 
         assertThat(historyForB).isNull()
     }
+    /**
+     * Issue #5789 — the defect the V3 last-writer marker has never caught, and which was treated
+     * throughout the #5698 sweep as "the one that already guards". The marker stored the LAST id
+     * applied, so a replay of A arriving after B is `IS DISTINCT FROM` the marker and increments
+     * `payment_count` a second time. payee_history feeds first-time-payee detection, so a spurious
+     * re-application moves a fraud signal, not just a counter.
+     */
+    @Test
+    fun `an out-of-order replay after another payment is not counted twice`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val payeeIdentifier = UUID.randomUUID().toString()
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        repository.recordPayment(accountId, payeeIdentifier, a, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, b, Instant.now())
+        // The replay of A, landing after B.
+        repository.recordPayment(accountId, payeeIdentifier, a, Instant.now())
+
+        val history = repository.findHistory(accountId, payeeIdentifier)
+        assertThat(history!!.paymentCount).isEqualTo(2L)
+    }
+
+    /** Both ids replayed after each other, in the order an uncommitted offset window is re-delivered. */
+    @Test
+    fun `replaying a whole uncommitted window counts neither payment twice`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val payeeIdentifier = UUID.randomUUID().toString()
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        repository.recordPayment(accountId, payeeIdentifier, a, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, b, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, a, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, b, Instant.now())
+
+        val history = repository.findHistory(accountId, payeeIdentifier)
+        assertThat(history!!.paymentCount).isEqualTo(2L)
+    }
+
+    /**
+     * A suppressed replay leaves no trace of its own — no row written, nothing logged. This asserts
+     * the one series that makes it visible.
+     */
+    @Test
+    fun `a suppressed replay is counted`(): Unit = runBlocking {
+        val suppressed = mutableListOf<String>()
+        val repo = PayeeHistoryRepositoryImpl(
+            pool,
+            object : FraudMetricsPort {
+                override fun recordVerdict(verdict: FraudVerdict, rail: String) = Unit
+                override fun recordShadowScore(score: Double) = Unit
+                override fun recordSignalReplaySuppressed(aggregate: String) {
+                    suppressed.add(aggregate)
+                }
+            },
+            100,
+        )
+        val accountId = UUID.randomUUID()
+        val payeeIdentifier = UUID.randomUUID().toString()
+        val a = UUID.randomUUID()
+
+        repo.recordPayment(accountId, payeeIdentifier, a, Instant.now())
+        assertThat(suppressed).isEmpty()
+
+        repo.recordPayment(accountId, payeeIdentifier, a, Instant.now())
+
+        assertThat(suppressed).containsExactly("payee_history")
+    }
+
 }
