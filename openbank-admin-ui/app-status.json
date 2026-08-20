@@ -9,7 +9,7 @@
     "owner": "customer-app team",
     "repo": "JiRaska/openbank-app"
   },
-  "asOf": "2026-08-15",
+  "asOf": "2026-08-19",
   "appRepo": "JiRaska/openbank-app",
   "derived": {
     "version": "0.25.0",
@@ -136,8 +136,8 @@
         "ADR-0066"
       ],
       "gap": {
-        "cs": "Kompletní Authorization Code + PKCE flow ve sdíleném AuthService (commonMain, unit-testováno): S256 challenge, state proti CSRF, OIDC nonce, výměna kódu, persistnce tokenů s expirací, proaktivní refresh (refresh_token) a RP-initiated logout. P0 zpevnění je PŘIPRAVENÉ, ale ZATÍM NEAKTIVNÍ: claimed HTTPS app/universal link (https://open-bank.tech/app/oauth/callback) má hotové AASA i assetlinks.json, ale realm ho ještě neregistruje (open-bank-oss #2814 je otevřený) — živý authorize endpoint na něj vrací 400 invalid redirect_uri, takže app zatím používá privátní scheme. Přepnout až po merge #2814 a nasazení realmu.",
-        "en": "Complete Authorization Code + PKCE flow in the shared AuthService (commonMain, unit-tested): S256 challenge, CSRF state, OIDC nonce, code exchange, token persistence with expiry, proactive refresh (refresh_token) and RP-initiated logout. The P0 hardening is BUILT but NOT YET ACTIVE: the claimed HTTPS app/universal link (https://open-bank.tech/app/oauth/callback) has its AASA and assetlinks.json served, but the realm does not register it yet (open-bank-oss #2814 is still open) — the live authorize endpoint answers it with 400 invalid redirect_uri, so the app still uses the private scheme. Flip it once #2814 merges and the realm is deployed."
+        "cs": "Kompletní Authorization Code + PKCE flow ve sdíleném AuthService (commonMain, unit-testováno): S256 challenge, state proti CSRF, OIDC nonce, výměna kódu, persistnce tokenů s expirací, proaktivní refresh (refresh_token) a RP-initiated logout. Claimed HTTPS redirect (https://open-bank.tech/app/oauth/callback) je zaregistrovaný na realmu (open-bank-oss #2814, mergnuto 2026-07-31) a RedirectUriNegotiator ho za běhu proberuje a přepíná na něj, s privátním scheme jako trvalou podlahou pro iOS 16.0–17.3, které claimed-HTTPS callback API nemá (#294 poučení: nikdy nehardcodovat jednu odpověď).",
+        "en": "Complete Authorization Code + PKCE flow in the shared AuthService (commonMain, unit-tested): S256 challenge, CSRF state, OIDC nonce, code exchange, token persistence with expiry, proactive refresh (refresh_token) and RP-initiated logout. The claimed HTTPS redirect (https://open-bank.tech/app/oauth/callback) is registered on the realm (open-bank-oss #2814, merged 2026-07-31) and RedirectUriNegotiator probes and upgrades to it at runtime, with the private scheme as a permanent floor for iOS 16.0–17.3, which has no claimed-HTTPS callback API (lesson from #294: never hardcode either answer)."
       },
       "derivedStatus": "live"
     },
@@ -213,8 +213,8 @@
         "ADR-0070"
       ],
       "gap": {
-        "cs": "Phase 1 dokončena (ADR-0070 Accepted): DebugGate (Android BuildConfig.DEBUG / iOS Platform.isDebugBinary), 7-tap debugTrigger, DebugMenu s panelem build-info (živé /api/v1/info bez PII). Zbývá F2: feature flags (EvaluationReason), network tracing (X-Correlation-ID), session claims, SCA metadata; a build-time source-set split místo runtime gate.",
-        "en": "Phase 1 complete (ADR-0070 Accepted): DebugGate (Android BuildConfig.DEBUG / iOS Platform.isDebugBinary), 7-tap debugTrigger, DebugMenu with build-info panel (live /api/v1/info, no PII). Remaining F2: feature flags (EvaluationReason), network tracing (X-Correlation-ID), session claims, SCA metadata; and a build-time source-set split instead of a runtime gate."
+        "cs": "Phase 1 dokončena (ADR-0070 Accepted): DebugGate (Android BuildConfig.DEBUG / iOS Platform.isDebugBinary), 7-tap debugTrigger, DebugMenu s panelem build-info (živé /api/v1/info bez PII). F2 z velké části hotovo (2026-08-19): DebugMenu má SessionClaimsSection (dekódované sub/exp/scope, nikdy raw token) a ScaChallengeSection (typ/výsledek posledních SCA výzev, ring buffer), FeatureFlags.kt s EvaluationReason (DEFAULT/TARGETING_MATCH/OVERRIDE/ERROR) obaluje NearPay.PAYER_DISCOVERY_ENABLED a další; network tracing (W3C traceparent + X-Correlation-ID) je hotové už dřív (ADR-0082/0088). Zbývá vědomě odloženo: build-time source-set split místo runtime gate — riskantní zásah do build grafu, mimo scope jednoho sezení.",
+        "en": "Phase 1 complete (ADR-0070 Accepted): DebugGate (Android BuildConfig.DEBUG / iOS Platform.isDebugBinary), 7-tap debugTrigger, DebugMenu with build-info panel (live /api/v1/info, no PII). F2 is mostly done (2026-08-19): DebugMenu has a SessionClaimsSection (decoded sub/exp/scope, never the raw token) and a ScaChallengeSection (recent SCA challenge type/outcome, ring buffer), `FeatureFlags.kt` with `EvaluationReason` (DEFAULT/TARGETING_MATCH/OVERRIDE/ERROR) wrapping `NearPay.PAYER_DISCOVERY_ENABLED` and others; network tracing (W3C traceparent + X-Correlation-ID) already shipped earlier (ADR-0082/0088). Deliberately deferred: a build-time source-set split instead of a runtime gate — a risky build-graph change, out of scope for a single session."
       },
       "derivedStatus": "partial"
     },
@@ -228,13 +228,13 @@
         "technology",
         "security"
       ],
-      "status": "partial",
+      "status": "live",
       "adr": [
         "ADR-0075"
       ],
       "gap": {
-        "cs": "Sentry Kotlin Multiplatform SDK (MIT) je zapojen pro iOS i Android s cílem na self-hosted GlitchTip — zachytává pády, ANR a chyby před API voláním, které backend (ADR-0008) nevidí. Vypnuto by-default (zrcadlí ADR-0067 flag): nic neopouští zařízení, dokud není flag zapnut a nastaven DSN. PII se stripuje on-device přes beforeSend (allowlist z ADR-0070); jediná identita je pseudonymní party_id. Zbývá: provisionovat GlitchTip sink (open-bank gitops/apps/glitchtip.yaml), nastavit DSN a překlopit flag; CI upload mapping/dSYM pro symbolikaci.",
-        "en": "The Sentry Kotlin Multiplatform SDK (MIT) is wired for iOS and Android targeting self-hosted GlitchTip — capturing crashes, ANRs and pre-API errors the backend (ADR-0008) cannot see. Off by default (mirrors the ADR-0067 flag): nothing leaves a device until the flag is on and a DSN is set. PII is stripped on-device via beforeSend (the ADR-0070 allowlist); the only identity is the pseudonymous party_id. Remaining: provision the GlitchTip sink (open-bank gitops/apps/glitchtip.yaml), set the DSN and flip the flag; CI upload of mapping/dSYM for symbolication."
+        "cs": "Sentry Kotlin Multiplatform SDK (MIT) je zapojen pro iOS i Android, cíl self-hosted GlitchTip — zachytává pády, ANR a chyby před API voláním, které backend (ADR-0008) nevidí. GlitchTip je nasazen přes ArgoCD (open-bank-oss gitops/apps/glitchtip.yaml), AppConfig.crashReportingEnabled=true a produkční DSN je nastaven natvrdo. PII se stripuje on-device přes beforeSend (allowlist z ADR-0070); jediná identita je pseudonymní party_id. CI (crash-symbols.yml) uploaduje iOS dSYM i Android R8 mapping.txt při release, gated na GLITCHTIP_AUTH_TOKEN secret. Neověřeno odsud (chce živý přístup ke GitHub secrets / GlitchTip dashboardu): jestli GLITCHTIP_AUTH_TOKEN je opravdu vyplněný a eventy reálně tečou.",
+        "en": "The Sentry Kotlin Multiplatform SDK (MIT) is wired for iOS and Android, targeting self-hosted GlitchTip — capturing crashes, ANRs and pre-API errors the backend (ADR-0008) cannot see. GlitchTip is deployed via ArgoCD (open-bank-oss gitops/apps/glitchtip.yaml), AppConfig.crashReportingEnabled=true and a production DSN is hardcoded in. PII is stripped on-device via beforeSend (the ADR-0070 allowlist); the only identity is the pseudonymous party_id. CI (crash-symbols.yml) uploads iOS dSYM and Android R8 mapping.txt on release, gated on the GLITCHTIP_AUTH_TOKEN secret. Not verifiable from here (needs live GitHub-secrets / GlitchTip-dashboard access): whether GLITCHTIP_AUTH_TOKEN is actually populated and events are actually flowing."
       }
     },
     {
@@ -272,8 +272,8 @@
         "ADR-0074"
       ],
       "gap": {
-        "cs": "Snapshot edge OpenAPI je 1.21.0 (35 schémat, 48 cest); EdgeContractTest kryje 14 DTO, EdgeRouteCoverageTest drží ratchet nad všemi 77 app-volánými routami (36 covered, 41 známých gapů — seznam se jen zmenšuje). PR gate (edge-contract-gate.yml) blokuje merge při driftu proti živému OpenAPI. Test odhalil reálný drift: phantom pole TxDto odstraněna, schémata Balance/Pagination opravena v open-bank-oss. Zbývá: dospecifikovat 41 rout na backendu a vygenerovat klienta z OpenAPI.",
-        "en": "The edge OpenAPI snapshot is 1.21.0 (35 schemas, 48 paths); EdgeContractTest covers 14 DTOs, EdgeRouteCoverageTest holds a ratchet over all 77 app-called routes (36 covered, 41 known gaps — the list only shrinks). A PR gate (edge-contract-gate.yml) blocks merges on drift against the live OpenAPI. The test caught real drift: phantom TxDto fields removed, Balance/Pagination schemas fixed in open-bank-oss. Remaining: spec the 41 routes on the backend and generate the client from OpenAPI."
+        "cs": "Snapshot edge OpenAPI je 1.39.0 (52 schémat, 102 cest); EdgeRouteCoverageTest drží ratchet nad všemi 89 app-volánými routami (84 covered, jen 5 známých gapů — seznam se jen zmenšuje). 38 z původních 41 gapů bylo doplněno do OpenAPI (open-bank-oss #5663, 2026-08-19), s ověřením proti reálnému backend kódu, ne jen předpokladům appky; 3 routy neměly žádnou backend implementaci a nebyly vymýšleny. Denní scheduled sync (edge-contract-sync.yml) drží snapshot aktuální; PR gate (edge-contract-gate.yml) je advisory, merge fyzicky neblokuje. Zbývá: dospecifikovat zbylých 5 rout.",
+        "en": "The edge OpenAPI snapshot is 1.39.0 (52 schemas, 102 paths); EdgeRouteCoverageTest holds a ratchet over all 89 app-called routes (84 covered, only 5 known gaps left — the list only shrinks). 38 of the original 41 gaps were backfilled into the OpenAPI spec (open-bank-oss #5663, 2026-08-19), verified against real backend code rather than the app's assumptions; 3 routes had no backend implementation at all and were not invented. A daily scheduled sync (edge-contract-sync.yml) keeps the snapshot current; the PR gate (edge-contract-gate.yml) is advisory and does not actually block a merge. Remaining: spec the last 5 routes."
       }
     },
     {
@@ -286,13 +286,13 @@
         "technology",
         "governance"
       ],
-      "status": "partial",
+      "status": "live",
       "adr": [
         "ADR-0074"
       ],
       "gap": {
-        "cs": "Loans/Cards/SDD/StandingOrder/Consents/Disputes list API vracejí DataResult (Ok / Failed: UNAUTHORIZED/NETWORK/SERVER) místo spolknutí chyby do prázdného seznamu — „nemáte půjčky“ ≠ „banka je nedostupná“; každá obrazovka má poctivý error stav. Hard-401 hlásí API vrstva přes SessionGuard → forced re-auth. Zbývá: rozšířit DataResult na zbylé čtecí API (pockets, fees, instant payments, documents, notifications) a odstranit ~15 zbývajících error-swallow míst.",
-        "en": "Loans/Cards/SDD/StandingOrder/Consents/Disputes list APIs return DataResult (Ok / Failed: UNAUTHORIZED/NETWORK/SERVER) instead of swallowing errors into empty lists — \"no loans\" ≠ \"bank unreachable\"; every screen has an honest error state. Hard 401s are reported by the API layer via SessionGuard → forced re-auth. Remaining: extend DataResult to the other read APIs (pockets, fees, instant payments, documents, notifications) and remove the ~15 remaining error-swallow sites."
+        "cs": "Kompletní: Loans/Cards/SDD/StandingOrder/Consents/Disputes/Pockets/Documents/Fees/InstantPayments/Notifications/Sca list API vrací DataResult (Ok / Failed: UNAUTHORIZED/NETWORK/SERVER) místo spolknutí chyby do prázdného seznamu — „nemáte půjčky“ ≠ „banka je nedostupná“; každá obrazovka má poctivý error stav. Hard-401 hlásí API vrstva přes SessionGuard → forced re-auth. Jediné zbývající místo (PayeeStore) je lokální cache platebních příjemců, ne bankovní čtení, mimo scope tohoto capability.",
+        "en": "Complete: Loans/Cards/SDD/StandingOrder/Consents/Disputes/Pockets/Documents/Fees/InstantPayments/Notifications/Sca list APIs all return DataResult (Ok / Failed: UNAUTHORIZED/NETWORK/SERVER) instead of swallowing errors into empty lists — \"no loans\" ≠ \"bank unreachable\"; every screen has an honest error state. Hard 401s are reported by the API layer via SessionGuard → forced re-auth. The one remaining site (PayeeStore) is a local payee cache, not a bank read, out of scope for this capability."
       }
     },
     {
@@ -328,8 +328,8 @@
         "ADR-0066"
       ],
       "gap": {
-        "cs": "app-security.yml: dependency CVE gate (High+ blokuje merge), gitleaks secret scan (PR + týdenní full-history), explicitní pinning/auth/contract unit gate. MoneyPathChaosTest hlídá money-path invarianty (idempotence, žádné tiché retry). Zbývá P2: MobSF/MASTG binární scan store artefaktů a MITM pinning test přes proxy.",
-        "en": "app-security.yml: dependency CVE gate (High+ blocks merges), gitleaks secret scan (per-PR + weekly full-history), explicit pinning/auth/contract unit gate. MoneyPathChaosTest guards money-path invariants (idempotency, no silent retries). Remaining P2: MobSF/MASTG binary scanning of store artifacts and a MITM pinning test via proxy."
+        "cs": "app-security.yml: dependency CVE gate (High+ blokuje merge), gitleaks secret scan (PR + týdenní full-history), explicitní pinning/auth/contract unit gate. MoneyPathChaosTest hlídá money-path invarianty (idempotence, žádné tiché retry). P2 MobSF/MASTG binární scan store artefaktů má od 2026-08-19 hotové CI scaffolding (app-mobsf-scan.yml, scripts/mobsf-scan.sh, scripts/mobsf-severity-gate.py + testy) — běží nočně/on-demand, ale je záměrně dormantní (skip s notice), dokud chybí MOBSF_HOST/MOBSF_API_KEY secrets a provisionovaný MobSF host (aktivační kroky v hlavičce workflow souboru). Zbývá: samotné provisionování hostu a MITM pinning test přes proxy.",
+        "en": "app-security.yml: dependency CVE gate (High+ blocks merges), gitleaks secret scan (per-PR + weekly full-history), explicit pinning/auth/contract unit gate. MoneyPathChaosTest guards money-path invariants (idempotency, no silent retries). The P2 MobSF/MASTG binary scan of store artifacts has had CI scaffolding since 2026-08-19 (app-mobsf-scan.yml, scripts/mobsf-scan.sh, scripts/mobsf-severity-gate.py + tests) — runs nightly/on-demand but is deliberately dormant (skips with a notice) until the MOBSF_HOST/MOBSF_API_KEY secrets and a provisioned MobSF host exist (activation steps are in that workflow file's header). Remaining: actually provisioning the host, and a MITM pinning test via proxy."
       }
     },
     {
@@ -373,8 +373,8 @@
   "summary": {
     "total": 18,
     "byStatus": {
-      "live": 14,
-      "partial": 4
+      "live": 16,
+      "partial": 2
     },
     "decisionMissing": []
   },
