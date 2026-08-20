@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.176.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.175.0...admin-ui-v0.176.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** filter service documentation ([#5945](https://github.com/JiRaska/open-bank-oss/issues/5945)) ([7227681](https://github.com/JiRaska/open-bank-oss/commit/722768181381e1b9d451d98a1d3fb9d10e1e44b1))
+
+
+### Bug Fixes
+
+* **admin-ui:** expose identity case action state ([#5921](https://github.com/JiRaska/open-bank-oss/issues/5921)) ([2544f38](https://github.com/JiRaska/open-bank-oss/commit/2544f3899af0be15114b7d09e4aa38f0d2169f14))
+* **admin-ui:** expose service config state ([#5930](https://github.com/JiRaska/open-bank-oss/issues/5930)) ([0d5584e](https://github.com/JiRaska/open-bank-oss/commit/0d5584edcfbe0598c544cc4a96fed5453ca7c70a))
+* **admin-ui:** expose system agent tool state ([#5927](https://github.com/JiRaska/open-bank-oss/issues/5927)) ([52e482a](https://github.com/JiRaska/open-bank-oss/commit/52e482a4d85f709cba038b4c9c1f76d2d2276244))
+* **admin-ui:** label code quality controls ([#5942](https://github.com/JiRaska/open-bank-oss/issues/5942)) ([db6aa47](https://github.com/JiRaska/open-bank-oss/commit/db6aa47c9a87534ac1001ae20a8a89708a731961))
+
 ## [0.175.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.174.1...admin-ui-v0.175.0) (2026-08-20)
 
 

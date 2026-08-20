@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.1...case-coordinator-agent-v0.6.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **case-coordinator:** bump thread API contract ([#5887](https://github.com/JiRaska/open-bank-oss/issues/5887)) ([a4e80bd](https://github.com/JiRaska/open-bank-oss/commit/a4e80bd00df2ecf6f274d52a1304c30c154f7e4a))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.0...case-coordinator-agent-v0.6.1) (2026-08-20)
 
 
