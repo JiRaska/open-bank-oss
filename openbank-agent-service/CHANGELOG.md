@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.1...agent-service-v1.20.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** record an LLM metric on every streaming outcome ([#5960](https://github.com/JiRaska/open-bank-oss/issues/5960)) ([f6fdb0f](https://github.com/JiRaska/open-bank-oss/commit/f6fdb0fc302acb7d84b288ee29d2d98b9de1e994))
+
 ## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.0...agent-service-v1.20.1) (2026-08-20)
 
 
