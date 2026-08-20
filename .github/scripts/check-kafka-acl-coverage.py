@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import tempfile
 import sys
 
 import yaml
@@ -107,7 +108,18 @@ def required(app_yaml: pathlib.Path) -> set[tuple[str, str]]:
     for path, value in flat:
         if not path or path[-1] not in ("topic", "topics") or not isinstance(value, str):
             continue
-        if "incoming" in path:
+        # A dead-letter topic is WRITTEN by the connector, even though its config sits under an
+        # `incoming` channel. Direction-by-channel-key gets this exactly backwards: SmallRye parks
+        # the failed record by PRODUCING to the DLQ; nothing consumes it (by design — the
+        # party-events DLQ alert says so in as many words). The working example on main is
+        # account-service, whose KafkaUser grants `dead-letter-topic-party-events-in`
+        # `[Write, Describe]` with the comment "Without Write here, the DLQ send itself fails and
+        # the consumer [retries]". Classifying it Read would let a PR satisfy this gate with an ACL
+        # the broker still denies — a green check over a DLQ that cannot be written, which is worse
+        # than no DLQ at all: the rethrow it exists to serve then stops the channel (#5745).
+        if "dead-letter-queue" in path:
+            operation = "Write"
+        elif "incoming" in path:
             operation = "Read"
         elif "outgoing" in path:
             operation = "Write"
@@ -180,7 +192,42 @@ def selftest() -> int:
     if not kafka_users():
         print("selftest FAIL: no KafkaUser CRs found — the scan itself is broken.")
         return 1
-    print(f"selftest OK: {len(cases)} cases, both directions (flags the near-miss, spares the prefix match).")
+
+    # DIRECTION. A dead-letter topic is produced to, so it must come out as Write even though its
+    # config nests under an `incoming` channel. Asserted on a real config shape rather than on the
+    # regex, because the bug this guards against was invisible in the pattern and only showed up in
+    # what the extraction RETURNED: classifying it Read makes the gate satisfiable by an ACL the
+    # broker denies.
+    with tempfile.TemporaryDirectory() as td:
+        sample = pathlib.Path(td) / "application.yaml"
+        sample.write_text(
+            "mp:\n"
+            "  messaging:\n"
+            "    incoming:\n"
+            "      party-events-in:\n"
+            "        topic: openbank.party.events\n"
+            "        failure-strategy: dead-letter-queue\n"
+            "        dead-letter-queue:\n"
+            "          topic: openbank.dlq.acct.party-events-in\n"
+            "    outgoing:\n"
+            "      account-events-out:\n"
+            "        topic: openbank.accounts.account.created\n",
+            encoding="utf-8",
+        )
+        got = required(sample)
+    want = {
+        ("openbank.party.events", "Read"),
+        ("openbank.dlq.acct.party-events-in", "Write"),
+        ("openbank.accounts.account.created", "Write"),
+    }
+    if got != want:
+        print(f"selftest FAIL: direction inference wrong.\n  want {sorted(want)}\n  got  {sorted(got)}")
+        return 1
+
+    print(
+        f"selftest OK: {len(cases)} coverage cases both directions, plus DLQ direction "
+        "(a dead-letter topic under an incoming channel resolves to Write, not Read)."
+    )
     return 0
 
 
