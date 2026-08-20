@@ -65,7 +65,7 @@ class DeadLetterJanitorWorkflowLivenessTest {
         it.domainMetrics = metrics
     }
 
-    private fun onVertxContext(block: suspend () -> Unit): Unit {
+    private fun onVertxContext(block: suspend () -> Unit) {
         val vertx = Vertx.vertx()
         val completion = CompletableFuture<Unit>()
         vertx.runOnContext {
