@@ -125,8 +125,8 @@ export default function ApprovalsPage() {
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
         title={t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
         subtitle={t('Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.', 'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.')}
-        actions={<button onClick={load} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+        actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+          <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
 
@@ -243,13 +243,13 @@ export default function ApprovalsPage() {
                   onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                   style={{ flex: 1, minWidth: 180, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
                 />
-                <button onClick={() => decide(p, true)} disabled={busyId === p.id}
+                <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId === p.id}
                   style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
-                  <CheckCircle2 size={14} /> {t('Schválit', 'Approve')}
+                  <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
                 </button>
-                <button onClick={() => decide(p, false)} disabled={busyId === p.id}
+                <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId === p.id}
                   style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
-                  <XCircle size={14} /> {t('Zamítnout', 'Reject')}
+                  <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
                 </button>
               </div>
             </div>

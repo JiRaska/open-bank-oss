@@ -13,6 +13,8 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.CatalogLoanProfile
+import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -62,6 +64,7 @@ import com.openbank.libs.lending.origination.OriginationTransitionResult
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -83,7 +86,7 @@ import java.util.UUID
 // three-line economic change in a file move. The same call CustomerEdgeResource made. Splitting the
 // servicing/provisioning loops out is a real follow-up, not a drive-by.
 @Suppress("LongParameterList", "TooManyFunctions", "LargeClass")
-class LendingService(
+class LendingService @Inject constructor(
     private val applications: LoanApplicationRepository,
     private val loans: LoanRepository,
     private val installments: InstallmentRepository,
@@ -100,6 +103,7 @@ class LendingService(
     private val decisionEngine: OriginationDecisionService,
     private val borrowerAccounts: com.openbank.lending.application.port.out.BorrowerAccountLookupPort,
     private val borrowerCredit: com.openbank.lending.application.port.out.BorrowerCreditPort,
+    private val catalogLoanProfiles: CatalogLoanProfilePort = UnusedCatalogLoanProfilePort,
 ) : ApplyForLoanUseCase,
     DisburseLoanUseCase,
     ServicingUseCase,
@@ -238,7 +242,38 @@ class LendingService(
 
     // --- Origination --------------------------------------------------------------------------------
 
-    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> {
+    override fun apply(request: LoanApplicationRequest, proposedBy: String): Uni<LoanApplication> =
+        request.catalogOfferingId?.let { offeringId ->
+            catalogLoanProfiles.resolvePublished(offeringId).flatMap { profile ->
+                applyCatalogProfile(request, proposedBy, profile)
+            }
+        } ?: applyLegacy(request, proposedBy, null)
+
+    private fun applyCatalogProfile(
+        request: LoanApplicationRequest,
+        proposedBy: String,
+        profile: CatalogLoanProfile,
+    ): Uni<LoanApplication> {
+        require(request.requestedAmount.currency.code == profile.currency) {
+            "Requested currency does not match catalog"
+        }
+        require(request.termPeriods == profile.tenorMonths) { "Requested term does not match catalog" }
+        require(request.periodsPerYear == MONTHS_PER_YEAR) { "Catalog loans require monthly periods" }
+        require(request.method == profile.method) { "Requested amortization method does not match catalog" }
+        require(profile.minPrincipal == null || request.requestedAmount.amount >= profile.minPrincipal) {
+            "Requested amount is below the catalog minimum"
+        }
+        require(profile.maxPrincipal == null || request.requestedAmount.amount <= profile.maxPrincipal) {
+            "Requested amount exceeds the catalog maximum"
+        }
+        return applyLegacy(request.copy(nominalAnnualRate = profile.nominalAnnualRate), proposedBy, profile.snapshot)
+    }
+
+    private fun applyLegacy(
+        request: LoanApplicationRequest,
+        proposedBy: String,
+        catalogSnapshot: com.openbank.lending.domain.model.CatalogLoanSnapshot?,
+    ): Uni<LoanApplication> {
         complianceGuard.checkOriginationAllowed(request.jurisdiction, request.productType)
         require(request.requestedAmount.isPositive()) { "Requested amount must be positive" }
         require(request.termPeriods > 0) { "Term must be at least one period" }
@@ -266,6 +301,7 @@ class LendingService(
             ageYears = request.ageYears,
             residency = request.residency,
             employmentTenureMonths = request.employmentTenureMonths,
+            catalogSnapshot = catalogSnapshot,
         )
         return applications.save(application).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
@@ -284,6 +320,11 @@ class LendingService(
                 ),
             )
         }
+    }
+
+    private data object UnusedCatalogLoanProfilePort : CatalogLoanProfilePort {
+        override fun resolvePublished(offeringId: UUID): Uni<CatalogLoanProfile> =
+            Uni.createFrom().failure(IllegalStateException("catalog loan profiles are not configured"))
     }
 
     /**
@@ -1304,5 +1345,6 @@ class LendingService(
 
     private companion object {
         const val MAX_LIST_LIMIT = 100
+        const val MONTHS_PER_YEAR = 12
     }
 }

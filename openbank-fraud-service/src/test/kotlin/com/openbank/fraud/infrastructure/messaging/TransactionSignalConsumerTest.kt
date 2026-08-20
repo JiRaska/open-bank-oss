@@ -49,7 +49,31 @@ class TransactionSignalConsumerTest {
 
         consumer.onTransactionInitiated(payload)
 
-        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("250.00"), "CZK") }
+        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("250.00"), "CZK", any()) }
+    }
+
+    @Test
+    fun `forwards the signal aggregateId to the velocity repository as the dedup key`() {
+        val accountId = UUID.randomUUID()
+        val aggregateId = UUID.randomUUID()
+        val transactionIdSlot = slot<UUID>()
+        coEvery {
+            velocityRepo.recordTransaction(any(), any(), any(), capture(transactionIdSlot))
+        } returns Unit
+        val payload = """
+            {
+              "aggregateId": "$aggregateId",
+              "sourceAccountId": "$accountId",
+              "amount": "250.00",
+              "currencyCode": "CZK"
+            }
+        """.trimIndent()
+
+        consumer.onTransactionInitiated(payload)
+
+        // #5716: without this the redelivery guard has no key to compare and every signal is treated
+        // as new — the guard would exist in SQL and never fire.
+        assertThat(transactionIdSlot.captured).isEqualTo(aggregateId)
     }
 
     @Test
@@ -84,7 +108,7 @@ class TransactionSignalConsumerTest {
     fun `bad JSON is dropped without calling repository`() {
         consumer.onTransactionInitiated("not-valid-json{{{")
 
-        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any()) }
+        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any(), any()) }
     }
 
     @Test
@@ -93,14 +117,14 @@ class TransactionSignalConsumerTest {
 
         consumer.onTransactionInitiated(payload)
 
-        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any()) }
+        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any(), any()) }
     }
 
     @Test
     fun `missing amount defaults to zero`() {
         val accountId = UUID.randomUUID()
         val amountSlot = slot<BigDecimal>()
-        coEvery { velocityRepo.recordTransaction(any(), capture(amountSlot), any()) } returns Unit
+        coEvery { velocityRepo.recordTransaction(any(), capture(amountSlot), any(), any()) } returns Unit
 
         val payload = """{"sourceAccountId": "$accountId", "currencyCode": "CZK"}"""
         consumer.onTransactionInitiated(payload)
@@ -112,7 +136,7 @@ class TransactionSignalConsumerTest {
     fun `missing currencyCode defaults to CZK`() {
         val accountId = UUID.randomUUID()
         val currencySlot = slot<String>()
-        coEvery { velocityRepo.recordTransaction(any(), any(), capture(currencySlot)) } returns Unit
+        coEvery { velocityRepo.recordTransaction(any(), any(), capture(currencySlot), any()) } returns Unit
 
         val payload = """{"sourceAccountId": "$accountId", "amount": "50.00"}"""
         consumer.onTransactionInitiated(payload)
@@ -123,7 +147,7 @@ class TransactionSignalConsumerTest {
     @Test
     fun `repository exception is caught and does not propagate`() {
         val accountId = UUID.randomUUID()
-        coEvery { velocityRepo.recordTransaction(any(), any(), any()) } throws RuntimeException("DB down")
+        coEvery { velocityRepo.recordTransaction(any(), any(), any(), any()) } throws RuntimeException("DB down")
 
         val payload = """{"sourceAccountId": "$accountId", "amount": "100.00", "currencyCode": "CZK"}"""
 
@@ -207,6 +231,6 @@ class TransactionSignalConsumerTest {
         // Must not throw, and must not prevent the velocity path from running
         consumer.onTransactionInitiated(payload)
 
-        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("100.00"), "CZK") }
+        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("100.00"), "CZK", any()) }
     }
 }

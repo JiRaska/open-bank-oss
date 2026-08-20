@@ -23,12 +23,24 @@ import java.util.UUID
 class VelocityAggregateRepositoryImpl(private val pool: PgPool, private val clock: Clock) :
     VelocityAggregateRepository {
 
-    override suspend fun recordTransaction(accountId: UUID, amount: BigDecimal, currency: String) {
+    override suspend fun recordTransaction(
+        accountId: UUID,
+        amount: BigDecimal,
+        currency: String,
+        transactionId: UUID?,
+    ) {
         val now = Instant.now(clock)
         VelocityWindow.entries.forEach { window ->
             val start = window.bucketStart(now).toOffsetDateTime()
             pool.preparedQuery(UPSERT_SQL).execute(
-                Tuple.of(accountId.toString(), window.name, currency, start, amount),
+                Tuple.of(
+                    accountId.toString(),
+                    window.name,
+                    currency,
+                    start,
+                    amount,
+                    transactionId?.toString(),
+                ),
             ).awaitSuspending()
         }
     }
@@ -55,16 +67,27 @@ class VelocityAggregateRepositoryImpl(private val pool: PgPool, private val cloc
     }
 
     companion object {
+        // Redelivery guard (#5716), mirroring payee_history's: only apply when the incoming
+        // transaction id is either absent (NULL — the signal carries no aggregateId, so it cannot be
+        // deduplicated) or genuinely different from the one this row last applied. A redelivered
+        // Kafka message for the SAME aggregateId makes the WHERE false, so the DO UPDATE is skipped
+        // entirely and Postgres leaves the row untouched — no double-count of either the count or
+        // the amount. The marker is per row, so the three window statements converge independently:
+        // a retry after a partial failure re-applies only the windows it had not reached.
         private const val UPSERT_SQL =
             """
             INSERT INTO velocity_aggregates
-                (account_id, velocity_window, currency, window_start, transaction_count, total_amount, updated_at)
-            VALUES ($1::uuid, $2, $3, $4, 1, $5, NOW())
+                (account_id, velocity_window, currency, window_start, transaction_count, total_amount,
+                 last_transaction_id, updated_at)
+            VALUES ($1::uuid, $2, $3, $4, 1, $5, $6::uuid, NOW())
             ON CONFLICT (account_id, velocity_window, currency, window_start)
             DO UPDATE SET
-                transaction_count = velocity_aggregates.transaction_count + 1,
-                total_amount      = velocity_aggregates.total_amount + EXCLUDED.total_amount,
-                updated_at        = NOW()
+                transaction_count   = velocity_aggregates.transaction_count + 1,
+                total_amount        = velocity_aggregates.total_amount + EXCLUDED.total_amount,
+                last_transaction_id = EXCLUDED.last_transaction_id,
+                updated_at          = NOW()
+            WHERE EXCLUDED.last_transaction_id IS NULL
+               OR velocity_aggregates.last_transaction_id IS DISTINCT FROM EXCLUDED.last_transaction_id
             """
 
         private const val SELECT_SQL =
