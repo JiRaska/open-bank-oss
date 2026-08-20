@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.182.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.2...admin-ui-v0.182.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align lending compliance rbac ([#6093](https://github.com/JiRaska/open-bank-oss/issues/6093)) ([3829353](https://github.com/JiRaska/open-bank-oss/commit/38293539624d87ebf38445965fa24905211dde8e))
+
 ## [0.182.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.1...admin-ui-v0.182.2) (2026-08-20)
 
 
