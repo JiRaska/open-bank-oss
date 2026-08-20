@@ -59,7 +59,7 @@ com.openbank.securityscanner/          ◄── the only package root
 │   └── IctIncident                    IctIncident, IncidentSeverity, IncidentStatus, IncidentCategory
 ├── application/
 │   ├── SecurityScannerService         scan pipeline, in-memory result cache
-│   └── IctIncidentService             DORA incident lifecycle, in-memory store,
+│   └── IctIncidentService             DORA incident lifecycle, durable Postgres store,
 │                                      direct @Channel Kafka emitter
 └── infrastructure/
     └── rest/
