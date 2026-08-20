@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.182.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.5...admin-ui-v0.182.6) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align identity case rbac ([#6106](https://github.com/JiRaska/open-bank-oss/issues/6106)) ([eb51a40](https://github.com/JiRaska/open-bank-oss/commit/eb51a40e46753e14d9186259933ce2d1f359f3db))
+
 ## [0.182.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.4...admin-ui-v0.182.5) (2026-08-20)
 
 
