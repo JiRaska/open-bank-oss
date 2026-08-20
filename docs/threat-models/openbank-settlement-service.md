@@ -64,7 +64,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | mTLS between Temporal server and workers (both directions); OPA activity interceptor (`OpaActivityInterceptor`) rejects tasks not matching policy |
+| S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | **Corrected 2026-08-20 (#6055) — neither control named here exists; see Residual risk 2.** There is no `OpaActivityInterceptor` in any Kotlin source in this repository, and the worker↔frontend connection is not mTLS: `TemporalClientProducer` (`openbank-libs-temporal`, the single fleet-wide producer) builds `WorkflowServiceStubsOptions` with a target and nothing else — no SSL context — and the Temporal HelmRelease configures no TLS either. What actually constrains this edge: the `temporal-platform-ingress` NetworkPolicy admits port 7233 only from an explicit namespace allow-list, and the Temporal SDK dispatches only the activity types the worker registered (`SettlementActivitiesImpl`), so an unregistered activity name is not dispatchable at all. Transport authentication on this edge is unbuilt fleet-wide and tracked in #6066. |
 | S2 | Attacker impersonates settlement-service to call balance/ledger | Corrected 2026-08-16 (#3921) — see note below. `debit-port`/`credit-port`/`ledger-port` are `OidcClientRequestReactiveFilter`-backed REST clients (`BalanceRestClient`, `LedgerRestClient`) that attach a client-credentials bearer token from `quarkus.oidc-client`, the confidential `openbank-services` Keycloak client (`OIDC_CLIENT_SECRET` Vault-projected, never in git); OPA authz on the balance/ledger REST receivers checks that identity |
 
 ### T — Tampering
@@ -100,7 +100,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | OPA policy gate: only activities matching `data.openbank.settlement.activity.allow` are dispatched; `reverseBookToLedger` requires `compensation=true` context |
+| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no activity-level authorization exists; see Residual risk 2.** No policy gate mediates activity dispatch, and no `compensation=true` context is ever evaluated — the word `compensation` appeared nowhere in the policy file that this row cited. The residual constraints are structural, not authorization: only the seven methods registered on the worker are dispatchable, and `reverseBookToLedger` is not implemented — it throws a non-retryable failure and records `LEDGER_REVERSAL_UNSUPPORTED` (#6037), so it moves no money whoever invokes it. Ordering (that a compensation runs only after its forward leg) is a property of `SettlementWorkflowImpl`'s saga, which registers each compensation after the corresponding forward activity returns — it is not enforced by any external policy. |
 | E2 | Service account token used to submit arbitrary workflows | Temporal namespace ACL restricts task queue submission to settlement-service service account (SPIFFE `spiffe://openbank/ns/openbank-settlement/sa/settlement-service`) |
 
 ---
@@ -128,10 +128,49 @@ replacing the former in-memory stub), so settlement state is durable across rest
    narrow `service-settlement-m2m` rule the way `service-domestic-payment-m2m` / `service-sca-m2m`
    do it, not a blanket SERVICE allow.
 
-2. ~~**OPA policy for settlement activities not yet written.**~~ **Closed** —
-   `openbank-settlement-service/src/main/resources/opa/settlement_activity.rego` exists and is bundled
-   (`settlement-opa-bundle.yaml`), so `OpaActivityInterceptor` has a real policy to evaluate rather
-   than fail-closing on a missing one. This was the pre-condition for the flag flip below.
+2. **OPEN — there is no activity-level authorization on the settlement worker, and this entry was
+   wrongly marked Closed (#6055).** The previous text ("`settlement_activity.rego` exists and is bundled
+   (`settlement-opa-bundle.yaml`), so `OpaActivityInterceptor` has a real policy to evaluate") was false in
+   all three of its parts, and every part was measured before this correction:
+
+   - **No interceptor.** `OpaActivityInterceptor` occurs in no Kotlin source anywhere in the repository.
+     `openbank-libs-temporal` contains only `TemporalClientProducer` and `TemporalConfig`; the
+     "OPA activity interceptor" listed in ADR-0101's P0 row was never built. `SettlementWorkerRegistrar`
+     registers workflow and activity implementations and installs no interceptor.
+   - **Not bundled.** `settlement-opa-bundle.yaml` carries exactly `rest.rego`,
+     `settlement_rest_ext.rego`, `agents.rego`, `agents-data.yaml`, `rules-data.yaml` and
+     `manifest.json` — the generator (`gen-settlement-opa-bundle.sh`) never reads the file. Materialising
+     the ConfigMap into the sidecar's directory layout and evaluating it confirms this from the outside:
+     `data.openbank.settlement` resolves to `{}`, i.e. the package is not in the deployed bundle at all.
+     Controls in the same run: `settlement.create` for a HUMAN `ROLE_OPERATOR` allows with reason
+     `operator-settlement-write`, and the same action for an ANONYMOUS principal denies — so the probe
+     was live and the empty result is absence, not a broken query.
+   - **Not queried, and it did not say what E1 said.** The service's only OPA query path is
+     `/v1/data/openbank/rest/allow` (`application.yaml`), which cannot reach an activity package. And the
+     policy's `allow` was a single membership test of `input.activity` against a fixed set in which
+     `reverseBookToLedger` was an unconditional member: evaluated directly, `reverseBookToLedger` with
+     `compensation: false` returned `true`. It could not have enforced E1 even if something had loaded it.
+
+   **Decision: the control is not being built, and the orphan policy file is deleted rather than left
+   reading as coverage.** The rationale is that the gate as specified would add no security property the
+   service does not already have. The Temporal SDK dispatches only registered activity types, and the
+   policy's allowed set was exactly the seven methods the worker registers — so the membership test
+   restated the registration and could never deny anything reachable. The threat S1 actually describes (a
+   spoofed or compromised Temporal frontend) is a transport-authentication problem: a task forged by such
+   a peer carries a legitimate activity name, so no name-based policy distinguishes it. The genuinely
+   security-relevant constraint in E1 — that a compensation may run only after its forward leg — is a saga
+   state invariant belonging in `SettlementWorkflowImpl`, not in an external stateless policy that cannot
+   see the workflow's history. `settlement_activity.rego` was the only `src/main/resources/opa/` file in
+   the fleet; every other service's policy lives in its bundle generator, so it was an orphan by
+   convention as well as by wiring.
+
+   **What remains open, and is tracked rather than closed here:** transport authentication on the
+   worker↔Temporal-frontend edge (S1's other clause, unbuilt fleet-wide — the shared client configures no
+   SSL context; filed as #6066), and the ledger-reversal/maker-checker questions raised by
+   #6037's `LEDGER_REVERSAL_UNSUPPORTED` path (numbering of residual risks is in flux while #6048 is
+   open, so this cites the issue rather than an index). This entry stays OPEN until the S1 edge
+   is decided. It is deliberately **not** re-closed by this change: nothing was built here, only a false
+   claim withdrawn.
 
 3. **Temporal is now the SOLE orchestrator (issue #1917, ADR-0120 Phase 6).** The
    `openbank.temporal.enabled` dispatch gate is removed and the in-process legacy saga
@@ -182,11 +221,24 @@ replacing the former in-memory stub), so settlement state is durable across rest
 ## References
 
 - ADR-0030 (threat model policy)
-- ADR-0034 (OPA unified authz — `OpaActivityInterceptor`)
+- ADR-0034 (OPA unified authz) — applies to this service at the **REST** layer only
+  (`settlement.create`). The `OpaActivityInterceptor` this line used to name does not exist (#6055).
 - ADR-0101 (Temporal durable execution — this migration)
 - Settlement money-bug (2026-06-19, root cause: missing intermediate-state timeout in hand-rolled saga)
 
 ## Change log
+
+- **2026-08-20** (#6055) — **S1, E1 and residual risk 2 credited an OPA activity-authorization control
+  that has never existed, and risk 2 was signed off as Closed on it.** `OpaActivityInterceptor` is in no
+  Kotlin source; the policy file the entry cited was in no bundle ConfigMap, was reachable from no query
+  path, and did not contain the `compensation` term E1 attributed to it. Measured by materialising
+  `settlement-opa-bundle.yaml` into the sidecar layout and evaluating it — `data.openbank.settlement` is
+  `{}`, against a must-ALLOW and a must-DENY control on `settlement.create` in the same run. Same shape as
+  #3921's service-mesh correction on S2 in this very document: a mitigation cell naming a mechanism that
+  was never deployed here. Risk 2 is **re-opened**, not rewritten to match the absent code; the orphan
+  `settlement_activity.rego` is deleted; S1's mTLS clause is corrected too, since verifying the row
+  surfaced that the shared `TemporalClientProducer` configures no SSL context anywhere in the fleet — that
+  half is filed as #6066 rather than resolved here.
 
 - **2026-08-16** (#3921) — S2's mitigation was corrected and the outbound OIDC client was
   configured for the first time; both belong together. The prior text credited "Service mesh mTLS
