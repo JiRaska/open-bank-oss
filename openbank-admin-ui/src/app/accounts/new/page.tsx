@@ -12,7 +12,8 @@ import { accountApi } from '@/lib/api'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AuthGuard } from '@/components/auth/AuthGuard'
-import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
+import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
+import { accountPartySelection } from '@/lib/accounts/partySelection'
 
 
 const ACCOUNT_TYPES = ['CURRENT', 'SAVINGS', 'NOSTRO', 'GL_ASSET', 'GL_LIABILITY', 'GL_INCOME', 'GL_EXPENSE']
@@ -43,13 +44,14 @@ export default function NewAccountPage() {
   }
 
   function selectParty(party: PartyHit) {
+    const selection = accountPartySelection(party)
     setForm(prev => ({
       ...prev,
-      partyId: party.id,
+      partyId: selection.partyId,
       // The selected party is the source of truth for sanctions screening. Keep
       // the field editable for exceptional legal-name corrections, but never
-      // make an operator retype a name after selecting an existing party.
-      ...(party.legalName || party.tradingName ? { legalName: partyDisplayName(party) } : {}),
+      // never retain a name from a different party after an id-only selection.
+      legalName: selection.legalName,
     }))
     setErrors(prev => ({ ...prev, partyId: '', legalName: '' }))
   }
