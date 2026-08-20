@@ -319,7 +319,10 @@ jobs:
             # contract gate rightfully refuses (#3318), and the build is wasted work. The exact
             # co-deploy replay above is different: it cannot deploy unless the later gate proves
             # its supplied Pact versions are byte-identical to these build inputs.
-            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | grep -v '^$' | sort -u )"
+            # `grep -v` returns 1 when no line remains. That is a valid state for an
+            # explicit replay (the wrapper changes only deployment metadata), not a failed
+            # command; `awk` preserves the filtering semantics while returning success.
+            CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | awk 'NF' | sort -u )"
             GUARD_FAILED=0
             for svc in "${DEPLOYABLE[@]}"; do
               if [ "$EXACT_CODEPLOY_REPLAY" != "true" ] && ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
