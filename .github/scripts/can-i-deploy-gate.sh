@@ -95,15 +95,27 @@ BLOCKS_FILE="$(mktemp)"
 
 # ── #1985: co-deploy mode ───────────────────────────────────────────────────────
 # Services that block EACH OTHER cannot converge one deploy at a time; this asks
-# the broker whether THOSE versions are mutually compatible. Full reasoning in
+# the broker whether THOSE exact build versions are mutually compatible. Full reasoning in
 # derive-codeploy-set.py's header. It is a gate, not a bypass — a red verdict
 # deploys nothing — but a DIFFERENT question, so it is opt-in on workflow_dispatch
-# and never reachable from a push or a scheduled tick.
+# and never reachable from a push or a scheduled tick. Do not use `--latest main` here:
+# a later, unrelated main build can move that tag between selection and the question, turning
+# this into a verdict about a different image.
 if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
    && [ "${INPUT_CODEPLOY}" = "true" ]; then
   CODEPLOY_ARGS=()
   for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-    CODEPLOY_ARGS+=(--pacticipant "$svc" --latest main)
+    vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+    sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
+      bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
+    read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+    if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
+      echo "::error::can-i-deploy co-deploy set cannot be asked safely for ${svc}: $(printf '%s' "$sel_line" | cut -f2)"
+      echo "deployable=[]" >> "$GITHUB_OUTPUT"
+      exit 1
+    fi
+    echo "    ${svc}: ${CID_SELECTOR[*]} ($(printf '%s' "$sel_line" | cut -f2))"
+    CODEPLOY_ARGS+=(--pacticipant "$svc" "${CID_SELECTOR[@]}")
   done
   echo "==> can-i-deploy CO-DEPLOY SET (#1985): $(echo "$SERVICES" | jq -r 'join(" ")')"
   if "$CLI" can-i-deploy "${CODEPLOY_ARGS[@]}" \
