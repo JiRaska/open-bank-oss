@@ -72,8 +72,6 @@ BASELINE: dict[str, str] = {
         "#5962 — SendOutcome: undeclared CONVERTED/FAILED/SKIPPED_CONDITION/SUPPRESSED_LIST",
     "openbank-card-issuance-service:MASTERCARD,VISA":
         "#5962 — CardNetwork: undeclared AMEX/UNIONPAY",
-    "openbank-clearing-service:CZ_DOMESTIC,SEPA_SCT,SEPA_SCT_INST,SWIFT":
-        "#5962 — PaymentRail: spec-only CZ_DOMESTIC; undeclared DOMESTIC/INTERNAL",
     "openbank-consent-service:ACTIVE,EXPIRED,PENDING,REJECTED,REVOKED":
         "#5962 — ConsentStatus: spec-only PENDING; undeclared PENDING_SCA/SUPERSEDED",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
