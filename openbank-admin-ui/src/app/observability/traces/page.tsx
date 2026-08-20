@@ -84,6 +84,7 @@ export default function TraceExplorerPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [spans, setSpans] = useState<FlatSpan[] | null>(null)
   const [spansLoading, setSpansLoading] = useState(false)
+  const [spansUnavailable, setSpansUnavailable] = useState<UnavailableKind | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
 
   const loadTraces = useCallback(async () => {
@@ -118,14 +119,21 @@ export default function TraceExplorerPage() {
   const openTrace = useCallback(async (traceID: string) => {
     setSelected(traceID)
     setSpans(null)
+    setSpansUnavailable(null)
     setSpansLoading(true)
     try {
       const res = await fetch(`/api/tempo/api/traces/${traceID}`, { signal: AbortSignal.timeout(8000) })
-      if (!res.ok) { setSpans([]); return }
+      // A failed span fetch used to `setSpans([])`, which rendered the same "No data yet" panel
+      // as a trace that genuinely carries no spans — so a 502 from Tempo read to the operator as
+      // "this trace is empty". Keep the two apart (issue #5904).
+      if (!res.ok) {
+        setSpansUnavailable(res.status === 502 ? 'unreachable' : 'error')
+        return
+      }
       const json = await res.json()
       setSpans(flattenTrace(json))
     } catch {
-      setSpans([])
+      setSpansUnavailable('unreachable')
     } finally {
       setSpansLoading(false)
     }
@@ -150,7 +158,27 @@ export default function TraceExplorerPage() {
           </button>}
         />
 
-        {unavailable && !traces?.length ? (
+        {/*
+          Three distinct states, never collapsed into one another (issue #5904):
+          LOADING  — the first fetch is still in flight and we have nothing yet. Before this
+                     branch existed the page fell straight through to the grid and rendered an
+                     empty "Recent traces ()" card, which is byte-for-byte what a successful
+                     but empty search also renders. An operator could not tell "still asking"
+                     from "Tempo holds no traces".
+          EMPTY    — the search succeeded and returned zero traces (`kind: 'no_data'`). This is
+                     currently the HONEST state for admin-ui and openbank-app, which emit no
+                     spans at all (#5735); browser instrumentation is proposed in #5847.
+          FAILED   — the search could not be answered (`unreachable` / `error`).
+          A refresh over an existing list deliberately does NOT re-enter the loading branch —
+          `traces` is still populated, so the list stays put and only the button spins.
+        */}
+        {loading && !traces && !unavailable ? (
+          <div className="card" data-testid="trace-list-loading" role="status" aria-live="polite"
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', padding: '48px 0', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+            <RefreshCw size={15} className="spin" aria-hidden="true" />
+            {t('Načítám trasy z Tempa…', 'Loading traces from Tempo…')}
+          </div>
+        ) : unavailable && !traces?.length ? (
           <DataUnavailable
             kind={unavailable.kind}
             service="tempo (observability)"
@@ -209,6 +237,8 @@ export default function TraceExplorerPage() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
                   <RefreshCw size={14} className="spin" /> {t('Načítám spany…', 'Loading spans…')}
                 </div>
+              ) : spansUnavailable ? (
+                <DataUnavailable kind={spansUnavailable} service="tempo (observability)" feature={t('Spany trasy', 'Trace spans')} lang={t('cs', 'en') as 'cs' | 'en'} dense />
               ) : !spans?.length ? (
                 <DataUnavailable kind="no_data" feature={t('Spany trasy', 'Trace spans')} lang={t('cs', 'en') as 'cs' | 'en'} dense />
               ) : (
