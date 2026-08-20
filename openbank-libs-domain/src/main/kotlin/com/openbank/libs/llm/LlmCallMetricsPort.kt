@@ -32,10 +32,13 @@ interface LlmCallMetricsPort {
      * @param model the model id as sent upstream (e.g. `deepseek-ai/DeepSeek-V3.2`) — the same
      *   string the gateway config uses, so a cost rule can join on it without a mapping table.
      * @param outcome one of [OUTCOME_SUCCESS], [OUTCOME_HTTP_ERROR], [OUTCOME_EXCEPTION],
-     *   [OUTCOME_NOT_CONFIGURED]. A closed vocabulary: this tag is a Prometheus label and an
-     *   open-ended one (an exception message, a status code) would be a cardinality bomb.
-     * @param promptTokens from the response's `usage.prompt_tokens`; 0 when the provider omits it.
-     * @param completionTokens from `usage.completion_tokens`; 0 when the provider omits it.
+     *   [OUTCOME_STREAM_ABORTED], [OUTCOME_NOT_CONFIGURED]. A closed vocabulary: this tag is a
+     *   Prometheus label and an open-ended one (an exception message, a status code) would be a
+     *   cardinality bomb.
+     * @param promptTokens from the response's `usage.prompt_tokens`; 0 when the provider reported
+     *   zero, or [TOKENS_UNKNOWN] when it reported nothing at all. The two are not the same fact
+     *   and must not share a value — see [TOKENS_UNKNOWN].
+     * @param completionTokens from `usage.completion_tokens`; same [TOKENS_UNKNOWN] rule.
      * @param durationNanos wall-clock for the whole attempt, including a failed one — a timeout is
      *   the slowest and most interesting case, so timing only successes would hide it.
      * @param provider the egress backend this attempt was ADDRESSED TO, from [providerOf] — the
@@ -68,6 +71,41 @@ interface LlmCallMetricsPort {
          * never-configured agent look like a broken one — and vice versa, which is worse.
          */
         const val OUTCOME_NOT_CONFIGURED = "not_configured"
+
+        /**
+         * The response opened — status 2xx, headers received, possibly tokens already delivered to
+         * the user — and then the stream failed before it completed (#5878).
+         *
+         * Its own value, not folded into an existing one, because every alternative states
+         * something false. [OUTCOME_SUCCESS] would count a truncated answer as a delivered one —
+         * the `PushResult.skipped()`/`success = true` shape (ADR-0252 phase 0) that this repo has
+         * already paid for once. [OUTCOME_HTTP_ERROR] would be a lie about a call the backend
+         * answered 200 to, and would make the status-code hypothesis the first thing an operator
+         * checks the wrong one. [OUTCOME_EXCEPTION] is reserved for a call that never got a
+         * response at all, and the two have different causes (connect/DNS/TLS versus a mid-flight
+         * reset, an idle timeout or a truncated SSE body) and different fixes.
+         *
+         * It is a FAILURE and alerts as one: it is in the `AiCallErrorRateHigh` numerator alongside
+         * `http_error` and `exception`.
+         */
+        const val OUTCOME_STREAM_ABORTED = "stream_aborted"
+
+        /**
+         * "The provider never told us how many tokens this call used" — as opposed to `0`, which
+         * means it told us zero.
+         *
+         * Needed by the streaming path, which has no single response body to read `usage` from: an
+         * OpenAI-compatible backend MAY send a final usage chunk before `[DONE]` and many do not,
+         * and an aborted stream may end before one arrives. Recording `0` there would be
+         * indistinguishable from a real zero and would silently understate every rule that reads
+         * `openbank_llm_tokens_total` (`openbank:llm_cost_usd_24h:total`, `:by_model`,
+         * `openbank:llm_tokens_unpriced_24h`) with no signal anywhere that a figure was missing.
+         *
+         * Negative on purpose: it cannot be produced by summing real token counts, so it cannot be
+         * reached by accident. An implementation must not add it to the token counters; it should
+         * make the fact that a call went unmeasured observable in its own right.
+         */
+        const val TOKENS_UNKNOWN = -1
 
         // --- provider vocabulary (closed, like `outcome`) -------------------------------------
         //
