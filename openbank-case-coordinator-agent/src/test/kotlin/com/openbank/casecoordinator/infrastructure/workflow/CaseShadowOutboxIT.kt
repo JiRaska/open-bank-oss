@@ -6,9 +6,14 @@
 package com.openbank.casecoordinator.infrastructure.workflow
 
 import com.openbank.casecoordinator.PostgresTestResource
+import com.openbank.casecoordinator.infrastructure.persistence.CaseOutboxRepositoryImpl
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.uni
 import jakarta.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
@@ -28,6 +33,12 @@ class CaseShadowOutboxIT {
 
     @Inject
     lateinit var dataSource: DataSource
+
+    @Inject
+    lateinit var repository: CaseOutboxRepositoryImpl
+
+    private fun <T> onEventLoop(block: suspend () -> T): T =
+        VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     @AfterEach
     fun cleanUp() {
@@ -49,21 +60,14 @@ class CaseShadowOutboxIT {
 
         activities.emitProposalWithDelivery(WORKFLOW_ID, "case-synthesis", "shadow only", false, shadow = true)
 
+        assertThat(onEventLoop { repository.listProcessable(10) }).isEmpty()
+
         dataSource.connection.use { conn ->
             conn.prepareStatement("SELECT status FROM case_outbox WHERE aggregate_id = ?").use { ps ->
                 ps.setObject(1, CASE_UUID)
                 ps.executeQuery().use { rs ->
                     assertThat(rs.next()).isTrue()
                     assertThat(rs.getString("status")).isEqualTo("SHADOW")
-                }
-            }
-            conn.prepareStatement(
-                "SELECT count(*) FROM case_outbox WHERE aggregate_id = ? AND status IN ('PENDING', 'FAILED')",
-            ).use { ps ->
-                ps.setObject(1, CASE_UUID)
-                ps.executeQuery().use { rs ->
-                    assertThat(rs.next()).isTrue()
-                    assertThat(rs.getInt(1)).isZero()
                 }
             }
         }
