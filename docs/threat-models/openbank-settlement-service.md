@@ -64,7 +64,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | mTLS between Temporal server and workers (both directions); OPA activity interceptor (`OpaActivityInterceptor`) rejects tasks not matching policy |
+| S1 | Attacker impersonates Temporal server, injects malicious workflow tasks | mTLS between Temporal server and workers (both directions). **Corrected 2026-08-20 (#6055) — the second half of this row credited a control that does not exist.** It named an OPA activity interceptor which is present in no Kotlin source in this repository; its only occurrence outside this document is a label rendered on an admin-UI page. No activity-level authorization runs today |
 | S2 | Attacker impersonates settlement-service to call balance/ledger | Corrected 2026-08-16 (#3921) — see note below. `debit-port`/`credit-port`/`ledger-port` are `OidcClientRequestReactiveFilter`-backed REST clients (`BalanceRestClient`, `LedgerRestClient`) that attach a client-credentials bearer token from `quarkus.oidc-client`, the confidential `openbank-services` Keycloak client (`OIDC_CLIENT_SECRET` Vault-projected, never in git); OPA authz on the balance/ledger REST receivers checks that identity |
 
 ### T — Tampering
@@ -100,7 +100,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | OPA policy gate: only activities matching `data.openbank.settlement.activity.allow` are dispatched; `reverseBookToLedger` requires `compensation=true` context |
+| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no such gate is implemented.** The activity policy file exists in the service's resources but is bundled by no ConfigMap and loaded by nothing, so it is evaluated never; and it does not say what this row said it said — its allow rule is a single membership test over a fixed activity set, with no `compensation` term anywhere in the file, and the reversal activity is an unconditional member. The effective control on this boundary is the Temporal namespace ACL in E2 alone |
 | E2 | Service account token used to submit arbitrary workflows | Temporal namespace ACL restricts task queue submission to settlement-service service account (SPIFFE `spiffe://openbank/ns/openbank-settlement/sa/settlement-service`) |
 
 ---
@@ -128,10 +128,13 @@ replacing the former in-memory stub), so settlement state is durable across rest
    narrow `service-settlement-m2m` rule the way `service-domestic-payment-m2m` / `service-sca-m2m`
    do it, not a blanket SERVICE allow.
 
-2. ~~**OPA policy for settlement activities not yet written.**~~ **Closed** —
-   `openbank-settlement-service/src/main/resources/opa/settlement_activity.rego` exists and is bundled
-   (`settlement-opa-bundle.yaml`), so `OpaActivityInterceptor` has a real policy to evaluate rather
-   than fail-closing on a missing one. This was the pre-condition for the flag flip below.
+2. **OPA policy for settlement activities: REOPENED 2026-08-20 (#6055).** This entry was marked
+   *Closed* on the grounds that the policy file exists and is bundled, so an activity interceptor
+   would have a real policy to evaluate. Re-measured against `origin/main`: the policy file exists,
+   is referenced by no bundle ConfigMap, and the interceptor it was closed on behalf of exists in no
+   Kotlin source and never has. Nothing evaluates the policy. A residual risk marked *Closed* is the
+   state a reviewer stops re-checking, which is why this is recorded as a reopening rather than a
+   quiet edit — and why the pre-condition it was supplying for the flag flip below was never met.
 
 3. **Temporal is now the SOLE orchestrator (issue #1917, ADR-0120 Phase 6).** The
    `openbank.temporal.enabled` dispatch gate is removed and the in-process legacy saga

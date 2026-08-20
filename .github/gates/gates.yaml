@@ -2715,6 +2715,37 @@ gates:
       # count; see hunk_moves_boundary and the gate's --self-test.
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}" --enforce
 
+  # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
+  # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
+  # CLAIM, so a model can be present, current, freshly edited — and false. Settlement's R2
+  # listed a money-moving stub as its own mitigation and T1 named an idempotency key built from
+  # identifiers that appear in no source file here; three unit tests asserted the defect
+  # verbatim, so the suite agreed with the document and both were wrong together.
+  #
+  # Scope is DERIVED (money_path_services x docs/threat-models/<service>.md) and the claims
+  # inside are enumerated by TWO independent parsers whose union is checked — the fleet's models
+  # are not one format, and a single parser here would be a probe rather than a census.
+  # Exclusions live in the script's ALLOWED_UNRESOLVED with a reason and fail STALE in either
+  # direction; that already fired once during development, on its own entry.
+  #
+  # Both `mode:` and `--enforce` are required and neither alone does anything (#2392): without
+  # the flag the script prints ::warning and exits 0, which is a permanently green gate that
+  # blocks nothing. Negative control, read from $? with output redirected to a file (a pipe
+  # returns the pipeline's status, not the script's): restoring one pre-fix claim gives rc=1
+  # naming it PHANTOM; restoring the corrected text gives rc=0.
+  - id: threat-model-claims-resolve
+    name: "threat-model mitigation claims resolve to real code (ADR-0030 D2, enforced)"
+    group: security
+    mode: enforced
+    min_subjects: 15   # 23 money-path threat models today (2026-08-20)
+    budget_seconds: 90   # 41s over the 23 models on a warm checkout
+    rationale: "A threat model is a set of claims about running code and nothing checked whether any was true, so a mitigation could name a class that does not exist, a stub, or the very state transition whose truthfulness was the risk — and the document read as coverage in all three cases."
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-threat-model-claims.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-threat-model-claims.py --enforce
+
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
     group: security
