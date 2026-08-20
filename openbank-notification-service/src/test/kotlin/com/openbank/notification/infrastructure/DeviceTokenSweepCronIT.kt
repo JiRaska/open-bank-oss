@@ -24,10 +24,10 @@ import javax.sql.DataSource
 class DeviceTokenSweepCronIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory(
-                "notification-events-in",
-                "party-events-in",
-                "delegation-events-in",
-            ) + InMemoryConnector.switchOutgoingChannelsToInMemory("notification-events-out")
+            "notification-events-in",
+            "party-events-in",
+            "delegation-events-in",
+        ) + InMemoryConnector.switchOutgoingChannelsToInMemory("notification-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }
