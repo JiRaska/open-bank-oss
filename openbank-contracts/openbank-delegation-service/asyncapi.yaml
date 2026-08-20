@@ -78,6 +78,12 @@ channels:
         $ref: '#/components/messages/DelegationRenounced'
       DelegationExpired:
         $ref: '#/components/messages/DelegationExpired'
+      SpendReserved:
+        $ref: '#/components/messages/SpendReserved'
+      SpendConfirmed:
+        $ref: '#/components/messages/SpendConfirmed'
+      SpendReleased:
+        $ref: '#/components/messages/SpendReleased'
 
 operations:
   publishDelegationEvents:
@@ -96,6 +102,13 @@ operations:
       read model so that enforcing a delegation never requires a synchronous call to
       delegation-service. When either merges, add it here; a consumer absent from this list is a
       consumer nobody has agreed to keep compatible.
+
+      **`openbank-audit-service` subscribes as of #5728** (ADR-0249 D4). It was not subscribed to
+      this topic before, so no delegation event of any kind reached the audit trail — which is why
+      adding the spend-reservation events below without the subscription would have been an outbox
+      row nobody reads. It consumes every message on this channel generically (no per-type logic),
+      so a new event type does not break it; what it needs is `sourceService`, which the three
+      Spend* messages carry and the eight lifecycle messages do not yet.
     messages:
       - $ref: '#/channels/delegationEvents/messages/DelegationOffered'
       - $ref: '#/channels/delegationEvents/messages/DelegationActivated'
@@ -105,6 +118,9 @@ operations:
       - $ref: '#/channels/delegationEvents/messages/DelegationReinstated'
       - $ref: '#/channels/delegationEvents/messages/DelegationRenounced'
       - $ref: '#/channels/delegationEvents/messages/DelegationExpired'
+      - $ref: '#/channels/delegationEvents/messages/SpendReserved'
+      - $ref: '#/channels/delegationEvents/messages/SpendConfirmed'
+      - $ref: '#/channels/delegationEvents/messages/SpendReleased'
 
 components:
   messageTraits:
@@ -247,6 +263,28 @@ components:
                 `{"code":"CZK"}` while every consumer reads this as text. Matches the fleet's
                 event convention (AccountEvents, LedgerEvents).
 
+    # ADR-0249 D3/D4 — one unit of delegated spend. `aggregateId` is still the GRANT, not the
+    # reservation: the partition key is `aggregateId`, and keying on the reservation would let a
+    # consumer see spend against an authority whose revocation it has not applied yet.
+    reservation:
+      type: object
+      required: [reservationId, amount]
+      properties:
+        reservationId:
+          type: string
+          format: uuid
+          description: The unit of spend. Unique; NOT the partition key.
+        amount:
+          type: object
+          required: [amount, currency]
+          properties:
+            amount: { type: string, format: decimal }
+            currency:
+              type: string
+              minLength: 3
+              maxLength: 3
+              description: ISO 4217, flat — same `EventMoney` shape as `perTransactionLimit`.
+
   messages:
     DelegationOffered:
       name: DelegationOffered
@@ -385,3 +423,80 @@ components:
           - $ref: '#/components/schemas/envelope'
           - $ref: '#/components/schemas/parties'
           - $ref: '#/components/schemas/resource'
+
+    SpendReserved:
+      name: SpendReserved
+      title: Headroom was taken under the grant's cumulative ceilings
+      summary: |
+        Emitted by `SpendReservationService.reserve` and written to `delegation_outbox` in the SAME
+        transaction as the reservation row, so a committed reservation always has its event.
+
+        Emitted only for a NEWLY created reservation. An idempotent replay returns the reservation
+        an earlier call created and emits nothing — it created no state, so a second event would
+        claim a second spend. A refusal creates nothing and emits nothing either; a refused reserve
+        is visible as the absence of this event, not as an event of its own.
+
+        `idempotencyKey` is the caller's opaque key for the payment this reservation backs — the
+        only link from the audit trail to the money movement that consumed the headroom.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/reservation'
+          - type: object
+            required: [idempotencyKey]
+            properties:
+              idempotencyKey:
+                type: string
+
+    SpendConfirmed:
+      name: SpendConfirmed
+      title: The money moved — the headroom stays consumed
+      summary: |
+        Terminal for the reservation. Emitted only when the compare-and-set in
+        `SpendReservationRepository.settle` actually won: the losing side of a confirm/release race
+        changed nothing, and a re-confirm of an already-CONFIRMED reservation is a no-op replay, so
+        neither emits. One reservation therefore yields at most one settlement event.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/reservation'
+          - type: object
+            required: [settledAt]
+            properties:
+              settledAt:
+                type: string
+                format: date-time
+                description: >-
+                  When the reservation left RESERVED. Distinct from `occurredAt` only in intent:
+                  both are this call's clock reading, and neither has a default — an `occurredAt`
+                  that defaults is the Instant.EPOCH shape (#3874/#3883) that reads as 1970.
+
+    SpendReleased:
+      name: SpendReleased
+      title: The payment did not happen — the headroom comes back
+      summary: |
+        Terminal for the reservation, and the only settlement that RESTORES headroom. Same
+        emit-once-on-a-won-CAS rule as `SpendConfirmed`. A release is refused outright once the
+        reservation is CONFIRMED, so this event can never re-open a ceiling already spent through.
+      contentType: application/json
+      traits:
+        - $ref: '#/components/messageTraits/outboxHeaders'
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/envelope'
+          - $ref: '#/components/schemas/parties'
+          - $ref: '#/components/schemas/reservation'
+          - type: object
+            required: [settledAt]
+            properties:
+              settledAt:
+                type: string
+                format: date-time
