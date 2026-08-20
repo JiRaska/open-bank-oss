@@ -12,10 +12,18 @@ import java.util.UUID
 /** Stores and queries per-account rolling velocity aggregates (ADR-0084 §2). */
 interface VelocityAggregateRepository {
     /**
-     * Records a new transaction signal for [accountId]. Upserts all three windows (H1/H24/D7)
-     * in a single call — incrementing the count and sum within each window's time bucket.
+     * Records a new transaction signal for [accountId], identified by [transactionId] (the signal's
+     * `aggregateId`). Upserts all three windows (H1/H24/D7) in a single call — incrementing the
+     * count and sum within each window's time bucket.
+     *
+     * Idempotent per window (#5716): each window row carries the id of the last signal applied to
+     * it, and a signal whose [transactionId] matches is skipped. So a redelivered Kafka message does
+     * not double-count, and a retry after a partial failure re-applies only the windows that were
+     * not applied — the windows converge independently rather than as one transaction. A null
+     * [transactionId] carries no identity and is therefore never deduplicated (same contract as
+     * [PayeeHistoryRepository.recordPayment]).
      */
-    suspend fun recordTransaction(accountId: UUID, amount: BigDecimal, currency: String)
+    suspend fun recordTransaction(accountId: UUID, amount: BigDecimal, currency: String, transactionId: UUID?)
 
     /**
      * Returns the current aggregate for [accountId] in [window] for [currency], or null.

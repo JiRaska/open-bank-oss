@@ -73,7 +73,7 @@ class TransactionSignalConsumer(
         @Suppress("TooGenericExceptionCaught") // DB / reactive layer exceptions have no common base
         runBlocking {
             try {
-                velocityRepo.recordTransaction(accountId, amount, currency)
+                velocityRepo.recordTransaction(accountId, amount, currency, signal.aggregateId)
                 log.debugf("Velocity aggregate updated for account %s amount=%s %s", accountId, amount, currency)
             } catch (ex: Exception) {
                 log.warnf(ex, "Failed to record velocity aggregate for account %s", accountId)
