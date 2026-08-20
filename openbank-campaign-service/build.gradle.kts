@@ -48,6 +48,11 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    // Consumer-driven contract against consent-service (ADR-0063). campaign-service reads the
+    // suppression list and the consent check on every outbound touch, and both were unverified:
+    // `GET /api/v1/suppressions/party/{partyId}` answered 500 on EVERY call from the day it
+    // shipped (#5711) and nothing here noticed, because the only tests of this client mock it.
+    testImplementation(libs.pact.consumer)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // CampaignRestContractIT drives the real HTTP surface against real Postgres/Redis (#3133).
     testImplementation(libs.testcontainers)
