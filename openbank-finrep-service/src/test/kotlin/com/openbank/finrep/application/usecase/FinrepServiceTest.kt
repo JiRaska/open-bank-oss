@@ -31,8 +31,15 @@ class FinrepServiceTest {
     fun `getTemplate dispatches F01_01 to the balance sheet mapper`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         val lines = listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
-            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000")),
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            TrialBalanceLineDto(
+                code = "2000",
+                accountType = "LIABILITY",
+                net = BigDecimal("-300000"),
+                currency = "CZK",
+            ),
+            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-260000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("60000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns lines
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -49,8 +56,8 @@ class FinrepServiceTest {
     fun `getTemplate dispatches F02_00 to the P&L mapper`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         val lines = listOf(
-            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("120000")),
-            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("80000")),
+            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-120000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("80000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns lines
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -78,8 +85,15 @@ class FinrepServiceTest {
     fun `a rendered template publishes its input size, cell count and balanced flag`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         coEvery { ledgerPort.getTrialBalance(asOf) } returns listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
-            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000")),
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            TrialBalanceLineDto(
+                code = "2000",
+                accountType = "LIABILITY",
+                net = BigDecimal("-300000"),
+                currency = "CZK",
+            ),
+            TrialBalanceLineDto(code = "4000", accountType = "INCOME", net = BigDecimal("-260000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "5000", accountType = "EXPENSE", net = BigDecimal("60000"), currency = "CZK"),
         )
         val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
 
@@ -88,7 +102,7 @@ class FinrepServiceTest {
         assertThat(
             registry.get("openbank.finrep.templates.rendered")
                 .tag("service", "finrep").tag("framework", "finrep").tag("template", "F01.01")
-                .tag("balanced", template.isBalanced.toString())
+                .tag("balanced", "true")
                 .counter().count(),
         ).isEqualTo(1.0)
         assertThat(
@@ -96,10 +110,38 @@ class FinrepServiceTest {
         ).isEqualTo(1L)
         assertThat(
             registry.get("openbank.finrep.trial_balance.lines").tag("template", "F01.01").summary().totalAmount(),
-        ).isEqualTo(2.0)
+        ).isEqualTo(4.0)
         assertThat(
             registry.get("openbank.finrep.template.cells").tag("template", "F01.01").summary().totalAmount(),
         ).isEqualTo(template.cells.size.toDouble())
+    }
+
+    @Test
+    fun `the balanced tag takes the value FALSE for a trial balance that does not tie out`(): Unit = runBlocking {
+        // The falsification half of the test above, and the reason issue #5987 was filed: while both
+        // mappers passed a hardcoded `true`, this series had exactly ONE reachable value, so an alert
+        // built on it could never fire and the tag looked like health monitoring while measuring
+        // nothing. Asserting `balanced=false` is reachable is what makes the tag worth alerting on.
+        val asOf = LocalDate.of(2026, 6, 30)
+        coEvery { ledgerPort.getTrialBalance(asOf) } returns listOf(
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            TrialBalanceLineDto(
+                code = "2000",
+                accountType = "LIABILITY",
+                net = BigDecimal("-410000"),
+                currency = "CZK",
+            ),
+        )
+        val service = FinrepService(ledgerPort, FinrepMetricsAdapter(registry))
+
+        val template = service.getTemplate(GetFinrepTemplateQuery(templateId = "F01.01", asOf = asOf))
+
+        assertThat(template.isBalanced).isFalse()
+        assertThat(
+            registry.get("openbank.finrep.templates.rendered")
+                .tag("framework", "finrep").tag("template", "F01.01").tag("balanced", "false")
+                .counter().count(),
+        ).isEqualTo(1.0)
     }
 
     @Test

@@ -47,7 +47,7 @@ interface LedgerRestClient {
     fun getTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 }
 
-data class TrialBalanceLineResponse(val code: String, val type: String, val net: BigDecimal)
+data class TrialBalanceLineResponse(val code: String, val type: String, val net: BigDecimal, val currency: String)
 
 data class ClosedPeriodTrialBalanceResponse(
     val period: String,
@@ -65,6 +65,7 @@ class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPo
                 code = line.code,
                 accountType = line.type,
                 net = line.net,
+                currency = line.currency,
             )
         }
     }

@@ -14,5 +14,11 @@ data class FinrepTemplate(
     val templateId: String,
     val period: LocalDate,
     val cells: List<FinrepCell>,
-    val isBalanced: Boolean = true,
+    /**
+     * Whether the double-entry identity of the trial balance this template was rendered from holds
+     * (`Σ net == 0` per currency, `TrialBalanceIdentity`). NO DEFAULT on purpose (issue #5987): the
+     * field spent its whole life as a hardcoded `true` that no producer computed, and a default
+     * would let a new producer omit it and re-publish that same constant silently.
+     */
+    val isBalanced: Boolean,
 )
