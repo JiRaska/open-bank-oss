@@ -143,7 +143,13 @@ class CaseWorkflowImpl : CaseWorkflow {
         contested: Boolean,
     ): CaseOutcome {
         persistence.recordContributions(start.caseId, contributions)
-        val proposalId = proposals.emitProposal(start.caseId, eventType, summary, contested)
+        val proposalId = proposals.emitProposal(
+            start.caseId,
+            eventType,
+            summary,
+            contested,
+            start.deliveryMode.name == "SHADOW",
+        )
         persistence.recordCaseClosed(start.caseId, status.name, Workflow.currentTimeMillis())
         return CaseOutcome(
             caseId = start.caseId,

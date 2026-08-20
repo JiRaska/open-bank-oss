@@ -56,7 +56,7 @@ interface CaseSynthesisActivity {
 /** Emits the single HITL proposal into the case outbox (D7). */
 @ActivityInterface
 interface CaseProposalActivity {
-    fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean): String
+    fun emitProposal(caseId: String, proposalType: String, summary: String, contested: Boolean, shadow: Boolean): String
 }
 
 /** Persists case lifecycle + contribution rows to the V1 schema. */

@@ -114,6 +114,8 @@ openbank:
     # key degrades the synthesis call instead of CrashLooping the pod.
     model-endpoint: ${CASE_COORDINATOR_MODEL_ENDPOINT:https://api.deepinfra.com/v1/openai}
     model-id: ${CASE_COORDINATOR_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
+    case:
+      delivery-mode: ${CASE_COORDINATOR_CASE_DELIVERY_MODE:HITL}
 
 mp:
   messaging:

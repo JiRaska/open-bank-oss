@@ -120,6 +120,10 @@ spec:
             # which the NetworkPolicy egress denies.
             - name: CASE_COORDINATOR_MODEL_ENDPOINT
               value: http://litellm.ai-platform.svc:4000/v1
+            # Seven-day incident-response pilot: persist results for measurement but never relay
+            # them to proposal-events/HITL. Any other class is rejected by CaseOpenService.
+            - name: CASE_COORDINATOR_CASE_DELIVERY_MODE
+              value: SHADOW
             # LiteLLM virtual key (ESO case-coordinator-litellm; reuses KEY_AGENT_SERVICE
             # until a per-service virtual key is provisioned in Vault — a Vault admin action).
             - name: CASE_COORDINATOR_MODEL_API_KEY
