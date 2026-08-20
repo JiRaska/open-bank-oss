@@ -11,19 +11,19 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.runtime.StartupEvent
-import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
-import io.smallrye.mutiny.coroutines.asUni
+import io.vertx.core.Vertx
 import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.CompletableFuture
 
 /**
  * ADR-0237: the dead-letter janitor must publish a liveness heartbeat, and the heartbeat must move
@@ -65,8 +65,21 @@ class DeadLetterJanitorWorkflowLivenessTest {
         it.domainMetrics = metrics
     }
 
-    private fun onVertxContext(block: suspend () -> Unit) = VertxContextSupport.subscribeAndAwait {
-        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
+    private fun onVertxContext(block: suspend () -> Unit): Unit {
+        val vertx = Vertx.vertx()
+        val completion = CompletableFuture<Unit>()
+        vertx.runOnContext {
+            CoroutineScope(Dispatchers.Unconfined).launch {
+                runCatching { block() }
+                    .onSuccess(completion::complete)
+                    .onFailure(completion::completeExceptionally)
+            }
+        }
+        try {
+            completion.get()
+        } finally {
+            vertx.close()
+        }
     }
 
     @Test
