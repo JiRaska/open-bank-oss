@@ -7,8 +7,9 @@ info:
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
-    case history into the ADR-0246 thread view. Every case converges to exactly one
-    human-in-the-loop proposal (ADR-0031); this API never writes to a business record.
+    case history into the ADR-0246 thread view. Normal cases converge to exactly one
+    human-in-the-loop proposal (ADR-0031); the bounded shadow pilot records its terminal result
+    without delivery to HITL. This API never writes to a business record.
   license:
     name: AGPL-3.0-only
     url: https://www.gnu.org/licenses/agpl-3.0.html
