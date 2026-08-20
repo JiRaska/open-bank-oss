@@ -137,19 +137,19 @@ function formatAmount(n: number, currency: string, locale: string) {
 function TabNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const { t } = useLanguage()
   return (
-    <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+    <div role="group" aria-label={t('Rozsah plateb', 'Payment scope')} style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
       {TABS.map(tab => {
         const Icon = tab.icon
         const isActive = active === tab.key
         return (
-          <button key={tab.key} onClick={() => onChange(tab.key)}
+          <button key={tab.key} type="button" aria-pressed={isActive} onClick={() => onChange(tab.key)}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', fontSize: '13px',
               fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
               border: 'none', borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
               background: 'transparent', cursor: 'pointer', marginBottom: '-1px', transition: 'all 0.15s ease',
             }}>
-            <Icon size={14} />
+            <Icon size={14} aria-hidden="true" />
             {tab.key === 'sct-inst' ? 'SCT Inst' : (t(tab.labelCs, tab.labelEn))}
           </button>
         )
