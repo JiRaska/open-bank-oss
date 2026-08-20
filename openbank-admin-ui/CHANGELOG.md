@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.181.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.180.0...admin-ui-v0.181.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify cluster topology controls ([#6007](https://github.com/JiRaska/open-bank-oss/issues/6007)) ([4919bf5](https://github.com/JiRaska/open-bank-oss/commit/4919bf50f1b748c67d8f14042d4db79190bbb807))
+* **admin-ui:** distinguish trace states and block incomplete regulatory exports ([#5988](https://github.com/JiRaska/open-bank-oss/issues/5988)) ([9133ca7](https://github.com/JiRaska/open-bank-oss/commit/9133ca7fb9eea671ad75fdff3fc763ac0455e952)), closes [#5904](https://github.com/JiRaska/open-bank-oss/issues/5904)
+
 ## [0.180.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.179.0...admin-ui-v0.180.0) (2026-08-20)
 
 
