@@ -4,6 +4,7 @@
 
 package com.openbank.lending.infrastructure.persistence.mapper
 
+import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.Loan
 import com.openbank.lending.domain.model.LoanApplication
@@ -54,6 +55,10 @@ class LendingMapper {
         it.policyVersions = a.policyVersions
         it.decisionInputHash = a.decisionInputHash
         it.decidedEngineAt = a.decidedEngineAt
+        it.catalogOfferingId = a.catalogSnapshot?.offeringId
+        it.catalogRevisionId = a.catalogSnapshot?.revisionId
+        it.catalogContentHash = a.catalogSnapshot?.contentHash
+        it.catalogSchemaVersion = a.catalogSnapshot?.schemaVersion
     }
 
     fun toDomain(e: LoanApplicationEntity) = LoanApplication(
@@ -71,6 +76,7 @@ class LendingMapper {
         decisionReasons = e.decisionReasons, decisionMatchedRules = e.decisionMatchedRules,
         policyVersions = e.policyVersions, decisionInputHash = e.decisionInputHash,
         decidedEngineAt = e.decidedEngineAt,
+        catalogSnapshot = e.toCatalogSnapshot(),
     )
 
     fun toEntity(l: Loan) = LoanEntity().also {
@@ -185,4 +191,12 @@ class LendingMapper {
         expectedCreditLoss = Money.of(e.expectedCreditLoss, e.currency),
         createdAt = e.createdAt,
     )
+}
+
+private fun LoanApplicationEntity.toCatalogSnapshot(): CatalogLoanSnapshot? {
+    val offeringId = catalogOfferingId ?: return null
+    val revisionId = catalogRevisionId ?: return null
+    val contentHash = catalogContentHash ?: return null
+    val schemaVersion = catalogSchemaVersion ?: return null
+    return CatalogLoanSnapshot(offeringId, revisionId, contentHash, schemaVersion)
 }

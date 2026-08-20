@@ -7,7 +7,13 @@ package com.openbank.account.application.port.out
 import java.util.UUID
 
 /** The minimal projection of a product-catalog `Product` needed to validate account opening (issue #668). */
-data class CatalogProduct(val id: UUID, val code: String, val status: String)
+data class CatalogProduct(
+    val id: UUID,
+    val code: String,
+    val status: String,
+    /** ISO-4217 product currency from the v1 compatibility projection. */
+    val currency: String,
+)
 
 /**
  * The outcome of resolving a product by its canonical id from `openbank-product-catalog`
