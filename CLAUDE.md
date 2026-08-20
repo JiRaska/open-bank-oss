@@ -776,6 +776,28 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   close that; only a merge queue or up-to-date-branch enforcement would, and the repo has
   deliberately chosen detection over prevention. So the re-check above is still required — but
   a branch that has been sitting is the risk, not a branch that was created early.
+- **`oasdiff` compares a spec to its own PREVIOUS version, never to the implementation — so a spec
+  enum that was wrong from the first commit is wrong forever, and every gate stays green.** The
+  version axis is watched from both ends and the *truth* axis from neither.
+  `openbank-kyc-service` published `checkType` as
+  `[IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]` against a domain
+  `CheckType { IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA }`: three
+  names misspelled, `ADDRESS` (a check `createCase` creates on every case) unpublished, and
+  `SOURCE_OF_FUNDS` a value that has never existed in the code. Its `UpdateCheckRequest` was
+  fiction in the same way — `required: [result]` with `result` carrying the status enum, against a
+  DTO of `(status: String, result: String?)`. So no client generated from that document could call
+  the endpoint at all, and nothing anywhere said so (#5895). It is not one service:
+  `check-openapi-enum-vs-domain.py` (gate `openapi-enum-domain-drift`, pairs a spec enum with the
+  Kotlin enum it serves by value overlap) found **27 more across 16 services** (#5962), several
+  advertising values the code lacks — which a generated client will send and the service will 400.
+  **Two consequences worth carrying.** Correcting one is *breaking* to `oasdiff` (removed enum
+  values) while being unbreakable in fact — the server is byte-identical — so it takes the
+  `correction` class in `check-api-contract.py`: MINOR, no URL major. That reclassification is
+  **mechanical, not declared**, and it only applies while the PR touches *nothing else* in that
+  service, so **put the drift test outside the service directory** or the gate demands a MAJOR it
+  also forbids. And when a downstream spec republishes the same vocabulary, it is evidence about
+  which side is canonical: `openbank-customer-edge` already carried the domain spelling verbatim,
+  which settled all five kyc names before any judgement call was needed.
 - **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
   Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
   scans *open* PRs — but the number is just as easily consumed by something that landed while your
