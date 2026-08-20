@@ -3,9 +3,11 @@ package com.openbank.notification.infrastructure
 import com.openbank.notification.it.PostgresTestResource
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
+import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -17,8 +19,20 @@ import javax.sql.DataSource
 /** Proves the real Quarkus scheduler invokes the stale-token sweep. */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
+@QuarkusTestResource(DeviceTokenSweepCronIT.InMemoryKafkaResource::class)
 @TestProfile(DeviceTokenSweepCronIT.FastCronProfile::class)
 class DeviceTokenSweepCronIT {
+    class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchIncomingChannelsToInMemory(
+                "notification-events-in",
+                "party-events-in",
+                "delegation-events-in",
+            ) + InMemoryConnector.switchOutgoingChannelsToInMemory("notification-events-out")
+
+        override fun stop() = InMemoryConnector.clear()
+    }
+
     class FastCronProfile : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> = mapOf(
             "quarkus.scheduler.enabled" to "true",
