@@ -21,9 +21,15 @@ data class DeadLetterRecord(val contentHash: String, val rawPayload: String, val
  * Outbound port for quarantining un-projectable messages (ADR-0022).
  *
  * Replaces the old "log and swallow" behaviour: a dropped event is an invisible gap in the bronze
- * layer, which undermines the "complete, replayable log of record" guarantee. The default binding
- * [com.openbank.analytics.infrastructure.sink.LoggingDeadLetterSink] needs no infra; a ClickHouse
- * `dead_letter_events`-backed adapter lands with the warehouse adapter.
+ * layer, which undermines the "complete, replayable log of record" guarantee.
+ *
+ * Two bindings. [com.openbank.analytics.infrastructure.sink.ClickHouseDeadLetterSink] is the durable
+ * one — it writes the `dead_letter_events` row this KDoc describes — and is selected at build time by
+ * `openbank.analytics.sink.type=clickhouse`, alongside the durable warehouse sink. Otherwise the
+ * zero-infrastructure [com.openbank.analytics.infrastructure.sink.LoggingDeadLetterSink] applies, and
+ * "quarantined" then means **logged**: recoverable for as long as log retention holds, not from the
+ * table. Read a `quarantine()` that returns normally as proof of nothing — the two are
+ * indistinguishable at the call site (#5761).
  */
 interface DeadLetterSink {
     suspend fun quarantine(record: DeadLetterRecord)

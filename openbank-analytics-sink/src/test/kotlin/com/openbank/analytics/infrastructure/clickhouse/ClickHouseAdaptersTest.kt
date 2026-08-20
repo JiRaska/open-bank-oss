@@ -5,10 +5,12 @@
 package com.openbank.analytics.infrastructure.clickhouse
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.analytics.application.port.out.DeadLetterRecord
 import com.openbank.analytics.application.port.out.IntegrityAnchor
 import com.openbank.analytics.application.port.out.ProposalDecisionPhase
 import com.openbank.analytics.infrastructure.proposal.ClickHouseProposalStore
 import com.openbank.analytics.infrastructure.reconcile.ClickHouseWarehouseStateReader
+import com.openbank.analytics.infrastructure.sink.ClickHouseDeadLetterSink
 import com.openbank.analytics.infrastructure.worm.ClickHouseWormArchive
 import com.openbank.libs.analytics.AggregateKey
 import com.openbank.libs.analytics.BackfillRequest
@@ -180,6 +182,53 @@ class ClickHouseAdaptersTest {
         }
 
         assertThat(worm.latest()).isNull()
+    }
+
+    // ------------------------------------------------------------------------ dead-letter quarantine
+
+    @Test
+    fun `quarantine inserts the raw payload into dead_letter_events`() = runBlocking<Unit> {
+        val client = FakeClickHouseClient()
+        val dlq = ClickHouseDeadLetterSink().apply {
+            clickhouse = client
+            mapper = this@ClickHouseAdaptersTest.mapper
+        }
+
+        dlq.quarantine(
+            DeadLetterRecord(
+                contentHash = "sha256:abc",
+                rawPayload = """{"broken":""",
+                error = "JsonParseException: unexpected end of input",
+                failedAt = Instant.parse("2026-05-01T10:00:00Z"),
+            ),
+        )
+
+        assertThat(client.lastInsertTable).isEqualTo("dead_letter_events")
+        val node = mapper.readTree(client.lastInsertBody!!)
+        assertThat(node.get("content_hash").asText()).isEqualTo("sha256:abc")
+        assertThat(node.get("raw_payload").asText()).isEqualTo("""{"broken":""")
+        assertThat(node.get("error").asText()).contains("JsonParseException")
+        assertThat(node.get("failed_at").asText()).isEqualTo("2026-05-01 10:00:00.000")
+    }
+
+    /**
+     * The payload must be written WHOLE. [com.openbank.analytics.infrastructure.sink.LoggingDeadLetterSink]
+     * truncates at 500 chars, which is fine for a log line and fatal for the documented recovery —
+     * an operator replays `raw_payload` through the mapping path, and a truncated payload does not
+     * parse. This is the assertion that distinguishes the durable binding from the logging one.
+     */
+    @Test
+    fun `quarantine does not truncate a payload longer than the log fallback would keep`() = runBlocking<Unit> {
+        val client = FakeClickHouseClient()
+        val dlq = ClickHouseDeadLetterSink().apply {
+            clickhouse = client
+            mapper = this@ClickHouseAdaptersTest.mapper
+        }
+        val long = "x".repeat(2_000)
+
+        dlq.quarantine(DeadLetterRecord("h", long, "boom", Instant.parse("2026-05-01T10:00:00Z")))
+
+        assertThat(mapper.readTree(client.lastInsertBody!!).get("raw_payload").asText()).isEqualTo(long)
     }
 
     // ------------------------------------------------------------------ durable ProposalStore (F3)
