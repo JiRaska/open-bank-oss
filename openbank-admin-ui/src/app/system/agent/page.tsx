@@ -317,6 +317,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
 
   const properties = tool.inputSchema.properties ?? {}
   const required   = tool.inputSchema.required ?? []
+  const panelId = `agent-tool-${tool.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`
 
   const run = async () => {
     setRunning(true); setResult(null)
@@ -332,6 +333,9 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
     <div className="card" style={{ overflow: 'hidden' }}>
       {/* Header */}
       <button
+        type="button"
+        aria-expanded={expanded}
+        aria-controls={expanded ? panelId : undefined}
         onClick={onToggle}
         style={{
           width: '100%', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
@@ -346,7 +350,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', minWidth: 0 }}>
           <span style={{ color: 'var(--text-tertiary)', marginTop: '1px', flexShrink: 0 }}>
-            {expanded ? <ChevronDown size={13}/> : <ChevronRight size={13}/>}
+            {expanded ? <ChevronDown size={13} aria-hidden="true"/> : <ChevronRight size={13} aria-hidden="true"/>}
           </span>
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', fontFamily: 'JetBrains Mono, monospace' }}>
@@ -364,7 +368,7 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
 
       {/* Expanded body */}
       {expanded && (
-        <div style={{ padding: '16px', background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div id={panelId} role="region" aria-label={t('Parametry a výsledek nástroje', 'Tool parameters and result')} style={{ padding: '16px', background: 'var(--surface)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {/* Parameters */}
           {Object.entries(properties).length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -395,14 +399,16 @@ function ToolCard({ tool, expanded, onToggle }: { tool: ToolDef; expanded: boole
           {/* Run button */}
           <div>
             <button
+              type="button"
+              aria-busy={running}
               className="btn btn-primary"
               onClick={run}
               disabled={running}
               style={{ background: running ? 'var(--text-tertiary)' : 'var(--accent)' }}
             >
               {running
-                ? <><RefreshCw size={13} className="animate-spin"/> {t('Probíhá…', 'Running…')}</>
-                : <><Play size={13}/> {t('Spustit nástroj', 'Run tool')}</>
+                ? <><RefreshCw size={13} aria-hidden="true" className="animate-spin"/> {t('Probíhá…', 'Running…')}</>
+                : <><Play size={13} aria-hidden="true"/> {t('Spustit nástroj', 'Run tool')}</>
               }
             </button>
           </div>
