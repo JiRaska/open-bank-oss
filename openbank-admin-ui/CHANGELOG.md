@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.175.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.174.1...admin-ui-v0.175.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
+
+### Bug Fixes
+
+* **admin-ui:** label consent lookup actions ([#5916](https://github.com/JiRaska/open-bank-oss/issues/5916)) ([49607d0](https://github.com/JiRaska/open-bank-oss/commit/49607d0ffd1ec145a8788e6a36e5d7bc70264593))
+
 ## [0.174.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.174.0...admin-ui-v0.174.1) (2026-08-20)
 
 

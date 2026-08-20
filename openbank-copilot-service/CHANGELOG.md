@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.1...copilot-service-v0.13.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.12.0...copilot-service-v0.12.1) (2026-08-19)
 
 

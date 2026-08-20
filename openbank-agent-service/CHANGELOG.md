@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.3...agent-service-v1.20.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
 ## [1.19.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.2...agent-service-v1.19.3) (2026-08-17)
 
 
