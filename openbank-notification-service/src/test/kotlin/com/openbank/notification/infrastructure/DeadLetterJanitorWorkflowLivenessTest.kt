@@ -11,9 +11,13 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.runtime.StartupEvent
+import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.inject.Instance
-import kotlinx.coroutines.runBlocking
+import io.smallrye.mutiny.coroutines.asUni
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -61,8 +65,12 @@ class DeadLetterJanitorWorkflowLivenessTest {
         it.domainMetrics = metrics
     }
 
+    private fun onVertxContext(block: suspend () -> Unit) = VertxContextSupport.subscribeAndAwait {
+        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
+    }
+
     @Test
-    fun `registers the gauges at startup and records success after a purge`(): Unit = runBlocking {
+    fun `registers the gauges at startup and records success after a purge`() {
         val registry = SimpleMeterRegistry()
         every { repo.purgeDeadBefore(any()) } returns Uni.createFrom().item(5L)
 
@@ -82,20 +90,20 @@ class DeadLetterJanitorWorkflowLivenessTest {
                 .gauge()?.value(),
         ).isEqualTo(Duration.ofDays(1).toSeconds().toDouble())
 
-        janitor.purgeDeadLetters()
+        onVertxContext { janitor.purgeDeadLetters() }
 
         assertThat(successRecordedOf(registry)).isEqualTo(SUCCEEDED)
         assertThat(ageOf(registry)).isLessThan(TOLERANCE_SECONDS)
     }
 
     @Test
-    fun `a purge that removes nothing still records success`(): Unit = runBlocking {
+    fun `a purge that removes nothing still records success`() {
         val registry = SimpleMeterRegistry()
         every { repo.purgeDeadBefore(any()) } returns Uni.createFrom().item(0L)
 
         val janitor = job(metricsOver(registry))
         janitor.registerLiveness(StartupEvent())
-        janitor.purgeDeadLetters()
+        onVertxContext { janitor.purgeDeadLetters() }
 
         // A quiet night IS a successful run. Asserted on the success FLAG, not the age: the boot
         // seed already puts the age under the tolerance before purgeDeadLetters() is called, so an
@@ -106,7 +114,7 @@ class DeadLetterJanitorWorkflowLivenessTest {
     }
 
     @Test
-    fun `a swallowed purge failure leaves the heartbeat unrecorded`(): Unit = runBlocking {
+    fun `a swallowed purge failure leaves the heartbeat unrecorded`() {
         val registry = SimpleMeterRegistry()
         every { repo.purgeDeadBefore(any()) } returns
             Uni.createFrom().failure(IllegalStateException("HR000068: no current Vertx context"))
@@ -117,7 +125,7 @@ class DeadLetterJanitorWorkflowLivenessTest {
         // The janitor catches this itself — no exception escapes, which is why the heartbeat is
         // the only externally visible difference between a broken purge and a healthy one. This is
         // the #2913 shape reproduced exactly.
-        janitor.purgeDeadLetters()
+        onVertxContext { janitor.purgeDeadLetters() }
 
         assertThat(successRecordedOf(registry))
             .describedAs("a swallowed failure must not record a success")
