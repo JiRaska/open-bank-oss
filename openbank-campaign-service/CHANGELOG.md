@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.3](https://github.com/JiRaska/open-bank-oss/compare/v0.33.2...v0.33.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **campaign,onboarding:** stop swallowing transient consumer failures as an ack ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5757](https://github.com/JiRaska/open-bank-oss/issues/5757)) ([4f2d6e5](https://github.com/JiRaska/open-bank-oss/commit/4f2d6e5eb84bf3435c393d5c2fc0be79db20817e))
+
 ## [0.33.2](https://github.com/JiRaska/open-bank-oss/compare/v0.33.1...v0.33.2) (2026-08-17)
 
 
