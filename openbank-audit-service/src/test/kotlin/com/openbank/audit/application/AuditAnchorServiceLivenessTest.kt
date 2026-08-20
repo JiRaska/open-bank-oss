@@ -4,7 +4,6 @@
 
 package com.openbank.audit.application
 
-import com.openbank.audit.application.port.out.AnchorSignature
 import com.openbank.audit.application.port.out.AnchorSigner
 import com.openbank.audit.domain.model.AuditAnchor
 import com.openbank.audit.infrastructure.persistence.AuditAnchorRepository
@@ -17,7 +16,6 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
 import io.mockk.verify
 import io.quarkus.runtime.StartupEvent
 import kotlinx.coroutines.runBlocking
@@ -95,23 +93,6 @@ class AuditAnchorServiceLivenessTest {
 
         coVerify(exactly = 0) { anchorRepository.save(any()) }
         verify(exactly = 0) { liveness.recordSuccess() }
-    }
-
-    @Test
-    fun `asymmetric capture persists immutable key id and public material`(): Unit = runBlocking {
-        val saved = slot<AuditAnchor>()
-        val service = service(enabled = true, signingRequired = true)
-        val head = ChainHead(java.util.UUID.randomUUID(), "a".repeat(64), 1)
-        coEvery { auditRepository.chainHead() } returns head
-        coEvery { auditRepository.verifyChain() } returns ChainVerification(intact = true, checked = 1, unchained = 0)
-        every { signer.sign(any()) } returns AnchorSignature("signature", "immutable-kms-key")
-        every { signer.verificationKeyPem("immutable-kms-key") } returns "public-key-pem"
-        coEvery { anchorRepository.save(capture(saved)) } returns Unit
-
-        service.captureAnchor()
-
-        assertThat(saved.captured.keyId).isEqualTo("immutable-kms-key")
-        assertThat(saved.captured.publicKeyPem).isEqualTo("public-key-pem")
     }
 
     @Test

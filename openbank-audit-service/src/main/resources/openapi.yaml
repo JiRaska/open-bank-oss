@@ -253,8 +253,9 @@ paths:
       summary: Get the public key for offline audit-anchor verification (ADR-0031 D5)
       operationId: getAnchorVerificationKey
       description: >
-        Returns PEM material captured with the requested immutable KMS key identifier only when
-        it is recorded on an anchor. This supports offline verification across KMS key rotations.
+        Returns KMS-held PEM material for the requested immutable key identifier only when it is
+        recorded on an anchor. Rotation retains each historic KMS key in the workload's explicit
+        IAM policy until its anchors age out.
       parameters:
         - name: keyId
           in: query
@@ -273,6 +274,8 @@ paths:
                 $ref: '#/components/schemas/AnchorVerificationKeyResponse'
         '401':
           description: Unauthenticated
+        '400':
+          description: keyId query parameter is required
         '403':
           description: Caller does not have an audit-reading role
         '404':

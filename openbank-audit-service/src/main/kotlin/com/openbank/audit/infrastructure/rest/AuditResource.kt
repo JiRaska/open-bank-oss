@@ -232,8 +232,8 @@ class AuditResource {
         Response.ok(anchors.recent(limit)).build()
 
     /**
-     * Return the public key captured with a specified KMS-backed anchor generation. This stays
-     * under the same auditor gate as the anchors themselves.
+     * Return the KMS public key for a specified recorded anchor generation. This stays under the
+     * same auditor gate as the anchors themselves.
      */
     @GET
     @Path("/anchors/verification-key")

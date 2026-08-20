@@ -4,7 +4,9 @@
 # ADR-0031 D5 requires an anchor that survives a rewrite of the audit database.
 # This key is deliberately NOT the release/cosign key: compromise of the audit workload
 # must not grant the ability to sign deployable artefacts. The workload gets only Sign,
-# Verify and GetPublicKey for this one ECC key; the private key never leaves KMS.
+# Verify and GetPublicKey for this ECC key; the private key never leaves KMS. A key rotation must
+# add the replacement ARN and retain this ARN in the policy until every anchor signed by it has
+# passed its retention period. Do not replace this explicit list with a wildcard or tag selector.
 # ---------------------------------------------------------------------------
 
 resource "aws_kms_key" "audit_anchor" {

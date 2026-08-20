@@ -83,20 +83,6 @@ class AuditAnchorService(
                 if (signingRequired) throw failure
                 null
             }
-        val publicKeyPem = signed?.let { signature ->
-            runCatching { signer.verificationKeyPem(signature.keyId) }
-                .getOrElse { failure ->
-                    if (signingRequired) {
-                        log.error(
-                            "anchor public-key capture failed; required signer prevents checkpoint capture",
-                            failure,
-                        )
-                        throw failure
-                    }
-                    log.warn("anchor public-key capture failed; storing non-portable checkpoint", failure)
-                    null
-                }
-        }
         val anchor = AuditAnchor(
             lastEntryId = head.entryId,
             lastRecordHash = head.recordHash,
@@ -106,7 +92,6 @@ class AuditAnchorService(
             signature = signed?.value,
             keyId = signed?.keyId ?: signer.keyId,
             signedAt = signedAt,
-            publicKeyPem = publicKeyPem,
         )
         anchorRepo.save(anchor)
         log.infof("audit anchor captured: count=%d status=%s signed=%b", head.count, status, signed != null)
@@ -152,9 +137,12 @@ class AuditAnchorService(
 
     suspend fun recent(limit: Int): List<AuditAnchor> = anchorRepo.recent(limit.coerceIn(1, MAX_ANCHOR_PAGE))
 
-    /** Public material captured on an anchor, including a retained key after KMS alias rotation. */
-    suspend fun verificationKey(keyId: String): AnchorVerificationKey? = anchorRepo.publicKeyFor(keyId)?.let {
-        AnchorVerificationKey(keyId = keyId, algorithm = "ECDSA_SHA_256", publicKeyPem = it)
+    /** KMS is the independent key registry; only identifiers attested on anchors are exposed. */
+    suspend fun verificationKey(keyId: String): AnchorVerificationKey? {
+        if (!anchorRepo.hasKeyId(keyId)) return null
+        return signer.verificationKeyPem(keyId)?.let {
+            AnchorVerificationKey(keyId = keyId, algorithm = "ECDSA_SHA_256", publicKeyPem = it)
+        }
     }
 
     private suspend fun verifyAnchor(anchor: AuditAnchor): AnchorCheckResult {
@@ -165,7 +153,7 @@ class AuditAnchorService(
             anchor.chainStatus,
             anchor.signedAt,
         ).toByteArray(Charsets.UTF_8)
-        val signatureOk = anchor.signature?.let { verifySignature(digest, it, anchor) }
+        val signatureOk = anchor.signature?.let { signer.verify(digest, it, anchor.keyId) }
         val headMatches = anchor.lastEntryId?.let { auditRepo.recordHashOf(it) } == anchor.lastRecordHash
         if (signatureOk == false || !headMatches) {
             return AnchorCheckResult.Broken(
@@ -182,10 +170,6 @@ class AuditAnchorService(
             false -> error("invalid signature is handled above")
         }
     }
-
-    private fun verifySignature(digest: ByteArray, signature: String, anchor: AuditAnchor): Boolean? =
-        anchor.publicKeyPem?.let { publicKeyPem -> PublicKeyAnchorVerifier.verify(digest, signature, publicKeyPem) }
-            ?: signer.verify(digest, signature, anchor.keyId)
 
     private companion object {
         const val WORKFLOW_NAME = "audit-anchor-capture"
