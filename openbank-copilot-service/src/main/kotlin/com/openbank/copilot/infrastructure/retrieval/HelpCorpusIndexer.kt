@@ -68,8 +68,18 @@ class HelpCorpusIndexer(
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
+    // `every` + `delayed`, NOT a cron. A cron alone means a freshly deployed environment has an
+    // EMPTY index until the next scheduled hour — measured on the sandbox rollout: the table sat at
+    // 0 rows with the pod healthy, and every help search silently answered keyword-only for up to
+    // six hours. The delay is what makes a boot-time run safe: at t=0 the gateway route, the ESO
+    // secret and the database may all still be settling, and a run that fails then simply logs and
+    // is retried by the next tick — which is the property a one-shot @Startup would not have.
+    //
+    // SKIP rather than PROCEED on overlap: the run is idempotent by content hash, but two
+    // concurrent passes would embed the same stale chunks twice and pay for it twice.
     @Scheduled(
-        cron = "{copilot.retrieval.index-cron}",
+        every = "{copilot.retrieval.index-interval}",
+        delayed = "{copilot.retrieval.index-initial-delay}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
     suspend fun reindex() {
@@ -137,7 +147,7 @@ class HelpCorpusIndexer(
 
         const val WORKFLOW_NAME = "copilot-help-index"
 
-        /** Matches the default cron (every 6h); the staleness rule fires at twice this. */
+        /** Matches the default interval (6h); the ADR-0237 staleness rule fires at twice this. */
         val EXPECTED_INTERVAL: Duration = Duration.ofHours(6)
 
         fun sha256(s: String): String =
