@@ -15,7 +15,22 @@ import { serverSvcUrl } from '@/lib/services/bff'
 
 export const dynamic = 'force-dynamic'
 
-type SourceState = 'ok' | 'forbidden' | 'unavailable'
+type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
+
+// These domains already persist maker-checker decisions, but do not yet expose the
+// pending-list read required by ADR-0227 D2. Keep them in the response explicitly so
+// the inbox can distinguish "not wired" from an empty queue. Omitting them would make
+// the most dangerous state look healthy to an operator.
+const NOT_CONFIGURED_SOURCES = {
+  account: 'not-configured',
+  balance: 'not-configured',
+  billing: 'not-configured',
+  consent: 'not-configured',
+  notification: 'not-configured',
+  party: 'not-configured',
+  'sepa-instant': 'not-configured',
+  'sepa-payment': 'not-configured',
+} as const satisfies Record<string, SourceState>
 
 type InboxItem = {
   id: string
@@ -259,6 +274,7 @@ export async function GET() {
   return NextResponse.json({
     items,
     sources: {
+      ...NOT_CONFIGURED_SOURCES,
       lending: lending.state,
       sanctions: sanctions.state,
       transaction: transaction.state,
