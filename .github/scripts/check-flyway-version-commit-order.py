@@ -91,7 +91,7 @@ def migration_files(root: pathlib.Path) -> list[tuple[pathlib.Path, int]]:
     return out
 
 
-def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
+def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, int], str]:
     """{path: position in origin/main's history, lower = earlier} for the commit that first
     ADDED each path (git log --diff-filter=A, oldest add if a path was ever removed+re-added).
 
@@ -144,6 +144,8 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
                 mainline = ref
                 break
     position = {sha: i for i, sha in enumerate(revs)}
+    if revs:
+        provenance = f"{mainline}@{revs[-1][:9]} ({len(revs)} commits)"
 
     wanted = {str(p.relative_to(REPO)) for p in paths}
     try:
@@ -170,7 +172,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
             cwd=REPO, capture_output=True, text=True, check=True,
         ).stdout.splitlines()
     except subprocess.CalledProcessError:
-        return order
+        return order, provenance
 
     # Newest-first traversal: the LAST (oldest) commit that added a given path wins, so a later
     # match for the same path must not overwrite an earlier one already recorded.
@@ -191,7 +193,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
         sha = seen.get(rel)
         if sha in position:
             order[path] = position[sha]
-    return order
+    return order, provenance
 
 
 def find_violations(
@@ -275,7 +277,7 @@ def main() -> int:
         return selftest()
 
     all_files = migration_files(REPO)
-    order = first_commit_order([p for p, _ in all_files])
+    order, provenance = first_commit_order([p for p, _ in all_files])
 
     files_by_service: dict[str, list[tuple[pathlib.Path, int]]] = {}
     for path, version in all_files:
@@ -283,6 +285,7 @@ def main() -> int:
         files_by_service.setdefault(service, []).append((path, version))
 
     if all_files and not order:
+        print(f"mainline resolved as: {provenance}")
         # Never report "clean" from a scan that resolved nothing. A gate that cannot see its
         # corpus must say so, not agree with it.
         print("::error::could not obtain main's history (git fetch origin main failed and no "
@@ -310,6 +313,7 @@ def main() -> int:
     # should catch it independently of the baseline check.
     gatelib.subjects(len(order), "migrations ordered against mainline history")
     verdict = "clean." if not findings else f"{len(findings)} finding(s) above."
+    print(f"mainline resolved as: {provenance}")
     print(f"check-flyway-version-commit-order: {total} migration(s) across "
           f"{len(files_by_service)} service(s) checked, {len(KNOWN_VIOLATIONS)} known baseline "
           f"entr{'y' if len(KNOWN_VIOLATIONS) == 1 else 'ies'} — {verdict}")
