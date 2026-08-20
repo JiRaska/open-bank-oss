@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.1...copilot-service-v0.13.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** give every help chunk its own id — the index held ONE row, not 13 ([#5954](https://github.com/JiRaska/open-bank-oss/issues/5954)) ([f4ba956](https://github.com/JiRaska/open-bank-oss/commit/f4ba95694f2f2ffbb195a2be962f0dcca134a5ca)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
 ## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.0...copilot-service-v0.13.1) (2026-08-20)
 
 
