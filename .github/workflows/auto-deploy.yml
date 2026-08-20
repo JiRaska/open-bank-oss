@@ -141,6 +141,9 @@ jobs:
           fetch-depth: 0
 
       - id: detect
+        env:
+          INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
+          INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
         run: |
           set -euo pipefail
           # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
@@ -289,14 +292,37 @@ jobs:
               exit 0
             fi
 
+            # A normal manual dispatch is intentionally limited to service code changed by
+            # this ref: otherwise the broker cannot be asked about the image being built.
+            # The one safe exception is a co-deploy replay with a complete explicit Pact map.
+            # `can-i-deploy` subsequently proves every supplied version byte-identical to this
+            # ref's build inputs before it can open a GitOps PR. Validate the map shape here as
+            # well so a malformed input cannot turn the exception into a broad build bypass.
+            DEPLOYABLE_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            EXACT_CODEPLOY_REPLAY=false
+            if [ "${INPUT_CODEPLOY:-}" = "true" ] \
+              && [ -n "${INPUT_CODEPLOY_PACT_VERSIONS:-}" ] \
+              && [ "${INPUT_CODEPLOY_PACT_VERSIONS}" != "{}" ]; then
+              if ! jq -e --argjson services "$DEPLOYABLE_JSON" \
+                'type == "object" and (keys | sort) == ($services | sort) and
+                 all(.[]; type == "string" and test("^[0-9a-f]{40}$"))' \
+                >/dev/null <<< "$INPUT_CODEPLOY_PACT_VERSIONS"; then
+                echo "::error::codeploy_pact_versions must map exactly the requested services to 40-hex versions"
+                exit 1
+              fi
+              EXACT_CODEPLOY_REPLAY=true
+            fi
+
             # Guard: every manually requested service must have changed in the current HEAD,
             # or be a consumer of a changed shared library. Dispatching a service that did not
             # change in this commit means the broker has no pact version for this SHA, which the
-            # contract gate rightfully refuses (#3318), and the build is wasted work.
+            # contract gate rightfully refuses (#3318), and the build is wasted work. The exact
+            # co-deploy replay above is different: it cannot deploy unless the later gate proves
+            # its supplied Pact versions are byte-identical to these build inputs.
             CHANGED_SET="$( { printf '%s\n' "${DIRECT_SERVICES[@]+"${DIRECT_SERVICES[@]}"}"; printf '%s\n' "$LIBS_DEPENDENTS"; } | grep -v '^$' | sort -u )"
             GUARD_FAILED=0
             for svc in "${DEPLOYABLE[@]}"; do
-              if ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
+              if [ "$EXACT_CODEPLOY_REPLAY" != "true" ] && ! grep -qxF "$svc" <<< "$CHANGED_SET"; then
                 echo "::error::workflow_dispatch requested service ${svc} which did not change in HEAD ($(git rev-parse --short HEAD)) and is not a dependent of a changed shared library. The broker has no pact version for this SHA, so the contract gate will REFUSE. Dispatch from the commit that changed ${svc}, or use reconcile=true to recover the correct per-service commit."
                 GUARD_FAILED=1
               fi
@@ -305,7 +331,7 @@ jobs:
               exit 1
             fi
 
-            SERVICES_JSON="$(printf '%s\n' "${DEPLOYABLE[@]}" | jq -R . | jq -sc .)"
+            SERVICES_JSON="$DEPLOYABLE_JSON"
             echo "workflow_dispatch → building: $SERVICES_JSON"
             echo "services=$SERVICES_JSON" >> "$GITHUB_OUTPUT"
             echo "any=true" >> "$GITHUB_OUTPUT"
