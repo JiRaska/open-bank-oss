@@ -88,6 +88,14 @@ object TopicAttribution {
         // value below is still correct (ScaService.kt's outbox payload sets no source field yet,
         // and "sca-service" is what it will say when it does).
         "openbank.sca.events" to "sca-service",
+        // Issue #5728 (ADR-0249 D4): audit-service did not subscribe to this topic at all, so no
+        // delegation grant lifecycle event was ever audited -- and delegation-service is
+        // money-path (it mints payment rights). Subscribing it is what makes the new spend
+        // reservation events (SpendReserved/SpendConfirmed/SpendReleased) reach the audit trail;
+        // emitting them without this would have been an outbox row nobody reads. Those three
+        // carry their own "sourceService", so they resolve AttributionSource.EVENT; the eight
+        // older lifecycle events do not yet, and resolve TOPIC through this row.
+        "openbank.delegation.events" to "delegation-service",
     )
 
     /** Topics with a verified producer entry. Visible for the coverage test. */
