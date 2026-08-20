@@ -76,8 +76,8 @@ export default function AmlPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button onClick={triggerScan} disabled={scanning || !serviceReachable} className="btn btn-primary btn-sm" style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: scanning || !serviceReachable ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: scanning || !serviceReachable ? 0.6 : 1 }}>
-              <Play size={13} style={{ animation: scanning ? 'pulse 1s infinite' : 'none' }} />
+            <button type="button" aria-label={t('Spustit AML kontrolu', 'Run AML scan')} aria-busy={scanning} onClick={triggerScan} disabled={scanning || !serviceReachable} className="btn btn-primary btn-sm" style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: scanning || !serviceReachable ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: scanning || !serviceReachable ? 0.6 : 1 }}>
+              <Play size={13} aria-hidden="true" style={{ animation: scanning ? 'pulse 1s infinite' : 'none' }} />
               {scanning ? t('Kontroluji…', 'Scanning…') : t('Spustit AML kontrolu', 'Run AML scan')}
             </button>
           </div>}
