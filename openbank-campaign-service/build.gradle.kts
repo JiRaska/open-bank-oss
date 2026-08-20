@@ -47,6 +47,16 @@ dependencies {
     testImplementation(libs.quarkus.test.security)
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
+    // Test-only (#5705): CampaignMetricsAdapterTest asserts the alert expressions in
+    // gitops/components/campaign/prometheus-rules.yaml against a real Prometheus scrape, so the
+    // dot->underscore mapping, the counter's `_total` suffix and the tag ordering come from
+    // Micrometer rather than from this test's idea of them. Runtime already ships the registry via
+    // quarkus-micrometer-registry-prometheus, but as the `-simpleclient` variant (package
+    // io.micrometer.prometheus); only the compile classpath needs the io.micrometer.prometheusmetrics
+    // one. Same version, same rationale and same CVE pin as openbank-domestic-payment's copy:
+    // 1.14.5 -> 1.17.0 for GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH DoS; the 1.14.x line has no
+    // fix), and this literal — not quarkus-bom's constraint — is what dependency-review scans.
+    testImplementation("io.micrometer:micrometer-registry-prometheus:1.17.0")
     testImplementation(libs.rest.assured.kotlin)
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
     // CampaignRestContractIT drives the real HTTP surface against real Postgres/Redis (#3133).
