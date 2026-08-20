@@ -61,6 +61,12 @@ data class TransactionAck(val id: UUID, val status: String)
 // Same alternative priority as RestLedgerPostingAdapter (this module).
 private const val REST_ADAPTER_PRIORITY = 100
 
+// `@Unremovable` because a test asserts this bean's PRESENCE (LedgerAdapterBindingIT, #6057).
+// The test-scope `@Priority(200)` stubs outrank it, which makes it unused, and ArC would then
+// remove it for a reason unrelated to the build-time gate under test — the assertion would fail
+// against correct code. No effect in production, where nothing outranks it. `@IfBuildProperty`
+// still disables it outright when the backend is not selected, so the negative case is unaffected.
+@io.quarkus.arc.Unremovable
 @ApplicationScoped
 @Alternative
 @Priority(REST_ADAPTER_PRIORITY)
