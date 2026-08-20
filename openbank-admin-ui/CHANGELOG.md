@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.172.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.2...admin-ui-v0.172.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose unwired approval queues ([#5804](https://github.com/JiRaska/open-bank-oss/issues/5804)) ([15cb73a](https://github.com/JiRaska/open-bank-oss/commit/15cb73a15cd9f7989f4c74c914d15bcb914e5b53))
+
 ## [0.172.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.1...admin-ui-v0.172.2) (2026-08-20)
 
 
