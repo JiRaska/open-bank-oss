@@ -4,7 +4,7 @@
 
 'use client'
 import { useState } from 'react'
-import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, User, Play, AlertOctagon } from 'lucide-react'
+import { ShieldAlert, Search, Clock, RefreshCw, AlertTriangle, User, AlertOctagon } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { ServiceStatusBadge } from '@/components/feedback/ServiceStatusBadge'
@@ -27,25 +27,12 @@ interface AmlCase {
 export default function AmlPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [scanning, setScanning] = useState(false)
   const [search, setSearch] = useState('')
   const { data, loading, unavailable, waking, reload } = useServiceResource<AmlCase[]>(
     svcUrl('aml-service', '/api/v1/aml/cases'),
     { select: (raw) => (Array.isArray(raw) ? (raw as AmlCase[]) : ((raw as { cases?: AmlCase[] }).cases ?? [])) },
   )
   const cases = data ?? []
-  // The service can still be scanned when it's merely idle (a POST wakes it);
-  // only a hard-down state blocks the button.
-  const serviceReachable = !unavailable || unavailable.kind === 'no_data' || unavailable.kind === 'scaled_to_zero'
-
-  const triggerScan = async () => {
-    setScanning(true)
-    try {
-      await fetch(svcUrl('aml-service', '/api/v1/aml/scan'), { method: 'POST' })
-      setTimeout(() => { reload(); setScanning(false) }, 3000)
-    } catch { setScanning(false) }
-  }
-
   const filtered = cases.filter(c =>
     c.customerName?.toLowerCase().includes(search.toLowerCase()) ||
     c.riskLevel?.toLowerCase().includes(search.toLowerCase()) ||
@@ -63,7 +50,7 @@ export default function AmlPage() {
           title={t('AML Monitoring', 'AML Monitoring')}
           subtitle={t('Prevence praní špinavých peněz — monitoring transakcí a správa případů', 'Anti-Money Laundering — transaction monitoring & case management')}
           icon={<ShieldAlert size={20} aria-hidden="true" />}
-          actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          actions={<div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <ServiceStatusBadge
               label="aml-service :8117"
               loading={loading}
@@ -76,10 +63,9 @@ export default function AmlPage() {
                 checking: t('Zjišťuji stav služby…', 'Checking service…'),
               }}
             />
-            <button type="button" aria-label={t('Spustit AML kontrolu', 'Run AML scan')} aria-busy={scanning} onClick={triggerScan} disabled={scanning || !serviceReachable} className="btn btn-primary btn-sm" style={{ background: 'var(--accent)', color: 'white', border: 'none', padding: '6px 12px', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: scanning || !serviceReachable ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: '6px', opacity: scanning || !serviceReachable ? 0.6 : 1 }}>
-              <Play size={13} aria-hidden="true" style={{ animation: scanning ? 'pulse 1s infinite' : 'none' }} />
-              {scanning ? t('Kontroluji…', 'Scanning…') : t('Spustit AML kontrolu', 'Run AML scan')}
-            </button>
+            <span role="status" style={{ fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '280px', textAlign: 'right' }}>
+              {t('Automatické AML skenování není v tomto prostředí nakonfigurováno.', 'Automated AML scanning is not configured in this environment.')}
+            </span>
           </div>}
         />
 
@@ -137,7 +123,7 @@ export default function AmlPage() {
               lang={language}
               detail={search
                 ? t('Žádný případ neodpovídá zadanému filtru. Zkuste upravit hledaný výraz.', 'No case matches the filter. Try adjusting the search term.')
-                : t('Služba běží, ale zatím neeviduje žádné AML případy. Spusťte kontrolu tlačítkem „Spustit AML kontrolu".', 'Service is up but no AML cases recorded yet. Run a scan using the "Run AML scan" button.')}
+                : t('Služba běží, ale zatím neeviduje žádné AML případy. Automatické skenování není v tomto prostředí nakonfigurováno.', 'Service is up but no AML cases recorded yet. Automated AML scanning is not configured in this environment.')}
             />
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
