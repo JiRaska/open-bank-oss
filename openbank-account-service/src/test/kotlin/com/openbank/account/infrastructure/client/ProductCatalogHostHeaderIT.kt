@@ -75,7 +75,7 @@ class ProductCatalogHostHeaderIT {
                 hosts += ex.requestHeaders.getFirst("Host") ?: ""
                 val requestedId = ex.requestURI.path.substringAfterLast('/')
                 val body =
-                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE"}""".toByteArray()
+                    """{"id":"$requestedId","code":"BEZNY_UCET","status":"ACTIVE","currency":"CZK"}""".toByteArray()
                 ex.responseHeaders.add("Content-Type", "application/json")
                 ex.sendResponseHeaders(200, body.size.toLong())
                 ex.responseBody.use { it.write(body) }
