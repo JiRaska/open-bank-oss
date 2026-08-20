@@ -409,7 +409,29 @@ jobs:
             }
 
             run_pass "authz ON" ""
-            run_pass "authz OFF" "-authz-off" -Dquarkus.security.auth.enabled-in-dev-mode=false
+            # `authz.enforce` goes off with authentication, and it has to: the two are one
+            # decision, not two. AuthorizeInterceptor fails CLOSED when the PDP is unreachable
+            # (ADR-0034), and no OPA sidecar runs in this job — so pass 2 without it produced
+            # 66 of 83 "server errors" that were nothing of the kind:
+            #
+            #   [503] {"code":"POLICY_DECISION_POINT_UNAVAILABLE",
+            #          "message":"policy decision point unavailable: OPA call failed: null"}
+            #
+            # Correct behaviour, wrongly counted. Pass 1 never saw it because a 401/403 fires
+            # before the interceptor is reached — the same accidental immunity that hid the Redis
+            # dependency, in a second dependency I did not anticipate and had to be shown by a
+            # full-fleet run (32360573944).
+            #
+            # `%test` already makes exactly this override for exactly this reason ("OPA is not
+            # present in a test JVM"); %dev keeps the deployed default of AUTHZ_ENFORCE:true, which
+            # is why the fuzz JVM needs it explicitly.
+            #
+            # So pass 2 tests neither authentication nor authorization, by design. Both are pass
+            # 1's job. What is left is the only thing pass 2 claims: does a handler answer 5xx to
+            # input it should reject with a 4xx.
+            run_pass "authz OFF" "-authz-off" \
+              -Dquarkus.security.auth.enabled-in-dev-mode=false \
+              -Dauthz.enforce=false
 
             # Containers only — run_pass already stopped each pass's JVM.
             docker rm -f fuzz-pg >/dev/null 2>&1 || true
