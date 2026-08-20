@@ -85,11 +85,10 @@ class MergeSweepApprovalBindingIT {
     @Priority(1)
     @ApplicationScoped
     class AlwaysFourEyesPdp : PolicyDecisionPoint {
-        override suspend fun allow(query: AuthzQuery): AuthzDecision =
-            AuthzDecision(
-                allow = true,
-                attributes = mapOf("four_eyes_required" to (query.action == FOUR_EYES_ACTION)),
-            )
+        override suspend fun allow(query: AuthzQuery): AuthzDecision = AuthzDecision(
+            allow = true,
+            attributes = mapOf("four_eyes_required" to (query.action == FOUR_EYES_ACTION)),
+        )
     }
 
     class FourEyesProfile : QuarkusTestProfile {
