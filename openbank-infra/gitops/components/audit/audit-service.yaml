@@ -103,6 +103,16 @@ spec:
             # warns and continues.
             - name: QUARKUS_CONFIG_LOCATIONS
               value: /mnt/msg-config/override.properties
+            # ADR-0031 D5: the asymmetric signing key is held by KMS; the alias is only
+            # the signing input. AuditAnchorService records KMS's immutable returned key id
+            # with each anchor so verification remains correct across key rotation.
+            # The audit-service Pod Identity receives only Sign/Verify/GetPublicKey on this key.
+            - name: AUDIT_ANCHOR_SIGNER
+              value: kms
+            - name: AUDIT_ANCHOR_SIGNING_REQUIRED
+              value: "true"
+            - name: AUDIT_ANCHOR_KMS_KEY_ID
+              value: alias/openbank-audit-anchor
             # ADR-0034 Phase 5 / issue #1797: audit-service shipped @Authorize with the app default
             # AUTHZ_ENFORCE=true and NO sidecar — so the PDP call failed and audit.read / audit.verify
             # failed closed (HTTP 422). The `opa` sidecar below now answers the PDP call; this explicit
