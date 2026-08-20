@@ -66,17 +66,30 @@ import java.util.UUID
 class MergeSweepApprovalBindingIT {
 
     /**
-     * Stands in for the OPA sidecar: allows the call and flags it `four_eyes_required`, which is
-     * exactly what the deployed bundle answers for `transaction.sweep` (rules.yaml
-     * `four_eyes.verbs: sweep`). Enabled as a CDI `@Alternative` via the profile below, so it
-     * overrides the service's own `AuthzProducer` for this test only.
+     * Stands in for the OPA sidecar: allows every call, and flags `four_eyes_required` for
+     * `transaction.sweep` ONLY — which is exactly what the deployed bundle answers, since
+     * `rules.yaml four_eyes.verbs` lists `sweep` and does not list `decide`. Enabled as a CDI
+     * `@Alternative` via the profile below, so it overrides the service's own `AuthzProducer`
+     * for this test only.
+     *
+     * Scoping by action is load-bearing, not tidiness. `ApprovalResource.decide` is itself
+     * `@Authorize(action = "transaction.approval.decide")`, so a stub that flagged EVERY action
+     * makes approving an approval transitively require approving that approval: step 2's PATCH
+     * answers 202 PENDING_APPROVAL instead of 200, and steps 3 and 4 then run against an approval
+     * that was never granted. Steps 2 and 4 fail outright; step 3 — the negative that is the whole
+     * point of this test — passes VACUOUSLY, because a gate that pauses everything also pauses the
+     * mismatched replay it is supposed to catch. A fixture that gates one action too many cannot
+     * observe the binding this test exists to prove.
      */
     @Alternative
     @Priority(1)
     @ApplicationScoped
     class AlwaysFourEyesPdp : PolicyDecisionPoint {
         override suspend fun allow(query: AuthzQuery): AuthzDecision =
-            AuthzDecision(allow = true, attributes = mapOf("four_eyes_required" to true))
+            AuthzDecision(
+                allow = true,
+                attributes = mapOf("four_eyes_required" to (query.action == FOUR_EYES_ACTION)),
+            )
     }
 
     class FourEyesProfile : QuarkusTestProfile {
@@ -204,6 +217,9 @@ class MergeSweepApprovalBindingIT {
         private const val KEY_A = "sweep-a-11111111-1111-1111-1111-111111111111"
         private const val KEY_B = "sweep-b-22222222-2222-2222-2222-222222222222"
         private const val PENDING_APPROVAL = 202
+
+        /** The only action this stub PDP gates — mirrors `rules.yaml four_eyes.verbs: sweep`. */
+        private const val FOUR_EYES_ACTION = "transaction.sweep"
 
         /** Carried between ordered steps — the maker and checker must be different principals. */
         private var approvalForSweepA: String? = null
