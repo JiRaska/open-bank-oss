@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.177.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.176.0...admin-ui-v0.177.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify BPMN process controls ([#5955](https://github.com/JiRaska/open-bank-oss/issues/5955)) ([d40acf5](https://github.com/JiRaska/open-bank-oss/commit/d40acf5244b02e3e48c4b07506f5f6ea46cb3410))
+
 ## [0.176.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.175.0...admin-ui-v0.176.0) (2026-08-20)
 
 
