@@ -156,11 +156,12 @@ mp:
         # enumerated rather than four independent oversights. Each producer was verified at its
         # own `mp.messaging.outgoing.<channel>.topic` declaration, never by grepping a topic
         # literal (a serialised data-class payload has no literal anywhere, #3883):
-        #   openbank.ledger.journal.posted  -- openbank-ledger-service/application.yaml (the
-        #     posting record itself, so the largest of the five named in #6035)
-        #   openbank.sdd.event              -- openbank-sdd-service/application.yaml
-        #   openbank.interest.accrual.event -- openbank-interest-service/application.yaml
-        #   openbank.fraud.hold.changed     -- openbank-fraud-service/application.yaml
+        #   openbank.ledger.journal.posted  --
+        #     openbank-ledger-service/src/main/resources/application.yaml (the posting record
+        #     itself, so the largest of the five named in #6035)
+        #   openbank.sdd.event              -- openbank-sdd-service/src/main/resources/application.yaml
+        #   openbank.interest.accrual.event -- openbank-interest-service/src/main/resources/application.yaml
+        #   openbank.fraud.hold.changed     -- openbank-fraud-service/src/main/resources/application.yaml
         # All four publish through the standard outbox relay, so each record carries the `ce-type`
         # header AuditConsumer reads for event_type; none sets a "sourceService" body field, so
         # they resolve AttributionSource.TOPIC through TopicAttribution.
