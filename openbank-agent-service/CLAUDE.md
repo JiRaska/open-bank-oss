@@ -47,6 +47,18 @@ JAVA_HOME=$(/usr/libexec/java_home -v 25) ./gradlew :openbank-agent-service:test
 
 ## Config gotchas
 
+- **A reasoning model spends `max_tokens` on REASONING before it emits any answer, so a low cap
+  returns an EMPTY `content` field — not a short answer.** Measured on `openai/gpt-oss-120b`
+  through the gateway: `max_tokens=40` gives `content=''` with `finish_reason=length` (the whole
+  budget went to reasoning), `128` truncates mid-sentence, `512` finishes normally in 189 tokens.
+  Both paid models in the picker are reasoning models, and the loop's `MAX_OUTPUT_TOKENS` is 512,
+  so this works today — but lowering that cap to save tokens turns replies into blanks, which the
+  dock renders as "(no reply)" and reads as a broken assistant. The same trap makes model
+  EVALUATION lie: `zai-org/GLM-5.2` and `moonshotai/Kimi-K3` were first measured at 120 tokens and
+  looked broken (empty content; Kimi's chain of thought where the answer should be, which is just a
+  truncated reasoning-prefixed stream). At 512 both answer cleanly. Measure a reasoning model at
+  the cap the caller actually sends, or you are measuring the cap.
+
 - `AGENT_MODEL_API_KEY` (or the legacy `GROQ_API_KEY` fallback) must be set for the
   `llama-3.3-70b-versatile` model; omit for mock-echo. Deployed, that key is the LiteLLM
   *virtual* key and `AGENT_MODEL_ENDPOINT` points at the in-cluster gateway — the provider

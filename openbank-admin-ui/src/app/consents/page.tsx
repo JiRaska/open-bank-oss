@@ -158,6 +158,8 @@ export default function ConsentsPage() {
               }}
             />
             <button
+              type="button"
+              aria-busy={loading}
               onClick={() => lookup()}
               disabled={loading || !term.trim()}
               style={{
@@ -168,9 +170,11 @@ export default function ConsentsPage() {
                 opacity: loading || !term.trim() ? 0.6 : 1,
               }}
             >
-              <Search size={15} /> {t('Vyhledat', 'Look up')}
+              <Search size={15} aria-hidden="true" /> {t('Vyhledat', 'Look up')}
             </button>
             <button
+              type="button"
+              aria-busy={loading}
               onClick={() => { setTerm(MARKETING_GRANTEE); void lookup(MARKETING_GRANTEE) }}
               disabled={loading}
               style={{

@@ -33,6 +33,14 @@ export interface AiGovernancePhaseRoadmapEntry {
   outcome: string
 }
 
+export interface AiGovernanceControlMaturity {
+  current: number
+  total: number
+  label: string
+  achieved: string[]
+  remaining: string
+}
+
 export interface AiGovernanceSnapshot {
   adrRef: string
   adrStatus: string
@@ -41,6 +49,7 @@ export interface AiGovernanceSnapshot {
   phaseLabel: string
   agentsActing: number
   phaseRoadmap: AiGovernancePhaseRoadmapEntry[]
+  controlMaturity: AiGovernanceControlMaturity
   decisions: AiGovernanceDecision[]
   decisionSummary: { built: number; partial: number; planned: number; total: number }
   compliance: AiGovernanceComplianceRow[]

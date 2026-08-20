@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: case-coordinator-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-b5768983
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-e62a4765
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -120,6 +120,13 @@ spec:
             # which the NetworkPolicy egress denies.
             - name: CASE_COORDINATOR_MODEL_ENDPOINT
               value: http://litellm.ai-platform.svc:4000/v1
+            # Seven-day incident-response pilot: persist results for measurement but never relay
+            # them to proposal-events/HITL. Any other class is rejected by CaseOpenService.
+            - name: CASE_COORDINATOR_CASE_DELIVERY_MODE
+              value: SHADOW
+            # Rotate this ID for each distinct shadow rollout; startup then rechecks legacy runs.
+            - name: CASE_COORDINATOR_CASE_SHADOW_ROLLOUT_ID
+              value: incident-triage-shadow-2026-08-20
             # LiteLLM virtual key (ESO case-coordinator-litellm; reuses KEY_AGENT_SERVICE
             # until a per-service virtual key is provisioned in Vault — a Vault admin action).
             - name: CASE_COORDINATOR_MODEL_API_KEY

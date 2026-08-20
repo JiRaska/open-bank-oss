@@ -14,6 +14,31 @@ interface ToolCall { tool: string; allowed: boolean; resultPreview: string }
 interface Msg { role: 'user' | 'assistant'; content: string; toolCalls?: ToolCall[]; isProposal?: boolean }
 interface ModelInfo { id: string; provider: string; sensitivity: string }
 
+/**
+ * Human label for a model id. The VALUE stays the raw id — that is what agent-service resolves and
+ * what every audit event records, so the option value must never diverge from it. Only the visible
+ * text is friendlier.
+ *
+ * An unknown id falls through to its own last path segment rather than to a generic "model":
+ * whoever adds a route to litellm-config should get something readable in the picker without having
+ * to remember to edit this file, and a stale mapping must never hide which model is actually
+ * selected.
+ */
+const MODEL_LABELS: Record<string, string> = {
+  'mock-echo': 'mock (offline)',
+  'llama-3.3-70b-versatile': 'Llama 3.3 70B · free tier',
+  'openai/gpt-oss-120b': 'GPT-OSS 120B · fast',
+  'deepseek-ai/DeepSeek-V4-Pro': 'DeepSeek V4 Pro · strongest',
+}
+
+export function modelLabel(id: string): string {
+  // `??` is not enough on its own: 'vendor/'.split('/').pop() is an EMPTY STRING, not undefined,
+  // so it would pass through and render a blank option the operator cannot identify. The final
+  // literal covers the same shape for an empty id — agent-service should never send one, and if it
+  // ever does the picker must still show a row you can see and report, not an invisible one.
+  return MODEL_LABELS[id] || id.split('/').filter(Boolean).pop() || id || '(unnamed model)'
+}
+
 export function AgentDock() {
   const pathname = usePathname()
   const { t } = useLanguage()
@@ -72,7 +97,10 @@ export function AgentDock() {
     <>
       {/* Floating bot button — present on every page via root layout */}
       <button
-        aria-label={t('OpenBank asistent', 'OpenBank assistant')}
+        type="button"
+        aria-label={open ? t('Zavřít asistenta', 'Close assistant') : t('Otevřít asistenta', 'Open assistant')}
+        aria-expanded={open}
+        aria-controls={open ? 'agent-dock-panel' : undefined}
         onClick={() => setOpen(o => !o)}
         style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
@@ -82,11 +110,14 @@ export function AgentDock() {
           boxShadow: '0 6px 20px rgba(0,0,0,0.18)',
         }}
       >
-        {open ? <X size={22} /> : <Bot size={22} />}
+        {open ? <X size={22} aria-hidden="true" /> : <Bot size={22} aria-hidden="true" />}
       </button>
 
       {open && (
         <div
+          id="agent-dock-panel"
+          role="region"
+          aria-label={t('Panel asistenta OpenBank', 'OpenBank assistant panel')}
           style={{
             position: 'fixed', bottom: 88, right: 24, zIndex: 1000,
             width: 400, maxWidth: 'calc(100vw - 48px)', height: 540, maxHeight: 'calc(100vh - 120px)',
@@ -97,7 +128,7 @@ export function AgentDock() {
         >
           {/* Header */}
           <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Bot size={16} style={{ color: 'var(--accent)' }} />
+            <Bot size={16} aria-hidden="true" style={{ color: 'var(--accent)' }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{t('OpenBank asistent', 'OpenBank Assistant')}</div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{t('jen pro čtení · řízeno politikou · auditováno', 'read-only · policy-gated · audited')}</div>
@@ -109,7 +140,7 @@ export function AgentDock() {
                 aria-label={t('Model asistenta', 'Assistant model')}
                 style={{ fontSize: 11, padding: '3px 6px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-secondary)' }}
               >
-                {models.map(m => <option key={m.id} value={m.id}>{m.id}</option>)}
+                {models.map(m => <option key={m.id} value={m.id} title={m.id}>{modelLabel(m.id)}</option>)}
               </select>
             )}
           </div>
@@ -155,11 +186,11 @@ export function AgentDock() {
                   <div style={{ marginTop: 5, display: 'flex', flexDirection: 'column', gap: 3 }}>
                     {m.toolCalls.map((tc, j) => (
                       <div key={j} style={{ fontSize: 11, color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <Wrench size={11} />
+                        <Wrench size={11} aria-hidden="true" />
                         <span style={{ fontFamily: 'JetBrains Mono, monospace' }}>{tc.tool}</span>
                         {tc.allowed
-                          ? <ShieldCheck size={11} style={{ color: 'var(--success)' }} />
-                          : <ShieldAlert size={11} style={{ color: 'var(--danger)' }} />}
+                          ? <ShieldCheck size={11} aria-hidden="true" style={{ color: 'var(--success)' }} />
+                          : <ShieldAlert size={11} aria-hidden="true" style={{ color: 'var(--danger)' }} />}
                       </div>
                     ))}
                   </div>
@@ -168,7 +199,7 @@ export function AgentDock() {
             ))}
             {busy && (
               <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-tertiary)', fontSize: 12 }}>
-                <Loader2 size={13} className="animate-spin" /> {t('přemýšlím…', 'thinking…')}
+                <Loader2 size={13} aria-hidden="true" className="animate-spin" /> {t('přemýšlím…', 'thinking…')}
               </div>
             )}
           </div>
@@ -176,6 +207,8 @@ export function AgentDock() {
           {/* Input */}
           <div style={{ padding: 10, borderTop: '1px solid var(--border)', display: 'flex', gap: 8 }}>
             <input
+              id="agent-dock-input"
+              aria-label={t('Zpráva pro asistenta', 'Message for assistant')}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
@@ -184,6 +217,8 @@ export function AgentDock() {
               style={{ flex: 1, fontSize: 12.5, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--surface-2)', color: 'var(--text-primary)' }}
             />
             <button
+              type="button"
+              aria-label={t('Odeslat zprávu', 'Send message')}
               onClick={send}
               disabled={busy || !input.trim()}
               style={{
@@ -192,7 +227,7 @@ export function AgentDock() {
                 opacity: busy || !input.trim() ? 0.5 : 1,
               }}
             >
-              <Send size={15} />
+              <Send size={15} aria-hidden="true" />
             </button>
           </div>
         </div>

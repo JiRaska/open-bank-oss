@@ -16,7 +16,7 @@ import { caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
 import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
 import { PageHeader } from '@/components/ui/PageHeader'
 
-type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
+type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED'
 
 interface ThreadEntry {
   type: EntryType
@@ -29,6 +29,7 @@ interface ThreadEntry {
   contested?: boolean
   proposalId?: string
   proposalType?: string
+  shadow?: boolean
 }
 
 interface CaseThread {
@@ -163,6 +164,12 @@ export default function IaopsCaseThreadPage() {
                   detail: t('Koordinátor vytvořil proposal event. Stav doručení a lidského rozhodnutí tato stránka nesleduje.', 'The coordinator created a proposal event. This page does not track delivery or the human decision.'),
                   tone: 'var(--accent-text)', bg: 'var(--accent-bg)', border: 'var(--accent-border)',
                 }
+              : brief.stage === 'shadow_recorded'
+                ? {
+                    title: t('Shadow výsledek zaznamenán', 'Shadow result recorded'),
+                    detail: t('Jde pouze o pilotní důkaz. Výsledek nebyl odeslán do HITL fronty ani nepředstavuje lidské rozhodnutí.', 'This is pilot evidence only. It was not sent to the HITL queue and is not a human decision.'),
+                    tone: 'var(--info-text)', bg: 'var(--info-bg)', border: 'var(--border)',
+                  }
               : brief.stage === 'needs_convergence'
                 ? {
                     title: t('Neshoda zůstává viditelná', 'Dissent remains visible'),
@@ -240,7 +247,8 @@ export default function IaopsCaseThreadPage() {
                   </div>
                 )
               }
-              if (entry.type === 'PROPOSAL_EMITTED') {
+              if (entry.type === 'PROPOSAL_EMITTED' || entry.type === 'SHADOW_RECORDED') {
+                const shadow = entry.type === 'SHADOW_RECORDED' || entry.shadow === true
                 return (
                   <div key={index} style={{
                     padding: '14px 18px', borderRadius: '12px',
@@ -249,7 +257,7 @@ export default function IaopsCaseThreadPage() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                       <Sparkles size={14} style={{ color: 'var(--accent-text)' }} />
                       <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--accent-text)' }}>
-                        {t('Návrh zaznamenán ve vlákně', 'Proposal recorded in the thread')}
+                        {shadow ? t('Shadow výsledek zaznamenán', 'Shadow result recorded') : t('Návrh zaznamenán ve vlákně', 'Proposal recorded in the thread')}
                       </span>
                       <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-secondary)' }}>{entry.proposalType ?? ''}</span>
                       <span style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-tertiary)' }}>{fmt(entry.atEpochMs)}</span>
@@ -257,9 +265,9 @@ export default function IaopsCaseThreadPage() {
                     {entry.summary && (
                       <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '8px 0 0', lineHeight: 1.5 }}>{entry.summary}</p>
                     )}
-                    <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
+                    {!shadow && <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
                       {t('Procházet HITL frontu', 'Browse the HITL queue')}
-                    </Link>
+                    </Link>}
                   </div>
                 )
               }

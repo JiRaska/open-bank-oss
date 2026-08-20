@@ -109,8 +109,12 @@ export default function ApprovalsPage() {
   const decided = useMemo(() => rows.filter(r => r.state !== 'PROPOSED'), [rows])
   // Sources that answered anything other than 200 — a 403 here is ordinary (lending's list is
   // desk-role gated while this page is not), and it must never look like an empty queue.
-  const degradedSources = useMemo(
-    () => Object.entries(domainSources).filter(([, v]) => v !== 'ok').map(([k]) => k),
+  const unavailableSources = useMemo(
+    () => Object.entries(domainSources).filter(([, v]) => v === 'unavailable' || v === 'forbidden').map(([k]) => k),
+    [domainSources],
+  )
+  const notConfiguredSources = useMemo(
+    () => Object.entries(domainSources).filter(([, v]) => v === 'not-configured').map(([k]) => k),
     [domainSources],
   )
 
@@ -137,18 +141,29 @@ export default function ApprovalsPage() {
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
         {t('Doménová schvalování (money-path)', 'Domain approvals (money-path)')} ({domainItems.filter(i => i.domain !== 'agent').length})
       </div>
-      {degradedSources.length > 0 && (
+      {unavailableSources.length > 0 && (
         <div className="card" style={{
           padding: 14, marginBottom: 16, fontSize: 13,
           color: '#92400e', background: '#fffbeb', border: '1px solid #fcd34d',
         }}>
           {t(
-            `Fronta není úplná — nepodařilo se načíst: ${degradedSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
-            `This queue is incomplete — could not read: ${degradedSources.join(', ')}. An empty list does not mean nothing is pending.`,
+            `Fronta není úplná — nepodařilo se načíst: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
+            `This queue is incomplete — could not read: ${unavailableSources.join(', ')}. An empty list does not mean nothing is pending.`,
           )}
         </div>
       )}
-      {!loading && degradedSources.length === 0 && domainItems.filter(i => i.domain !== 'agent').length === 0 && (
+      {notConfiguredSources.length > 0 && (
+        <div className="card" style={{
+          padding: 14, marginBottom: 16, fontSize: 13,
+          color: '#475569', background: '#f8fafc', border: '1px solid #cbd5e1',
+        }}>
+          {t(
+            `Část fronty zatím není napojená: ${notConfiguredSources.join(', ')}. Rozhodnutí z těchto domén se zde nezobrazí, dokud jejich read endpoint nebude dostupný.`,
+            `Some queues are not connected yet: ${notConfiguredSources.join(', ')}. Decisions from these domains will not appear here until their read endpoint is available.`,
+          )}
+        </div>
+      )}
+      {!loading && unavailableSources.length === 0 && notConfiguredSources.length === 0 && domainItems.filter(i => i.domain !== 'agent').length === 0 && (
         <div className="card" style={{ padding: 16, marginBottom: 16, color: 'var(--text-secondary)', fontSize: 13 }}>
           {t('Žádná doménová schvalování nečekají.', 'No domain approvals pending.')}
         </div>

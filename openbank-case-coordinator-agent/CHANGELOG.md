@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.0...case-coordinator-agent-v0.6.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **case-coordinator:** bump API contract to 1.2.0 for the shadow-pilot additions ([#5881](https://github.com/JiRaska/open-bank-oss/issues/5881)) ([c13e7f6](https://github.com/JiRaska/open-bank-oss/commit/c13e7f69287a84a40847ead6c1755ef2ab24ff09))
+
+## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.5.0...case-coordinator-agent-v0.6.0) (2026-08-20)
+
+
+### Features
+
+* **case-coordinator:** isolate incident shadow pilot ([#5861](https://github.com/JiRaska/open-bank-oss/issues/5861)) ([c78a10d](https://github.com/JiRaska/open-bank-oss/commit/c78a10d78732c186c390382aed5c7e6e36d0e777))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.4.5...case-coordinator-agent-v0.5.0) (2026-08-18)
 
 

@@ -34,12 +34,18 @@ data class ContributionRow(
 )
 
 /** Raw terminal proposal row projected from `case_outbox` (ADR-0244 D7). */
-data class ProposalEventRow(val proposalId: String, val proposalType: String, val emittedAtEpochMs: Long)
+data class ProposalEventRow(
+    val proposalId: String,
+    val proposalType: String,
+    val status: String,
+    val emittedAtEpochMs: Long,
+)
 
 enum class ThreadEntryType {
     CASE_OPENED,
     CONTRIBUTION,
     PROPOSAL_EMITTED,
+    SHADOW_RECORDED,
 }
 
 /** One thread entry in the ADR-0246 timeline, oldest first. */
@@ -54,6 +60,7 @@ data class ThreadEntry(
     val contested: Boolean = false,
     val proposalId: String? = null,
     val proposalType: String? = null,
+    val shadow: Boolean = false,
 )
 
 /** Case list item — `GET /api/v1/case-coordinator/cases`. */
