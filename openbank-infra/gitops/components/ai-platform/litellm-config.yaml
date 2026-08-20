@@ -124,6 +124,46 @@ data:
           # price declared", which is the state that made every DeepSeek call cost $0 and quietly
           # voided three nested budgets. The gate rejects a zero for that reason, and it is right to.
           output_cost_per_token: 0.00000001
+      # ── Paid chat models for the admin-UI assistant ──────────────────────────────────────
+      #
+      # The picker in AgentDock has always existed; it only ever had one real model — Groq's free
+      # llama-3.3-70b-versatile, whose 12k tokens/min tier is what makes the assistant answer
+      # "I'm being rate-limited" under a burst of clicks. These two are paid, on a provider this
+      # gateway already holds a key for, and both were MEASURED against a real Czech prompt from
+      # inside this pod before being added — the same probe that caught Groq decommissioning
+      # Llama Guard:
+      #
+      #   openai/gpt-oss-120b          2.9s, clean Czech   <- fastest, ~35x cheaper per output token
+      #   deepseek-ai/DeepSeek-V4-Pro  9.6s, clean Czech   <- strongest
+      #   moonshotai/Kimi-K3          14.8s, LEAKED its chain of thought into the reply -> rejected
+      #   zai-org/GLM-5.2              8.0s, empty content within 120 tokens            -> rejected
+      #   meta-llama/Llama-4-Maverick  HTTP 429 "Model busy, retry later"                -> rejected
+      #
+      # The three rejections are the reason to measure rather than pick from a leaderboard: all are
+      # current, well-regarded models that would have read fine in a config review and produced a
+      # visibly broken assistant.
+      - model_name: openai/gpt-oss-120b
+        litellm_params:
+          model: deepinfra/openai/gpt-oss-120b
+          api_key: os.environ/DEEPINFRA_API_KEY
+          max_budget: 5
+          budget_duration: 1d
+          # DeepInfra rate card, read from api.deepinfra.com/models/<id>: cents_per_input_token
+          # 3.7e-06, cents_per_output_token 1.7e-05 — converted from cents to USD per token.
+          input_cost_per_token: 0.000000037
+          output_cost_per_token: 0.00000017
+      - model_name: deepseek-ai/DeepSeek-V4-Pro
+        litellm_params:
+          model: deepinfra/deepseek-ai/DeepSeek-V4-Pro
+          api_key: os.environ/DEEPINFRA_API_KEY
+          # Lower ceiling than the cheap route above, deliberately: this one costs ~15x more per
+          # output token, so an equal budget would buy a very unequal number of runs before the
+          # cap bites.
+          max_budget: 3
+          budget_duration: 1d
+          # cents_per_input_token 0.00013, cents_per_output_token 0.00026.
+          input_cost_per_token: 0.0000013
+          output_cost_per_token: 0.0000026
     general_settings:
       # Virtual keys and every budget below persist here. Injected from the CNPG litellm-db-app
       # secret (components/ai-platform/postgres.yaml) — see the DATABASE_URL note in litellm.yaml
