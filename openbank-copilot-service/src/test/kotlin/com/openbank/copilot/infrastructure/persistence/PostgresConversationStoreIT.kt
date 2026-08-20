@@ -7,6 +7,7 @@ package com.openbank.copilot.infrastructure.persistence
 import com.openbank.copilot.application.port.out.ConversationStore
 import com.openbank.copilot.domain.model.ChatMessage
 import com.openbank.copilot.domain.model.ChatRole
+import com.openbank.copilot.it.PGVECTOR_IMAGE
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
@@ -26,7 +27,7 @@ class PostgresConversationStoreIT {
     class Resource : QuarkusTestResourceLifecycleManager {
         private lateinit var postgres: PostgreSQLContainer<*>
         override fun start(): Map<String, String> {
-            postgres = PostgreSQLContainer("postgres:18-alpine")
+            postgres = PostgreSQLContainer(PGVECTOR_IMAGE)
                 .withDatabaseName("openbank_copilot")
                 .withUsername("openbank")
                 .withPassword("openbank")

@@ -200,6 +200,27 @@ model-gateway:
       provider: openai-compat
       endpoint: ${AGENT_MODEL_ENDPOINT:https://api.groq.com/openai/v1}
       sensitivity: hosted
+    # Paid alternatives to the free Groq tier above, served through the SAME gateway endpoint and
+    # the same virtual key — a model entry here plus a route in litellm-config, no code change.
+    #
+    # WHY THESE TWO AND NOT WHATEVER IS TOP OF A LEADERBOARD: they were measured against a real
+    # Czech admin prompt through the gateway before being registered. gpt-oss-120b answered in
+    # 2.9s, DeepSeek-V4-Pro in 9.6s, both cleanly. Three others that look equally reasonable on
+    # paper were rejected by the same probe — Kimi-K3 leaked its chain of thought into the reply,
+    # GLM-5.2 returned empty content, Llama-4-Maverick answered HTTP 429 "Model busy". A config
+    # review cannot see any of that.
+    #
+    # Both stay `sensitivity: hosted`: they are off-cluster US providers, so the ADR-0031 D6
+    # sensitive-context routing must not choose them. That tier still needs a self-hosted model,
+    # which is the `vLLM` line ADR-0265 left as planned.
+    - id: openai/gpt-oss-120b
+      provider: openai-compat
+      endpoint: ${AGENT_MODEL_ENDPOINT:https://api.groq.com/openai/v1}
+      sensitivity: hosted
+    - id: deepseek-ai/DeepSeek-V4-Pro
+      provider: openai-compat
+      endpoint: ${AGENT_MODEL_ENDPOINT:https://api.groq.com/openai/v1}
+      sensitivity: hosted
     # The SAME openai-compat adapter serves any OpenAI-shaped backend — just change endpoint+key:
     # - id: qwen2.5                       # self-hosted Ollama for the SELF_HOSTED (sensitive) tier
     #   provider: openai-compat
