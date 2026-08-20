@@ -21,7 +21,6 @@ import jakarta.enterprise.inject.Default
 @ApplicationScoped
 @Default
 class NoOpBackfillSource : BackfillSource {
-    override suspend fun read(window: BackfillWindow, request: BackfillRequest): List<String> {
+    override suspend fun read(window: BackfillWindow, request: BackfillRequest): List<String> =
         throw DurableBackfillUnavailableException()
-    }
 }

@@ -106,12 +106,14 @@ class RecoveryFlowsTest {
             requestedBy = "ops-1",
         )
 
-        assertThat(runCatching {
-            NoOpBackfillSource().read(
-                BackfillWindow(request.from, request.to),
-                request,
-            )
-        }.exceptionOrNull()).isInstanceOf(DurableBackfillUnavailableException::class.java)
+        assertThat(
+            runCatching {
+                NoOpBackfillSource().read(
+                    BackfillWindow(request.from, request.to),
+                    request,
+                )
+            }.exceptionOrNull(),
+        ).isInstanceOf(DurableBackfillUnavailableException::class.java)
     }
 
     @Test

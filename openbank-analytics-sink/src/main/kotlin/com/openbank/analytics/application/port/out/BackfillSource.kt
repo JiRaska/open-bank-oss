@@ -36,6 +36,7 @@ interface BackfillSource {
  * ingesting no rows and hide an unrecoverable evidence gap. Deployments must bind an outbox/export
  * adapter before enabling recovery operations.
  */
-class DurableBackfillUnavailableException : IllegalStateException(
-    "No durable analytics backfill reader is configured; bind an outbox or archive export adapter",
-)
+class DurableBackfillUnavailableException :
+    IllegalStateException(
+        "No durable analytics backfill reader is configured; bind an outbox or archive export adapter",
+    )
