@@ -14,6 +14,8 @@ export const ROLES = {
   AUDITOR:    "ROLE_AUDITOR",
   API:        "ROLE_API",
   SUPERVISOR: "ROLE_SUPERVISOR",
+  LENDING_OFFICER: "ROLE_LENDING_OFFICER",
+  CREDIT_RISK: "ROLE_CREDIT_RISK",
   KYC:        "ROLE_KYC",
   KYC_OPENER: "ROLE_KYC_OPENER",
   KYC_REVIEWER: "ROLE_KYC_REVIEWER",
@@ -49,6 +51,11 @@ export const PERMISSIONS = {
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Lending compliance-pack reads include the operational lending roles accepted by
+  // CompliancePackResource.listActive; maker/checker writes remain compliance/admin only.
+  "lending:compliance:view":    [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
+  "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
+  "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Card-issuance deliberately has a narrower read role than the wider payments
   // workspace: its GET endpoints accept only VIEWER/OPERATOR/ADMIN, and every
   // lifecycle writes except block/cancel accept only OPERATOR/ADMIN. Compliance
@@ -212,8 +219,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
     '/aml', '/fraud', '/disputes', '/consents', '/customer-360', '/campaigns',
-    '/segments', '/lending/compliance-packs', '/docs/compliance', '/docs/bcp',
+    '/segments', '/docs/compliance', '/docs/bcp',
   ]],
+  ['lending:compliance:view', ['/lending/compliance-packs']],
   ['system:view', [
     '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/notifications', '/system',
