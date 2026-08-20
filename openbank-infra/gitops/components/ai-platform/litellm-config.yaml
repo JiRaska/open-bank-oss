@@ -133,15 +133,26 @@ data:
       # inside this pod before being added — the same probe that caught Groq decommissioning
       # Llama Guard:
       #
-      #   openai/gpt-oss-120b          2.9s, clean Czech   <- fastest, ~35x cheaper per output token
-      #   deepseek-ai/DeepSeek-V4-Pro  9.6s, clean Czech   <- strongest
-      #   moonshotai/Kimi-K3          14.8s, LEAKED its chain of thought into the reply -> rejected
-      #   zai-org/GLM-5.2              8.0s, empty content within 120 tokens            -> rejected
-      #   meta-llama/Llama-4-Maverick  HTTP 429 "Model busy, retry later"                -> rejected
+      #   openai/gpt-oss-120b          1-3s, clean Czech   <- fastest, ~35x cheaper per output token
+      #   deepseek-ai/DeepSeek-V4-Pro  2.6-9.6s, clean Czech <- strongest
+      #   zai-org/GLM-5.2              6.9s, clean Czech    <- viable, simply not needed as a third
+      #   moonshotai/Kimi-K3          44.7s                 -> rejected on LATENCY alone
+      #   meta-llama/Llama-4-Maverick  HTTP 429 "Model busy, retry later" -> rejected
       #
-      # The three rejections are the reason to measure rather than pick from a leaderboard: all are
-      # current, well-regarded models that would have read fine in a config review and produced a
-      # visibly broken assistant.
+      # CORRECTION, kept here because the first version of this comment was wrong and the reason is
+      # worth more than the conclusion: GLM-5.2 and Kimi-K3 were first measured at max_tokens=120
+      # and looked BROKEN — empty content, and Kimi's chain of thought appearing where the answer
+      # should be. Both are REASONING models: the token budget is spent on reasoning first, so a
+      # small cap truncates before any answer is emitted, and a truncated reasoning-prefixed stream
+      # is what surfaced as "leaked chain of thought". At the 512 the callers actually use, both
+      # answer cleanly. Measuring a reasoning model at a small max_tokens measures the cap, not the
+      # model.
+      #
+      # gpt-oss-120b is a reasoning model too, and the same budget rule applies to it in
+      # production: at max_tokens=40 its `content` is EMPTY (finish_reason=length, the whole budget
+      # went to reasoning), at 128 it is truncated mid-sentence, and at 512 it finishes normally in
+      # 189 tokens. Callers here send 512 (agent-service MAX_OUTPUT_TOKENS), so this is fine — but
+      # anything that lowers that cap silently turns answers into blanks rather than short answers.
       - model_name: openai/gpt-oss-120b
         litellm_params:
           model: deepinfra/openai/gpt-oss-120b
