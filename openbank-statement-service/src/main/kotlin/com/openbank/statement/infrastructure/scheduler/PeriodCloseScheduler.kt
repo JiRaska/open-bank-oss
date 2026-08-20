@@ -7,11 +7,11 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.statement.application.port.`in`.RunCloseUseCase
 import com.openbank.statement.domain.model.CloseTrigger
+import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
-import io.quarkus.runtime.StartupEvent
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
@@ -38,9 +38,11 @@ class PeriodCloseScheduler(
     private var liveness: WorkflowLivenessRecorder? = null
 
     /** Register only when this opt-in scheduler is enabled, avoiding false stale alerts by default. */
-    fun onStart(@Observes event: StartupEvent) {
+    fun registerLiveness() {
         if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
+
+    fun onStart(@Observes event: StartupEvent) = registerLiveness()
 
     // Europe/Prague is explicit, not incidental (#1302): an unset @Scheduled timeZone means
     // JVM-default, so the close fires on the pod's zone, not the bank's accounting day —
