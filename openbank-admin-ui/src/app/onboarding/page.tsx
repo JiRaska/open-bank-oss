@@ -185,7 +185,7 @@ export default function OnboardingPage() {
           <DataUnavailable kind={countsUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Funnel počty', 'Funnel counts')} lang={language} dense />
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}>
+        <div role="group" aria-label={t('Filtr fází onboardingu', 'Onboarding stage filters')} style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '10px', marginBottom: '20px' }}>
           {STAGES.map(s => {
             const count = counts[s] ?? 0
             const isActive = stage === s
@@ -193,6 +193,8 @@ export default function OnboardingPage() {
             return (
               <button
                 key={s}
+                type="button"
+                aria-pressed={isActive}
                 onClick={() => handleStageFilter(isActive ? '' : s)}
                 style={{
                   background: isActive ? `${color}18` : 'var(--surface)',
