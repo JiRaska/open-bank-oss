@@ -2965,6 +2965,29 @@ gates:
       # disabled". Ratcheted against a baseline — new occurrences fail, today's are frozen
       # because removing a default makes config START applying and can flip live behaviour.
       python3 .github/scripts/check-configproperty-kotlin-defaults.py
+  - id: build-time-bean-selection
+    name: "A build-time-gated bean selection is not activated by a runtime env var"
+    group: kotlin
+    mode: enforced
+    min_subjects: 20   # 29 @IfBuildProperty/@UnlessBuildProperty sites today (2026-08-20)
+    rationale: "Quarkus resolves @IfBuildProperty at augmentation and ArC deletes the losing bean's class, so a container env var set by a Rollout cannot change it; when the surviving @Default is a no-op returning the real adapter's success value, nothing anywhere disagrees. Measured on the running lending pod: the image held NoOpLedgerPostingPort and not RestLedgerPostingAdapter, and the loan book had never reached the general ledger."
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-build-time-bean-selection.py --self-test
+    selftest_expect: pass
+    run: |
+      # Three sources of build-time truth, because reading only one makes the check wrong in
+      # both directions: the module's application.yaml with ${VAR:default} collapsed to its
+      # default (augmentation has no env), auto-deploy.yml's fast-jar build step env (which is
+      # how analytics-sink and agent-service are legitimately correct today, #4728), and the
+      # gitops container env attributed BY IMAGE rather than by file. Disagreement between the
+      # first two and the third is the defect.
+      #
+      # Falsified against the real pre-fix tree, not only a fixture: on origin/main it exits 1
+      # naming lending's ledger, borrower-credit and temporal gates, each of which was then
+      # independently confirmed absent from the deployed image by grepping ArC's generated
+      # bytecode in the running pod. Exclusions fail stale in BOTH directions and the subject
+      # count has a floor, because a scan that reaches nothing prints OK.
+      python3 .github/scripts/check-build-time-bean-selection.py --root .
   - id: nat-ami-pinned
     name: "NAT instance AMI is pinned (issue #3602, enforced)"
     group: gitops
