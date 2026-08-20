@@ -161,6 +161,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   named explicitly in the Kotlin use-site form `@field:Column(name = ...)` that a `@Column`-only
   regex cannot match. A gate that cries wolf about correct code is worth less than nothing, so it
   checks the convention, which is fully decidable.
+- **A NUL byte (U+0000) reaching Postgres is a 500, and it arrives ESCAPED — so a raw-byte scan of
+  the request finds nothing and reports clean.** Postgres cannot store U+0000 in any `text`/`varchar`
+  column (`invalid byte sequence for encoding "UTF8": 0x00`, SQLState 22021); Hibernate raises it at
+  flush, far past every handler, so `GenericExceptionMapper` renders a well-formed `INTERNAL_ERROR`
+  body — which is why "it did not crash" and "the response parsed" both pass against it. Rejected
+  fleet-wide now by `libs-runtime`'s `NulByteGuards` (#5913), and two things about it generalise.
+  First, the carrier: five services, **six** operations, and two of them carried the NUL in a QUERY
+  PARAMETER, not a body — those requests have no entity at all, so a Jackson-only guard is
+  structurally green about them. Enumerate the carriers from the fuzz artifacts before choosing where
+  a guard goes. Second, the wire form: inside JSON the character is the six ASCII characters of a
+  `\u0000` escape, legal JSON that Jackson decodes happily, so only the DECODED value answers the
+  question — scanning the stream for byte `0x00` sees nothing, and scanning for the escape as text
+  false-positives on a doubly-escaped backslash. Sibling of the `value too long` / duplicate-key
+  cases in the same issue, which are deliberately NOT this: a length limit is per-column and a
+  `ConstraintViolationException` is 409-or-400 depending on which constraint, so neither is decidable
+  fleet-wide. U+0000 is, because no valid request can carry it and no column can accept it.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
