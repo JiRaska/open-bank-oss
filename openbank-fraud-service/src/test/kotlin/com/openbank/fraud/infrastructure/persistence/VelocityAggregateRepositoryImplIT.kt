@@ -143,6 +143,56 @@ class VelocityAggregateRepositoryImplIT {
         assertAllWindows(accountId, count = 2L, total = "20.00")
     }
 
+    /**
+     * Issue #5789 follow-up: a signal with no aggregateId must not POISON the row.
+     *
+     * The dedupe set is tested as `EXCLUDED.last_transaction_id = ANY (array_append(applied_ids,
+     * last_transaction_id))`, and `last_transaction_id` is NULL for the whole life of the row after a
+     * signal that carried no aggregateId. `x = ANY (array containing NULL)` is NULL, not FALSE, in
+     * Postgres — so `NOT (...)` is NULL, the `ON CONFLICT ... WHERE` is not true, and every later
+     * genuinely-new signal to that row is silently dropped forever. The row freezes.
+     *
+     * The sequence must INTERLEAVE: two NULLs back to back both take the
+     * `EXCLUDED.last_transaction_id IS NULL` branch, which short-circuits before the membership test
+     * is ever reached, so a repeated-NULL test cannot see this. C, NULL, D, E can: the NULL parks a
+     * NULL in `last_transaction_id`, and D and E then have to survive the membership test.
+     *
+     * Direction of harm: velocity counts are UNDERCOUNTED, so a velocity rule that should fire does
+     * not. Against the pre-#5789 `IS DISTINCT FROM` guard this is a REGRESSION — that form was
+     * NULL-safe.
+     */
+    @Test
+    fun `a signal without a transaction id does not freeze the row against later signals`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID())
+        // No aggregateId: applied unconditionally, and deliberately not remembered.
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, null)
+        // Two genuinely new signals, after the NULL. Both must still count.
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID())
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID())
+
+        assertAllWindows(accountId, count = 4L, total = "40.00")
+    }
+
+    /**
+     * The guard must still SUPPRESS after a NULL has passed through — a NULL-safe membership test
+     * that simply always evaluated true would pass the freeze test above while silently disabling
+     * dedupe. This is the other side of that: replay of C after the NULL is still a replay.
+     */
+    @Test
+    fun `dedupe still suppresses a replay after a signal without a transaction id`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val c = UUID.randomUUID()
+
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, c)
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, null)
+        // Replay of C, after the NULL. Must be suppressed.
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, c)
+
+        assertAllWindows(accountId, count = 2L, total = "20.00")
+    }
+
     @Test
     fun `currencies are deduplicated independently`(): Unit = runBlocking {
         val accountId = UUID.randomUUID()

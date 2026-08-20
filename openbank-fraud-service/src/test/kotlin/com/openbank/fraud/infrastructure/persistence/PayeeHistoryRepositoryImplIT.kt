@@ -127,6 +127,46 @@ class PayeeHistoryRepositoryImplIT {
     }
 
     /**
+     * Issue #5789 follow-up, payee_history side of the same defect: a payment with no transaction id
+     * parks a NULL in `last_transaction_id`, which is unioned into the array the membership test runs
+     * over. `x = ANY (array containing NULL)` is NULL, so `NOT (...)` is NULL, the
+     * `ON CONFLICT ... WHERE` is not true, and every later payment to that payee is silently dropped —
+     * `payment_count` freezes. payee_history feeds first-time-payee detection, so a frozen row keeps a
+     * genuine payee looking newer than it is.
+     *
+     * The sequence INTERLEAVES on purpose: consecutive NULLs both take the
+     * `EXCLUDED.last_transaction_id IS NULL` branch and short-circuit before the membership test.
+     */
+    @Test
+    fun `a payment without a transaction id does not freeze the row against later payments`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val payeeIdentifier = UUID.randomUUID().toString()
+
+        repository.recordPayment(accountId, payeeIdentifier, UUID.randomUUID(), Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, null, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, UUID.randomUUID(), Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, UUID.randomUUID(), Instant.now())
+
+        val history = repository.findHistory(accountId, payeeIdentifier)
+        assertThat(history!!.paymentCount).isEqualTo(4L)
+    }
+
+    /** The other side: dedupe must still suppress a replay once a NULL has passed through the row. */
+    @Test
+    fun `dedupe still suppresses a replay after a payment without a transaction id`(): Unit = runBlocking {
+        val accountId = UUID.randomUUID()
+        val payeeIdentifier = UUID.randomUUID().toString()
+        val c = UUID.randomUUID()
+
+        repository.recordPayment(accountId, payeeIdentifier, c, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, null, Instant.now())
+        repository.recordPayment(accountId, payeeIdentifier, c, Instant.now())
+
+        val history = repository.findHistory(accountId, payeeIdentifier)
+        assertThat(history!!.paymentCount).isEqualTo(2L)
+    }
+
+    /**
      * Issue #5789 — the defect the V3 last-writer marker has never caught, and which was treated
      * throughout the #5698 sweep as "the one that already guards". The marker stored the LAST id
      * applied, so a replay of A arriving after B is `IS DISTINCT FROM` the marker and increments

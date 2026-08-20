@@ -86,6 +86,17 @@ class PayeeHistoryRepositoryImpl(
         // Residual bound (a decision, not an oversight): the set is bounded by a COUNT of signals,
         // not by elapsed time — a replay arriving after $5 further payments to the same payee is
         // applied again. See V6__applied_signal_ledger.sql.
+        // NULL-safety of the membership test (the union's cost, and the reason for array_remove):
+        // last_transaction_id is NULL for the whole life of a row after a signal that carried no
+        // aggregateId, and `x = ANY (array containing NULL)` evaluates to NULL — not FALSE — in
+        // Postgres. Without array_remove, `NOT (...)` is then NULL, the ON CONFLICT ... WHERE is not
+        // true, and every later genuinely-new signal to that row is silently dropped forever: the row
+        // freezes and the counts UNDERCOUNT, so a rule that should fire does not. The old
+        // IS DISTINCT FROM guard was NULL-safe, so this would have been a regression against main.
+        // applied_transaction_ids itself can never hold a NULL element (the INSERT path array_removes
+        // it, fraud_append_applied refuses to append it, and the V6 backfill array_removes it), so the
+        // union with the scalar marker is the only way a NULL reaches this array — array_remove is
+        // scoped exactly to that, and a NULL signal stays "applied unconditionally, not remembered".
         private const val UPSERT_SQL =
             """
             INSERT INTO payee_history
@@ -102,7 +113,9 @@ class PayeeHistoryRepositoryImpl(
                 updated_at              = NOW()
             WHERE EXCLUDED.last_transaction_id IS NULL
                OR NOT (EXCLUDED.last_transaction_id = ANY (
-                       array_append(payee_history.applied_transaction_ids, payee_history.last_transaction_id)))
+                       array_remove(
+                           array_append(payee_history.applied_transaction_ids,
+                                        payee_history.last_transaction_id), NULL)))
             """
 
         private const val SELECT_SQL =
