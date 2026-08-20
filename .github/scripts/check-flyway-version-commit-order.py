@@ -110,6 +110,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
     # reported every baseline entry as stale -- the ratchet catching the checker, which is the
     # single reason that idiom is worth its cost.
     revs: list[str] = []
+    mainline = ""
     for ref in ("origin/main", "FETCH_HEAD", "main", "HEAD"):
         try:
             revs = subprocess.run(
@@ -119,6 +120,7 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
         except subprocess.CalledProcessError:
             continue
         if revs:
+            mainline = ref
             break
     position = {sha: i for i, sha in enumerate(revs)}
 
@@ -131,10 +133,18 @@ def first_commit_order(paths: list[pathlib.Path]) -> dict[pathlib.Path, int]:
         # 1-then-2 order. A plain add-commit lookup is exact for the case this gate cares about
         # (two files landing as siblings in one PR resolve to the identical commit, which the
         # stable sort in find_violations then orders by filename -- V1 before V2).
+        # Traverse the SAME ref the positions came from, never implicit HEAD. On a PR run
+        # actions/checkout puts HEAD on the merge commit, so a HEAD traversal walks both parents
+        # and can attribute a file's "add" to a commit that is not on the mainline at all --
+        # while the positions are mainline-only. The two disagreed silently: CI found the order
+        # monotonic and reported zero violations where a local run found two, and again only the
+        # KNOWN_VIOLATIONS both-ways check made it visible (every baseline entry read as stale).
+        # Same failure family as the empty-map bug above: the gate ran, and measured the wrong
+        # history.
         log = subprocess.run(
             [
                 "git", "log", "--name-status", "--diff-filter=A", "--format=commit %H",
-                "--", "**/db/migration/V*.sql",
+                mainline, "--", "**/db/migration/V*.sql",
             ],
             cwd=REPO, capture_output=True, text=True, check=True,
         ).stdout.splitlines()
