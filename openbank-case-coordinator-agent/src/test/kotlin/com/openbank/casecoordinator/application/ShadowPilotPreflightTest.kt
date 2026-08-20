@@ -16,6 +16,10 @@ import io.temporal.client.WorkflowClientOptions
 import io.temporal.serviceclient.WorkflowServiceStubs
 import org.assertj.core.api.Assertions.assertThatIllegalStateException
 import org.junit.jupiter.api.Test
+import java.sql.Connection
+import java.sql.PreparedStatement
+import java.sql.ResultSet
+import java.util.Optional
 import javax.sql.DataSource
 
 class ShadowPilotPreflightTest {
@@ -30,6 +34,16 @@ class ShadowPilotPreflightTest {
     fun `shadow startup refuses an existing legacy case workflow`() {
         every { config.case() } returns caseGroup
         every { caseGroup.deliveryMode() } returns CaseDeliveryMode.SHADOW
+        every { caseGroup.shadowRolloutId() } returns Optional.of("shadow-test")
+        val connection = mockk<Connection>()
+        val statement = mockk<PreparedStatement>()
+        val result = mockk<ResultSet>()
+        every { dataSource.connection } returns connection
+        every { connection.prepareStatement(any()) } returns statement
+        every { statement.setString(any(), any()) } returns Unit
+        every { statement.executeQuery() } returns result
+        every { result.next() } returns true
+        every { result.getBoolean(1) } returns false
         every { temporal.enabled() } returns true
         every { client.options } returns WorkflowClientOptions.newBuilder().setNamespace("openbank").build()
         val stubs = mockk<WorkflowServiceStubs>()
