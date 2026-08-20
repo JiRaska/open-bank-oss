@@ -168,17 +168,19 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
         </div>
         <div style={{ display: 'flex', gap: '6px', flexShrink: 0, marginLeft: '12px' }}>
           <button
+            type="button"
             onClick={onEdit}
             disabled={product.status === 'ACTIVE'}
             title={product.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')}
+            aria-label={product.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}
             style={{ background: 'var(--surface-3)', border: '1px solid var(--border)', borderRadius: '6px', padding: '5px 10px', cursor: product.status === 'ACTIVE' ? 'not-allowed' : 'pointer', opacity: product.status === 'ACTIVE' ? 0.55 : 1, display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: 'var(--text-secondary)' }}
           >
             <Edit size={12} /> {t('Upravit', 'Edit')}
           </button>
-          <button onClick={onToggleStatus} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
+          <button type="button" onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
             {product.status === 'ACTIVE' ? <><Square size={11} /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} /> {t('Aktivovat', 'Activate')}</>}
           </button>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px' }}>
+          <button type="button" onClick={onClose} aria-label={t('Zavřít detail produktu', 'Close product details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px' }}>
             <X size={18} />
           </button>
         </div>
@@ -686,10 +688,10 @@ export default function ProductCatalogPage() {
                     </td>
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                        <button className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')}>
+                        <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
                           <Edit size={13} />
                         </button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
                           {p.status === 'ACTIVE' ? <Square size={13} /> : <Play size={13} />}
                         </button>
                       </div>
