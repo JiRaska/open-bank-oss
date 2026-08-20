@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.182.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.181.0...admin-ui-v0.182.0) (2026-08-20)
+
+
+### Features
+
+* **admin-ui:** clarify cloud architecture controls ([#6021](https://github.com/JiRaska/open-bank-oss/issues/6021)) ([8c435e3](https://github.com/JiRaska/open-bank-oss/commit/8c435e3ce324d69f6fc2b7705f233742f031655d))
+* **admin-ui:** clarify infrastructure topology controls ([#6025](https://github.com/JiRaska/open-bank-oss/issues/6025)) ([3cbd8bb](https://github.com/JiRaska/open-bank-oss/commit/3cbd8bb2d2206cde993441e16db0aa4fc1ab86b4))
+* **admin-ui:** clarify trace explorer controls ([#6028](https://github.com/JiRaska/open-bank-oss/issues/6028)) ([39b4fdd](https://github.com/JiRaska/open-bank-oss/commit/39b4fdd621a16aceefbf9b68e647f9e551a903f8))
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify sanctions controls ([#6042](https://github.com/JiRaska/open-bank-oss/issues/6042)) ([5baba8f](https://github.com/JiRaska/open-bank-oss/commit/5baba8f8017ecba10a5e79000635cd3c922ebbd7))
+
 ## [0.181.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.180.0...admin-ui-v0.181.0) (2026-08-20)
 
 
