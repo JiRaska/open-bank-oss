@@ -57,6 +57,9 @@ class OpenAiCompatibleLlmGatewayClient(
 
     private val log = Logger.getLogger(OpenAiCompatibleLlmGatewayClient::class.java)
 
+    // Derived once from the configured endpoint, not per call: it cannot change for a given client.
+    private val provider = LlmCallMetricsPort.providerOf(baseUrl)
+
     private val http: HttpClient = http ?: HttpClient.newBuilder()
         .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S))
         .build()
@@ -68,7 +71,7 @@ class OpenAiCompatibleLlmGatewayClient(
             // Recorded, not silent: an agent that has never had a key looks identical to one that
             // is simply idle unless this series exists, and "the AI features were never switched
             // on" is exactly the state this repo keeps discovering months late.
-            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0)
+            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0, provider)
             return null
         }
         val url = "${baseUrl.trimEnd('/')}/chat/completions"
@@ -101,6 +104,7 @@ class OpenAiCompatibleLlmGatewayClient(
                     0,
                     0,
                     System.nanoTime() - startedAt,
+                    provider,
                 )
                 return null
             }
@@ -111,6 +115,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 parsed.usage?.promptTokens ?: 0,
                 parsed.usage?.completionTokens ?: 0,
                 System.nanoTime() - startedAt,
+                provider,
             )
             parsed.choices.firstOrNull()?.message?.content?.takeIf { it.isNotBlank() }
         } catch (ex: Exception) {
@@ -121,6 +126,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 0,
                 0,
                 System.nanoTime() - startedAt,
+                provider,
             )
             null
         }

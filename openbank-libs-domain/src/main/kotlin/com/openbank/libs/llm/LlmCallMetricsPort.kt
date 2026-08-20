@@ -38,8 +38,23 @@ interface LlmCallMetricsPort {
      * @param completionTokens from `usage.completion_tokens`; 0 when the provider omits it.
      * @param durationNanos wall-clock for the whole attempt, including a failed one — a timeout is
      *   the slowest and most interesting case, so timing only successes would hide it.
+     * @param provider the egress backend this attempt was ADDRESSED TO, from [providerOf] — the
+     *   gateway or vendor host the request went to, not the upstream vendor LiteLLM may route it on
+     *   to. A caller cannot observe the latter (that mapping lives in litellm-config), and a label
+     *   that claims knowledge the emitter does not have is worse than a coarse one. Defaulted to
+     *   [PROVIDER_UNKNOWN] so an un-migrated call site keeps compiling and stays honestly labelled
+     *   rather than silently mislabelled. It does NOT change what [outcome] means: the two tags are
+     *   independent, and every existing outcome vocabulary and alert keeps its meaning.
      */
-    fun recordCall(model: String, outcome: String, promptTokens: Int, completionTokens: Int, durationNanos: Long)
+    @Suppress("LongParameterList")
+    fun recordCall(
+        model: String,
+        outcome: String,
+        promptTokens: Int,
+        completionTokens: Int,
+        durationNanos: Long,
+        provider: String = PROVIDER_UNKNOWN,
+    )
 
     companion object {
         const val OUTCOME_SUCCESS = "success"
@@ -54,6 +69,48 @@ interface LlmCallMetricsPort {
          */
         const val OUTCOME_NOT_CONFIGURED = "not_configured"
 
+        // --- provider vocabulary (closed, like `outcome`) -------------------------------------
+        //
+        // Closed on purpose: this is a Prometheus label, and deriving it from a raw host would let
+        // any endpoint string become a new series. Anything unrecognised collapses to
+        // PROVIDER_OTHER, so a mis-set endpoint shows up as one extra series rather than a
+        // cardinality leak — and PROVIDER_UNKNOWN specifically means "the call site has not been
+        // migrated", which is a different fact from "the endpoint is not one we recognise".
+
+        /** In-cluster LiteLLM gateway (ADR-0174/0175) — the fleet's single egress choke point. */
+        const val PROVIDER_LITELLM = "litellm"
+        const val PROVIDER_GROQ = "groq"
+        const val PROVIDER_DEEPINFRA = "deepinfra"
+        const val PROVIDER_OPENAI = "openai"
+        const val PROVIDER_OLLAMA = "ollama"
+
+        /** A recognised call, an endpoint host that is not in the list above. */
+        const val PROVIDER_OTHER = "other"
+
+        /** The call site does not report a provider yet. */
+        const val PROVIDER_UNKNOWN = "unknown"
+
+        /**
+         * Classifies an OpenAI-compatible base URL into the closed vocabulary above.
+         *
+         * Substring matching on the host, not equality: the LiteLLM service is addressed as
+         * `litellm.ai-platform:4000` by some callers and `litellm.ai-platform.svc:4000` by others,
+         * and both are the same backend — a label that split them would answer "which provider"
+         * with "which spelling of the DNS name someone happened to configure". Malformed input
+         * yields [PROVIDER_OTHER] rather than throwing: a metrics helper may never break a call.
+         */
+        @Suppress("ReturnCount")
+        fun providerOf(baseUrl: String): String {
+            val host = runCatching { java.net.URI(baseUrl).host }.getOrNull()?.lowercase()
+                ?: return PROVIDER_OTHER
+            if (host.startsWith("litellm.") || host == "litellm") return PROVIDER_LITELLM
+            if (host.contains("groq.com")) return PROVIDER_GROQ
+            if (host.contains("deepinfra.com")) return PROVIDER_DEEPINFRA
+            if (host.contains("openai.com")) return PROVIDER_OPENAI
+            if (host.contains("ollama")) return PROVIDER_OLLAMA
+            return PROVIDER_OTHER
+        }
+
         /** Records nothing. The default for every caller that has not been wired. */
         val NONE: LlmCallMetricsPort = object : LlmCallMetricsPort {
             override fun recordCall(
@@ -62,6 +119,7 @@ interface LlmCallMetricsPort {
                 promptTokens: Int,
                 completionTokens: Int,
                 durationNanos: Long,
+                provider: String,
             ) = Unit
         }
     }
