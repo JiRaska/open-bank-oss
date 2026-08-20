@@ -125,6 +125,7 @@ class PayeeHistoryRepositoryImplIT {
 
         assertThat(historyForB).isNull()
     }
+
     /**
      * Issue #5789 — the defect the V3 last-writer marker has never caught, and which was treated
      * throughout the #5698 sweep as "the one that already guards". The marker stored the LAST id
@@ -194,5 +195,4 @@ class PayeeHistoryRepositoryImplIT {
 
         assertThat(suppressed).containsExactly("payee_history")
     }
-
 }

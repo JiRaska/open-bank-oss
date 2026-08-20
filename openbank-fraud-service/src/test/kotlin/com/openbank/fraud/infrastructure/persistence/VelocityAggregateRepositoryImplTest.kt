@@ -4,8 +4,8 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
-import com.openbank.fraud.domain.model.VelocityWindow
 import com.openbank.fraud.application.port.out.FraudMetricsPort
+import com.openbank.fraud.domain.model.VelocityWindow
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
