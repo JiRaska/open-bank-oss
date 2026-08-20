@@ -80,7 +80,6 @@ interface CaseCoordinatorConfig {
 
         @WithDefault("40")
         fun maxContributions(): Int
-
     }
 
     interface CaseDeliveryGroup {
