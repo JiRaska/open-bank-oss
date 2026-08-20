@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.172.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.1...admin-ui-v0.172.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify AIOps navigation state ([#5796](https://github.com/JiRaska/open-bank-oss/issues/5796)) ([f952539](https://github.com/JiRaska/open-bank-oss/commit/f9525395fc211da4b18f07714af74104cb6cc664))
+
 ## [0.172.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.0...admin-ui-v0.172.1) (2026-08-20)
 
 
