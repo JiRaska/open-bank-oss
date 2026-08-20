@@ -61,6 +61,8 @@ spec:
           labels:
             severity: warning
           annotations:
+            # Subject: CronJob journey-public-edge, `*/5 * * * *`. The 30m window spans six invocations.
+            subject_period: 5m
             summary: "Journey run {{ $labels.job_name }} failed"
             description: >-
               A synthetic journey run failed its thresholds against production. k6 prints which
