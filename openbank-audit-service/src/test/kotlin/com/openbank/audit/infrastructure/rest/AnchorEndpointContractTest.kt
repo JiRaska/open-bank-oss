@@ -23,6 +23,8 @@ class AnchorEndpointContractTest {
         AuditResource::class.java.declaredMethods.single { it.name == "listAnchors" }
     private val verifyAnchors: Method =
         AuditResource::class.java.declaredMethods.single { it.name == "verifyAnchors" }
+    private val verificationKey: Method =
+        AuditResource::class.java.declaredMethods.single { it.name == "anchorVerificationKey" }
 
     @Test
     fun `listAnchors accepts a limit query parameter`() {
@@ -38,11 +40,12 @@ class AnchorEndpointContractTest {
     fun `anchor endpoints are mapped under the documented paths`() {
         assertThat(listAnchors.getAnnotation(Path::class.java).value).isEqualTo("/anchors")
         assertThat(verifyAnchors.getAnnotation(Path::class.java).value).isEqualTo("/anchors/verify")
+        assertThat(verificationKey.getAnnotation(Path::class.java).value).isEqualTo("/anchors/verification-key")
     }
 
     @Test
     fun `anchor endpoints are role-gated (never PermitAll, K7)`() {
-        for (m in listOf(listAnchors, verifyAnchors)) {
+        for (m in listOf(listAnchors, verifyAnchors, verificationKey)) {
             val roles = m.getAnnotation(RolesAllowed::class.java)
             assertThat(roles)
                 .describedAs("%s must be @RolesAllowed — an unauthenticated audit endpoint is a finding", m.name)

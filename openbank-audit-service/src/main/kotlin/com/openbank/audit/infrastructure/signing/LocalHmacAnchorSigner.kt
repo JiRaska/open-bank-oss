@@ -5,9 +5,6 @@
 package com.openbank.audit.infrastructure.signing
 
 import com.openbank.audit.application.port.out.AnchorSigner
-import io.quarkus.arc.DefaultBean
-import jakarta.enterprise.context.ApplicationScoped
-import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.Mac
@@ -19,12 +16,7 @@ import javax.crypto.spec.SecretKeySpec
  * replaces this bean (it is a [DefaultBean]) with a KMS/cosign-keyed asymmetric signer for full
  * third-party verifiability — see [AnchorSigner].
  */
-@ApplicationScoped
-@DefaultBean
-class LocalHmacAnchorSigner(
-    @ConfigProperty(name = "openbank.audit.anchor.signing-key", defaultValue = "CHANGE_ME_LOCAL_DEV_ONLY")
-    private val signingKey: String,
-) : AnchorSigner {
+class LocalHmacAnchorSigner(private val signingKey: String) : AnchorSigner {
 
     override val keyId: String = "local-hmac-sha256"
 

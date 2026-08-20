@@ -33,6 +33,7 @@ spec:
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
         openbank.tech/policy-checksum: "0abbbe4ed712e13f"
     spec:
+      serviceAccountName: audit-service
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -50,6 +51,16 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # ADR-0031 D5: pod identity may sign only audit anchors with this dedicated KMS key.
+            # No private key or AWS static credential is injected into the workload.
+            - name: AWS_REGION
+              value: eu-north-1
+            - name: AUDIT_ANCHOR_SIGNER
+              value: kms
+            - name: AUDIT_ANCHOR_SIGNING_REQUIRED
+              value: "true"
+            - name: AUDIT_ANCHOR_KMS_KEY_ID
+              value: alias/openbank-audit-anchor
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://audit-db-rw.audit.svc:5432/openbank_audit
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
@@ -241,6 +252,14 @@ spec:
         - name: msg-override
           configMap:
             name: audit-service-msg-override
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: audit-service
+  namespace: audit
+  labels:
+    app.kubernetes.io/name: audit-service
 ---
 apiVersion: v1
 kind: Service

@@ -30,6 +30,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(libs.quarkus.scheduler)
+    implementation(libs.aws.sdk.kms)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)

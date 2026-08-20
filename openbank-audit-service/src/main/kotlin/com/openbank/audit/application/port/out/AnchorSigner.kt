@@ -21,4 +21,7 @@ interface AnchorSigner {
 
     /** True when [signature] is a valid signature of [digest] under this signer's key. */
     fun verify(digest: ByteArray, signature: String): Boolean
+
+    /** PEM-encoded public key for offline verification, or null for symmetric development signers. */
+    fun verificationKeyPem(): String? = null
 }

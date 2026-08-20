@@ -36,6 +36,8 @@ class AuditAnchorService(
     private val clock: Clock,
     @ConfigProperty(name = "openbank.audit.anchor.enabled", defaultValue = "true")
     private val enabled: Boolean,
+    @ConfigProperty(name = "openbank.audit.anchor.signing-required", defaultValue = "false")
+    private val signingRequired: Boolean,
     private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(AuditAnchorService::class.java)
@@ -61,8 +63,8 @@ class AuditAnchorService(
 
     /**
      * Capture and sign a checkpoint over the current chain head. Returns null when the chain is
-     * empty (nothing to attest yet). Signing failures are tolerated: an unsigned checkpoint is
-     * still recorded (and reported as such by [verifyAnchors]) rather than losing the captured head.
+     * empty (nothing to attest yet). Development HMAC mode can retain an unsigned checkpoint for
+     * diagnostics; required KMS mode aborts capture rather than recording a false attestation.
      */
     suspend fun captureAnchor(): AuditAnchor? {
         val head = auditRepo.chainHead() ?: return null
@@ -70,8 +72,17 @@ class AuditAnchorService(
         val signedAt = clock.instant()
         val digest = AuditAnchor.digest(head.entryId, head.recordHash, head.count, status, signedAt)
         val signature = runCatching { signer.sign(digest.toByteArray(Charsets.UTF_8)) }
-            .onFailure { log.warn("anchor signing failed; storing unsigned checkpoint", it) }
-            .getOrNull()
+            .onFailure { failure ->
+                if (signingRequired) {
+                    log.error("anchor signing failed; required signer prevents checkpoint capture", failure)
+                } else {
+                    log.warn("anchor signing failed; storing unsigned checkpoint", failure)
+                }
+            }
+            .getOrElse { failure ->
+                if (signingRequired) throw failure
+                null
+            }
         val anchor = AuditAnchor(
             lastEntryId = head.entryId,
             lastRecordHash = head.recordHash,
@@ -132,6 +143,11 @@ class AuditAnchorService(
 
     suspend fun recent(limit: Int): List<AuditAnchor> = anchorRepo.recent(limit.coerceIn(1, MAX_ANCHOR_PAGE))
 
+    /** Public verification material is intentionally absent for the local symmetric development signer. */
+    fun verificationKey(): AnchorVerificationKey? = signer.verificationKeyPem()?.let {
+        AnchorVerificationKey(keyId = signer.keyId, algorithm = "ECDSA_SHA_256", publicKeyPem = it)
+    }
+
     private companion object {
         const val WORKFLOW_NAME = "audit-anchor-capture"
         val EXPECTED_INTERVAL: Duration = Duration.ofHours(1)
@@ -153,3 +169,6 @@ data class AnchorVerification(
 
 /** The first anchor whose signature or attested head failed verification. */
 data class AnchorBreak(val lastEntryId: UUID?, val signatureInvalid: Boolean, val headHashMismatch: Boolean)
+
+/** Public material needed to verify KMS-backed anchor signatures independently of the audit database. */
+data class AnchorVerificationKey(val keyId: String, val algorithm: String, val publicKeyPem: String)

@@ -196,8 +196,11 @@ openbank:
       enabled: true
       interval: 1h
       initial-delay: 30s
-      # Held outside the audit DB (env/Vault). Production replaces the default HMAC signer with a
-      # KMS/cosign-keyed adapter (follow-up); this key is the in-cluster fallback.
+      # hmac is local development only. Production switches to the dedicated ECC_NIST_P256 KMS
+      # key, so the private key never enters the workload.
+      signer: ${AUDIT_ANCHOR_SIGNER:hmac}
+      signing-required: ${AUDIT_ANCHOR_SIGNING_REQUIRED:false}
+      kms-key-id: ${AUDIT_ANCHOR_KMS_KEY_ID:}
       signing-key: ${AUDIT_ANCHOR_SIGNING_KEY:CHANGE_ME_LOCAL_DEV_ONLY}
     chain-verify:
       # ADR-0133: recompute the whole hash chain on a cadence and publish the verdict as metrics.

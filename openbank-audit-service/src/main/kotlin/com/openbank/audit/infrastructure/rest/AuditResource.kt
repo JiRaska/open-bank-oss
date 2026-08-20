@@ -232,6 +232,21 @@ class AuditResource {
         Response.ok(anchors.recent(limit)).build()
 
     /**
+     * Return the public key for offline verification of KMS-backed anchors. This stays under the
+     * same auditor gate as the anchors themselves; a symmetric development signer exposes none.
+     */
+    @GET
+    @Path("/anchors/verification-key")
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
+    @Authorize(action = "audit.verify", resource = "")
+    @Operation(summary = "Get the public key for offline audit-anchor verification (ADR-0031 D5)")
+    fun anchorVerificationKey(): Response = anchors.verificationKey()?.let { Response.ok(it).build() }
+        ?: Response.status(Response.Status.NOT_FOUND)
+            .entity("""{"error":"asymmetric anchor verification key is not configured"}""")
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+
+    /**
      * Verify every signed anchor: recompute each digest, check its signature, and confirm the
      * attested chain head still matches the live chain. Detects a wholesale rewrite of the log
      * that the internal hash-chain walk in [verifyIntegrity] alone cannot (ADR-0031 D5).
