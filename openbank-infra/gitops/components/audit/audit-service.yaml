@@ -107,6 +107,9 @@ spec:
             # the signing input. AuditAnchorService records KMS's immutable returned key id
             # with each anchor so verification remains correct across key rotation.
             # The audit-service Pod Identity receives only Sign/Verify/GetPublicKey on this key.
+            # Pod Identity supplies credentials, while the AWS SDK resolves its region separately.
+            - name: AWS_REGION
+              value: eu-north-1
             - name: AUDIT_ANCHOR_SIGNER
               value: kms
             - name: AUDIT_ANCHOR_SIGNING_REQUIRED
