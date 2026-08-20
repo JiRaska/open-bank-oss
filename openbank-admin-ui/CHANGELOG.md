@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.182.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.0...admin-ui-v0.182.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align account lifecycle permissions ([#6064](https://github.com/JiRaska/open-bank-oss/issues/6064)) ([15dd727](https://github.com/JiRaska/open-bank-oss/commit/15dd7273d9d87b39dd21ef77355c8adf89744304))
+* **admin-ui:** align sanctions action permissions ([#6065](https://github.com/JiRaska/open-bank-oss/issues/6065)) ([bd889cc](https://github.com/JiRaska/open-bank-oss/commit/bd889cccb52767e65df38cb4c5458ab801df6e21))
+* **admin-ui:** clarify closing controls ([#6060](https://github.com/JiRaska/open-bank-oss/issues/6060)) ([a494a4c](https://github.com/JiRaska/open-bank-oss/commit/a494a4c1d01ade9eb346d56e2488b14eebff0803))
+* **admin-ui:** gate devops hitl decisions ([#6074](https://github.com/JiRaska/open-bank-oss/issues/6074)) ([79288f7](https://github.com/JiRaska/open-bank-oss/commit/79288f755dd08a38c5e74f507df56fb6c0f75dce))
+
 ## [0.182.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.181.0...admin-ui-v0.182.0) (2026-08-20)
 
 
