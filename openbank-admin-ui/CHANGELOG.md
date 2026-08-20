@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.182.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.4...admin-ui-v0.182.5) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align campaign workflow rbac ([#6102](https://github.com/JiRaska/open-bank-oss/issues/6102)) ([5dfc00b](https://github.com/JiRaska/open-bank-oss/commit/5dfc00b6c5d09307ed1d806d530170769092f65f))
+
 ## [0.182.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.3...admin-ui-v0.182.4) (2026-08-20)
 
 
