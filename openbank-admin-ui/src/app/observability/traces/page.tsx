@@ -152,7 +152,7 @@ export default function TraceExplorerPage() {
           title={t('Trace Explorer', 'Trace Explorer')}
           subtitle={t('Sleduj jeden požadavek napříč službami — distribuované trasy z Tempa s časováním každého spanu.', 'Watch a single request hop across services — distributed traces from Tempo with per-span timing.')}
           breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Trasování', 'Tracing')}</span></div>}
-          actions={<button onClick={loadTraces} className="btn btn-secondary" disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          actions={<button type="button" onClick={loadTraces} className="btn btn-secondary" disabled={loading} aria-busy={loading} aria-label={t('Obnovit trasy z Tempa', 'Refresh traces from Tempo')} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
             <RefreshCw size={14} aria-hidden="true" className={loading ? 'spin' : undefined} />
             {t('Obnovit', 'Refresh')}
           </button>}
@@ -188,7 +188,7 @@ export default function TraceExplorerPage() {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 340px) minmax(0, 1fr)', gap: '20px', alignItems: 'start' }}>
             {/* Trace list */}
-            <div className="card" style={{ padding: '8px' }}>
+            <div className="card" role="region" aria-label={t('Seznam posledních tras', 'Recent traces list')} style={{ padding: '8px' }}>
               <div style={{
                 fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.06em',
                 color: 'var(--text-tertiary)', fontWeight: 700, padding: '8px 10px 6px',
@@ -199,7 +199,7 @@ export default function TraceExplorerPage() {
                 {(traces ?? []).map(tr => {
                   const active = tr.traceID === selected
                   return (
-                    <button key={tr.traceID} onClick={() => openTrace(tr.traceID)}
+                    <button key={tr.traceID} type="button" onClick={() => openTrace(tr.traceID)} aria-pressed={active} aria-label={`${tr.rootServiceName ?? t('neznámá služba', 'unknown service')} — ${tr.rootTraceName ?? tr.traceID.slice(0, 12)}`}
                       style={{
                         textAlign: 'left', border: 'none', cursor: 'pointer',
                         display: 'flex', alignItems: 'center', gap: '8px',
@@ -220,7 +220,7 @@ export default function TraceExplorerPage() {
                           {fmtDuration(tr.durationMs)}
                         </span>
                       )}
-                      <ChevronRight size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
+                      <ChevronRight aria-hidden="true" size={12} style={{ color: 'var(--text-tertiary)', flexShrink: 0 }} />
                     </button>
                   )
                 })}
@@ -230,12 +230,12 @@ export default function TraceExplorerPage() {
             {/* Waterfall */}
             <div className="card" style={{ padding: '20px', minWidth: 0 }}>
               {!selected ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
-                  <Activity size={15} /> {t('Vyber trasu vlevo pro zobrazení span waterfall.', 'Pick a trace on the left to see the span waterfall.')}
+                <div role="status" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
+                  <Activity aria-hidden="true" size={15} /> {t('Vyber trasu vlevo pro zobrazení span waterfall.', 'Pick a trace on the left to see the span waterfall.')}
                 </div>
               ) : spansLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
-                  <RefreshCw size={14} className="spin" /> {t('Načítám spany…', 'Loading spans…')}
+                <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-tertiary)', fontSize: '13px', padding: '24px 0', justifyContent: 'center' }}>
+                  <RefreshCw aria-hidden="true" size={14} className="spin" /> {t('Načítám spany…', 'Loading spans…')}
                 </div>
               ) : spansUnavailable ? (
                 <DataUnavailable kind={spansUnavailable} service="tempo (observability)" feature={t('Spany trasy', 'Trace spans')} lang={t('cs', 'en') as 'cs' | 'en'} dense />
@@ -248,7 +248,7 @@ export default function TraceExplorerPage() {
                       {selected.slice(0, 24)}…
                     </span>
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                      <Clock size={12} /> {fmtDuration(traceTotal / 1e6)} · {spans.length} {t('spanů', 'spans')}
+                      <Clock aria-hidden="true" size={12} /> {fmtDuration(traceTotal / 1e6)} · {spans.length} {t('spanů', 'spans')}
                     </span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
