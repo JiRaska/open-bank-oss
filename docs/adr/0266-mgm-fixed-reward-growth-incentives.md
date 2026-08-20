@@ -100,7 +100,9 @@ The implementation is not complete until a real HTTP/integration path proves:
 1. program draft → independent publication → invite issuance;
 2. accepted invite attribution and rejection of self-referral, duplicate and expired invites;
 3. exactly-once qualification and reward request under replay/concurrency;
-4. ledger posting handoff, duplicate reference rejection and reversal;
+4. the ledger boundary contract: an accepted/rejected/reversed handoff, duplicate-reference
+   rejection and idempotent retry using a test double or contract fixture; production money-path
+   posting itself remains blocked until the separate money-path ADR and threat model are approved;
 5. Campaign Studio exposure/attribution projection without treating a click as a reward; and
 6. authorization, audit evidence, retention/deletion handling and contract replay for every new event.
 
