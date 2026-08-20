@@ -23,8 +23,15 @@ import java.time.LocalDate
  * FINREP template rendering (ADR-0097 Phase 1). A pure derivation over the ledger trial balance — it
  * stores nothing and emits nothing, so **every** way it can be wrong still produces a well-formed 200
  * response. [FinrepMetricsPort] is what makes those ways visible: an empty trial balance renders a
- * template of honest-looking zeros, and a balance sheet that does not balance is currently computed
- * into `FinrepTemplate.isBalanced`, serialised, and never looked at again.
+ * template of honest-looking zeros, and a trial balance that does not satisfy double entry is
+ * reported on `FinrepTemplate.isBalanced` and on the `balanced` tag of the render counter.
+ *
+ * That sentence used to read "is currently computed into `FinrepTemplate.isBalanced`, serialised,
+ * and never looked at again". The second half stopped being true when admin-ui's export gate began
+ * blocking on it (#5904); the FIRST half was never true — both mappers passed the literal `true`,
+ * so the `balanced` tag had exactly one reachable value and an alert on it could not fire. Fixed in
+ * #5987: the flag is now `TrialBalanceIdentity.holds(lines)`, which is falsifiable by input the
+ * mappers do not otherwise read.
  */
 @ApplicationScoped
 class FinrepService(private val ledgerPort: LedgerPort, private val metrics: FinrepMetricsPort) : FinrepUseCase {

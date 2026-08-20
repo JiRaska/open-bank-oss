@@ -31,8 +31,8 @@ class CorepServiceTest {
     fun `getTemplate dispatches C_01_00 to the own funds mapper`(): Unit = runBlocking {
         val asOf = LocalDate.of(2026, 6, 30)
         val lines = listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
-            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000")),
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
+            TrialBalanceLineDto(code = "2000", accountType = "LIABILITY", net = BigDecimal("300000"), currency = "CZK"),
         )
         coEvery { ledgerPort.getTrialBalance(asOf) } returns lines
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
@@ -64,7 +64,7 @@ class CorepServiceTest {
         // zeros. That honesty is invisible without a series counting them.
         val asOf = LocalDate.of(2026, 6, 30)
         coEvery { ledgerPort.getTrialBalance(asOf) } returns listOf(
-            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000")),
+            TrialBalanceLineDto(code = "1000", accountType = "ASSET", net = BigDecimal("500000"), currency = "CZK"),
         )
         val service = CorepService(ledgerPort, FinrepMetricsAdapter(registry))
 
