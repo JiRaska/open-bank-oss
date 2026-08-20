@@ -10,7 +10,7 @@ tags: [onboarding, accounts, kafka, kyc]
 summary: "A new party's accounts are opened and activated by party domain events, not by an edge call: PARTY_CREATED opens inert PENDING_ACTIVATION accounts, the KYC+AML two-key gate activates them, and balance init follows the events."
 ---
 
-# ADR-0266 — Event-driven onboarding account lifecycle
+# ADR-0267 — Event-driven onboarding account lifecycle
 
 ## Context
 
