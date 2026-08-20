@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.173.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.173.0...admin-ui-v0.173.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** respect locale in shared displays ([#5807](https://github.com/JiRaska/open-bank-oss/issues/5807)) ([d0ec7a9](https://github.com/JiRaska/open-bank-oss/commit/d0ec7a977b4eabb45ec222ffbc8166c5a759e4d8))
+
 ## [0.173.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.172.3...admin-ui-v0.173.0) (2026-08-20)
 
 
