@@ -29,6 +29,9 @@
 #   SERVICES                 JSON array of changed service names        (required)
 #   EVENT_NAME               github.event_name                          (required)
 #   INPUT_CODEPLOY           github.event.inputs.codeploy, may be empty
+#   INPUT_CODEPLOY_PACT_VERSIONS
+#                            optional JSON object mapping a co-deployed service to an exact
+#                            Pact version that this gate proves equivalent to GITHUB_SHA
 #   PACT_BROKER_URL/_USERNAME/_PASSWORD, PACT_STANDALONE_VERSION        (job env)
 #   GITHUB_OUTPUT            written for: gate_ran, deployable, and the rest below
 #
@@ -103,18 +106,45 @@ BLOCKS_FILE="$(mktemp)"
 # this into a verdict about a different image.
 if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
    && [ "${INPUT_CODEPLOY}" = "true" ]; then
-  CODEPLOY_ARGS=()
-  for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-    vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
-    sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
-      bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
-    read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
-    if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
-      echo "::error::can-i-deploy co-deploy set cannot be asked safely for ${svc}: $(printf '%s' "$sel_line" | cut -f2)"
+  explicit_versions="${INPUT_CODEPLOY_PACT_VERSIONS:-}"
+  use_explicit_versions=false
+  if [ -n "$explicit_versions" ] && [ "$explicit_versions" != "{}" ]; then
+    if ! jq -e --argjson services "$SERVICES" \
+      'type == "object" and (keys | sort) == ($services | sort)' >/dev/null <<< "$explicit_versions"; then
+      echo "::error::codeploy_pact_versions must map exactly the requested services to 40-hex versions"
       echo "deployable=[]" >> "$GITHUB_OUTPUT"
       exit 1
     fi
-    echo "    ${svc}: ${CID_SELECTOR[*]} ($(printf '%s' "$sel_line" | cut -f2))"
+    use_explicit_versions=true
+  fi
+  CODEPLOY_ARGS=()
+  for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+    if [ "$use_explicit_versions" = true ]; then
+      pact_version="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$explicit_versions")"
+      if ! grep -qE '^[0-9a-f]{40}$' <<< "$pact_version"; then
+        echo "::error::codeploy_pact_versions has no valid 40-hex version for ${svc}"
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        exit 1
+      fi
+      if ! bash .github/scripts/pact-version-tree-equivalent.sh "$svc" "$pact_version" "$GITHUB_SHA"; then
+        echo "::error::codeploy_pact_versions entry for ${svc} is not byte-identical to the deploy ref in every build input"
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        exit 1
+      fi
+      CID_SELECTOR=(--version "$pact_version")
+      echo "    ${svc}: --version ${pact_version} (explicit version proven byte-identical to deploy ref)"
+    else
+      vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+      sel_line="$(PACT_VERSION_PRESENT="$vpresent" EVENT_NAME="$GITHUB_EVENT_NAME" \
+        bash .github/scripts/resolve-can-i-deploy-selector.sh "$svc" "$GITHUB_SHA")"
+      read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+      if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
+        echo "::error::can-i-deploy co-deploy set cannot be asked safely for ${svc}: $(printf '%s' "$sel_line" | cut -f2)"
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        exit 1
+      fi
+      echo "    ${svc}: ${CID_SELECTOR[*]} ($(printf '%s' "$sel_line" | cut -f2))"
+    fi
     CODEPLOY_ARGS+=(--pacticipant "$svc" "${CID_SELECTOR[@]}")
   done
   echo "==> can-i-deploy CO-DEPLOY SET (#1985): $(echo "$SERVICES" | jq -r 'join(" ")')"
