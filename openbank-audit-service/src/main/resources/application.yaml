@@ -148,7 +148,30 @@ mp:
         # alone (#1034's lesson). audit-service was the only one of the topic's two documented
         # consumers (the other being onboarding-service's projection, #4353) that had never
         # subscribed.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events
+        #
+        # Issue #6035 (money-path audit gap, found by
+        # .github/scripts/check-audit-money-path-subscription.py): four more money-path producers
+        # were missing from all three places at once -- this list, TopicAttribution, and the
+        # audit-service KafkaUser's Read ACLs -- which is the signature of a set that was never
+        # enumerated rather than four independent oversights. Each producer was verified at its
+        # own `mp.messaging.outgoing.<channel>.topic` declaration, never by grepping a topic
+        # literal (a serialised data-class payload has no literal anywhere, #3883):
+        #   openbank.ledger.journal.posted  -- openbank-ledger-service/application.yaml (the
+        #     posting record itself, so the largest of the five named in #6035)
+        #   openbank.sdd.event              -- openbank-sdd-service/application.yaml
+        #   openbank.interest.accrual.event -- openbank-interest-service/application.yaml
+        #   openbank.fraud.hold.changed     -- openbank-fraud-service/application.yaml
+        # All four publish through the standard outbox relay, so each record carries the `ce-type`
+        # header AuditConsumer reads for event_type; none sets a "sourceService" body field, so
+        # they resolve AttributionSource.TOPIC through TopicAttribution.
+        #
+        # NOT changed here, deliberately: `auto.offset.reset`. It is already `earliest` for the
+        # deployed channel (audit-service-msg-override ConfigMap, config_ordinal=500). The
+        # existing 22 topics have committed offsets on group `audit-service` and are unaffected;
+        # the four new ones have none, so they are read from their retention start on first
+        # subscribe. That is the intended audit behaviour, not a mass replay of the existing
+        # surface -- but it is a first-subscribe load spike worth knowing about.
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:

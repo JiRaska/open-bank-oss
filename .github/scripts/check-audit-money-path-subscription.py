@@ -75,15 +75,17 @@ AUDIT_KAFKAUSER = "audit-service"
 # it. Fixing one means DELETING its entries here — and the check fails on an entry that is no
 # longer a gap, so the list cannot drift in either direction.
 #
-# All six are #6035 / #5859: the same six topics missing from all three places at once. They are
-# not drive-by-fixable from this PR: adding a topic to the audit subscription is a live-broker
-# change (a new Read grant on a running consumer group) whose blast radius wants its own review,
-# and PR #5857 is already in flight for the delegation row.
+# What is left after #6035's first backfill. Four of the original seven -- ledger
+# (openbank.ledger.journal.posted), sdd, interest and fraud -- were wired in all three places and
+# their entries deleted here; a stale entry is itself an error, so a half-fix cannot pass.
+#
+# The three that remain each need a decision this ratchet should not make silently:
+#  - billing has no KafkaTopic CR for openbank.billing.fee.event at all, so a Read grant would
+#    point at an undeclared topic -- a second way to get silence, and the topic's ownership is
+#    billing's call, not audit's.
+#  - standing-order and psd2 were found by THIS check and named in neither #5859 nor #6035, so
+#    nothing has yet reviewed whether their streams belong in the audit trail.
 _GAP_ISSUE = {
-    "openbank-ledger-service": "#6035 - the posting record itself, the largest of the five",
-    "openbank-sdd-service": "#6035",
-    "openbank-interest-service": "#6035",
-    "openbank-fraud-service": "#6035",
     "openbank-billing-service": "#6035 - also has no KafkaTopic CR (see the issue)",
     # Found by THIS check on its first run, and by nothing before it: neither #5859's probe nor
     # #6035's enumeration named these two. That is the argument for deriving the scope rather
@@ -93,10 +95,6 @@ _GAP_ISSUE = {
     "openbank-psd2-service": "#6035 - found by this check, not named in the issue",
 }
 _GAP_TOPICS = {
-    "openbank-ledger-service": "openbank.ledger.journal.posted",
-    "openbank-sdd-service": "openbank.sdd.event",
-    "openbank-interest-service": "openbank.interest.accrual.event",
-    "openbank-fraud-service": "openbank.fraud.hold.changed",
     "openbank-billing-service": "openbank.billing.fee.event",
     "openbank-standing-order-service": "openbank.standing-orders.order.event",
     "openbank-psd2-service": "openbank.psd2.events",

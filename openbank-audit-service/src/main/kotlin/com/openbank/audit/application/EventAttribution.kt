@@ -96,6 +96,28 @@ object TopicAttribution {
         // carry their own "sourceService", so they resolve AttributionSource.EVENT; the eight
         // older lifecycle events do not yet, and resolve TOPIC through this row.
         "openbank.delegation.events" to "delegation-service",
+        // Issue #6035: four more money-path producers were absent from all three places at once
+        // (this table, application.yaml's topics list, and the audit KafkaUser's Read ACLs) --
+        // found by .github/scripts/check-audit-money-path-subscription.py, which derives the set
+        // from `money_path_services` and each service's own outgoing channel declaration. Every
+        // value below is read off the module that DECLARES the outgoing channel, not derived from
+        // the topic's domain segment: a derivation writes a plausible, confident, FALSE service
+        // name into a tamper-evident record, and `source_service` is chain-hashed into
+        // `record_hash`, so it gets exactly one chance to be right.
+        //
+        // None of the four sets a "sourceService" body field today, so each resolves
+        // AttributionSource.TOPIC through this row; a producer that later populates the field
+        // keeps its own value and upgrades to AttributionSource.EVENT with no edit here.
+        //
+        // openbank-ledger-service/src/main/resources/application.yaml -> ledger-events-out.
+        // The posting record itself -- the largest of the five gaps #6035 names.
+        "openbank.ledger.journal.posted" to "ledger-service",
+        // openbank-sdd-service/src/main/resources/application.yaml -> sdd-events-out.
+        "openbank.sdd.event" to "sdd-service",
+        // openbank-interest-service/src/main/resources/application.yaml -> interest-events-out.
+        "openbank.interest.accrual.event" to "interest-service",
+        // openbank-fraud-service/src/main/resources/application.yaml -> fraud-outbox-out.
+        "openbank.fraud.hold.changed" to "fraud-service",
     )
 
     /** Topics with a verified producer entry. Visible for the coverage test. */

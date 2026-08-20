@@ -167,6 +167,41 @@ class AuditSubscriptionSurfaceIT {
     }
 
     /**
+     * Issue #6035: the four money-path topics wired by this change, named as LITERALS.
+     *
+     * The test above is deliberately corpus-driven and therefore cannot see a REMOVAL: delete a
+     * topic from `application.yaml` and the loop simply iterates one fewer topic and stays green.
+     * That is the "a gate whose scope is the thing it checks reads as passing when the list is
+     * short" shape. These four are the production wiring this change adds, so they are asserted by
+     * name — revert any one of the three artefacts and this goes red naming the topic.
+     *
+     * It asserts two of the three places. The third, the `audit-service` KafkaUser's Read ACL, is
+     * unreachable from any test in this repo (there is no Kafka broker in any test here, only the
+     * in-memory connector) and is the gate's job:
+     * `.github/scripts/check-audit-money-path-subscription.py --enforce`.
+     */
+    @Test
+    fun `the money-path topics wired by issue 6035 are subscribed and attributed`() {
+        val subscribed = subscribedTopics()
+        val failures = WIRED_BY_6035.mapNotNull { (topic, producer) ->
+            when {
+                topic !in subscribed ->
+                    "$topic: absent from mp.messaging.incoming.$CHANNEL.topics — nothing is read, " +
+                        "and no error is raised anywhere"
+                TopicAttribution.sourceService(topic) == null ->
+                    "$topic: no TopicAttribution entry — every row would land on the \"$UNKNOWN\" " +
+                        "sentinel, and source_service is chain-hashed into record_hash so it can " +
+                        "never be corrected"
+                TopicAttribution.sourceService(topic) != producer ->
+                    "$topic: TopicAttribution says ${TopicAttribution.sourceService(topic)}, " +
+                        "the module declaring the outgoing channel is $producer"
+                else -> null
+            }
+        }
+        assertThat(failures).`as`("issue #6035 wiring").isEmpty()
+    }
+
+    /**
      * A record shaped exactly as SmallRye Kafka delivers one: the topic on
      * [io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata], the outbox event type
      * on the `ce-type` header. `accountId` carries the per-topic marker so the row is findable by a
@@ -252,5 +287,17 @@ class AuditSubscriptionSurfaceIT {
         const val UNKNOWN = "unknown"
         const val POLL_MILLIS = 100L
         const val AWAIT_NANOS = 30_000_000_000L
+
+        /**
+         * topic -> the module that DECLARES the outgoing channel producing it, read off that
+         * module's own `mp.messaging.outgoing.<channel>.topic` rather than derived from the
+         * topic's domain segment (a derivation is wrong for eight of the subscribed topics).
+         */
+        val WIRED_BY_6035 = mapOf(
+            "openbank.ledger.journal.posted" to "ledger-service",
+            "openbank.sdd.event" to "sdd-service",
+            "openbank.interest.accrual.event" to "interest-service",
+            "openbank.fraud.hold.changed" to "fraud-service",
+        )
     }
 }
