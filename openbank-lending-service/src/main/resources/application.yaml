@@ -72,6 +72,10 @@ quarkus:
       url: ${ACCOUNT_SERVICE_URL:http://account-service.accounts.svc:8100}
       connect-timeout: 2000
       read-timeout: 3000
+    product-catalog:
+      url: ${PRODUCT_CATALOG_URL:http://localhost:8104}
+      connect-timeout: 2000
+      read-timeout: 3000
   redis:
     hosts: redis://localhost:6379
   shutdown:

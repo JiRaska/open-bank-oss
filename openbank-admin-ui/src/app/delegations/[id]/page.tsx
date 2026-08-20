@@ -35,6 +35,7 @@ type CheckOutcome = { granted: boolean; reason?: string | null; code?: string | 
 
 export default function DelegationDetailPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const params = useParams<{ id: string }>()
   const id = params?.id
 
@@ -98,13 +99,13 @@ export default function DelegationDetailPage() {
               <dd>{grant.approvalPolicy ?? '—'}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Strop na transakci', 'Per-transaction cap')}</dt>
-              <dd>{formatCeiling(grant.perTransactionLimit)}</dd>
+              <dd>{formatCeiling(grant.perTransactionLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Denní strop', 'Daily cap')}</dt>
-              <dd>{formatCeiling(grant.dailyLimit)}</dd>
+              <dd>{formatCeiling(grant.dailyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Měsíční strop', 'Monthly cap')}</dt>
-              <dd>{formatCeiling(grant.monthlyLimit)}</dd>
+              <dd>{formatCeiling(grant.monthlyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Platnost od', 'Valid from')}</dt>
               <dd>{grant.validFrom ?? '—'}</dd>

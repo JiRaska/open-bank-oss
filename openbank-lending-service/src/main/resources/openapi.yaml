@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.12.0
+  version: 1.13.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -802,6 +802,13 @@ components:
         ageYears: { type: integer, nullable: true, description: Applicant age in years (majority floor) }
         residency: { type: string, nullable: true, description: Residency country code (e.g. CZ) }
         employmentTenureMonths: { type: integer, nullable: true }
+        catalogOfferingId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >-
+            Optional published catalog offering. When supplied, its immutable revision sets the
+            rate, currency, tenor and amortization constraints and is retained with the application.
     DecisionRequest:
       type: object
       required: [approve]

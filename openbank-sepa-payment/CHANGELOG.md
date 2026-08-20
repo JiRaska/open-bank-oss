@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.1...sepa-payment-v0.11.0) (2026-08-20)
+
+
+### Features
+
+* **sepa-payment:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5691](https://github.com/JiRaska/open-bank-oss/issues/5691)) ([dc737f5](https://github.com/JiRaska/open-bank-oss/commit/dc737f572a2dc368231d255ec4741137e6cd5531))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.0...sepa-payment-v0.10.1) (2026-08-18)
 
 

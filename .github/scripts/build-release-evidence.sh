@@ -145,7 +145,12 @@ if [ -f "$CL" ]; then
   ' "$CL")"
 fi
 
-# ── AI attribution: authors + Co-Authored-By since previous component tag ────────
+# ── Contributor attribution + runtime-AI attribution boundary ──────────────────
+#
+# The git range can establish who contributed to a release, but it cannot establish that a
+# deployed agent emitted model_id/prompt_hash/policy_decision audit fields. Do not turn that
+# category error into an AI-runtime attestation. The bundle publishes the missing runtime proof
+# explicitly; D5 can only graduate when independently observed audit evidence is attached later.
 PREV_TAG="$(git tag --sort=-creatordate 2>/dev/null | grep -E "^${COMPONENT}-v" | sed -n '2p' || true)"
 RANGE="HEAD"; [ -n "$PREV_TAG" ] && RANGE="${PREV_TAG}..HEAD"
 ATTRIB="$( { git log "$RANGE" --pretty='%an <%ae>' -- "$MODULE_DIR" 2>/dev/null;
@@ -178,8 +183,16 @@ bundle = {
     "vex": {"file": os.environ["VEX_OUT"], "format": "openvex/0.2.0",
             "sha256": sha(os.environ["VEX_OUT"]), "signature": os.environ["VEX_OUT"] + ".sig"},
     "changelog": os.environ.get("CHANGELOG_EXCERPT", "").strip(),
-    "ai_attribution": {"contributors": attrib,
-                       "note": "authors + Co-Authored-By trailers since previous component tag (ADR-0029 D6/0031)"},
+    "ai_attribution": {
+        "contributors": attrib,
+        "build_attribution_note": "authors + Co-Authored-By trailers since previous component tag (ADR-0029 D6)",
+        "runtime_audit_attribution": {
+            "status": "not_attested",
+            "required_fields": ["model_id", "prompt_hash", "policy_decision"],
+            "reason": "a release build has no runtime audit-event sample; contributor trailers are not evidence of AI runtime attribution",
+            "promotion_eligible": False,
+        },
+    },
     # Referenced, not embedded: these live on the CI run that produced them.
     "scan_results": {"trivy": os.environ["RUN_URL"],
                      "codeql": "n/a — GHAS code-scanning gated while repo is private (security.yml)"},

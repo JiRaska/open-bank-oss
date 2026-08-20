@@ -107,7 +107,7 @@ not deployed.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `e93d82f28786d1ef…`, 16 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `ddeb3865d205fd7f…`, 16 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.22.0...account-service-v0.23.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.21.3...account-service-v0.22.0) (2026-08-18)
 
 

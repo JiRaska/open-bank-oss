@@ -228,7 +228,8 @@ export default function DelegationsPage() {
 function GrantTable({
   title, subtitle, grants, state,
 }: { title: string; subtitle: string; grants: Grant[]; state: DirectionState }) {
-  const { t } = useLanguage()
+  const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
   return (
     <div className="card" style={{ padding: '16px', marginBottom: '20px' }}>
@@ -272,7 +273,7 @@ function GrantTable({
                   <td><EntityChip type="party" id={g.granteePartyId} label={counterpartyLabel(g.granteeName)} /></td>
                   <td style={{ fontSize: '12px' }}>{g.resourceType}</td>
                   <td style={{ fontSize: '12px' }}>{capabilityLabels(g.capabilities)}</td>
-                  <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit)}</td>
+                  <td style={{ fontSize: '12px' }}>{formatCeiling(g.perTransactionLimit, numberLocale)}</td>
                   <td style={{ fontSize: '12px' }}>{g.validTo ? g.validTo.slice(0, 10) : '—'}</td>
                   <td>
                     <Link href={`/delegations/${g.id}`} className="btn btn-secondary" style={{ fontSize: '12px' }}>

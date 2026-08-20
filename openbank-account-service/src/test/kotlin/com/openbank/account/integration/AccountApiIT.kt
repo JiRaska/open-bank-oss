@@ -29,6 +29,7 @@ class AccountApiIT {
     companion object {
         private val partyId = UUID.fromString("00000000-1111-0000-0000-000000000001")
         private val productId = UUID.fromString("00000000-2222-0000-0000-000000000001")
+        private val eurProductId = UUID.fromString("00000000-2222-0000-0000-000000000002")
         private var createdAccountId: String? = null
 
         init {
@@ -90,7 +91,7 @@ class AccountApiIT {
         val payload = """
             {
               "partyId": "$partyId",
-              "productId": "$productId",
+              "productId": "$eurProductId",
               "accountType": "SAVINGS",
               "currencyCode": "EUR",
               "legalName": "Test Customer"

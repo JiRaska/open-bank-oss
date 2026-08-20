@@ -132,10 +132,12 @@ function PartyDetailPage() {
 
       {/* Loop var is `item`, never `t` — a callback param named `t` shadows the translation
           function (see openbank-admin-ui/CLAUDE.md rule #4; sanctions/page.tsx does this). */}
-      <div style={{ display: 'flex', gap: '2px', marginBottom: '16px', flexWrap: 'wrap' }}>
+      <div role="group" aria-label={t('Sekce detailu subjektu', 'Party detail sections')} style={{ display: 'flex', gap: '2px', marginBottom: '16px', flexWrap: 'wrap' }}>
         {tabs.map(item => (
           <button
             key={item.id}
+            type="button"
+            aria-pressed={tab === item.id}
             onClick={() => setTab(item.id)}
             style={{
               display: 'flex', alignItems: 'center', gap: '4px', padding: '5px 10px', fontSize: '11px',
@@ -144,7 +146,7 @@ function PartyDetailPage() {
               color: tab === item.id ? '#fff' : 'var(--text-secondary)', transition: 'all 0.1s',
             }}
           >
-            {item.icon}{item.label}
+            <span aria-hidden="true">{item.icon}</span>{item.label}
           </button>
         ))}
       </div>

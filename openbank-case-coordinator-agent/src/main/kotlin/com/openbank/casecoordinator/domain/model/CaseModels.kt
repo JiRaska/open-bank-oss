@@ -29,6 +29,9 @@ enum class CaseStatus {
     CLOSED,
 }
 
+/** Delivery is explicit in the workflow input so replay cannot depend on mutable deployment config. */
+enum class CaseDeliveryMode { HITL, SHADOW }
+
 /** Start parameters for a case workflow run. */
 data class CaseStart(
     val caseId: String,
@@ -39,6 +42,7 @@ data class CaseStart(
     val deadlineEpochMs: Long,
     val contestedRateThreshold: Double,
     val maxContributions: Int,
+    val deliveryMode: CaseDeliveryMode = CaseDeliveryMode.HITL,
 )
 
 data class JoinSignal(val agentId: String, val role: String)

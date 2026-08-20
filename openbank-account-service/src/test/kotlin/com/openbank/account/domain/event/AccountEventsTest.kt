@@ -63,7 +63,7 @@ class AccountEventsTest {
             version = 1L,
             previousStatus = AccountStatus.PENDING_ACTIVATION,
             newStatus = AccountStatus.ACTIVE,
-            reason = "KYC + AML cleared (ADR-0073)",
+            reason = "KYC + AML cleared (ADR-0267)",
             occurredAt = now,
         )
 

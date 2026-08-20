@@ -389,7 +389,14 @@ export default function FxPage() {
         <div className="card" style={{ marginBottom: '24px' }}>
           <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '8px' }}>
             {(['bank', 'cnb', 'ecb'] as const).map(tab => (
-              <button key={tab} style={tabStyle(tab)} onClick={() => setActiveTab(tab)}>
+              <button
+                key={tab}
+                type="button"
+                style={tabStyle(tab)}
+                aria-pressed={activeTab === tab}
+                aria-label={tab === 'bank' ? t('Bankovní lístek', 'Bank rate sheet') : tab === 'cnb' ? t('Kurzy ČNB', 'CNB rates') : t('Kurzy ECB', 'ECB rates')}
+                onClick={() => setActiveTab(tab)}
+              >
                 {tab === 'bank' ? `🏦 ${t('Bankovní lístek', 'Bank Rate Sheet')}` : tab === 'cnb' ? `🇨🇿 ${t('ČNB Kurzy', 'CNB Rates')}` : `🇪🇺 ${t('ECB Kurzy', 'ECB Rates')}`}
               </button>
             ))}
