@@ -92,8 +92,6 @@ BASELINE: dict[str, str] = {
         "#5962 — Status: spec-only REJECTED/VERIFIED; undeclared COMPLETED",
     "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,UN_CONSOLIDATED":
         "#5962 — SanctionsListType: undeclared PEP_GLOBAL",
-    "openbank-sca-service:EXPIRED,FAILED,PENDING,VERIFIED":
-        "#5962 — ScaStatus: spec-only VERIFIED; undeclared CANCELLED/COMPLETED",
     "openbank-sepa-instant:ACCEPTED,RECALLED,REJECTED,SETTLED,SUBMITTED":
         "#5962 — SctInstStatus: spec-only ACCEPTED/SUBMITTED; undeclared PENDING/PROCESSING/TIMEOUT",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
