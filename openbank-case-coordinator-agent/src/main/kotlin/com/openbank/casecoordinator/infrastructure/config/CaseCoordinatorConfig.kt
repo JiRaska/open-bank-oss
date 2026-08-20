@@ -37,15 +37,7 @@ interface CaseCoordinatorConfig {
      */
     fun case(): CaseGroup
 
-    /**
-     * Detekt's `TooManyFunctions` fires AT the threshold (11), not above it, and this interface sits
-     * exactly on it. Splitting it into nested groups would rename every config key it binds
-     * (`case.delivery-mode` -> `case.rollout.delivery-mode`), which is a breaking configuration
-     * change, not a refactor. Suppressed here rather than in a baseline file so the reason travels
-     * with the code; revisit if a twelfth key is genuinely needed.
-     */
-    @Suppress("TooManyFunctions")
-    interface CaseGroup {
+    interface CaseGroup : CaseDeliveryGroup {
         @WithDefault("case-coordinator")
         fun openAgents(): Set<String>
 
@@ -88,7 +80,9 @@ interface CaseCoordinatorConfig {
 
         @WithDefault("40")
         fun maxContributions(): Int
+    }
 
+    interface CaseDeliveryGroup {
         /** Shadow mode is valid only for the bounded non-money-path incident-response pilot. */
         @WithDefault("HITL")
         fun deliveryMode(): CaseDeliveryMode
