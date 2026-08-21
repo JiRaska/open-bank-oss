@@ -248,8 +248,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
-    '/security', '/notifications', '/system',
+    '/security', '/system',
   ]],
+  ['notifications:view', ['/notifications']],
   ['agent:view', ['/system/agent']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],

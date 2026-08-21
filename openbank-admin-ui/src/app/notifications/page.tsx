@@ -13,6 +13,7 @@ import { classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { opsMessageApi } from '@/lib/api'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 
 const NOTIFICATION_SERVICE = '/api/svc/notification-service'
 
@@ -29,7 +30,7 @@ const STATUS_COLOR: Record<string, string> = {
   SENT: 'var(--green)', FAILED: 'var(--red)', PENDING: 'var(--yellow)', QUEUED: 'var(--accent)',
 }
 
-export default function NotificationsPage() {
+function NotificationsContent() {
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const { roles } = useAuth()
@@ -159,6 +160,10 @@ export default function NotificationsPage() {
       </div>
     </div>
   )
+}
+
+export default function NotificationsPage() {
+  return <AuthGuard permission="notifications:view"><NotificationsContent /></AuthGuard>
 }
 
 /**
