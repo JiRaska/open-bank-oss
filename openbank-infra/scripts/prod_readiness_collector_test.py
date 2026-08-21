@@ -165,6 +165,9 @@ class CollectorScorerTest(unittest.TestCase):
     def test_a_money_path_service_needs_three_on_the_critical_cells(self):
         """The stricter gate is what the six leniently-scored services were missing."""
         self.write_rules(("openbank-widget-service",))
+        # DEPLOYED on purpose: an undeployed service takes the NOT-DEPLOYED verdict instead of
+        # NO-GO, so without this the test would assert the wrong branch (#5706).
+        self.deploy()
         r = self.mod.ServiceReadiness(service="widget", money_path=True)
         r.scores = {c: 2 for c, _ in self.mod.DIMENSIONS}
         r.compute_gate()
@@ -175,10 +178,51 @@ class CollectorScorerTest(unittest.TestCase):
         self.assertEqual(r.gate, "GO")
 
     def test_a_non_money_path_service_clears_at_all_twos(self):
+        self.deploy()
         r = self.mod.ServiceReadiness(service="widget", money_path=False)
         r.scores = {c: 2 for c, _ in self.mod.DIMENSIONS}
         r.compute_gate()
         self.assertEqual(r.gate, "GO")
+
+    # -- the third verdict: a released component with no workload (#5706, #5760) -----------
+    def test_a_service_with_no_gitops_workload_is_reported_as_not_deployed(self):
+        """tax-reporting sat in the NO-GO column beside 25 services that ARE deployed and failing
+        a control, so its actual blocker — an undecided deployment — was invisible."""
+        self.write_rules(("openbank-ledger-service",))
+        r = self.mod.ServiceReadiness(service="widget", money_path=False)
+        r.scores = {c: 2 for c, _ in self.mod.DIMENSIONS}
+        r.scores["C5"] = 0
+        r.compute_gate()
+        self.assertEqual(r.gate, "NOT-DEPLOYED")
+
+    def test_not_deployed_never_replaces_a_GO(self):
+        """The falsification that matters: the new verdict must be reachable ONLY where the old
+        code said NO-GO. A scorer that can no longer say NO-GO is worse than one that says it
+        wrongly, so this asserts the same scores still fail for a DEPLOYED service and that a
+        passing scorecard is unaffected by deployment state."""
+        self.write_rules(("openbank-ledger-service",))
+        failing = {c: 2 for c, _ in self.mod.DIMENSIONS} | {"C5": 0}
+        undeployed = self.mod.ServiceReadiness(service="widget", money_path=False)
+        undeployed.scores = dict(failing)
+        undeployed.compute_gate()
+        self.deploy()
+        deployed = self.mod.ServiceReadiness(service="widget", money_path=False)
+        deployed.scores = dict(failing)
+        deployed.compute_gate()
+        self.assertEqual((undeployed.gate, deployed.gate), ("NOT-DEPLOYED", "NO-GO"))
+        # And an all-clear scorecard is GO either way — the branch is only ever the failure one.
+        passing = self.mod.ServiceReadiness(service="widget", money_path=False)
+        passing.scores = {c: 2 for c, _ in self.mod.DIMENSIONS}
+        passing.compute_gate()
+        self.assertEqual(passing.gate, "GO")
+
+    def test_c5_evidence_names_the_missing_workload_not_a_missing_backup(self):
+        """`no CNPG cluster` sent the reader to the backup docs for a service whose whole workload
+        is absent. The SCORE stays 0 — this is about what the 0 says, not about passing."""
+        self.governance(datastore="PostgreSQL", schema="widget")
+        score, evidence = self.mod.score_c5_backup("widget", {}, "2026-08-20")
+        self.assertEqual(score, 0, "an undeployed stateful service must not score above Absent")
+        self.assertIn("no gitops workload", evidence)
 
     def test_threat_model_is_looked_up_under_the_resolved_module_name(self):
         """C7 read docs/threat-models/openbank-sepa-payment-service.md — a file that cannot exist."""

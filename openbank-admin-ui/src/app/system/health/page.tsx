@@ -92,8 +92,8 @@ export default function SystemHealthPage() {
               <Clock size={12} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(dateLocale)}
             </span>
           )}
-          <button className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing}>
-            <RefreshCw size={13} className={cn(refreshing && 'animate-spin')} />
+          <button type="button" className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing} aria-busy={refreshing} aria-label={t('Obnovit zdraví systému', 'Refresh system health')}>
+            <RefreshCw size={13} aria-hidden="true" className={cn(refreshing && 'animate-spin')} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}

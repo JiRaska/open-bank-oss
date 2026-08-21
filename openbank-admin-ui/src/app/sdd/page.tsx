@@ -68,8 +68,15 @@ export default function SddPage() {
           'Read-only mandate view including the B2B confirmation queue. Lifecycle changes belong to governed flows.',
         )}
         icon={<Repeat size={20} style={{ color: 'var(--accent)' }} />}
-        actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+        actions={<button
+          onClick={load}
+          disabled={loading}
+          type="button"
+          aria-busy={loading}
+          aria-label={t('Obnovit mandáty inkas', 'Refresh direct debit mandates')}
+          className="btn btn-secondary btn-sm"
+        >
+          <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
 
