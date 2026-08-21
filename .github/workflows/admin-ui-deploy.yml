@@ -295,13 +295,30 @@ jobs:
 
           mapfile -t SERVICES < <(node openbank-admin-ui/scripts/list-test-services.mjs --repo .)
 
+          # The artifacts endpoint returns at most 100 entries per page. Evidence
+          # artifacts are retained across many workflow runs, so a service's newest
+          # non-expired artifact can be beyond page one. Collect every page once,
+          # then select the newest match per service. This avoids both a blind
+          # first-page scan and one complete API walk for every service.
+          EVIDENCE_ARTIFACTS=""
+          page=1
+          while :; do
+            response="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" 2>/dev/null || true)"
+            [ -n "${response}" ] || break
+            matches="$(printf '%s' "${response}" | python3 -c "import json,sys; a=json.load(sys.stdin).get('artifacts',[]); [print(x['id'], x['name'], x['created_at']) for x in a if not x['expired'] and x['name'].startswith('quality-evidence-')]" 2>/dev/null || true)"
+            [ -z "${matches}" ] || EVIDENCE_ARTIFACTS+="${matches}"$'\n'
+            page_count="$(printf '%s' "${response}" | python3 -c "import json,sys; print(len(json.load(sys.stdin).get('artifacts',[])))" 2>/dev/null || true)"
+            case "${page_count}" in
+              ''|*[!0-9]*) break ;;
+            esac
+            [ "${page_count}" -lt 100 ] && break
+            page=$((page + 1))
+          done
+
           DOWNLOADED=0
           for svc in "${SERVICES[@]}"; do
             art_prefix="quality-evidence-${svc}-a"
-            ARTIFACT=$(api \
-              "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100" \
-              | python3 -c "import json,sys; p='${art_prefix}'; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and x['name'].startswith(p)]; a.sort(key=lambda x:x['created_at'], reverse=True); print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
-              2>/dev/null || true)
+            ARTIFACT="$(printf '%s' "${EVIDENCE_ARTIFACTS}" | python3 -c "import sys; p=sys.argv[1]; a=[line.split() for line in sys.stdin if line.split() and line.split()[1].startswith(p)]; a.sort(key=lambda x:x[2], reverse=True); print(' '.join(a[0][:2]) if a else '')" "${art_prefix}" 2>/dev/null || true)"
             if [ -z "${ARTIFACT}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue

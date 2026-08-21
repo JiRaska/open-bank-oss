@@ -20,4 +20,9 @@ describe('approval inbox source truthfulness', () => {
     expect(pageSource).toContain('notConfiguredSources.length === 0 && domainItems.filter')
     expect(pageSource).toContain('Decisions from these domains will not appear here until their read endpoint is available.')
   })
+
+  it('renders the proposer identity supplied by the BFF rather than assuming every proposer is a bot', () => {
+    expect(pageSource).toContain("const aiGenerated = p.agent ? p.agent.icon === 'bot'")
+    expect(pageSource).toContain('const ProposerIcon = aiGenerated ? Bot : UserRound')
+  })
 })
