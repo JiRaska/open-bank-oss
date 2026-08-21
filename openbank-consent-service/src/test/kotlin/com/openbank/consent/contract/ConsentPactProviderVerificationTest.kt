@@ -205,6 +205,33 @@ class ConsentPactProviderVerificationTest {
         }
     }
 
+    /**
+     * State for engagement-service's `EngagementToConsentPactConsumerTest`. Distinct from the
+     * campaign one on purpose: engagement gates promotional impressions on MARKETING_COMMS_INAPP,
+     * a separate grant from the EMAIL scope campaign's pact pins, so seeding one would not satisfy
+     * the other.
+     */
+    @State("an ACTIVE MARKETING_COMMS_INAPP consent covers the pact engagement party")
+    fun activeInAppConsentExists() {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            if (!rowExists(c, "SELECT 1 FROM consents WHERE id = ?::uuid", PACT_INAPP_CONSENT_ID)) {
+                c.prepareStatement(INSERT_MARKETING_CONSENT_SQL).use { ps ->
+                    ps.setString(1, PACT_INAPP_CONSENT_ID)
+                    ps.setString(2, PACT_ENGAGEMENT_PARTY_ID)
+                    ps.setString(3, PACT_MARKETING_GRANTEE_ID)
+                    ps.executeUpdate()
+                }
+                c.prepareStatement("INSERT INTO consent_scopes (consent_id, scope) VALUES (?::uuid, ?)").use { ps ->
+                    ps.setString(1, PACT_INAPP_CONSENT_ID)
+                    ps.setString(2, "MARKETING_COMMS_INAPP")
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
     private fun rowExists(c: Connection, sql: String, id: String): Boolean = c.prepareStatement(sql).use { ps ->
         ps.setString(1, id)
         ps.executeQuery().use { rs -> rs.next() }
@@ -259,5 +286,9 @@ class ConsentPactProviderVerificationTest {
         const val PACT_CONSENTED_PARTY_ID = "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2"
         const val PACT_MARKETING_CONSENT_ID = "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4"
         const val PACT_MARKETING_GRANTEE_ID = "party-service:marketing-comms"
+
+        /** Must equal the ids in openbank-engagement-service's EngagementToConsentPactConsumerTest. */
+        const val PACT_INAPP_CONSENT_ID = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"
+        const val PACT_ENGAGEMENT_PARTY_ID = "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
     }
 }
