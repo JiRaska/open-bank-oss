@@ -23,6 +23,7 @@ import { CheckCircle2, Clock, RefreshCw, ShieldCheck, ScrollText, AlertTriangle 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { svcUrl } from '@/lib/services/bff'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 /** Mirrors lending-service `PackActivationView`. `listActive()` synthesises id = all-zero UUID for
  *  every row (it projects the in-memory registry, not a workflow row) — never key a list on it. */
@@ -177,6 +178,7 @@ export default function CompliancePacksPage() {
   )
 
   return (
+    <AuthGuard permission="lending:compliance:view">
     <div>
       <PageHeader
         breadcrumb={<div className="breadcrumb">
@@ -190,7 +192,7 @@ export default function CompliancePacksPage() {
           'Jurisdikční úvěrové compliance packy (ADR-0212 D4). Maker navrhne, JINÝ compliance principál rozhodne. Aktivovaný pack platí okamžitě — bez release služby.',
           'Jurisdictional credit compliance packs (ADR-0212 D4). A maker proposes, a DIFFERENT compliance principal decides. An activated pack takes effect immediately — no service release.',
         )}
-        actions={<button onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+        actions={<button type="button" onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
@@ -278,6 +280,7 @@ export default function CompliancePacksPage() {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Can permission="lending:compliance:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodnutí je pouze pro compliance principály.', 'Decisions are limited to compliance principals.')}</span>}>
               <input
                 className="input"
                 type="text"
@@ -287,12 +290,13 @@ export default function CompliancePacksPage() {
                 onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
                 style={{ fontSize: 12 }}
               />
-              <button className="btn btn-primary" disabled={busyId === p.id} onClick={() => void decide(p.id, true)} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-primary" disabled={busyId === p.id} onClick={() => void decide(p.id, true)} style={{ fontSize: 12 }}>
                 {t('Schválit', 'Approve')}
               </button>
-              <button className="btn btn-secondary" disabled={busyId === p.id} onClick={() => void decide(p.id, false)} style={{ fontSize: 12 }}>
+              <button type="button" className="btn btn-secondary" disabled={busyId === p.id} onClick={() => void decide(p.id, false)} style={{ fontSize: 12 }}>
                 {t('Zamítnout', 'Reject')}
               </button>
+              </Can>
             </div>
           </div>
         ))}
@@ -303,6 +307,7 @@ export default function CompliancePacksPage() {
         )}
       </div>
 
+      <Can permission="lending:compliance:propose">
       <div className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <ScrollText aria-hidden="true" size={15} /> {t('Navrhnout pack (maker)', 'Propose a pack (maker)')}
       </div>
@@ -321,6 +326,7 @@ export default function CompliancePacksPage() {
           style={{ width: '100%', fontFamily: 'monospace', fontSize: 12, padding: 8, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text)' }}
         />
         <button
+          type="button"
           className="btn btn-primary"
           style={{ marginTop: 8, fontSize: 12 }}
           disabled={busyId === 'propose' || packJson.trim().length === 0}
@@ -329,6 +335,8 @@ export default function CompliancePacksPage() {
           {t('Navrhnout', 'Propose')}
         </button>
       </div>
+      </Can>
     </div>
+    </AuthGuard>
   )
 }

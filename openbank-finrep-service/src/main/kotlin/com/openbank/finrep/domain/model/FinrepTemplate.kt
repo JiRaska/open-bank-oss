@@ -15,10 +15,23 @@ data class FinrepTemplate(
     val period: LocalDate,
     val cells: List<FinrepCell>,
     /**
-     * Whether the double-entry identity of the trial balance this template was rendered from holds
-     * (`Σ net == 0` per currency, `TrialBalanceIdentity`). NO DEFAULT on purpose (issue #5987): the
-     * field spent its whole life as a hardcoded `true` that no producer computed, and a default
-     * would let a new producer omit it and re-publish that same constant silently.
+     * Whether this template may be treated as balanced — TRUE only when finrep's own recomputation
+     * (`Σ net == 0` per currency, `TrialBalanceIdentity`) and openbank-ledger-service's published
+     * verdict AGREE that it is, i.e. [balanceVerdict] is [BalanceVerdict.AGREED_BALANCED]
+     * (issue #6011). Requiring both is what makes a truncated-but-internally-balanced response
+     * visible: finrep's recomputation alone passes it.
+     *
+     * NO DEFAULT on purpose (issue #5987): the field spent its whole life as a hardcoded `true`
+     * that no producer computed, and a default would let a new producer omit it and re-publish that
+     * same constant silently.
      */
     val isBalanced: Boolean,
+    /**
+     * WHICH of the two sources objected, and whether they objected together (issue #6011).
+     * [isBalanced] is deliberately a strict function of this field, never an independent boolean:
+     * a plain imbalance, a disagreement between the two sources and a missing producer verdict are
+     * three different defects with three different owners, and collapsing them onto one flag is the
+     * `PushResult.skipped()` failure this repo already paid for once.
+     */
+    val balanceVerdict: BalanceVerdict,
 )

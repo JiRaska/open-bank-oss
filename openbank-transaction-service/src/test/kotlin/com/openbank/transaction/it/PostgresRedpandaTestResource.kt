@@ -5,6 +5,7 @@
 package com.openbank.transaction.it
 
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import org.jboss.logging.Logger
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
@@ -71,8 +72,28 @@ class PostgresRedpandaTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
+        // Say out loud that the broker is going away (issue #5940). Quarkus calls stop() whenever
+        // the set of @QuarkusTestResource classes changes between test classes, so this runs
+        // mid-run, not only at the end — and any Kafka producer belonging to the previous boot is
+        // still open and will start failing against a port that no longer exists. Without this
+        // line the only evidence is a wall of "could not be established" with nothing explaining
+        // what happened to the broker, which is exactly how #5940 read for 37 minutes.
+        redpanda?.let { rp ->
+            LOG.infof(
+                "Stopping Redpanda test container (bootstrap=%s) — producers from the current " +
+                    "Quarkus boot will fail to reach it after this point",
+                rp.bootstrapServers,
+            )
+        }
         redis?.stop()
         redpanda?.stop()
         postgres?.stop()
+        redis = null
+        redpanda = null
+        postgres = null
+    }
+
+    private companion object {
+        private val LOG: Logger = Logger.getLogger(PostgresRedpandaTestResource::class.java)
     }
 }

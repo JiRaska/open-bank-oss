@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.17.0
+  version: 1.18.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -41,7 +41,7 @@ paths:
           description: Filter by party status. When omitted all parties are returned.
           schema:
             type: string
-            enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED]
+            enum: [PENDING_KYC, ACTIVE, SUSPENDED, CLOSED, MERGED]
       responses:
         '200':
           description: Party list with optional statusFilter echo
@@ -806,7 +806,7 @@ components:
       properties:
         documentType:
           type: string
-          enum: [PASSPORT, ID_CARD, DRIVING_LICENSE, COMPANY_REGISTRATION]
+          enum: [NATIONAL_ID, PASSPORT, DRIVING_LICENCE, COMPANY_REGISTRATION, TAX_ID]
         documentNumber:
           type: string
         issuingCountry:
@@ -821,7 +821,7 @@ components:
       properties:
         kycStatus:
           type: string
-          enum: [PENDING, VERIFIED, REJECTED, EXPIRED]
+          enum: [NOT_STARTED, IN_PROGRESS, APPROVED, REJECTED, EXPIRED]
 
     AddressDto:
       type: object

@@ -74,6 +74,23 @@ dependencies {
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
 
+    // NulByteGuards: the fleet-wide U+0000 rejection (#5913). jackson-databind supplies
+    // StringDeserializer/SimpleModule; quarkus-jackson supplies ObjectMapperCustomizer, the
+    // registration hook. Both compileOnly for the same reason as everything above — every real
+    // service already brings them via quarkus-rest-jackson.
+    //
+    // quarkus-jackson is pinned to 3.33.2, matching every sibling literal in this block rather
+    // than the 3.38.0 the platform actually resolves. That is deliberate and measured, not the
+    // rot this block's header warns about: resolving quarkus-jackson:3.38.0 STANDALONE (this
+    // module applies no Quarkus BOM) drags four POMs that `gradle/verification-metadata.xml` does
+    // not carry — io.smallrye.common:smallrye-common-{classloader,expression,function}:2.17.1 and
+    // smallrye-common-os:2.15.0 — and dependency verification then fails the build of every
+    // consuming service. Only the ObjectMapperCustomizer interface is compiled against, and it is
+    // identical across both versions. Correcting the whole block to the real BOM versions is the
+    // separate change the header calls for (#5482), and needs those checksums added with it.
+    compileOnly("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    compileOnly("io.quarkus:quarkus-jackson:3.33.2")
+
     // S3ObjectStore (ADR-0161 D2) compiles against the real AWS SDK v2 `s3` module
     // (S3Presigner ships in the same artifact — no separate presigner dependency).
     // compileOnly, matching the convention above: this is NOT part of the Quarkus
@@ -100,6 +117,11 @@ dependencies {
     // existed deleting it left every suite green. Both are compileOnly above, so the test source
     // set needs them explicitly; same pattern as quarkus-security and the FT API here.
     testImplementation("io.quarkus:quarkus-redis-client:3.33.2")
+    // NulByteGuardsTest drives the REAL ObjectMapper through the REAL customizer, so the module
+    // registration and the deserializer are both exercised rather than asserted about.
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
+    testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
+    testImplementation("io.quarkus:quarkus-jackson:3.33.2")
     testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
     testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")

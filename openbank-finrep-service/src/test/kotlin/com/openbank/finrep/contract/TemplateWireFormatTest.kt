@@ -6,6 +6,7 @@ package com.openbank.finrep.contract
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.infrastructure.client.LedgerAdapter
 import com.openbank.libs.security.Roles
 import io.mockk.coEvery
@@ -98,7 +99,11 @@ class TemplateWireFormatTest {
     @BeforeEach
     fun installLedgerStub() {
         val ledger = mockk<LedgerAdapter>()
-        coEvery { ledger.getTrialBalance(any()) } returns trialBalance
+        coEvery { ledger.getTrialBalance(any()) } returns TrialBalanceSnapshot(
+            lines = trialBalance,
+            // Ledger's own verdict for this fixture, passed explicitly: it ties out (issue #6011).
+            ledgerReportsBalanced = true,
+        )
         QuarkusMock.installMockForType(ledger, LedgerAdapter::class.java)
     }
 
@@ -117,10 +122,12 @@ class TemplateWireFormatTest {
     fun `the FINREP template wire format matches the published openapi schema`() {
         val json = getJson("/api/v1/finrep/templates/F01.01", LocalDate.of(2026, 6, 30))
 
-        assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "isBalanced")
+        assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "isBalanced", "balanceVerdict")
         assertThat(json["templateId"]).isEqualTo("F01.01")
         assertThat(json["period"]).isEqualTo("2026-06-30")
         assertThat(json["isBalanced"]).isEqualTo(true)
+        // The verdict is served as the ENUM NAME, which is what `openapi.yaml` documents (#6011).
+        assertThat(json["balanceVerdict"]).isEqualTo("AGREED_BALANCED")
 
         @Suppress("UNCHECKED_CAST")
         val cells = json["cells"] as List<Map<*, *>>

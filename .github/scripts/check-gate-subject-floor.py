@@ -90,7 +90,6 @@ DEBT = {
     "compliance-matrix": DEBT_MARKER,
     "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
-    "configproperty-supplied": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
