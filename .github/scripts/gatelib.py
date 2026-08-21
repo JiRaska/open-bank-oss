@@ -204,6 +204,26 @@ def subjects(count: int, label: str = "") -> None:
     print(f"{SUBJECTS_PREFIX}{int(count)}" + (f"  # {label}" if label else ""))
 
 
+SUBJECTS_UNRESOLVED = "UNRESOLVED"
+
+
+def subjects_unresolved(reason: str) -> None:
+    """Declare that the corpus could not be READ at all — a third state, not a count of zero.
+
+    A gate whose corpus lives behind a network API has three outcomes, not two: it compared
+    and found nothing wrong, it compared and found a violation, or it could not compare. The
+    third must render as neither a pass nor a failure — see check-stale-comment-references.py's
+    repo rule, and check-ruleset-context-parity.py, which on 2026-08-21 exited 1 on a shared
+    installation rate limit and reddened a PR whose diff could not have caused it.
+
+    `min_subjects:` exists to catch a gate that silently lost its corpus, and 0 subjects is
+    exactly what an unreachable API produces — so without this line the manifest floor would
+    convert the third state straight back into a red one layer up. run-gates.py reads this and
+    skips the floor for that run only; a run that DID read its corpus is still held to it.
+    """
+    print(f"{SUBJECTS_PREFIX}{SUBJECTS_UNRESOLVED}  # {reason}")
+
+
 def clear() -> None:
     """Drop the in-process parse cache. For tests."""
     _parse_cache.clear()

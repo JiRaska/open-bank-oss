@@ -3626,7 +3626,10 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-ruleset-context-parity.py --self-test
     selftest_expect: pass
-    min_subjects: 3   # 5 required contexts today (2026-08-09)
+    # 5 required contexts today (2026-08-21). Not applied to a run that could not READ the
+    # ruleset: the gate prints `SUBJECTS=UNRESOLVED` there and run-gates.py skips the floor,
+    # because 0 contexts from a rate-limited API means "not measured", not "corpus collapsed".
+    min_subjects: 3
     run: |
       python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 
