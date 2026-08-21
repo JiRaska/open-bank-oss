@@ -1186,7 +1186,16 @@ jobs:
                 await new Promise(r => setTimeout(r, 12000));
               }
             }
-            core.notice('could not enable auto-merge after retries — check the App token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) / branch protection');
+            // setFailed, NOT notice (issue #6231): a deploy PR with auto-merge unarmed never
+            // merges, so the deploy silently does not happen — and a notice leaves the job, the
+            // workflow and `Deploy signal` all green, with the only evidence one line in a job
+            // nobody opens. That is the repo's "green run that deployed nothing" shape. The PR
+            // itself is left open and rescuable; what changes is that the run now says so.
+            core.setFailed(
+              `auto-merge could not be enabled on PR #${pull_number} after 8 attempts, so this deploy ` +
+              `will NOT land on its own — the PR stays open until someone merges it. Check the App ` +
+              `token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) and branch protection.`
+            );
 
       # The failure this guards against is silent by construction: create-pull-request logs
       # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check

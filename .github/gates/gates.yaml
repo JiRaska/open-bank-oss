@@ -248,6 +248,29 @@ gates:
   # comparison itself escalates via deploy-drift-watch.yml and never gates a merge.
   # Without this half, a hand-set tag (`latest`, `sandbox-sec1`) would make the
   # scheduled watch blind for that service while the repo reports green.
+  # issue #6231: the supersede script decides which deploy PRs to CLOSE, and it used to decide by
+  # PR creation time. A slower build opens a later PR for an OLDER commit, so on 2026-08-21 it closed
+  # #6222 (`579dda8e`) in favour of #6225 (`a9e9d082`, an ancestor of it) and stranded the newer code
+  # with every job green. It now decides by ancestry and FAILS the step when the surviving PR is the
+  # ancestor. Nothing in CI executes that script — it only runs inside auto-deploy against live PRs —
+  # so its own self-test is the only place its RED is reachable before it acts on real PRs. Case 1 is
+  # the #6231 interleaving and must exit non-zero; case 2 is the ordinary supersede and must still
+  # close the older PR, so a fail-everything script does not satisfy it either.
+  - id: supersede-deploy-prs-ancestry
+    selftest_exempt: "is-a-test-suite — the run: IS supersede-deploy-prs.sh --self-test"
+    name: "supersede-deploy-prs decides by ancestry, not recency (issue #6231)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A slower build opens a later deploy PR for an OLDER commit. Deciding which PR to close by
+      creation time instead of ancestry closed #6222 in favour of an ancestor PR on 2026-08-21 and
+      stranded newer code with every job green (issue #6231). This gate is the only place that
+      defect's fix can go red before it acts on a real PR — the script itself only runs inside
+      auto-deploy against live PRs, never in ordinary CI.
+    review_after: "2027-02-19"
+    run: |
+      bash .github/scripts/supersede-deploy-prs.sh --self-test
+
   - id: deploy-drift-declaration
     name: "deployed image pins name a commit (issue #3344, enforced)"
     group: gitops
@@ -962,6 +985,31 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+
+  # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
+  # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
+  # machine, to decide whether OpenBank's audit log was tampered with. Nothing in CI can
+  # exercise it against production data, and that is exactly why its rejection paths need a
+  # home here: a verifier whose only observed behaviour is "VERIFIED" is decoration, and the
+  # party it would mislead is an auditor or a regulator rather than a developer.
+  #
+  # The suite constructs, from a throwaway EC key and no infrastructure, the four tamperings
+  # the anchors exist to catch (altered entry, deleted entry, re-ordered pair, chain gap),
+  # three the anchor row itself must catch (edited row, foreign-key signature, backwards
+  # re-anchor), and — the case this repo has paid for before (PushResult.skipped(), #4348) —
+  # the four cases that must land on their own outcome rather than sharing one with
+  # success: no anchors at all, and an unsigned anchor. One clean range is accepted, because
+  # ten rejections prove nothing if the tool rejects everything.
+  - id: audit-anchor-offline-verifier-unit-test
+    selftest_exempt: "is-a-test-suite — the run: IS the verifier's own --self-test"
+    name: "offline audit-anchor verifier self-test (ADR-0031 D5)"
+    group: security
+    mode: enforced
+    min_subjects: 13   # 2 acceptances + 7 rejections + 4 distinct UNVERIFIABLE outcomes
+    rationale: "The offline anchor verifier is the only D5 control an auditor can run without trusting the bank, and nothing in CI can exercise it against production data; its rejection paths would otherwise be code that has never run, so a tool whose only observed behaviour is VERIFIED would read as tamper-evidence while being decoration — and the party it misleads is a regulator rather than a developer."
+    review_after: "2027-02-21"
+    run: |
+      python3 .github/scripts/verify-audit-anchors.py --self-test
 
   # can-i-deploy block classifier unit test (issue #2549). The reconcile probe above
   # decides WHICH stranded services to re-drive; this one decides whether a block that
@@ -2918,6 +2966,37 @@ gates:
       # count; see hunk_moves_boundary and the gate's --self-test.
       python3 openbank-infra/scripts/check-threat-model-diff.py --base "${PR_DIFF_BASE}" --enforce
 
+  # ADR-0030 D2, third half (#6037, PR #6048): the coverage gate proves a threat model EXISTS
+  # and the diff gate proves it is TOUCHED when a trust boundary moves. Neither reads a single
+  # CLAIM, so a model can be present, current, freshly edited — and false. Settlement's R2
+  # listed a money-moving stub as its own mitigation and T1 named an idempotency key built from
+  # identifiers that appear in no source file here; three unit tests asserted the defect
+  # verbatim, so the suite agreed with the document and both were wrong together.
+  #
+  # Scope is DERIVED (money_path_services x docs/threat-models/<service>.md) and the claims
+  # inside are enumerated by TWO independent parsers whose union is checked — the fleet's models
+  # are not one format, and a single parser here would be a probe rather than a census.
+  # Exclusions live in the script's ALLOWED_UNRESOLVED with a reason and fail STALE in either
+  # direction; that already fired once during development, on its own entry.
+  #
+  # Both `mode:` and `--enforce` are required and neither alone does anything (#2392): without
+  # the flag the script prints ::warning and exits 0, which is a permanently green gate that
+  # blocks nothing. Negative control, read from $? with output redirected to a file (a pipe
+  # returns the pipeline's status, not the script's): restoring one pre-fix claim gives rc=1
+  # naming it PHANTOM; restoring the corrected text gives rc=0.
+  - id: threat-model-claims-resolve
+    name: "threat-model mitigation claims resolve to real code (ADR-0030 D2, enforced)"
+    group: security
+    mode: enforced
+    min_subjects: 15   # 23 money-path threat models today (2026-08-20)
+    budget_seconds: 90   # 41s over the 23 models on a warm checkout
+    rationale: "A threat model is a set of claims about running code and nothing checked whether any was true, so a mitigation could name a class that does not exist, a stub, or the very state transition whose truthfulness was the risk — and the document read as coverage in all three cases."
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-threat-model-claims.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-threat-model-claims.py --enforce
+
   - id: compliance-page-evidence
     name: "Compliance-page evidence (issue #2370, enforced)"
     group: security
@@ -3168,6 +3247,29 @@ gates:
       # disabled". Ratcheted against a baseline — new occurrences fail, today's are frozen
       # because removing a default makes config START applying and can flip live behaviour.
       python3 .github/scripts/check-configproperty-kotlin-defaults.py
+  - id: build-time-bean-selection
+    name: "A build-time-gated bean selection is not activated by a runtime env var"
+    group: kotlin
+    mode: enforced
+    min_subjects: 20   # 29 @IfBuildProperty/@UnlessBuildProperty sites today (2026-08-20)
+    rationale: "Quarkus resolves @IfBuildProperty at augmentation and ArC deletes the losing bean's class, so a container env var set by a Rollout cannot change it; when the surviving @Default is a no-op returning the real adapter's success value, nothing anywhere disagrees. Measured on the running lending pod: the image held NoOpLedgerPostingPort and not RestLedgerPostingAdapter, and the loan book had never reached the general ledger."
+    review_after: "2027-02-20"
+    selftest: python3 .github/scripts/check-build-time-bean-selection.py --self-test
+    selftest_expect: pass
+    run: |
+      # Three sources of build-time truth, because reading only one makes the check wrong in
+      # both directions: the module's application.yaml with ${VAR:default} collapsed to its
+      # default (augmentation has no env), auto-deploy.yml's fast-jar build step env (which is
+      # how analytics-sink and agent-service are legitimately correct today, #4728), and the
+      # gitops container env attributed BY IMAGE rather than by file. Disagreement between the
+      # first two and the third is the defect.
+      #
+      # Falsified against the real pre-fix tree, not only a fixture: on origin/main it exits 1
+      # naming lending's ledger, borrower-credit and temporal gates, each of which was then
+      # independently confirmed absent from the deployed image by grepping ArC's generated
+      # bytecode in the running pod. Exclusions fail stale in BOTH directions and the subject
+      # count has a floor, because a scan that reaches nothing prints OK.
+      python3 .github/scripts/check-build-time-bean-selection.py --root .
   - id: nat-ami-pinned
     name: "NAT instance AMI is pinned (issue #3602, enforced)"
     group: gitops

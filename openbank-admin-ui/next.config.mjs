@@ -44,6 +44,7 @@ const nextConfig = {
     '@opentelemetry/sdk-node',
     '@opentelemetry/exporter-trace-otlp-proto',
     '@opentelemetry/instrumentation-undici',
+    '@opentelemetry/instrumentation-http',
     '@opentelemetry/resources',
     '@opentelemetry/semantic-conventions',
     '@opentelemetry/api',

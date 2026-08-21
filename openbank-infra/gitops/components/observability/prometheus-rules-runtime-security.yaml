@@ -1,0 +1,87 @@
+# Falco agent liveness (ADR-0030 / issue #5734 follow-up).
+#
+# WHY THIS EXISTS, AND WHY IT REPLACED A LOKI RULE: liveness for the runtime-security
+# agent used to be `FalcoAgentSilent` in loki-rules-falco-runtime.yaml —
+# `absent_over_time({namespace="falco"}[30m])`. Its own comment stated the premise it
+# rested on: "Falco emits continuously (the untuned NOTICE rules alone are thousands a
+# day, and `Run shell untrusted` is deliberately left noisy), so an empty 30m window
+# means the agent, Alloy, or Loki ingestion is broken."
+#
+# That premise was true when written and was then destroyed BY US. #6075 and #6198 tuned
+# the Falco ruleset from ~33,000 events/day to zero — deliberately, because the noise was
+# what made the control unreadable. Measured 2026-08-21, minutes after the Loki ruler
+# started evaluating rules for the first time: 13/13 Falco pods Ready, zero log lines in
+# 60 minutes, and `FalcoAgentSilent` sitting in `pending` on its way to firing. The alert
+# that exists to reveal a dead agent had become an alert that fires on the healthy resting
+# state — and noise on that control is the one thing that hides a genuinely dead agent.
+#
+# This is the same shape as the WorkflowLivenessStale/Instant.EPOCH lesson in the root
+# CLAUDE.md, one layer up: an alert whose discriminator was a MAGNITUDE stops being able
+# to discriminate the moment that magnitude legitimately changes. The fix is a different
+# observable, not a retuned threshold — there is no event rate that separates
+# "well-tuned Falco" from "dead Falco", because both are zero.
+#
+# The observable used here is the DaemonSet's own readiness from kube-state-metrics, which
+# is emitted whether or not Falco ever detects anything. Verified live 2026-08-21:
+#   kube_daemonset_status_desired_number_scheduled{daemonset="falco"} = 13
+#   kube_daemonset_status_number_ready{daemonset="falco"}             = 13
+#   kube_daemonset_status_number_unavailable{daemonset="falco"}       = 0
+#
+# Falco's own `falco_*` metrics are NOT an option today: `metrics.enabled: false` in
+# apps/falco.yaml and there is no Service in the falco namespace, so Prometheus has zero
+# falco-named series. Enabling them would give a richer signal (rules loaded, event
+# drops) and is worth doing separately; this file deliberately depends only on what
+# already exists.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-runtime-security-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.runtime-security.falco
+      rules:
+        # A Falco pod that is not Ready is a NODE with no runtime detection. Falco is a
+        # DaemonSet, so this is per-node coverage, not redundancy: one unavailable pod
+        # means one node is dark, and nothing else in the estate reports that.
+        - alert: FalcoAgentNotReady
+          expr: |
+            kube_daemonset_status_number_unavailable{daemonset="falco", namespace="falco"} > 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Falco is not running on {{ $value | printf \"%.0f\" }} node(s) — those nodes have no runtime detection"
+            description: >-
+              {{ $value | printf "%.0f" }} Falco DaemonSet pod(s) have been unavailable for over
+              15 minutes. Falco runs one pod per node, so each unavailable pod is a node with NO
+              syscall-level detection: every Falco rule is blind there and nothing else covers it.
+              Check: kubectl -n falco get ds,pods -o wide — then the node itself
+              (system-node-critical priority means a pending pod is a node problem, not preemption).
+        # The absence case, which the readiness comparison above CANNOT see. If
+        # kube-state-metrics stops, or the DaemonSet is deleted outright, the
+        # `unavailable > 0` comparison is evaluated over an absent series and matches
+        # nothing — so it reports healthy for a Falco that is not merely degraded but
+        # gone. An absent series is a third state next to ready and unavailable, and it
+        # needs its own rule; this is the lesson the dead alert rules in #5733 cost.
+        - alert: FalcoDaemonSetAbsent
+          expr: |
+            absent(kube_daemonset_status_desired_number_scheduled{daemonset="falco", namespace="falco"})
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "The Falco DaemonSet has disappeared from monitoring — runtime security is unverifiable"
+            description: >-
+              No `kube_daemonset_status_desired_number_scheduled{daemonset="falco"}` series for 15
+              minutes. Either the Falco DaemonSet no longer exists, or kube-state-metrics has
+              stopped — and in the second case EVERY kube_* based alert in this estate is equally
+              blind, not just this one. FalcoAgentNotReady cannot fire while this is true, because
+              a threshold over an absent series matches nothing.
+              Check: kubectl -n falco get ds && kubectl -n observability get pods -l app.kubernetes.io/name=kube-state-metrics
