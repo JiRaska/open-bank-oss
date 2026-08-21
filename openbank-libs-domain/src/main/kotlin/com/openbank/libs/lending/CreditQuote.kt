@@ -125,8 +125,7 @@ object CreditQuoteCalculator {
         )
     }
 
-    private fun zero(request: CreditQuoteRequest) =
-        Money.of(BigDecimal.ZERO, request.principal.currency.code)
+    private fun zero(request: CreditQuoteRequest) = Money.of(BigDecimal.ZERO, request.principal.currency.code)
 
     private const val MONTHS_PER_YEAR = 12
 }

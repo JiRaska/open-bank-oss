@@ -85,17 +85,7 @@ data class BorrowerDistressSignals(
     val lastCreditContactAt: Instant?,
     val inputsChangedSinceLastContact: Boolean,
     val complete: Boolean,
-) {
-    /**
-     * The same signals with contact history cleared.
-     *
-     * Frequency capping and materiality exist to stop the bank speaking too often; neither is a
-     * reason to refuse an answer the customer just asked for. A PULL evaluation therefore drops
-     * them rather than reporting FREQUENCY_CAP to someone who opened the screen themselves.
-     */
-    fun withoutContactHistory(): BorrowerDistressSignals =
-        copy(lastCreditContactAt = null, inputsChangedSinceLastContact = true)
-}
+)
 
 /**
  * Who started the conversation — the axis ADR-0269's pull-only rule turns on.
@@ -160,6 +150,7 @@ object CreditOfferEligibility {
         signals: BorrowerDistressSignals,
         now: Instant,
         policy: CreditOfferPolicy = CreditOfferPolicy.V1,
+        surface: OfferSurface = OfferSurface.PUSH,
     ): CreditOfferDecision {
         if (!hasOffersConsent) {
             return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.CONSENT_ABSENT)
@@ -167,7 +158,7 @@ object CreditOfferEligibility {
         if (!signals.complete) {
             return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.SIGNALS_UNAVAILABLE)
         }
-        val distress = distressCode(signals, now, policy)
+        val distress = distressCode(signals, now, policy, surface)
             ?: return CreditOfferDecision.Allowed(policy.version)
         return CreditOfferDecision.Suppressed(policy.version, distress)
     }
@@ -184,12 +175,24 @@ object CreditOfferEligibility {
         signals: BorrowerDistressSignals,
         now: Instant,
         policy: CreditOfferPolicy,
+        surface: OfferSurface,
     ): CreditOfferSuppressionCode? {
+        // Hard facts and a binding affordability refusal stop BOTH surfaces. These are the cases
+        // where the answer itself is the harm, no matter who started the conversation.
         hardFactCode(signals)?.let { return it }
-
         if (withinDays(signals.lastAffordabilityFailureAt, now, policy.affordabilityCoolingDays)) {
             return CreditOfferSuppressionCode.AFFORDABILITY_COOLING
         }
+        // Everything below is about the bank speaking UNPROMPTED, and none of it is a reason to
+        // refuse an answer the customer just asked for:
+        //
+        //  - a thin buffer means "do not go looking for this customer with an offer"; it does not
+        //    mean "refuse to tell them what a loan would cost", which would leave someone who is
+        //    managing carefully unable to plan at all;
+        //  - a frequency cap limits how often the BANK initiates, and cannot silence a reply;
+        //  - materiality asks whether there is anything new to SAY, which is meaningless when the
+        //    customer just asked the question.
+        if (surface == OfferSurface.PULL) return null
 
         // A missing buffer is not a healthy buffer. Unknown reads as below the floor.
         val buffer = signals.bufferDays ?: return CreditOfferSuppressionCode.BUFFER_BELOW_FLOOR

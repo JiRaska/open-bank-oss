@@ -83,8 +83,7 @@ object Aprc {
 
         // f(X) = PV(payments at X) − PV(advances at X). Strictly decreasing in X, so bisection is
         // safe: more discounting shrinks the (later) payments faster than the (earlier) advances.
-        fun f(rate: BigDecimal): BigDecimal =
-            presentValue(payments, rate).subtract(presentValue(advances, rate), MC)
+        fun f(rate: BigDecimal): BigDecimal = presentValue(payments, rate).subtract(presentValue(advances, rate), MC)
 
         val atZero = f(LOWER)
         // Total repayments no greater than the advance: no positive rate can balance the equation.

@@ -33,8 +33,19 @@ class CreditOfferEligibilityService(
     private val consent: CreditOffersConsentPort,
     private val distress: BorrowerDistressPort,
     private val clock: Clock,
-    private val policy: CreditOfferPolicy = CreditOfferPolicy.V1,
 ) {
+    /*
+     * NOT a constructor parameter with a Kotlin default. A default generates a synthetic
+     * constructor, Arc resolves the bean through it, and the whole bean then fails to resolve —
+     * the same class of defect CustomerIntakeConfig documents, where a Kotlin fallback quietly
+     * replaced injected configuration. Here it surfaced as an UnsatisfiedResolutionException that
+     * took down every Quarkus test in the module, which is the loud version and the lucky one.
+     *
+     * When the thresholds need to move per environment this becomes a @ConfigProperty-driven bean,
+     * not a defaulted parameter.
+     */
+    private val policy: CreditOfferPolicy = CreditOfferPolicy.V1
+
     /**
      * Evaluate the gate for [partyId].
      *
@@ -65,10 +76,7 @@ class CreditOfferEligibilityService(
             }
         }
         val signals = failClosed("distress-signals", UNREADABLE) { distress.signalsFor(partyId) }
-        // The frequency cap and materiality rules are about the bank speaking unprompted; they must
-        // not silence an answer the customer asked for, so a pull evaluation ignores contact history.
-        val effective = if (surface == OfferSurface.PULL) signals.withoutContactHistory() else signals
-        return CreditOfferEligibility.evaluate(true, effective, Instant.now(clock), policy)
+        return CreditOfferEligibility.evaluate(true, signals, Instant.now(clock), policy, surface)
     }
 
     /**
