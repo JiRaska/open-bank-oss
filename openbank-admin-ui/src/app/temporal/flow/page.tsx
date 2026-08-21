@@ -82,17 +82,17 @@ export default function TemporalFlowPage() {
       />
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginBottom: '14px', gap: '8px' }}>
-        <button onClick={() => setFlow(v => !v)} aria-pressed={flow} title={t('Přepnout tok', 'Toggle flow')}
+        <button type="button" onClick={() => setFlow(v => !v)} aria-pressed={flow} aria-label={t(flow ? 'Pozastavit tok workflow' : 'Spustit tok workflow', flow ? 'Pause workflow flow' : 'Start workflow flow')} title={t('Přepnout tok', 'Toggle flow')}
           style={{
             display: 'flex', alignItems: 'center', gap: '5px', padding: '5px 10px', fontSize: '12px', fontWeight: 600,
             borderRadius: '20px', cursor: 'pointer', fontFamily: 'inherit',
             border: `1px solid ${flow ? 'var(--accent)' : 'var(--border)'}`,
             background: flow ? 'var(--accent)' : 'var(--surface)', color: flow ? '#fff' : 'var(--text-secondary)',
           }}>
-          {flow ? <Pause size={13} /> : <Play size={13} />}{t('Tok', 'Flow')}
+          {flow ? <Pause size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}{t('Tok', 'Flow')}
         </button>
-        <button onClick={load} disabled={isChecking} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-          <RefreshCw size={14} className={isChecking ? 'animate-spin' : ''} />
+        <button type="button" onClick={load} disabled={isChecking} aria-busy={isChecking} aria-label={t('Obnovit stav Temporal', 'Refresh Temporal status')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+          <RefreshCw size={14} aria-hidden="true" className={isChecking ? 'animate-spin' : ''} />
           {isChecking ? t('Načítám…', 'Loading...') : t('Obnovit', 'Refresh')}
         </button>
       </div>

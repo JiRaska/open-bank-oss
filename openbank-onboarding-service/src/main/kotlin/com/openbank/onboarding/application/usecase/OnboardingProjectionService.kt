@@ -11,6 +11,7 @@ import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.OnboardingRecord
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.domain.model.ProjectionResult
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import java.util.UUID
@@ -51,82 +52,21 @@ class OnboardingProjectionService : OnboardingUseCase {
 
     // ── Event projection ─────────────────────────────────────────────────────
 
-    suspend fun applyEvent(event: OnboardingEvent) {
-        when (event) {
-            is OnboardingEvent.PartyCreated -> {
-                val now = event.occurredAt
-                val record = OnboardingRecord(
-                    partyId = event.partyId,
-                    legalName = event.legalName,
-                    email = event.email,
-                    partyStatus = PartyStage.PENDING_KYC,
-                    kycCaseId = null,
-                    kycStatus = null,
-                    scaEnrolled = false,
-                    deviceCount = 0,
-                    funnelStage = FunnelStage.REGISTERED,
-                    blockedReason = null,
-                    createdAt = now,
-                    updatedAt = now,
-                )
-                repo.upsert(record)
-            }
-
-            is OnboardingEvent.PartyStatusChanged -> {
-                val existing = repo.findByPartyId(event.partyId) ?: return
-                val updated = existing.copy(
-                    partyStatus = event.newStatus,
-                    funnelStage = FunnelStage.derive(event.newStatus, existing.kycStatus, existing.scaEnrolled),
-                    blockedReason = if (event.newStatus == PartyStage.SUSPENDED ||
-                        event.newStatus == PartyStage.CLOSED
-                    ) {
-                        "Party ${event.newStatus.name.lowercase()}"
-                    } else {
-                        null
-                    },
-                    updatedAt = event.occurredAt,
-                )
-                repo.upsert(updated)
-            }
-
-            is OnboardingEvent.KycCaseOpened -> {
-                val existing = repo.findByPartyId(event.partyId) ?: return
-                val updated = existing.copy(
-                    kycCaseId = event.kycCaseId,
-                    kycStatus = KycStage.OPEN,
-                    funnelStage = FunnelStage.derive(existing.partyStatus, KycStage.OPEN, existing.scaEnrolled),
-                    updatedAt = event.occurredAt,
-                )
-                repo.upsert(updated)
-            }
-
-            is OnboardingEvent.KycStatusChanged -> {
-                val existing = repo.findByPartyId(event.partyId) ?: return
-                val updated = existing.copy(
-                    kycStatus = event.newStatus,
-                    funnelStage = FunnelStage.derive(existing.partyStatus, event.newStatus, existing.scaEnrolled),
-                    blockedReason = when (event.newStatus) {
-                        KycStage.REJECTED -> "KYC rejected"
-                        KycStage.EXPIRED -> "KYC expired"
-                        else -> null
-                    },
-                    updatedAt = event.occurredAt,
-                )
-                repo.upsert(updated)
-            }
-
-            is OnboardingEvent.DeviceEnrolled -> {
-                val existing = repo.findByPartyId(event.partyId) ?: return
-                val newCount = existing.deviceCount + 1
-                val updated = existing.copy(
-                    scaEnrolled = true,
-                    deviceCount = newCount,
-                    funnelStage = FunnelStage.derive(existing.partyStatus, existing.kycStatus, true),
-                    updatedAt = event.occurredAt,
-                )
-                repo.upsert(updated)
-            }
-        }
+    /**
+     * Applies one event to the read model and reports what it did.
+     *
+     * Returns [ProjectionResult.SKIPPED_UNKNOWN_PARTY] rather than throwing when the event names
+     * a party with no row: the three source topics are independent consumer groups with no
+     * ordering between them, so this is an expected race, not a fault. The caller must record it
+     * as its own outcome and never as a success — see [ProjectionResult] for what folding the two
+     * together cost (#6248).
+     */
+    suspend fun applyEvent(event: OnboardingEvent): ProjectionResult = when (event) {
+        is OnboardingEvent.PartyCreated -> repo.applyPartyCreated(event)
+        is OnboardingEvent.PartyStatusChanged -> repo.applyPartyStatusChanged(event)
+        is OnboardingEvent.KycCaseOpened -> repo.applyKycCaseOpened(event)
+        is OnboardingEvent.KycStatusChanged -> repo.applyKycStatusChanged(event)
+        is OnboardingEvent.DeviceEnrolled -> repo.applyDeviceEnrolled(event)
     }
 
     // ── GDPR erasure ─────────────────────────────────────────────────────────
@@ -156,4 +96,98 @@ class OnboardingProjectionService : OnboardingUseCase {
         "createdAt" to createdAt.toString(),
         "updatedAt" to updatedAt.toString(),
     )
+}
+
+// ── Per-event projection ────────────────────────────────────────────────────
+//
+// File-private extensions on the repository rather than methods on the service: they need
+// nothing else from it, and keeping them off the class holds it under detekt's TooManyFunctions
+// threshold, which fires AT 11 and not above it.
+
+/** The only branch that creates a row, and so the only one that cannot skip. */
+private suspend fun OnboardingRepository.applyPartyCreated(event: OnboardingEvent.PartyCreated): ProjectionResult {
+    val now = event.occurredAt
+    upsert(
+        OnboardingRecord(
+            partyId = event.partyId,
+            legalName = event.legalName,
+            email = event.email,
+            partyStatus = PartyStage.PENDING_KYC,
+            kycCaseId = null,
+            kycStatus = null,
+            scaEnrolled = false,
+            deviceCount = 0,
+            funnelStage = FunnelStage.REGISTERED,
+            blockedReason = null,
+            createdAt = now,
+            updatedAt = now,
+        ),
+    )
+    return ProjectionResult.APPLIED
+}
+
+private suspend fun OnboardingRepository.applyPartyStatusChanged(
+    event: OnboardingEvent.PartyStatusChanged,
+): ProjectionResult {
+    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    upsert(
+        existing.copy(
+            partyStatus = event.newStatus,
+            funnelStage = FunnelStage.derive(event.newStatus, existing.kycStatus, existing.scaEnrolled),
+            blockedReason = if (event.newStatus == PartyStage.SUSPENDED ||
+                event.newStatus == PartyStage.CLOSED
+            ) {
+                "Party ${event.newStatus.name.lowercase()}"
+            } else {
+                null
+            },
+            updatedAt = event.occurredAt,
+        ),
+    )
+    return ProjectionResult.APPLIED
+}
+
+private suspend fun OnboardingRepository.applyKycCaseOpened(event: OnboardingEvent.KycCaseOpened): ProjectionResult {
+    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    upsert(
+        existing.copy(
+            kycCaseId = event.kycCaseId,
+            kycStatus = KycStage.OPEN,
+            funnelStage = FunnelStage.derive(existing.partyStatus, KycStage.OPEN, existing.scaEnrolled),
+            updatedAt = event.occurredAt,
+        ),
+    )
+    return ProjectionResult.APPLIED
+}
+
+private suspend fun OnboardingRepository.applyKycStatusChanged(
+    event: OnboardingEvent.KycStatusChanged,
+): ProjectionResult {
+    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    upsert(
+        existing.copy(
+            kycStatus = event.newStatus,
+            funnelStage = FunnelStage.derive(existing.partyStatus, event.newStatus, existing.scaEnrolled),
+            blockedReason = when (event.newStatus) {
+                KycStage.REJECTED -> "KYC rejected"
+                KycStage.EXPIRED -> "KYC expired"
+                else -> null
+            },
+            updatedAt = event.occurredAt,
+        ),
+    )
+    return ProjectionResult.APPLIED
+}
+
+private suspend fun OnboardingRepository.applyDeviceEnrolled(event: OnboardingEvent.DeviceEnrolled): ProjectionResult {
+    val existing = findByPartyId(event.partyId) ?: return ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    upsert(
+        existing.copy(
+            scaEnrolled = true,
+            deviceCount = existing.deviceCount + 1,
+            funnelStage = FunnelStage.derive(existing.partyStatus, existing.kycStatus, true),
+            updatedAt = event.occurredAt,
+        ),
+    )
+    return ProjectionResult.APPLIED
 }

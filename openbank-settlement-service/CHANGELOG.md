@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.6.1...settlement-service-v0.7.0) (2026-08-21)
+
+
+### Features
+
+* **settlement:** alert on settlements that stopped advancing ([#6036](https://github.com/JiRaska/open-bank-oss/issues/6036)) ([83d9584](https://github.com/JiRaska/open-bank-oss/commit/83d9584d8816cd9258c637b4b7e3cdc5caa64d83)), closes [#5705](https://github.com/JiRaska/open-bank-oss/issues/5705)
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.6.0...settlement-service-v0.6.1) (2026-08-21)
 
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.184.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.4...admin-ui-v0.184.5) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** expose readiness refresh state ([#6210](https://github.com/JiRaska/open-bank-oss/issues/6210)) ([217889e](https://github.com/JiRaska/open-bank-oss/commit/217889e93ddf66f2e742979f3bdcefff37e11d31))
+* **admin-ui:** prevent overlapping KYC searches ([#6254](https://github.com/JiRaska/open-bank-oss/issues/6254)) ([5a670fb](https://github.com/JiRaska/open-bank-oss/commit/5a670fb920afe4c847cf2b1e0c7df935c756d164))
+* **admin-ui:** scope agent proposal history ([#6247](https://github.com/JiRaska/open-bank-oss/issues/6247)) ([c4c9b3a](https://github.com/JiRaska/open-bank-oss/commit/c4c9b3a37a0fc375d9152c3f293f544ce6b76b48))
+
 ## [0.184.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.3...admin-ui-v0.184.4) (2026-08-21)
 
 

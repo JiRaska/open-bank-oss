@@ -76,10 +76,28 @@ BASELINE: dict[str, str] = {
         "#5962 — ConsentStatus: spec-only PENDING; undeclared PENDING_SCA/SUPERSEDED",
     "openbank-copilot-service:CARD_FREEZE,DISPUTE,PAYMENT":
         "#5962 — ActionKind: undeclared FX_CONVERSION",
+    # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
+    # values are `RecordDecisionRequest.decision`, and a signer decides SIGNED or DECLINED;
+    # PENDING is the state a signer starts in, never one they can submit.
+    # `SignatureCeremony.recordDecision` enforces exactly that:
+    #     require(decision == SignerStatus.SIGNED || decision == SignerStatus.DECLINED)
+    # so publishing PENDING would advertise a value the domain rejects by construction. The
+    # gate pairs a request enum with the full lifecycle enum and cannot see the restriction.
     "openbank-document-service:DECLINED,SIGNED":
-        "#5962 — SignerStatus: undeclared PENDING",
+        "#5962 — RecordDecisionRequest.decision: NOT drift. A deliberate subset of SignerStatus; "
+        "recordDecision `require`s SIGNED or DECLINED, so PENDING is unsubmittable by design.",
+    # NOT drift — a DELIBERATE SUBSET, kept baselined with the reason corrected (#5962). The
+    # values are the `{to}` path parameter of POST /accounting-days/{businessDate}/transitions/{to},
+    # and OPEN is not a reachable transition TARGET: a day is created in OPEN by a different
+    # endpoint, and `AccountingDay.canTransitionTo` is
+    #     next.ordinal == ordinal + 1
+    # which OPEN (ordinal 0) can never satisfy — there is deliberately no reopen (ADR-0207 D2/D3;
+    # a day corrected after cutoff is corrected forward). Publishing OPEN here would advertise a
+    # transition that always answers 409, so the reason as first written asked for a regression.
+    # The response schemas that DO carry a whole-lifecycle status already publish all four.
     "openbank-ledger-service:CUTOFF,LOCKED,TIED_OUT":
-        "#5962 — AccountingDayStatus: undeclared OPEN",
+        "#5962 — transitionAccountingDay `{to}`: NOT drift. A deliberate subset of "
+        "AccountingDayStatus; OPEN is unreachable as a transition target (no reopen, ADR-0207).",
     "openbank-lending-service:APPROVED,EXECUTED,PENDING,REJECTED":
         "#5962 — CollateralStatus: spec-only EXECUTED",
     # Also deliberate: the enum is right to flag (INDIVIDUAL has never existed; the DB CHECK is
@@ -103,8 +121,6 @@ BASELINE: dict[str, str] = {
         "not an enum fix. The `Status` pairing is coincidental.",
     "openbank-sanctions-service:CNB_DOMESTIC,EU_CONSOLIDATED,FATF_HIGH_RISK,HM_TREASURY,OFAC_SDN,UN_CONSOLIDATED":
         "#5962 — SanctionsListType: undeclared PEP_GLOBAL",
-    "openbank-sepa-instant:ACCEPTED,RECALLED,REJECTED,SETTLED,SUBMITTED":
-        "#5962 — SctInstStatus: spec-only ACCEPTED/SUBMITTED; undeclared PENDING/PROCESSING/TIMEOUT",
     "openbank-sepa-payment:COMPLETED,PROCESSING,RECALLED,REJECTED":
         "#5962 — SepaPaymentStatus: spec-only RECALLED; undeclared CANCELLED/RECEIVED/RETURNED/VALIDATED",
     "openbank-sepa-payment:COMPLETED,PENDING,PROCESSING,RECALLED,REJECTED":

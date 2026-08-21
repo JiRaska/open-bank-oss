@@ -348,13 +348,16 @@ function DevOpsContent() {
             </span>
           )}
           <button
+            type="button"
             onClick={load}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit DevOps metriky', 'Refresh DevOps metrics')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
           >
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}

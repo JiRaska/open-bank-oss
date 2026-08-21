@@ -59,9 +59,9 @@ Orchestrace use-case a porty:
 4. **Audit.** Každé rozhodnutí (ALLOW/DENY) se stane `AuditEvent` s `actorType=AI_AGENT`, operace `agent.mcp.tool_call`.
 5. **Odchozí auth.** Pokud je povoleno, REST klient nástroje vyrazí `openbank-services` token (client credentials) a připojí jej jako Bearer k downstream volání — least-privilege servisní principal, nikdy operátorův token.
 
-## Žádný outbox, ale auditováno
+## Odolný auditní outbox
 
-Neexistuje doménová outbox tabulka, protože neexistuje doménový stav. Místo toho obě hranice důvěry — **model gateway** a **policy gate** — publikují AI-atribuovaný `AuditEvent` přes `openbank-libs` `AuditEventPublisher`, který je přenáší do `audit-service` přes Kafku. To je důkaz AI-atribuce vyžadovaný ADR-0031 D5.
+Služba nemá doménový event outbox, ale `agent_audit_outbox` před odesláním do Kafky trvale ukládá AI-atribuované `AuditEvent`. **Model gateway** a **policy gate** publikují přes `AuditEventPublisher`; dispatcher opakuje doručení brokeru a `audit-service` deduplikuje producer event id před rozšířením hash chainu. Aktivace Kafky zůstává výslovně řízená až do runtime atestace.
 
 ## Odolnost
 

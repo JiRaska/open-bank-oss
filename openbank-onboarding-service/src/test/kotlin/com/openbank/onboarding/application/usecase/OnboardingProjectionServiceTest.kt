@@ -10,6 +10,7 @@ import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.OnboardingRecord
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.domain.model.ProjectionResult
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.just
@@ -180,6 +181,55 @@ class OnboardingProjectionServiceTest {
             assertThat(deviceCount).isEqualTo(1)
             assertThat(funnelStage).isEqualTo(FunnelStage.ACTIVE)
         }
+    }
+
+    // ── applyEvent: the party row does not exist yet (#6248) ──────────────────
+
+    /**
+     * Every branch that needs an existing row must report the skip rather than returning the same
+     * value as work done. Parameterised over all four so a branch added later cannot quietly opt
+     * out — `DeviceEnrolled` is the one that was measured losing events, but the other three lose
+     * KYC and status transitions the same way.
+     */
+    @Test
+    fun `applyEvent returns SKIPPED_UNKNOWN_PARTY on every branch that needs an existing row`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val at = Instant.parse("2026-08-19T12:56:36Z")
+        val events = listOf(
+            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", at),
+            OnboardingEvent.PartyStatusChanged(partyId, PartyStage.ACTIVE, at),
+            OnboardingEvent.KycCaseOpened(partyId, UUID.randomUUID(), at),
+            OnboardingEvent.KycStatusChanged(partyId, UUID.randomUUID(), KycStage.APPROVED, at),
+        )
+        coEvery { repo.findByPartyId(partyId) } returns null
+
+        assertThat(events.map { service.applyEvent(it) })
+            .describedAs("all four branches report the skip")
+            .containsOnly(ProjectionResult.SKIPPED_UNKNOWN_PARTY)
+
+        coVerify(exactly = 0) { repo.upsert(any()) }
+    }
+
+    /**
+     * The other half of the contract: a real update must NOT report a skip. Without this the
+     * assertion above passes against a projection that returns SKIPPED_UNKNOWN_PARTY
+     * unconditionally.
+     */
+    @Test
+    fun `applyEvent returns APPLIED when the row exists`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        coEvery { repo.findByPartyId(partyId) } returns sampleRecord(
+            partyId,
+            funnelStage = FunnelStage.SCA_PENDING,
+            kycStatus = KycStage.APPROVED,
+        )
+        coEvery { repo.upsert(any()) } just runs
+
+        val result = service.applyEvent(
+            OnboardingEvent.DeviceEnrolled(partyId, "cred-abc", Instant.parse("2026-08-19T12:56:36Z")),
+        )
+
+        assertThat(result).isEqualTo(ProjectionResult.APPLIED)
     }
 
     // ── getRecord not found ───────────────────────────────────────────────────

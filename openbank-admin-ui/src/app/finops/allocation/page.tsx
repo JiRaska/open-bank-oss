@@ -144,11 +144,11 @@ function AllocationContent() {
             color: 'var(--text-secondary)', fontSize: '12px', textDecoration: 'none' }}>
             <ArrowLeft size={13} /> {t('Zpět na FinOps', 'Back to FinOps')}
           </Link>
-          <button onClick={load} disabled={loading} aria-label={t('Obnovit', 'Refresh')}
+          <button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit rozpad nákladů', 'Refresh cost allocation')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
               fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
