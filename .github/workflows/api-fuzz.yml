@@ -418,11 +418,34 @@ jobs:
                 # 2 alongside a real NullPointerException. The census informs triage; it does not
                 # perform it, and it must never be turned into an exclusion rule that quietly drops
                 # a real finding sharing a service with an absent dependency.
-                if grep -aq "Unhandled exception" "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null; then
+                # Every ERROR-logged exception class, not only the ones nobody handled.
+                #
+                # The first version grepped the literal phrase "Unhandled exception", which is what
+                # GenericExceptionMapper prints. That made it blind the moment an exception GAINED a
+                # mapper: run 32501086843 showed dispute/interest/sdd with an empty census while 78
+                # exceptions had in fact been thrown, mapped and ERROR-logged by the new persistence
+                # mappers (#6240). An empty census read as "nothing happened" when the truth was
+                # "everything was handled" — the same silence, two opposite meanings, which is the
+                # one thing a triage aid must never do.
+                #
+                # Ordering matters and cost a wrong answer once: strip ANSI colour FIRST, then filter
+                # on the level. The runner's log has escape codes interleaved, so ` ERROR ` does not
+                # match literally before stripping, and the census came back empty for logs full of
+                # errors.
+                #
+                # The trailing `:` in the pattern is what separates a real `FQCN: message` from a
+                # LOGGER NAME — `[co.op.li.ap.er.GenericExceptionMapper]` otherwise matches as
+                # `GenericException`, and the bracketed field is dropped as well for good measure.
+                #
+                # Verified against both runs: this reproduces the pre-mapper counts (32368751763)
+                # and the post-mapper ones (32501086843) exactly as measured by hand.
+                if sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null | grep -aq " ERROR "; then
                   echo "==> [${svc}] ${label}: exception classes seen (triage aid, NOT a verdict):"
-                  grep -a "Unhandled exception" "fuzz-reports/${svc}-boot${logsuffix}.log" \
-                    | sed 's/\x1b\[[0-9;]*m//g' \
-                    | grep -oE '\): [a-zA-Z.]+(Exception|Error)' | sed 's/^): //' \
+                  sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" \
+                    | grep -a " ERROR " \
+                    | sed 's/\[[a-z][a-z.]*\.[A-Za-z]*\]//g' \
+                    | grep -oE '[a-zA-Z_]+(\.[a-zA-Z_]+)+\.[A-Za-z]+(Exception|Error):' \
+                    | sed 's/.*\.//;s/:$//' \
                     | sort | uniq -c | sort -rn | sed 's/^/      /'
                 fi
               fi
