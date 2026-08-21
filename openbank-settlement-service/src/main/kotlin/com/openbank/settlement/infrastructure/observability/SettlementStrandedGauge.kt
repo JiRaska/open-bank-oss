@@ -61,10 +61,15 @@ import java.util.concurrent.atomic.AtomicLong
  * ### Which states are published
  *
  * Terminal states ([SettlementStatus.BOOKED], [SettlementStatus.REJECTED]) are not published:
- * their age only grows and would alert forever. Everything else is published, including the three
+ * their age only grows and would alert forever. Everything else is published, including the
  * compensation states — `SettlementWorkflowImpl` always calls `rejectSettlement` after
- * compensating, so a row parked in `REVERSED` / `CREDITED_REVERSED` / `LEDGER_REVERSED` means the
- * unwinding ran and the record never reached its terminal state.
+ * compensating, so a row parked in `REVERSED` / `CREDITED_REVERSED` / `REVERSAL_FAILED` /
+ * `LEDGER_REVERSAL_UNSUPPORTED` means the unwinding ran (or could not) and the record never
+ * reached its terminal state. `LEDGER_REVERSED` is included too even though #6037 made it
+ * unreachable (dead status kept for backward compatibility, see its own KDoc) — publishing an
+ * always-zero series for it costs nothing and a status this gauge silently stopped watching is
+ * exactly the failure mode #6037 introduced `REVERSAL_FAILED`/`LEDGER_REVERSAL_UNSUPPORTED` to
+ * replace, so watching the whole non-terminal set rather than hand-picking members is the point.
  *
  * ### t=0 on a cold pod
  *
@@ -178,6 +183,8 @@ class SettlementStrandedGauge(
             SettlementStatus.CREDITED,
             SettlementStatus.REVERSED,
             SettlementStatus.CREDITED_REVERSED,
+            SettlementStatus.REVERSAL_FAILED,
+            SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED,
             SettlementStatus.LEDGER_REVERSED,
         )
     }

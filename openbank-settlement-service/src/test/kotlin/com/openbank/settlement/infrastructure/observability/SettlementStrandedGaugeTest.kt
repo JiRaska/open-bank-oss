@@ -123,6 +123,8 @@ class SettlementStrandedGaugeTest {
             "CREDITED",
             "REVERSED",
             "CREDITED_REVERSED",
+            "REVERSAL_FAILED",
+            "LEDGER_REVERSAL_UNSUPPORTED",
             "LEDGER_REVERSED",
         )
         assertThat(published).doesNotContain("BOOKED", "REJECTED")
