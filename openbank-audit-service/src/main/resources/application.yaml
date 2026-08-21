@@ -85,6 +85,14 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      # D5 provenance is isolated from the legacy mixed stream: its handler only acknowledges a
+      # Kafka record after append-only persistence succeeds.
+      agent-audit-events-in:
+        connector: smallrye-kafka
+        enabled: ${AUDIT_AGENT_AUDIT_KAFKA_ENABLED:false}
+        client.id: audit-service-agent-provenance-${quarkus.uuid}
+        topic: openbank.agent.audit.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
       # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
       # override loaded via QUARKUS_CONFIG_LOCATIONS) for where they're set instead. Summary:
