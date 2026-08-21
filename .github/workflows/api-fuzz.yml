@@ -439,14 +439,33 @@ jobs:
                 #
                 # Verified against both runs: this reproduces the pre-mapper counts (32368751763)
                 # and the post-mapper ones (32501086843) exactly as measured by hand.
-                if sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null | grep -aq " ERROR "; then
+                # Built into a VARIABLE, then tested — not `if <pipeline>; then <same pipeline>`.
+                #
+                # That earlier shape did not work, and failed SILENTLY, which is worse. This step
+                # runs under `set -uo pipefail` (line 166), the boot log is tens of megabytes, and
+                # `grep -q` exits on its FIRST match: it closes the pipe, `sed` takes SIGPIPE and
+                # dies 141, pipefail makes 141 the status of the whole pipeline, and the `if`
+                # therefore reads "no errors" for a log full of them. Run 32503175988 printed
+                # `Selected: 19/19` for dispute-service and no census at all, while its artifact
+                # holds 53 ERROR lines.
+                #
+                # It passed local testing because I ran the pipeline without pipefail. The defect
+                # lives in the INTERACTION between an early-exiting consumer and the shell options
+                # this step actually sets, so only the real options could show it — verified since
+                # against the 71 MB artifact, where the old shape suppresses and this one prints.
+                #
+                # `grep -oE` consumes its whole input, so nothing signals upstream; `|| true` covers
+                # the legitimate no-match exit under pipefail.
+                local census
+                census="$(sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null \
+                  | grep -a " ERROR " \
+                  | sed 's/\[[a-z][a-z.]*\.[A-Za-z]*\]//g' \
+                  | grep -oE '[a-zA-Z_]+(\.[a-zA-Z_]+)+\.[A-Za-z]+(Exception|Error):' \
+                  | sed 's/.*\.//;s/:$//' \
+                  | sort | uniq -c | sort -rn | sed 's/^/      /' || true)"
+                if [ -n "${census}" ]; then
                   echo "==> [${svc}] ${label}: exception classes seen (triage aid, NOT a verdict):"
-                  sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" \
-                    | grep -a " ERROR " \
-                    | sed 's/\[[a-z][a-z.]*\.[A-Za-z]*\]//g' \
-                    | grep -oE '[a-zA-Z_]+(\.[a-zA-Z_]+)+\.[A-Za-z]+(Exception|Error):' \
-                    | sed 's/.*\.//;s/:$//' \
-                    | sort | uniq -c | sort -rn | sed 's/^/      /'
+                  echo "${census}"
                 fi
               fi
 
