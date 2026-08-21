@@ -89,7 +89,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **Always fast-jar, never uber-jar.** Service Dockerfiles use `-Dquarkus.package.jar.type=fast-jar`
   and COPY `quarkus-app/`; an uber-jar leaves `quarkus-app/` empty → crashlooping pod.
 - **`@ConfigProperty` optional fields must be `Optional<String>`,** not plain `String`, or a missing
-  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`.
+  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`. **`defaultValue = ""`
+  is NOT a way to make one optional** — measured 2026-08-21, SmallRye answers `SRCFG00014: required
+  but it could not be found in any config source`, so an empty default leaves the property exactly
+  as required as no default at all. Nor does bean scope help: validation happens once at STARTUP in
+  `ConfigRecorder.validateConfigProperties`, over every injection point, so an `@ApplicationScoped`
+  bean's laziness defers nothing and the service simply does not boot. This bullet had existed for
+  months and audit-service shipped the shape anyway (#5844) — prose is not a control, so
+  `check-configproperty-supplied.py` now enforces both halves, plus the sibling case where
+  `application.yaml` DEFINES the value as empty (`key: ${VAR:}`), which no `defaultValue` rescues.
+  Two things made #5844 cost days rather than minutes, and both generalise: a module CI never
+  rebuilt stays red on `main` unseen, and **a service that cannot boot reports its tests as
+  SKIPPED** — that module read `1 failed, 15 skipped` instead of 143 failures, and a skip count
+  scans as a pass. Read the SKIPPED number, not just the failure count.
 - **Kotlin JUnit5 + `runBlocking` silent drop.** `fun foo() = runBlocking { }` infers a non-`Unit`
   return type and JUnit5 ignores the method. Write `fun foo(): Unit = runBlocking { }` or use a
   coroutine test runner.
