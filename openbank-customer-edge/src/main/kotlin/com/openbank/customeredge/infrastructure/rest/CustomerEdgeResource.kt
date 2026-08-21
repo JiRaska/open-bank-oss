@@ -527,6 +527,31 @@ class CustomerEdgeResource(
     }
 
     /**
+     * The caller's own four-pillar financial health (ADR-0269 / APP-ADR-0001 rule 5).
+     *
+     * Assembled by lending-service, which already reaches the credit profile and the loan book;
+     * this route only scopes it to the caller. No score, no rating, no eligibility — and no path
+     * into a credit decision.
+     *
+     * Fail-soft to an empty list. An unreachable upstream means the app shows no pillars rather
+     * than four invented ones, and each pillar can independently answer UNKNOWN, so a partial
+     * answer is the normal case rather than an error.
+     */
+    @GET
+    @Path("/financial-health")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getFinancialHealth(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/intake/financial-health",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        return Response.ok(resp.entity ?: "[]").type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
      * An indicative, non-binding price for an amount and term (ADR-0269 rule 4).
      *
      * The ONLY route by which the app may learn what a loan costs. The client computes no price:

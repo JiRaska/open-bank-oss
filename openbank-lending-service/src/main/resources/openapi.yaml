@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.15.0
+  version: 1.16.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -125,6 +125,30 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: No such application for this caller }
+
+  /api/v1/lending/intake/financial-health:
+    get:
+      tags: [Lending]
+      operationId: getCustomerFinancialHealth
+      summary: The caller's four-pillar financial health (customer-edge only, no score)
+      description: >-
+        ADR-0269 rule 5. Assembled here because the pillars need the credit profile, the loan book
+        and (later) balances, all of which this service already reaches. The judgement itself is a
+        pure function in libs; this route only fetches. Any pillar may answer UNKNOWN, and one
+        unavailable upstream greys out one pillar rather than the whole view.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The four pillars
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/lending/intake/quotes:
     post:

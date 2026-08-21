@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.44.0
+  version: 1.45.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1092,6 +1092,28 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Loan'}
+
+  /financial-health:
+    get:
+      tags: [Lending]
+      summary: The caller's four-pillar financial health (no score)
+      description: >-
+        ADR-0269 / APP-ADR-0001 rule 5. Reserve, cashflow, obligations and habits, each with its own
+        zone. There is deliberately no aggregate: a single grade invites the customer to optimise it
+        and the bank to act on it, and neither is what this exists for. Any pillar may answer
+        UNKNOWN — the bank not having seen something is a fact about the bank, not a verdict about
+        the customer. Fails soft to an empty list.
+      operationId: getFinancialHealth
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The pillars (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/HealthPillar'}
 
   /credit/consents:
     get:
@@ -3259,6 +3281,24 @@ components:
 
     # Edge's projected view of lending-service's Loan (internal fields dropped — see
     # CustomerEdgeResource.projectLoan).
+    HealthPillar:
+      type: object
+      required: [code, zone]
+      properties:
+        code: {type: string, enum: [RESERVE, CASHFLOW, OBLIGATIONS, HABITS]}
+        zone:
+          type: string
+          enum: [HEALTHY, STRETCHED, AT_RISK, UNKNOWN]
+          description: UNKNOWN means not enough data — never render it as a middling verdict.
+        value:
+          type: string
+          nullable: true
+          description: The working behind the zone (months of cover, net, DSTI). Null when UNKNOWN.
+        target:
+          type: string
+          nullable: true
+          description: What the pillar is measured against, where one exists.
+
     CreditConsents:
       type: object
       description: >-
