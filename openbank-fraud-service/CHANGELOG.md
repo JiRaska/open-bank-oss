@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.13.0...fraud-service-v0.13.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **fraud:** dedupe both aggregates against the applied-id set, not a last-writer marker ([#5789](https://github.com/JiRaska/open-bank-oss/issues/5789)) ([#6040](https://github.com/JiRaska/open-bank-oss/issues/6040)) ([6df930b](https://github.com/JiRaska/open-bank-oss/commit/6df930bdb17826a0110891a24241cd1fee88c339))
+
 ## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.12.1...fraud-service-v0.13.0) (2026-08-20)
 
 

@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.184.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.3...admin-ui-v0.184.4) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** export BFF traces by preloading the OTel SDK ([#6228](https://github.com/JiRaska/open-bank-oss/issues/6228)) ([0f21e7c](https://github.com/JiRaska/open-bank-oss/commit/0f21e7c053ca56c38784ede4c2f1ed5c2cfb3e65))
+* **admin-ui:** expose feedback refresh state ([#6190](https://github.com/JiRaska/open-bank-oss/issues/6190)) ([f85d512](https://github.com/JiRaska/open-bank-oss/commit/f85d5125fd5cc1683d0a9543478d6bd13aa2c099))
+* **admin-ui:** prevent overlapping party refreshes ([#6229](https://github.com/JiRaska/open-bank-oss/issues/6229)) ([ce55de6](https://github.com/JiRaska/open-bank-oss/commit/ce55de6943678a7609840e0faebf1611631509d5))
+* **governance:** reflect KMS audit anchors ([#6186](https://github.com/JiRaska/open-bank-oss/issues/6186)) ([dc749c8](https://github.com/JiRaska/open-bank-oss/commit/dc749c8c3a6ff98e0004b736c788effe4d5b963d))
+
 ## [0.184.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.2...admin-ui-v0.184.3) (2026-08-21)
 
 
