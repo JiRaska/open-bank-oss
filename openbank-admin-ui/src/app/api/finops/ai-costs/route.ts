@@ -95,7 +95,9 @@ export async function GET() {
 
     if (tokens24h == null && cost24h == null) continue
 
-    const budgetMonthlyUsd: number | null = null  // TODO: read from agents.yaml limits.monthly_budget_usd
+    // No monthly USD budget is configured in the current agents.yaml contract. Keep this
+    // explicitly unavailable so consumers cannot render a fabricated budget percentage.
+    const budgetMonthlyUsd: number | null = null
     const burnRate: AgentCostEntry['burnRate'] =
       cost24h == null ? 'normal'
       : cost24h > 10 ? 'exceeded'
