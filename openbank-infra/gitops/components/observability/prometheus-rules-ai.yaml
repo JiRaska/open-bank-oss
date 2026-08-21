@@ -408,6 +408,7 @@ spec:
             severity: warning
             team: platform
           annotations:
+            subject_period: continuous
             summary: "content-safety guardrail for {{ $labels.model }} is classifying nothing"
             description: >-
               Over 90% of classifications returned `unavailable` for the last 30 minutes, so the
@@ -433,6 +434,7 @@ spec:
             severity: info
             team: platform
           annotations:
+            subject_period: continuous
             summary: "copilot help search has fallen back to keyword-only"
             description: >-
               Semantic retrieval has produced results before (so it is configured) but over 90% of
