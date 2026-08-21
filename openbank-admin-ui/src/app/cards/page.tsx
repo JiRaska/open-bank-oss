@@ -128,8 +128,8 @@ export default function CardsPage() {
                 <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
               </button>
             )}
-            <button className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
-              <RefreshCw size={13} /> {t('Obnovit', 'Refresh')}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit karty', 'Refresh cards')}>
+              <RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
             </button>
           </div>}
         />
