@@ -13,6 +13,7 @@ import com.openbank.sepa.infrastructure.persistence.mapper.toDomain
 import com.openbank.sepa.infrastructure.persistence.mapper.toEntity
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
@@ -57,18 +58,39 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
     }.awaitSuspending().map { it.toDomain() }
 
     override suspend fun update(payment: SepaPayment, outboxMessage: SepaPaymentOutboxMessage): SepaPayment =
-        Panache.withTransaction {
-            find("paymentId", payment.id).firstResult()
-                .invoke { entity ->
-                    if (entity != null) {
-                        entity.status = payment.status.name
-                        entity.rejectReason = payment.rejectReason?.name
-                        entity.rejectDetail = payment.rejectDetail
-                        entity.submittedAt = payment.submittedAt
-                        entity.completedAt = payment.completedAt
-                        entity.updatedAt = payment.updatedAt
-                    }
+        updateWithMessages(payment, listOf(outboxMessage))
+
+    override suspend fun updateWithEvidence(
+        payment: SepaPayment,
+        outboxMessage: SepaPaymentOutboxMessage,
+        evidenceMessage: SepaPaymentOutboxMessage,
+    ): SepaPayment = updateWithMessages(payment, listOf(outboxMessage, evidenceMessage))
+
+    /**
+     * The single write path: the aggregate change and EVERY accompanying outbox message inside one
+     * `Panache.withTransaction`. The evidence row must not be able to commit without the transition
+     * (it would assert an act that did not happen) nor the transition without the evidence row
+     * (issue #6056 — that is the state this service shipped in).
+     */
+    private suspend fun updateWithMessages(
+        payment: SepaPayment,
+        outboxMessages: List<SepaPaymentOutboxMessage>,
+    ): SepaPayment = Panache.withTransaction {
+        find("paymentId", payment.id).firstResult()
+            .invoke { entity ->
+                if (entity != null) {
+                    entity.status = payment.status.name
+                    entity.rejectReason = payment.rejectReason?.name
+                    entity.rejectDetail = payment.rejectDetail
+                    entity.submittedAt = payment.submittedAt
+                    entity.completedAt = payment.completedAt
+                    entity.updatedAt = payment.updatedAt
                 }
-                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
-        }.awaitSuspending()
+            }
+            .flatMap {
+                outboxMessages.fold(Uni.createFrom().voidItem()) { chain, message ->
+                    chain.flatMap { outboxRepository.persistWithinCurrentTransaction(message).replaceWithVoid() }
+                }.replaceWith(payment)
+            }
+    }.awaitSuspending()
 }

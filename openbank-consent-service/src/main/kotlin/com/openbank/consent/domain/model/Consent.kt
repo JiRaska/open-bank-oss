@@ -52,6 +52,19 @@ enum class ConsentScope {
     MARKETING_COMMS_EMAIL,
     MARKETING_COMMS_PUSH,
     MARKETING_COMMS_INAPP,
+
+    // Credit offers — GDPR Art. 7 data-processing consent (ADR-0269 rule 1), NOT a PSD2
+    // account-access consent and NOT SCA-gated, same shape as the MARKETING_COMMS_* scopes.
+    // Deliberately separate from them: a customer who accepted marketing has not thereby agreed to
+    // be offered debt, which is the one product where the distance between helpful and harmful is a
+    // single nudge. Absent means denied, and absence is the default for every customer.
+    //
+    // The two are also separate from each other. CREDIT_OFFERS is permission to be *shown* an
+    // offer; CREDIT_PROFILE_USE is permission to use the ADR-0210 Customer 360 profile to work out
+    // *which* offer. A customer may want an affordability answer they asked for without wanting
+    // their spending mined for eligibility, and one checkbox cannot express that.
+    CREDIT_OFFERS,
+    CREDIT_PROFILE_USE,
 }
 
 enum class GranteeType {
@@ -160,6 +173,8 @@ data class Consent(
             ConsentScope.MARKETING_COMMS_EMAIL,
             ConsentScope.MARKETING_COMMS_PUSH,
             ConsentScope.MARKETING_COMMS_INAPP,
+            ConsentScope.CREDIT_OFFERS,
+            ConsentScope.CREDIT_PROFILE_USE,
         )
 
         /** PSD2 RTS Art. 10(2)(b): max AISP accesses per day without fresh SCA. */

@@ -37,7 +37,9 @@ class ProductCatalogAdapter : ProductCatalogPort {
     @Suppress("TooGenericExceptionCaught")
     override suspend fun findById(productId: UUID): ProductLookupResult = try {
         val response = client.getById(productId.toString()).awaitSuspending()
-        ProductLookupResult.Found(CatalogProduct(UUID.fromString(response.id), response.code, response.status))
+        ProductLookupResult.Found(
+            CatalogProduct(UUID.fromString(response.id), response.code, response.status, response.currency),
+        )
     } catch (e: WebApplicationException) {
         val status = e.response?.status ?: 0
         if (status == Response.Status.NOT_FOUND.statusCode) {

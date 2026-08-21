@@ -551,16 +551,16 @@ export default function DocumentTemplatesPage() {
                       <td style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-tertiary)' }}>{tpl.productRef ?? '—'}</td>
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
-                          <button className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} onClick={() => openEditModal(tpl)}>
+                          <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px' }} title={canEdit ? t('Upravit', 'Edit') : t('Zobrazit', 'View')} aria-label={canEdit ? t('Upravit šablonu', 'Edit template') : t('Zobrazit šablonu', 'View template')} onClick={() => openEditModal(tpl)}>
                             {canEdit ? <Edit size={13} /> : <Eye size={13} />}
                           </button>
                           {canEdit && (tpl.status ?? 'DRAFT') === 'DRAFT' && (
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--success-text)' }} title={t('Publikovat', 'Publish')} onClick={() => setPendingAction({ id: tpl.id, kind: 'publish' })}>
+                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--success-text)' }} title={t('Publikovat', 'Publish')} aria-label={t('Publikovat šablonu', 'Publish template')} onClick={() => setPendingAction({ id: tpl.id, kind: 'publish' })}>
                               <Send size={13} />
                             </button>
                           )}
                           {canEdit && tpl.status === 'PUBLISHED' && (
-                            <button className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--warning-text)' }} title={t('Vyřadit', 'Retire')} onClick={() => setPendingAction({ id: tpl.id, kind: 'retire' })}>
+                            <button type="button" className="btn btn-secondary btn-sm" style={{ padding: '4px', color: 'var(--warning-text)' }} title={t('Vyřadit', 'Retire')} aria-label={t('Vyřadit šablonu', 'Retire template')} onClick={() => setPendingAction({ id: tpl.id, kind: 'retire' })}>
                               <Archive size={13} />
                             </button>
                           )}

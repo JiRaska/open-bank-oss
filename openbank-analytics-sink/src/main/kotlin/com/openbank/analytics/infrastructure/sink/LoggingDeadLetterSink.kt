@@ -14,8 +14,14 @@ import org.jboss.logging.Logger
  * Default [DeadLetterSink] that emits the quarantined message at WARN with its content hash.
  *
  * WARN (not INFO) so it trips alerting — a non-zero DLQ rate means a producer is emitting malformed
- * events and bronze is losing rows. The full payload is logged (truncated) so the message is
- * recoverable from the log pipeline even before the ClickHouse `dead_letter_events` adapter exists.
+ * events and bronze is losing rows. The payload is logged truncated, so a message quarantined through
+ * this binding is recoverable only from the log pipeline, only for as long as log retention holds, and
+ * only up to 500 characters — it is NOT the durable, replayable `dead_letter_events` row that
+ * ADR-0022, the diagrams, the overview docs and the `dead_lettered` Grafana panel describe. That row
+ * is written by [ClickHouseDeadLetterSink], which this fallback yields to when
+ * `openbank.analytics.sink.type=clickhouse`. Any deployment relying on the documented "replay
+ * `raw_payload`" recovery, or reading that panel as a dead-letter rate, must select that binding —
+ * under this one the panel is a structural zero (#5761).
  */
 @ApplicationScoped
 @Default

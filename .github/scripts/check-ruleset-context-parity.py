@@ -82,22 +82,75 @@ import gatelib  # noqa: E402
 WORKFLOWS_DIR = ".github/workflows"
 
 
+class Unreachable(RuntimeError):
+    """The rulesets API could not be READ. Not a finding — a third state.
+
+    "the ruleset requires X and no job emits X" and "I could not reach the rulesets API"
+    are different facts and must not render as the same verdict. On 2026-08-21 ~18:25 UTC a
+    shared installation rate limit hit two gates in one run: `check-stale-comment-references.py`
+    printed `::notice:: ... UNRESOLVED ... Not a pass and not a failure` and stayed green, while
+    this gate exited 1 and turned PR #5896 red on a diff that touches no workflow and no
+    ruleset. This class carries the transient half so `main()` can degrade the same way.
+
+    RATE LIMIT vs GENUINE PERMISSION DENIAL — distinguishable, because `gh` prints the reason.
+    A quota exhaustion says `API rate limit exceeded` (HTTP 403 with `x-ratelimit-remaining: 0`)
+    and a permission denial says `Resource not accessible by integration` / `Must have admin
+    rights` (HTTP 403 with quota left). Only the transient family degrades to UNRESOLVED; a
+    permission denial stays a hard error, because it is a persistent misconfiguration of the
+    gate itself that no amount of waiting fixes, and silently downgrading it would leave the
+    gate permanently unresolved with nothing to notice.
+    """
+
+
+TRANSIENT_MARKERS = (
+    "api rate limit exceeded",
+    "secondary rate limit",
+    "you have exceeded a secondary rate limit",
+    "was submitted too quickly",
+    "connection refused",
+    "could not resolve host",
+    "network is unreachable",
+    "timeout",
+    "timed out",
+    "eof",
+    "bad gateway",
+    "service unavailable",
+    "server error",
+    "(http 429)",
+    "(http 500)",
+    "(http 502)",
+    "(http 503)",
+    "(http 504)",
+)
+
+
+def is_transient(message: str) -> bool:
+    """True when a `gh api` failure is about REACHABILITY, not about the ruleset's content."""
+    return any(m in message.lower() for m in TRANSIENT_MARKERS)
+
+
 def gh_api(path: str) -> list | dict:
     """`gh api <path>`, returning the parsed JSON.
 
-    Raises `RuntimeError` on any failure — a missing `gh` binary, a network error, an
-    unauthenticated token, or a non-JSON response — so the caller's one `except RuntimeError`
-    catches every way this can go wrong. A caller that only handled a non-zero exit code
-    would let a missing `gh` executable raise a bare `FileNotFoundError` straight out of
-    `main()`, which still exits non-zero but as an unhandled traceback rather than the
-    `::error::` message an operator can act on.
+    Raises on any failure, in one of two flavours the caller renders differently:
+    `Unreachable` (a subclass) when nothing could be READ — missing `gh`, network error,
+    timeout, rate limit, 5xx — and plain `RuntimeError` for everything else, such as a
+    permission denial or a non-JSON response. A caller that only handled a non-zero exit
+    code would let a missing `gh` executable raise a bare `FileNotFoundError` straight out
+    of `main()`, which still exits non-zero but as an unhandled traceback rather than a
+    message an operator can act on.
     """
     try:
         p = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired as exc:
+        raise Unreachable(f"`gh api {path}` timed out: {exc}") from exc
     except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"could not run `gh api {path}`: {exc}") from exc
+        # A missing `gh` binary is not a defect in the ruleset either — nothing was read.
+        raise Unreachable(f"could not run `gh api {path}`: {exc}") from exc
     if p.returncode != 0:
-        raise RuntimeError(f"gh api {path} failed (rc={p.returncode}): {p.stderr.strip()}")
+        err = p.stderr.strip()
+        msg = f"gh api {path} failed (rc={p.returncode}): {err}"
+        raise (Unreachable if is_transient(err) else RuntimeError)(msg)
     try:
         return json.loads(p.stdout)
     except json.JSONDecodeError as exc:
@@ -205,12 +258,92 @@ def self_test() -> int:
     case("matching is exact — no case-folding or fuzzy match",
          ["gitleaks"], {"Gitleaks"}, ["gitleaks"])
 
+    # --- the THIRD STATE: an unreachable API is not a failure, a mismatch still is --------
+    # Both directions, because either one alone is vacuous: a gate that never fails proves
+    # nothing about rate limits, and a gate that always fails hides them.
+    import contextlib
+    import io
+
+    def run_main(argv_extra, raise_exc=None, contexts=None, jobs=frozenset()):
+        """Drive the real main() end to end, stubbing only the network boundary."""
+        orig_rc = globals()["required_contexts"]
+        orig_jn = globals()["pr_triggered_job_names"]
+        orig_argv = sys.argv
+
+        def stub(repo):
+            if raise_exc is not None:
+                raise raise_exc
+            return list(contexts or [])
+
+        globals()["required_contexts"] = stub
+        globals()["pr_triggered_job_names"] = lambda root: set(jobs)
+        sys.argv = ["check-ruleset-context-parity.py", *argv_extra]
+        out, err = io.StringIO(), io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = main()
+        finally:
+            globals()["required_contexts"], globals()["pr_triggered_job_names"] = orig_rc, orig_jn
+            sys.argv = orig_argv
+        return rc, out.getvalue() + err.getvalue()
+
+    rate_limited = Unreachable(
+        "gh api repos/o/r/rulesets failed (rc=1): gh: API rate limit exceeded for "
+        "installation ... (HTTP 403)"
+    )
+    rc, out = run_main(["--enforce"], raise_exc=rate_limited)
+    if rc != 0 or "::notice::" not in out or "UNRESOLVED" not in out:
+        fails.append(f"API rate-limited must be UNRESOLVED, not a failure: rc={rc}, out={out!r}")
+    if "::error::" in out:
+        fails.append(f"API rate-limited must not emit ::error::: {out!r}")
+
+    rc, out = run_main(
+        ["--enforce"],
+        contexts=["Validate manifests", "Gitleaks", "OPA policy gate", "adr-registry"],
+        jobs={"Validate manifests", "Gitleaks", "OPA policy gate"},
+    )
+    if rc != 1 or "adr-registry" not in out:
+        fails.append(f"a genuine mismatch must STILL fail: rc={rc}, out={out!r}")
+
+    # A NON-transient 403 (a permission denial) is a different fact from a rate limit and
+    # stays red — see Unreachable's docstring.
+    denied = RuntimeError(
+        "gh api repos/o/r/rulesets failed (rc=1): gh: Resource not accessible by "
+        "integration (HTTP 403)"
+    )
+    rc, out = run_main(["--enforce"], raise_exc=denied)
+    if rc != 1 or "::error::" not in out:
+        fails.append(f"a permission denial must stay a hard failure: rc={rc}, out={out!r}")
+
+    for msg, want in [
+        ("gh: API rate limit exceeded for installation ... (HTTP 403)", True),
+        ("You have exceeded a secondary rate limit", True),
+        ("dial tcp: connection refused", True),
+        ("Resource not accessible by integration (HTTP 403)", False),
+        ("Must have admin rights to Repository. (HTTP 403)", False),
+        ("Not Found (HTTP 404)", False),
+    ]:
+        if is_transient(msg) is not want:
+            fails.append(f"is_transient({msg!r}): want {want}, got {not want}")
+
+    # The corpus floor lives in main(), so an UNRESOLVED run is not failed by it while a
+    # ruleset that really lost its protection still is.
+    # The UNRESOLVED run must ALSO tell run-gates.py not to apply `min_subjects:` to it —
+    # otherwise the manifest floor (3) fails a run that examined nothing by definition, and
+    # the third state is undone one layer up. A resolved run still prints a real count.
+    _, out = run_main(["--enforce"], raise_exc=rate_limited)
+    if "SUBJECTS=UNRESOLVED" not in out:
+        fails.append(f"UNRESOLVED run must print SUBJECTS=UNRESOLVED: {out!r}")
+    _, out = run_main(["--enforce"], contexts=["Gitleaks"], jobs={"Gitleaks"})
+    if "SUBJECTS=1" not in out:
+        fails.append(f"a resolved run must print its real subject count: {out!r}")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: ruleset-context-parity is falsifiable (7 cases)")
+    print("self-test ok: ruleset-context-parity is falsifiable (20 cases)")
     return 0
 
 
@@ -227,13 +360,25 @@ def main() -> int:
     root = pathlib.Path(args.root)
     try:
         missing, contexts, n = findings(root, args.repo)
+    except Unreachable as exc:
+        # THIRD STATE. Not a pass (nothing was compared) and not a failure (the PR's diff
+        # cannot cause this). Same shape as check-stale-comment-references.py's repo rule.
+        gatelib.subjects_unresolved(f"rulesets API unreachable: {exc}")
+        print(
+            f"::notice::ruleset-context-parity: UNRESOLVED for {args.repo} — {exc}. "
+            f"The rulesets API could not be read, so no context was compared against any "
+            f"job. Not a pass and not a failure."
+        )
+        return 0
     except RuntimeError as exc:
-        # A gate that cannot reach the API must not report a silent pass — a missing `gh`
-        # binary, a rate limit, or the API being unreachable is a tool failure, not "no
-        # violations found".
+        # A NON-transient failure — a permission denial, an unparseable response — is a real
+        # defect in the gate's own wiring and stays red. See Unreachable's docstring for why
+        # the two 403s are not the same fact.
         sys.stderr.write(f"::error::ruleset-context-parity: {exc}\n")
         return 1
 
+    # The corpus floor stays in gates.yaml (`min_subjects: 3`) — run-gates.py applies it to a
+    # run that printed a count, and skips it for a run that printed UNRESOLVED above.
     gatelib.subjects(n, "required status-check contexts")
     for c in missing:
         print(

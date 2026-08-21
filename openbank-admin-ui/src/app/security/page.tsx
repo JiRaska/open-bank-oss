@@ -152,8 +152,15 @@ export default function SecurityPage() {
                 <Shield size={12} /> {platformGrade} · {avgScore}/100
               </span>
             )}
-            <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <button
+              onClick={load}
+              disabled={loading}
+              type="button"
+              aria-busy={loading}
+              aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}
+              className="btn btn-secondary btn-sm"
+            >
+              <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
           </div>}
@@ -273,9 +280,9 @@ export default function SecurityPage() {
                 <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
                   {t('Výsledky skenování', 'Scan Results')} <span style={{ fontWeight: 400, color: 'var(--text-tertiary)' }}>({results.length})</span>
                 </span>
-                <div style={{ display: 'flex', gap: '4px', background: 'var(--surface-2)', padding: '4px', borderRadius: '6px' }}>
+                <div role="group" aria-label={t('Filtr závažnosti nálezů', 'Finding severity filters')} style={{ display: 'flex', gap: '4px', background: 'var(--surface-2)', padding: '4px', borderRadius: '6px' }}>
                   {(['ALL', 'CRITICAL', 'HIGH'] as const).map(f => (
-                    <button key={f} onClick={() => setFilter(f)}
+                    <button key={f} type="button" aria-pressed={filter === f} onClick={() => setFilter(f)}
                       style={{ padding: '4px 10px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, border: 'none', cursor: 'pointer',
                         background: filter === f ? 'var(--surface-1)' : 'transparent',
                         color: filter === f ? 'var(--text-primary)' : 'var(--text-tertiary)',

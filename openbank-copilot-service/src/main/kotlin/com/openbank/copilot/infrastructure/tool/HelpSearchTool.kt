@@ -4,18 +4,22 @@
 package com.openbank.copilot.infrastructure.tool
 
 import com.fasterxml.jackson.databind.JsonNode
-import com.openbank.copilot.application.HelpKnowledgeBase
+import com.openbank.copilot.application.HybridHelpRetrieval
 import com.openbank.copilot.application.port.out.CopilotTool
 import com.openbank.copilot.application.port.out.ToolResult
 import jakarta.enterprise.context.ApplicationScoped
 
 /**
- * RAG-as-a-tool (ADR-0089 D4): keyword search over the bundled customer-help corpus. The model calls
- * this for "how do I…" questions and narrates the returned passages WITH their citations, instead of
- * inventing an answer. No customer data, no downstream call — pure in-process retrieval.
+ * RAG-as-a-tool (ADR-0089 D4): hybrid keyword + semantic search over the bundled customer-help
+ * corpus. The model calls this for "how do I…" questions and narrates the returned passages WITH
+ * their citations, instead of inventing an answer. No customer data reaches it.
+ *
+ * Retrieval is no longer purely in-process (ADR-0183 / ADR-0265 slice 4): the semantic half embeds
+ * the query through the gateway and queries pgvector. It degrades to the original keyword-only
+ * behaviour whenever either is unavailable, and [HybridHelpRetrieval] counts that it did.
  */
 @ApplicationScoped
-class HelpSearchTool(private val knowledgeBase: HelpKnowledgeBase) : CopilotTool {
+class HelpSearchTool(private val retrieval: HybridHelpRetrieval) : CopilotTool {
 
     override val name = "search_help"
     override val description = "Search the bank's help/FAQ for a how-to answer; returns passages with citations."
@@ -29,7 +33,7 @@ class HelpSearchTool(private val knowledgeBase: HelpKnowledgeBase) : CopilotTool
     override suspend fun call(arguments: JsonNode): ToolResult {
         val query = arguments.get("query")?.asText()?.takeIf { it.isNotBlank() }
             ?: return ToolResult("Missing required 'query'.", isError = true)
-        val hits = knowledgeBase.search(query)
+        val hits = retrieval.search(query)
         if (hits.isEmpty()) {
             return ToolResult("Nenašel jsem k tomu v nápovědě nic konkrétního.")
         }

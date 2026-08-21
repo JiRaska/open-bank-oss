@@ -89,7 +89,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **Always fast-jar, never uber-jar.** Service Dockerfiles use `-Dquarkus.package.jar.type=fast-jar`
   and COPY `quarkus-app/`; an uber-jar leaves `quarkus-app/` empty → crashlooping pod.
 - **`@ConfigProperty` optional fields must be `Optional<String>`,** not plain `String`, or a missing
-  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`.
+  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`. **`defaultValue = ""`
+  is NOT a way to make one optional** — measured 2026-08-21, SmallRye answers `SRCFG00014: required
+  but it could not be found in any config source`, so an empty default leaves the property exactly
+  as required as no default at all. Nor does bean scope help: validation happens once at STARTUP in
+  `ConfigRecorder.validateConfigProperties`, over every injection point, so an `@ApplicationScoped`
+  bean's laziness defers nothing and the service simply does not boot. This bullet had existed for
+  months and audit-service shipped the shape anyway (#5844) — prose is not a control, so
+  `check-configproperty-supplied.py` now enforces both halves, plus the sibling case where
+  `application.yaml` DEFINES the value as empty (`key: ${VAR:}`), which no `defaultValue` rescues.
+  Two things made #5844 cost days rather than minutes, and both generalise: a module CI never
+  rebuilt stays red on `main` unseen, and **a service that cannot boot reports its tests as
+  SKIPPED** — that module read `1 failed, 15 skipped` instead of 143 failures, and a skip count
+  scans as a pass. Read the SKIPPED number, not just the failure count.
 - **Kotlin JUnit5 + `runBlocking` silent drop.** `fun foo() = runBlocking { }` infers a non-`Unit`
   return type and JUnit5 ignores the method. Write `fun foo(): Unit = runBlocking { }` or use a
   coroutine test runner.
@@ -142,6 +154,41 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   `nonnull-jaxrs-param-ratchet`) — money-path fixed, the tail baselined (#3104, #3624). Counting
   trap: an outbound REST-client **`interface`** carries the identical annotation and is NOT a defect
   (the caller supplies the argument, compile-time checked), which is half of every naive grep.
+- **An entity property with no explicit `@Column(name = ...)` asks for a column no migration here
+  ever creates — and it is wrong for every MULTI-WORD property while right for every single-word
+  one, so the class reads as internally consistent.** Hibernate's implicit name is the property
+  name verbatim and Postgres folds an unquoted identifier to lower case, so `createdAt` resolves to
+  `createdat` while the migration wrote `created_at`. Only six services set
+  `physical-naming-strategy: CamelCaseToUnderscoresNamingStrategy`; in the other ~46 the name must
+  be spelled out. consent-service's `SuppressionEntity` had six of ten columns wrong, and
+  `GET /api/v1/suppressions/party/{partyId}` answered **500 on every call from the day it shipped**
+  (`SQLGrammarException: column se1_0.createdat does not exist (42703)`). Nothing could see it: the
+  unit tests mock the repository so no SQL is issued, health probes never touch the table so the pod
+  stays Ready, and the two sibling entities in the same package DO name their columns — so the file
+  next door looked like the convention was being followed. It took schemathesis fuzzing the running
+  service to find it. `check-entity-column-names.py` enforces it (gate `entity-column-names`).
+  Note what that gate must NOT do: deriving "does this column exist" from the DDL needs real parsing
+  (partitioned tables, custom enum types, ALTER/RENAME chains) and two attempts produced 12 and then
+  ~40 false findings against correct code — including all of sanctions-service, whose columns are
+  named explicitly in the Kotlin use-site form `@field:Column(name = ...)` that a `@Column`-only
+  regex cannot match. A gate that cries wolf about correct code is worth less than nothing, so it
+  checks the convention, which is fully decidable.
+- **A NUL byte (U+0000) reaching Postgres is a 500, and it arrives ESCAPED — so a raw-byte scan of
+  the request finds nothing and reports clean.** Postgres cannot store U+0000 in any `text`/`varchar`
+  column (`invalid byte sequence for encoding "UTF8": 0x00`, SQLState 22021); Hibernate raises it at
+  flush, far past every handler, so `GenericExceptionMapper` renders a well-formed `INTERNAL_ERROR`
+  body — which is why "it did not crash" and "the response parsed" both pass against it. Rejected
+  fleet-wide now by `libs-runtime`'s `NulByteGuards` (#5913), and two things about it generalise.
+  First, the carrier: five services, **six** operations, and two of them carried the NUL in a QUERY
+  PARAMETER, not a body — those requests have no entity at all, so a Jackson-only guard is
+  structurally green about them. Enumerate the carriers from the fuzz artifacts before choosing where
+  a guard goes. Second, the wire form: inside JSON the character is the six ASCII characters of a
+  `\u0000` escape, legal JSON that Jackson decodes happily, so only the DECODED value answers the
+  question — scanning the stream for byte `0x00` sees nothing, and scanning for the escape as text
+  false-positives on a doubly-escaped backslash. Sibling of the `value too long` / duplicate-key
+  cases in the same issue, which are deliberately NOT this: a length limit is per-column and a
+  `ConstraintViolationException` is 409-or-400 depending on which constraint, so neither is decidable
+  fleet-wide. U+0000 is, because no valid request can carry it and no column can accept it.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the
@@ -286,6 +333,55 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   never by grepping quoted field names; and treat "no hits" over a codebase with two idioms as a
   fact about the probe. Same shape as the Pact bullet below on grepping `src/test` for the word
   "contract".
+- **A consumer that rethrows does NOT dead-letter unless that channel configures it — SmallRye's
+  default `failure-strategy` is `fail`, which STOPS the channel.** Measured 2026-08-19: 44 incoming
+  channels fleet-wide, **4** had a DLQ. So the #5698 sweep, which converted ~30 consumers from
+  catch-and-ack to retry-then-rethrow across a dozen services, was on its way to trading silent data
+  loss for a halted consumer — the exact outcome the original swallow comments were written to avoid
+  — while every KDoc in it said "the connector dead-letters". Wire the DLQ in the same change that
+  introduces the rethrow: `failure-strategy`, an **explicit per-service topic**, the `KafkaTopic` CR
+  (topics are not auto-created) and the KafkaUser Write ACL. All four, or the rethrow wedges on the
+  DLQ send instead (#5745, #5751).
+  Two traps inside that. **The topic key is dotted, and the sibling bullet above applies** — but the
+  conclusion the fleet drew from it was wrong. Several services carried a comment asserting an
+  explicit DLQ topic was impossible *because* SmallRye quotes dotted leaf keys; true premise, wrong
+  conclusion. Measured through the real `YamlConfigSource`: the dotted one-liner
+  (`dead-letter-queue.topic: x`) is inert, the **nested** form resolves fine —
+  ```yaml
+  dead-letter-queue:
+    topic: openbank.dlq.<service>.<channel>
+  ```
+  the same idiom already used for `value: deserializer:`. That false constraint suppressed the correct
+  fix fleet-wide, and left transaction-service's money-path `payment-scheme-accepted` carrying the
+  inert form — correct in the deployed pod only because its msg-override ConfigMap supplied the value,
+  wrong locally and in every test. And **the implicit topic name is derived from the CHANNEL name,
+  which repeats across services**: account-service and card-issuance-service both consume
+  `delegation-events-in` with no override, so they already dead-letter into one shared topic and any
+  alert scoped to one counts the other's records (#5752).
+- **A comment asserting current CONFIGURATION goes stale exactly like a report asserting current
+  remote state.** Two agents in one session measured "this channel has no DLQ", wrote it into a KDoc,
+  and were falsified within the hour by the PR that wired it — the same shape as the `NotificationOutcomeConsumer`
+  KDoc they had just corrected for claiming a failure was "bounded and visible" when `PENDING` is also
+  what an in-flight outcome shows. Write the **mechanism the code controls** ("the record is nacked;
+  the connector's configured `failure-strategy` decides what follows") and let `application.yaml` answer
+  what the value is today. A comment that names a config value is a claim with a shelf life, and nothing
+  re-checks it.
+
+- **A fuzz/DAST job list showing a service is NOT evidence the service was tested — read what each
+  job actually did.** The 2026-08-18 API-fuzz run reported 7 failures of 23 and exactly ONE was a
+  finding about an HTTP surface; the other six never sent a request, and both failure kinds render
+  identically in the job list. Two harness causes, both worth knowing: the datasource `username:`
+  in `application.yaml` is often a config EXPRESSION (`${POSTGRES_USER:openbank}`), and taken
+  verbatim into `docker run -e POSTGRES_USER=` / `pg_isready -U` it can never succeed — vop and
+  settlement had therefore NEVER been fuzzed; and six services register a Temporal worker at
+  `StartupEvent`, so with no Temporal present transaction-service failed to boot outright while
+  lending, sepa-payment and domestic-payment retried past the deadline. Every registrar carries a
+  disable switch but under a DIFFERENT name each (`openbank.transaction.worker.enabled`,
+  `openbank.sepa.worker.enabled`, … and lending's `lending.origination.worker.enabled`, not even
+  under `openbank.`), so the harness derives the property from each registrar's own
+  `@ConfigProperty` rather than listing six names. This matters beyond the lane: the `pentest`
+  attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
+  fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
@@ -306,6 +402,21 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   and `McpEndpoint` do.
 
 ### Flyway
+- **An UNTRUSTED extension cannot be created by the role Flyway connects as — the migration is green
+  on every laptop and crashloops in the cluster.** Postgres splits extensions into trusted
+  (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `unaccent` — a database OWNER may create them) and untrusted
+  (`vector`, `postgis`, `postgres_fdw`, `plpython3u` — SUPERUSER only). Every local path connects as
+  superuser (Dev Services, `PostgreSQLContainer`, compose); CNPG hands the deployed app a
+  non-superuser role. Measured against the fleet's own image
+  (`ghcr.io/cloudnative-pg/postgresql:18.1`, pgvector 0.8.1 already bundled): as owner
+  `ERROR: permission denied to create extension "vector"`, as superuser `CREATE EXTENSION`, and as
+  owner against an already-installed one `NOTICE: … already exists, skipping`. That last line is why
+  the two halves compose — a CNPG `Database` resource (`spec.extensions[]`, applied by the operator
+  over its superuser connection) creates it, and `CREATE EXTENSION IF NOT EXISTS` in the migration
+  short-circuits before the permission check, which is what keeps local dev working. Both are
+  load-bearing: drop the resource and the deployed migration dies at line 1; drop the migration line
+  and every developer's database breaks. Enforced by `check-untrusted-pg-extension.py`
+  (`rules.yaml: postgres_extensions`).
 - **Never change a migration after it has been applied to a live DB** — Flyway checksums the whole
   file (comments included), so any edit triggers a `checksum mismatch` startup failure.
 - **Committing migrations does not run them: `migrate-at-start` defaults to FALSE.**
@@ -441,6 +552,33 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   docker and CI realms also give it `ROLE_OPERATOR`. Any statement of the form "the shared client
   carries ROLE_OPERATOR" is environment-specific; take the union when reasoning about exposure, and
   say which realm you read.
+
+- **A backup that has never been configured reports the same "success" as one that works — CNPG's
+  archiver is a NO-OP with a success exit code when no `barmanObjectStore` exists, and both
+  `ContinuousArchiving=True ContinuousArchivingSuccess` and `pg_stat_archiver` agree with it.**
+  Measured on engagement-db 2026-08-19, before its backup landed: `archived_count=12`,
+  `failed_count=0`, last success two days earlier — and **zero objects in the bucket**, because
+  there was no bucket to write to. Every WAL sat `.done` in `archive_status/`. Nothing in
+  Kubernetes, in Postgres or in the alert set could distinguish "archived to S3" from "archived
+  to nowhere"; the only probe that separates them is `aws s3 ls <destinationPath>`. Same family as
+  the push adapter whose `PushResult.skipped()` carried `success = true` — a silent no-op sharing
+  a flag with real success — and the reason `cnpg-backup-declared-gate` exists at all: the enforced
+  sibling only inspects clusters that ALREADY declare a destination, so a database that never asked
+  is invisible to it. **Verify a backup by listing the objects, never by reading a condition.**
+- **WAL archiving is not a backup, and the cluster looks green in between.** A recovery point needs
+  a BASE backup plus WAL; with archiving freshly working and no base backup,
+  `ContinuousArchiving=True` while `firstRecoverabilityPoint` is empty — restoring is impossible and
+  the only field that says so is one nobody alerts on. After enabling backup on a cluster, force the
+  first base backup (an unmanaged `kind: Backup`) instead of waiting for the ScheduledBackup, and
+  assert `status.firstRecoverabilityPoint` is set.
+- **EKS Pod Identity credentials are injected at ADMISSION, so adding an association does nothing
+  for a pod that is already running — and CNPG's 30-minute grace period makes the fix cost minutes,
+  not seconds.** engagement-db-1 had been up 7 days when its association was created; WAL archiving
+  kept failing `barman-cloud-wal-archive: Unable to locate credentials, exit status 4` until the pod
+  was deleted and re-admitted (failures stopped at 17:14:30, first success from the new pod at
+  17:14:45). `terminationGracePeriodSeconds` is 1800 and the smart shutdown waits, so budget ~4
+  minutes of downtime for that single-instance restart, not 30 seconds. Distinct from #1759, where
+  the association existed and the agent merely missed injecting during a node roll.
 
 ### GitOps / Kubernetes / OPA policy bundles
 Full pitfalls — node livelock, `optional: true` secret refs, Argo Rollout dead-`stable` deadlock,
@@ -666,6 +804,28 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   close that; only a merge queue or up-to-date-branch enforcement would, and the repo has
   deliberately chosen detection over prevention. So the re-check above is still required — but
   a branch that has been sitting is the risk, not a branch that was created early.
+- **`oasdiff` compares a spec to its own PREVIOUS version, never to the implementation — so a spec
+  enum that was wrong from the first commit is wrong forever, and every gate stays green.** The
+  version axis is watched from both ends and the *truth* axis from neither.
+  `openbank-kyc-service` published `checkType` as
+  `[IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]` against a domain
+  `CheckType { IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA }`: three
+  names misspelled, `ADDRESS` (a check `createCase` creates on every case) unpublished, and
+  `SOURCE_OF_FUNDS` a value that has never existed in the code. Its `UpdateCheckRequest` was
+  fiction in the same way — `required: [result]` with `result` carrying the status enum, against a
+  DTO of `(status: String, result: String?)`. So no client generated from that document could call
+  the endpoint at all, and nothing anywhere said so (#5895). It is not one service:
+  `check-openapi-enum-vs-domain.py` (gate `openapi-enum-domain-drift`, pairs a spec enum with the
+  Kotlin enum it serves by value overlap) found **27 more across 16 services** (#5962), several
+  advertising values the code lacks — which a generated client will send and the service will 400.
+  **Two consequences worth carrying.** Correcting one is *breaking* to `oasdiff` (removed enum
+  values) while being unbreakable in fact — the server is byte-identical — so it takes the
+  `correction` class in `check-api-contract.py`: MINOR, no URL major. That reclassification is
+  **mechanical, not declared**, and it only applies while the PR touches *nothing else* in that
+  service, so **put the drift test outside the service directory** or the gate demands a MAJOR it
+  also forbids. And when a downstream spec republishes the same vocabulary, it is evidence about
+  which side is canonical: `openbank-customer-edge` already carried the domain spelling verbatim,
+  which settled all five kyc names before any judgement call was needed.
 - **The same trap fires from an ALREADY-MERGED PR, which is the direction that gets missed.**
   Anticipating it is not the same as checking for it: the instinct is "am I racing anyone?", and that
   scans *open* PRs — but the number is just as easily consumed by something that landed while your

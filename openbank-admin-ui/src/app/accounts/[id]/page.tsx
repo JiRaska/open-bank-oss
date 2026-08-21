@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { ArrowLeft, RefreshCw, Lock, Unlock, XCircle, AlertCircle } from 'lucide-react'
 import { accountApi } from '@/lib/api'
 import { EntityChip } from '@/components/entities/EntityChip'
+import { Can } from '@/components/auth/AuthGuard'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import type { Account, AccountBalance } from '@/types'
@@ -105,24 +106,33 @@ export default function AccountDetailPage() {
           <span className={STATUS_PILL[account.status] ?? 'pill pill-neutral'}>{account.status}</span>
           <Link href="/accounts" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true"/> {t('Zpět', 'Back')}</Link>
           {account.status === 'ACTIVE' && (
-            <button className="btn btn-secondary" onClick={() => requestAction('freeze')} disabled={acting}>
-              <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
-            </button>
+            <Can permission="accounts:freeze">
+              <button type="button" className="btn btn-secondary" onClick={() => requestAction('freeze')} disabled={acting} aria-busy={acting} aria-label={t('Zmrazit účet', 'Freeze account')}>
+                <Lock size={13} aria-hidden="true"/> {t('Zmrazit', 'Freeze')}
+              </button>
+            </Can>
           )}
           {account.status === 'FROZEN' && (
-            <button className="btn btn-secondary" onClick={() => requestAction('unfreeze')} disabled={acting}>
-              <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
-            </button>
+            <Can permission="accounts:freeze">
+              <button type="button" className="btn btn-secondary" onClick={() => requestAction('unfreeze')} disabled={acting} aria-busy={acting} aria-label={t('Odmrazit účet', 'Unfreeze account')}>
+                <Unlock size={13} aria-hidden="true"/> {t('Odzmrazit', 'Unfreeze')}
+              </button>
+            </Can>
           )}
           {account.status !== 'CLOSED' && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => requestAction('close')}
-              disabled={acting}
-              style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
-            >
-              <XCircle size={13} aria-hidden="true"/> {t('Zrušit účet', 'Close')}
-            </button>
+            <Can permission="accounts:close">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => requestAction('close')}
+                disabled={acting}
+                aria-busy={acting}
+                aria-label={t('Zrušit účet', 'Close account')}
+                style={{ color: 'var(--danger)', borderColor: 'var(--danger-border)' }}
+              >
+                <XCircle size={13} aria-hidden="true"/> {t('Zrušit účet', 'Close')}
+              </button>
+            </Can>
           )}
         </div>}
       />

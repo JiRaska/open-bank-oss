@@ -110,8 +110,9 @@ export default function IaopsCasesPage() {
         actions={<Link href="/iaops" className="btn btn-secondary btn-sm"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět na IAOps', 'Back to IAOps')}</Link>}
       />
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
+      <div role="group" aria-label={t('Filtrovat swarm cases podle stavu', 'Filter swarm cases by status')} style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '16px' }}>
         <button
+          aria-pressed={statusFilter === null}
           onClick={() => { setStatusFilter(null); setLimit(PAGE_SIZE) }}
           style={{
             fontSize: '11px', fontWeight: 700, padding: '5px 12px', borderRadius: '14px', cursor: 'pointer',
@@ -129,6 +130,7 @@ export default function IaopsCasesPage() {
           return (
             <button
               key={status}
+              aria-pressed={active}
               onClick={() => { setStatusFilter(active ? null : status); setLimit(PAGE_SIZE) }}
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: '5px',

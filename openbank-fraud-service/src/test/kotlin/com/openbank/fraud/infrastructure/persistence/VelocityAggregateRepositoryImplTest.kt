@@ -4,6 +4,7 @@
 
 package com.openbank.fraud.infrastructure.persistence
 
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.domain.model.VelocityWindow
 import io.mockk.every
 import io.mockk.mockk
@@ -29,7 +30,9 @@ class VelocityAggregateRepositoryImplTest {
 
     private val pool = mockk<PgPool>()
 
-    private val repository = VelocityAggregateRepositoryImpl(pool, Clock.systemUTC())
+    private val metrics = mockk<FraudMetricsPort>(relaxed = true)
+    private val repository =
+        VelocityAggregateRepositoryImpl(pool, Clock.systemUTC(), metrics, APPLIED_SIGNAL_WINDOW)
 
     private fun emptyRowIterator(): RowIterator<Row> {
         val iter = mockk<RowIterator<Row>>()
@@ -50,6 +53,9 @@ class VelocityAggregateRepositoryImplTest {
     private fun mockRowSet(iter: RowIterator<Row>): RowSet<Row> {
         val rowSet = mockk<RowSet<Row>>()
         every { rowSet.iterator() } returns iter
+        // A non-zero rowCount means "the upsert applied" — the suppressed case is asserted against a
+        // real database in VelocityAggregateRepositoryImplIT, which is the only place it is decidable.
+        every { rowSet.rowCount() } returns 1
         return rowSet
     }
 
@@ -67,7 +73,13 @@ class VelocityAggregateRepositoryImplTest {
         val pq = mockPreparedQuery(rowSet)
         every { pool.preparedQuery(any<String>()) } returns pq
 
-        repository.recordTransaction(UUID.randomUUID(), BigDecimal("100.00"), "CZK")
+        repository.recordTransaction(
+            UUID.randomUUID(),
+            BigDecimal("100.00"),
+            "CZK",
+            UUID.randomUUID(),
+            Instant.parse("2026-07-09T10:30:00Z"),
+        )
 
         // recordTransaction calls upsert once per window (H1, H24, D7)
         verify(exactly = 3) { pool.preparedQuery(any<String>()) }
@@ -128,5 +140,9 @@ class VelocityAggregateRepositoryImplTest {
         assertThat(epochDays % 7).isEqualTo(0L)
         // Must be <= today
         assertThat(start).isBeforeOrEqualTo(now.truncatedTo(ChronoUnit.DAYS))
+    }
+
+    private companion object {
+        const val APPLIED_SIGNAL_WINDOW = 100
     }
 }

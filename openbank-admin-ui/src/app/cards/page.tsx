@@ -128,8 +128,8 @@ export default function CardsPage() {
                 <Plus size={13} aria-hidden="true" /> {t('Vydat kartu', 'Issue a card')}
               </button>
             )}
-            <button className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
-              <RefreshCw size={13} /> {t('Obnovit', 'Refresh')}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading} aria-busy={loading} aria-label={t('Obnovit karty', 'Refresh cards')}>
+              <RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
             </button>
           </div>}
         />
@@ -161,14 +161,14 @@ export default function CardsPage() {
             </div>
             <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
               <div role="group" aria-label={t('Filtr podle stavu', 'Filter by status')} style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                <button style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
+                <button type="button" aria-pressed={statusFilter === ALL} style={chip(statusFilter === ALL)} onClick={() => { setStatusFilter(ALL); setVisible(PAGE_SIZE) }}>
                   {t('Vše', 'All')} · {cards.length}
                 </button>
                 {CARD_STATUSES.filter(s => countBy(s) > 0).map(s => {
                   const c = cardStatusColor(s)
                   const active = statusFilter === s
                   return (
-                    <button key={s} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
+                    <button key={s} type="button" aria-pressed={active} onClick={() => { setStatusFilter(active ? ALL : s); setVisible(PAGE_SIZE) }}
                       style={{ ...chip(active), background: active ? c.bg : 'var(--surface-2)', color: active ? c.text : 'var(--text-secondary)', borderColor: active ? c.border : 'var(--border)' }}>
                       {s} · {countBy(s)}
                     </button>
@@ -179,7 +179,7 @@ export default function CardsPage() {
                 {CARD_TYPES.filter(ct => cards.some(c => c.cardType === ct)).map(ct => {
                   const active = typeFilter === ct
                   return (
-                    <button key={ct} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
+                    <button key={ct} type="button" aria-pressed={active} style={chip(active)} onClick={() => { setTypeFilter(active ? ALL : ct); setVisible(PAGE_SIZE) }}>
                       {ct}
                     </button>
                   )

@@ -44,6 +44,12 @@ spec:
     acls:
       - resource:
           type: topic
+          name: openbank.agent.audit.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.accounts.account.created
           patternType: literal
         operations: [Read, Describe]
@@ -182,6 +188,12 @@ spec:
       - resource:
           type: group
           name: audit-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: audit-service-agent-provenance
           patternType: literal
         operations: [Read]
         host: "*"

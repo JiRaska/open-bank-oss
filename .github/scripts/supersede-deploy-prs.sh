@@ -19,6 +19,26 @@
 # per prefix is open at a time, it is always the newest, and it is always based on current main, so
 # the conflict class cannot arise.
 #
+# ANCESTRY, NOT RECENCY (issue #6231)
+# "Newer" was originally read off PR creation time — the PR that opened last kept, every other one
+# closed. That is not what "newer" means here: a deploy PR is created when its BUILD finishes, and
+# builds do not finish in commit order. Measured 2026-08-21: #6222 pinned `579dda8e` (merged to main
+# 14:08:59Z) and #6225 pinned `a9e9d082` (merged 13:58:07Z, an ANCESTOR of it) — but a9e9d082's build
+# ran ~12 min longer, so its PR was created at 14:47:01Z, twelve minutes after #6222's, and this
+# script closed #6222 at 14:47:04Z as "superseded". The survivor rewound copilot-service from
+# sandbox-579dda8e to sandbox-a9e9d082 and left agent-service short of #6204's code, with every job
+# in both runs green. Fail-open, and invisible: check-deploy-drift compares version.txt, which those
+# commits share (release-please bumps in a separate commit), so the drift watch reads "in sync".
+#
+# So the decision is now ancestry, asked of the GitHub compare API (the job's checkout is shallow,
+# `git merge-base --is-ancestor` cannot answer there):
+#   * other is an ancestor of keep (`ahead`/`identical`) -> genuinely superseded, close it.
+#   * keep is an ancestor of other (`behind`)            -> THIS run is the stale one. Close nothing,
+#     ::error, exit 1. The step fails, so the `Enable auto-merge` step that follows it never runs and
+#     the rollback PR cannot merge itself. Loud beats a silent rewind.
+#   * diverged, or a branch name with no parsable sha    -> ::warning, leave it open. Unknown is not
+#     permission to close someone's PR.
+#
 # Deliberately scoped:
 #   * Only the bot prefixes (chore/gitops-auto-deploy-, chore/admin-ui-deploy-). A hand-cut deploy PR
 #     — they exist, see record-deployment-on-merge.yml — is never touched.
@@ -29,80 +49,227 @@
 #
 # Usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number>
 #   e.g. supersede-deploy-prs.sh chore/admin-ui-deploy- 2604
+#        supersede-deploy-prs.sh --self-test     # falsify the ancestry decision, no network
 # Requires: gh, jq, GH_TOKEN with pull-requests: write.
 
 set -euo pipefail
 
-PREFIX="${1:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number>}"
-KEEP="${2:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number>}"
+# ── ancestry ────────────────────────────────────────────────────────────────────────────────────
+# Extract the 40-hex commit a deploy branch pins. Anything else yields "" and is treated as unknown.
+sha_of_branch() {
+  local sha="${1#"$2"}"
+  # 40 hex characters exactly. A truncated, suffixed or hand-cut branch name yields "" (unknown),
+  # and unknown must never mean "close it" — that was the pre-#6231 behaviour.
+  case "$sha" in
+    *[!0-9a-f]*) printf '' ;;
+    *) if [ "${#sha}" -eq 40 ]; then printf '%s' "$sha"; else printf ''; fi ;;
+  esac
+}
+
+# Ask GitHub how `head` relates to `base`: ahead | behind | identical | diverged.
+# Overridable for the self-test (SUPERSEDE_COMPARE_HOOK), which is the ONLY seam — the classify /
+# act loop below is the same code in both lanes.
+compare_status() {
+  local base="$1" head="$2"
+  if [ -n "${SUPERSEDE_COMPARE_HOOK:-}" ]; then
+    "$SUPERSEDE_COMPARE_HOOK" "$base" "$head"
+    return
+  fi
+  gh api "repos/$REPO/compare/$base...$head" --jq '.status' 2>/dev/null || printf 'unknown'
+}
+
+# CLOSE | STALE_KEEP | SKIP, from (keep sha, other sha). Pure — no I/O, so the self-test exercises
+# the real decision and not a paraphrase of it.
+classify() {
+  local keep_sha="$1" other_sha="$2" status
+  if [ -z "$keep_sha" ] || [ -z "$other_sha" ]; then printf 'SKIP'; return; fi
+  if [ "$keep_sha" = "$other_sha" ]; then printf 'CLOSE'; return; fi
+  status="$(compare_status "$other_sha" "$keep_sha")"
+  case "$status" in
+    ahead|identical) printf 'CLOSE' ;;       # keep contains other — genuinely superseded
+    behind)          printf 'STALE_KEEP' ;;  # keep is an ANCESTOR of other — this run is the stale one
+    *)               printf 'SKIP' ;;        # diverged / unknown — never close on a guess
+  esac
+}
+
+# ── main ────────────────────────────────────────────────────────────────────────────────────────
+run() {
+  local PREFIX="$1" KEEP="$2" KEEP_SHA="$3" PAIRS="$4"
+  local n ref other_sha verdict failed=0 stale_keep=0 closed=0 skipped=0
+
+  if [ -z "$PAIRS" ]; then
+    echo "supersede: no other open '$PREFIX*' PRs besides #$KEEP — nothing to close."
+    return 0
+  fi
+
+  while IFS=$'\t' read -r n ref; do
+    [ -n "$n" ] || continue
+    other_sha="$(sha_of_branch "$ref" "$PREFIX")"
+    verdict="$(classify "$KEEP_SHA" "$other_sha")"
+    case "$verdict" in
+      STALE_KEEP)
+        stale_keep=1
+        echo "::error::supersede: #$KEEP pins ${KEEP_SHA:0:8}, which is an ANCESTOR of #$n's ${other_sha:0:8}." \
+             "This build finished later than a NEWER commit's, so #$KEEP would roll those services BACK." \
+             "Closing nothing and failing the step: #$n stays open, and auto-merge is not armed on #$KEEP." \
+             "Re-dispatch auto-deploy for the current main once #$n has landed (issue #6231)."
+        ;;
+      SKIP)
+        skipped=$((skipped + 1))
+        echo "::warning::supersede: cannot establish that #$KEEP supersedes #$n (keep=${KEEP_SHA:-?} other=${other_sha:-?}, unrelated or unparsable) — leaving #$n OPEN."
+        ;;
+      CLOSE)
+        if [ "${DRY_RUN:-}" = "true" ]; then
+          echo "supersede: DRY_RUN — would close #$n (${other_sha:0:8} is an ancestor of ${KEEP_SHA:0:8})."
+          closed=$((closed + 1))
+          continue
+        fi
+        # Comment first, then close: if the close succeeds but the comment fails, the PR is shut with
+        # no stated reason, which is the outcome this is trying to avoid.
+        if ! gh pr comment "$n" --repo "$REPO" --body \
+"Superseded by #$KEEP and closed automatically.
+
+#$KEEP pins \`${KEEP_SHA:0:8}\`, a **descendant** of this PR's \`${other_sha:0:8}\` — it therefore already
+contains everything this PR would have applied. (Ancestry, not creation time: a slower build can open a
+newer PR for an older commit, which is issue #6231.)
+
+Left open, both PRs edit the same manifest line and whichever merges first leaves the other conflicting,
+which reads as healthy — green checks, auto-merge armed — right up to the point someone tries to merge it.
+
+If you believe otherwise, reopen it and say what it carries that #$KEEP does not.
+
+(\`.github/scripts/supersede-deploy-prs.sh\`)"; then
+          echo "::warning::supersede: could not comment on #$n — leaving it OPEN rather than closing it silently."
+          failed=1
+          continue
+        fi
+        if ! gh pr close "$n" --repo "$REPO" --delete-branch; then
+          echo "::warning::supersede: could not close #$n."
+          failed=1
+        else
+          closed=$((closed + 1))
+        fi
+        ;;
+    esac
+  done <<EOF
+$PAIRS
+EOF
+
+  echo "supersede: #$KEEP (${KEEP_SHA:0:8}) — closed=$closed skipped=$skipped stale_keep=$stale_keep"
+
+  # A stale KEEP is the one condition that must be loud. Everything else is tidiness: the image is
+  # already built and pushed, and a leftover stale PR does not break a deploy.
+  if [ "$stale_keep" -ne 0 ]; then
+    return 1
+  fi
+  if [ "$failed" -ne 0 ]; then
+    echo "::warning::supersede: one or more superseded deploy PRs could not be closed; close them by hand."
+  fi
+  return 0
+}
+
+# ── self-test ───────────────────────────────────────────────────────────────────────────────────
+# Falsification, not decoration: case 1 is the losing interleaving from #6231 (an older commit's PR
+# created LAST) and must fail; case 2 is the ordinary case and must still close the older PR.
+self_test() {
+  local tmp rc out ok=0
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+  # Fake compare: OLD..NEW is `ahead`, NEW..OLD is `behind`, anything else `diverged`.
+  cat > "$tmp/compare" <<'HOOK'
+#!/usr/bin/env bash
+base="$1"; head="$2"
+old=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+new=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+if [ "$base" = "$old" ] && [ "$head" = "$new" ]; then echo ahead
+elif [ "$base" = "$new" ] && [ "$head" = "$old" ]; then echo behind
+else echo diverged; fi
+HOOK
+  chmod +x "$tmp/compare"
+  export SUPERSEDE_COMPARE_HOOK="$tmp/compare"
+  export DRY_RUN=true
+  local OLD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  local NEW=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  local P=chore/gitops-auto-deploy-
+
+  # case 1 — the #6231 interleaving: KEEP is the OLDER commit, the open PR is the NEWER one.
+  out="$(run "$P" 6225 "$OLD" "$(printf '6222\t%s%s' "$P" "$NEW")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    echo "SELF-TEST FAIL case 1: stale KEEP exited 0 (must be non-zero)"; ok=1
+  elif ! printf '%s' "$out" | grep -q '::error::supersede: #6225 pins aaaaaaaa, which is an ANCESTOR'; then
+    echo "SELF-TEST FAIL case 1: no ::error naming the ancestry; got: $out"; ok=1
+  elif printf '%s' "$out" | grep -q 'would close'; then
+    echo "SELF-TEST FAIL case 1: it still closed the newer PR"; ok=1
+  else
+    echo "self-test case 1 OK (stale keep -> rc=$rc, ::error, nothing closed)"
+  fi
+
+  # case 2 — the ordinary case: KEEP is the NEWER commit. The older PR must still be closed.
+  out="$(run "$P" 6222 "$NEW" "$(printf '6225\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "SELF-TEST FAIL case 2: ordinary supersede exited $rc; got: $out"; ok=1
+  elif ! printf '%s' "$out" | grep -q 'would close #6225'; then
+    echo "SELF-TEST FAIL case 2: the older PR was not closed; got: $out"; ok=1
+  else
+    echo "self-test case 2 OK (ordinary supersede -> rc=$rc, older PR closed)"
+  fi
+
+  # case 3 — unrelated shas must never be closed on a guess.
+  out="$(run "$P" 1 cccccccccccccccccccccccccccccccccccccccc "$(printf '2\t%s%s' "$P" "$OLD")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close'; then
+    echo "SELF-TEST FAIL case 3: diverged pair was closed or failed; got: $out"; ok=1
+  else
+    echo "self-test case 3 OK (diverged -> warning, left open)"
+  fi
+
+  # case 4 — an unparsable branch name is unknown, not permission.
+  out="$(run "$P" 1 "$NEW" "$(printf '2\t%snot-a-sha' "$P")" 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ] || printf '%s' "$out" | grep -q 'would close'; then
+    echo "SELF-TEST FAIL case 4: unparsable branch was closed or failed; got: $out"; ok=1
+  else
+    echo "self-test case 4 OK (unparsable sha -> warning, left open)"
+  fi
+
+  if [ "$ok" -ne 0 ]; then
+    echo "self-test: FAILED"
+    return 1
+  fi
+  echo "self-test: all 4 cases OK"
+  return 0
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+  self_test
+  exit $?
+fi
+
+PREFIX="${1:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
+KEEP="${2:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
+
+# The sha THIS run's deploy PR pins. Without it nothing can be classified, and "cannot classify"
+# must mean "close nothing" — never "close everything", which is the pre-#6231 behaviour.
+KEEP_SHA="$(sha_of_branch "$(gh pr view "$KEEP" --repo "$REPO" --json headRefName --jq '.headRefName')" "$PREFIX")"
+if [ -z "$KEEP_SHA" ]; then
+  echo "::warning::supersede: could not read a commit sha off #$KEEP's branch — closing nothing."
+  exit 0
+fi
 
 # `gh pr list` caps at 30 by default; a backlog can exceed that, and a cap that silently truncates
 # would leave the oldest — the very ones most likely to be conflicting — untouched.
 #
-# Read with `while read`, NOT `mapfile`: mapfile is a bash-4 builtin, absent from macOS's system
+# Read into a single variable, NOT `mapfile`: mapfile is a bash-4 builtin, absent from macOS's system
 # bash 3.2 and from zsh, where it fails with "command not found" and leaves the array EMPTY. The
 # script would then print "nothing to close" and exit 0 — a broken probe reporting a clean result,
-# which is the failure mode this repo has been bitten by repeatedly. `while read` runs everywhere,
-# so the same command can be dry-run locally as it behaves in CI.
-STALE=""
-STALE_COUNT=0
-while IFS= read -r n; do
-  [ -n "$n" ] || continue
-  STALE="$STALE $n"
-  STALE_COUNT=$((STALE_COUNT + 1))
-done <<EOF
-$(gh pr list --repo "$REPO" --state open --limit 200 \
+# which is the failure mode this repo has been bitten by repeatedly.
+PAIRS="$(gh pr list --repo "$REPO" --state open --limit 200 \
     --json number,headRefName,headRepositoryOwner,createdAt \
     --jq "[.[]
            | select(.headRefName | startswith(\"$PREFIX\"))
            | select(.number != ($KEEP | tonumber))
            | select(.headRepositoryOwner.login == \"${REPO%%/*}\")]
           | sort_by(.createdAt)
-          | .[].number")
-EOF
+          | .[] | \"\(.number)\t\(.headRefName)\"")"
 
-if [ "$STALE_COUNT" -eq 0 ]; then
-  echo "supersede: no older open '$PREFIX*' PRs besides #$KEEP — nothing to close."
-  exit 0
-fi
-
-echo "supersede: #$KEEP is the current deploy PR; closing $STALE_COUNT superseded:$STALE"
-
-if [ "${DRY_RUN:-}" = "true" ]; then
-  echo "supersede: DRY_RUN — would close:$STALE"
-  exit 0
-fi
-
-failed=0
-for n in $STALE; do
-  # Comment first, then close: if the close succeeds but the comment fails, the PR is shut with no
-  # stated reason, which is the outcome this is trying to avoid.
-  if ! gh pr comment "$n" --repo "$REPO" --body \
-"Superseded by #$KEEP and closed automatically.
-
-A deploy PR rewrites an image tag to the newest build, so two of them are never additive — #$KEEP
-already contains everything this PR would have applied. Left open, both edit the same manifest line
-and whichever merges first leaves the other conflicting, which reads as healthy (green checks,
-auto-merge armed) right up to the point someone tries to merge it.
-
-Nothing is lost by this close: the tag this PR carried is older than the one in #$KEEP. If you
-believe otherwise, reopen it and say what it carries that #$KEEP does not.
-
-(\`.github/scripts/supersede-deploy-prs.sh\`)"; then
-    echo "::warning::supersede: could not comment on #$n — leaving it OPEN rather than closing it silently."
-    failed=1
-    continue
-  fi
-  if ! gh pr close "$n" --repo "$REPO" --delete-branch; then
-    echo "::warning::supersede: could not close #$n."
-    failed=1
-  fi
-done
-
-# A failure here must not fail the deploy — the image is already built and pushed, and a leftover
-# stale PR is a tidiness problem, not a broken deploy. Warn loudly instead.
-if [ "$failed" -ne 0 ]; then
-  echo "::warning::supersede: one or more superseded deploy PRs could not be closed; close them by hand."
-fi
-exit 0
+run "$PREFIX" "$KEEP" "$KEEP_SHA" "$PAIRS"
+exit $?

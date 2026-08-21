@@ -77,6 +77,7 @@ MANIFEST = ".github/gates/gates.yaml"
 # the manifest even where a checker's dependencies are missing, and the string is the contract.
 PARSE_CACHE_ENV = "GATE_PARSE_CACHE"
 SUBJECTS_PREFIX = "SUBJECTS="  # must match gatelib.SUBJECTS_PREFIX
+SUBJECTS_UNRESOLVED = "UNRESOLVED"  # must match gatelib.SUBJECTS_UNRESOLVED
 VALID_MODES = {"enforced", "advisory"}
 VALID_WHEN = {"always", "pull_request"}
 VALID_EXPECT = {"pass", "fail"}
@@ -337,9 +338,11 @@ def last_subject_count(out: str):
     for line in out.splitlines():
         line = line.strip()
         if line.startswith(SUBJECTS_PREFIX):
-            digits = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
-            if digits.isdigit():
-                found = int(digits)
+            value = line[len(SUBJECTS_PREFIX):].split("#")[0].strip()
+            if value.isdigit():
+                found = int(value)
+            elif value == SUBJECTS_UNRESOLVED:
+                found = SUBJECTS_UNRESOLVED
     return found
 
 
@@ -397,7 +400,16 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None) -> 
     floor = gate.get("min_subjects")
     if floor is not None and rc == 0:
         found = last_subject_count(out)
-        if found is None:
+        if found == SUBJECTS_UNRESOLVED:
+            # THIRD STATE. The gate says it could not read its corpus at all (a rate-limited
+            # or unreachable API), so the floor has nothing to hold: 0 subjects here means
+            # "not measured", not "corpus collapsed". Enforcing it would turn every transient
+            # outage into a red PR — exactly what gatelib.subjects_unresolved exists to stop.
+            buf.append(
+                "\n[run-gates] this gate reported its corpus UNRESOLVED; min_subjects "
+                f"({floor}) not applied to this run. Not a pass and not a failure.\n"
+            )
+        elif found is None:
             rc = 1
             buf.append(
                 f"\n[run-gates] this gate declares min_subjects: {floor} but printed no "
@@ -680,6 +692,11 @@ gates:
     group: t
     min_subjects: 3
     run: "echo checked nothing; echo SUBJECTS=0"
+  - id: floor-unresolved
+    name: "a gate whose corpus could not be READ is not held to its floor"
+    group: t
+    min_subjects: 3
+    run: "echo 'SUBJECTS=UNRESOLVED  # rate limited'"
   - id: floor-unreported
     name: "a gate that declares a floor and never prints a count"
     group: t
@@ -713,6 +730,7 @@ EXPECTED = {
     "passing": "ok",
     "floor-met": "ok",
     "floor-missed": "failed",
+    "floor-unresolved": "ok",
     "floor-unreported": "failed",
     "floor-last-wins": "ok",
     "over-budget": "failed",
@@ -751,6 +769,11 @@ def self_test():
                 bad.append("over-budget: failed, but not for the budget reason")
             if r.id == "floor-missed" and "below its declared floor" not in r.output:
                 bad.append("floor-missed: failed, but not for the floor reason")
+            # The third state, both halves: an UNRESOLVED corpus must pass DESPITE the floor,
+            # and must say out loud that the floor was not applied — a silent pass here is
+            # indistinguishable from a gate that really checked 3 subjects.
+            if r.id == "floor-unresolved" and "min_subjects (3) not applied" not in r.output:
+                bad.append("floor-unresolved: passed without saying the floor was skipped")
             # ADR-0255's json_records() must round-trip through json.dumps (a Result carrying
             # something non-serialisable would crash the whole run at the very end, after
             # every gate had already finished) and preserve the SUBJECTS= count this record

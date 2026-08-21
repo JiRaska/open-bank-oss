@@ -7,6 +7,7 @@ package com.openbank.finrep.infrastructure.observability
 import com.openbank.finrep.application.port.out.RegulatoryFramework
 import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
+import com.openbank.finrep.domain.model.BalanceVerdict
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -33,13 +34,43 @@ class FinrepMetricsAdapterTest {
 
     @Test
     fun `a null balanced flag renders as not_applicable, never as true`() {
-        adapter.templateRendered(render(framework = RegulatoryFramework.COREP, template = "C_01.00", balanced = null))
+        adapter.templateRendered(
+            render(
+                framework = RegulatoryFramework.COREP,
+                template = "C_01.00",
+                balanced = null,
+                balanceVerdict = null,
+            ),
+        )
 
         assertThat(
             registry.get("openbank.finrep.templates.rendered")
                 .tag("framework", "corep").tag("balanced", "not_applicable").counter().count(),
         ).isEqualTo(1.0)
         assertThat(registry.find("openbank.finrep.templates.rendered").tag("balanced", "true").counters()).isEmpty()
+        // Same rule for the verdict tag (issue #6011): COREP has no second source to agree with, so
+        // it must not borrow one of the four FINREP verdict values.
+        assertThat(
+            registry.get("openbank.finrep.templates.rendered")
+                .tag("framework", "corep").tag("balance_verdict", "not_applicable").counter().count(),
+        ).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `each balance verdict renders as its own tag value`() {
+        // Issue #6011: the point of the verdict is that "the two sources disagree" is a DIFFERENT
+        // series from "both agree it does not balance". If they shared a tag value, the truncation
+        // case would be unalertable — indistinguishable from an ordinary ledger imbalance.
+        BalanceVerdict.entries.forEachIndexed { i, verdict ->
+            adapter.templateRendered(render(template = "F01.0$i", balanced = false, balanceVerdict = verdict))
+        }
+
+        assertThat(
+            BalanceVerdict.entries.map { verdict ->
+                registry.get("openbank.finrep.templates.rendered")
+                    .tag("balance_verdict", verdict.name.lowercase()).counters().size
+            },
+        ).allMatch { it == 1 }
     }
 
     @Test
@@ -84,6 +115,7 @@ class FinrepMetricsAdapterTest {
         cells: Int = 20,
         dataGapCells: Int = 0,
         balanced: Boolean? = true,
+        balanceVerdict: BalanceVerdict? = BalanceVerdict.AGREED_BALANCED,
     ) = TemplateRender(
         framework = framework,
         templateId = template,
@@ -91,6 +123,7 @@ class FinrepMetricsAdapterTest {
         cells = cells,
         dataGapCells = dataGapCells,
         balanced = balanced,
+        balanceVerdict = balanceVerdict,
         duration = Duration.ofMillis(33),
     )
 }

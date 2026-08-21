@@ -1606,6 +1606,54 @@ scheduled_methods:
 # A failed weekly run opens a new issue. Once failure rate DCG stabilises, this
 # graduates to an enforced PR gate.
 # ---------------------------------------------------------------------------------------
+postgres_extensions:
+  # An UNTRUSTED extension cannot be created by the role Flyway connects as. PostgreSQL splits
+  # extensions into trusted (`uuid-ossp`, `pgcrypto`, `pg_trgm`, `unaccent`, … — a database OWNER
+  # may create them) and untrusted (`vector`, `postgis`, `postgres_fdw`, `plpython3u`, … —
+  # SUPERUSER only). Every local path connects as superuser (Dev Services, PostgreSQLContainer,
+  # docker-compose), so a migration creating an untrusted extension is GREEN on every laptop and in
+  # CI, and fails only in the cluster, where CloudNativePG hands the application a non-superuser
+  # role. The pod then crashloops on what reads as a migration bug, and nothing in the diff points
+  # at the connecting ROLE.
+  #
+  # Measured against the exact image the fleet runs (ghcr.io/cloudnative-pg/postgresql:18.1, which
+  # already bundles pgvector 0.8.1) while adding semantic retrieval to copilot-service:
+  #   as owner:      ERROR: permission denied to create extension "vector"
+  #                  HINT:  Must be superuser to create this extension.
+  #   as superuser:  CREATE EXTENSION
+  #   as owner, already installed: NOTICE: extension "vector" already exists, skipping
+  #
+  # BOTH halves are required, and the third line above is why they compose: the CNPG `Database`
+  # resource creates the extension over the operator's superuser connection, and the migration's
+  # `CREATE EXTENSION IF NOT EXISTS` short-circuits before the permission check, which is what keeps
+  # local dev and the test containers working. Delete the resource and the deployed migration fails
+  # at its first statement; delete the migration line and every developer's database breaks.
+  untrusted_needs_cnpg_database_resource: true
+  gate: untrusted-pg-extension
+  enforced: true
+  ci_producer: ".github/scripts/check-untrusted-pg-extension.py"
+  # Classification is per-extension and must be VERIFIED the way the pgvector one was — by running
+  # CREATE EXTENSION as a non-superuser against the real image — not inferred from documentation.
+  # The list lives in the checker; adding an entry there is the deliberate act.
+
+litellm_gateway:
+  # LiteLLM parses `--config` ONCE at startup and the ConfigMap is a plain volume mount, so a config
+  # edit reaches the pod's filesystem and changes nothing: the proxy keeps serving the model list it
+  # booted with. The caller of a newly added route gets `model not found` while ArgoCD reports
+  # Synced and Healthy and the ConfigMap in the cluster genuinely contains the new route — the same
+  # silent-degradation shape as an `optional: true` secret ref.
+  #
+  # The manifest has carried "BUMP THIS whenever litellm-config.yaml changes" in a comment since
+  # #1919. Prose is not a control: three routes were added in one week (llama-3.3, llama-guard,
+  # bge-m3) and each depended on somebody remembering it.
+  config_change_requires_revision_bump: true
+  revision_annotation: "openbank.tech/litellm-config-revision"
+  gate: litellm-config-revision
+  enforced: true
+  ci_producer: ".github/scripts/check-litellm-config-revision.py"
+  # Any DIFFERENT value rolls the pod, so the gate deliberately does not check direction or
+  # monotonicity — a legitimate revert must not be blocked by a numbering rule.
+
 perf_gate:
   pilot_services:
     - openbank-product-catalog
@@ -2621,12 +2669,14 @@ authz:
         - sanctions.create
         - sanctions.trigger
         - sanctions.update
+        - sctInstPayment.approval.decide
         - sctInstPayment.create
         - sepaPayment.approval.decide
         - sepaPayment.create
         - sepaPayment.handleReturn
         - sepaPayment.transitionStatus
         - settlement.create
+        - swift.approval.decide
         - transaction.create
         - transaction.reverse
         - opsmessage.compose
@@ -2861,12 +2911,14 @@ shared_m2m_matrix_write_grants:
     - sanctions.create
     - sanctions.trigger
     - sanctions.update
+    - sctInstPayment.approval.decide
     - sctInstPayment.create
     - sepaPayment.approval.decide
     - sepaPayment.create
     - sepaPayment.handleReturn
     - sepaPayment.transitionStatus
     - settlement.create
+    - swift.approval.decide
     - transaction.create
     - transaction.reverse
 

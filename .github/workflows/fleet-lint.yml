@@ -97,6 +97,18 @@ jobs:
       # broken" when nothing is. dependency-submission.yml already ratcheted 4g→6g for this same
       # OOM class, and security.yml runs at 6g; ubuntu-latest has 16 GB, so 6g leaves ample room for
       # the separate Kotlin compile daemon and the worker processes.
+      #
+      # DO NOT raise this because the heap sampler reports "94% of -Xmx" (#5949). That percentage
+      # tracks the ceiling, not demand: measured on this exact task graph with identical work
+      # (1140 actionable tasks, --rerun-tasks), 3g -> 99% and died, 6g -> 95% and passed,
+      # 10g -> 85% and passed. Raising 6g to 10g does not even clear the 85% line. Raise it when a
+      # run actually aborts (`kind=infra` below), not when the occupancy figure is high.
+      #
+      # And when that day comes, note this value is not one 6 GB budget. Nothing sets
+      # `kotlin.daemon.jvmargs`, so the Kotlin compile daemon inherits these jvmargs and runs with
+      # the SAME ceiling — both daemons were sampled at 6144 MiB here. On a 16 GB runner already
+      # observed dipping to ~1.3 GB free at its floor, raising this raises two ceilings at once, so
+      # pin the Kotlin daemon separately rather than letting the raise multiply.
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8 -Dsun.jnu.encoding=UTF-8"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -225,7 +237,17 @@ jobs:
           # Gradle prints that for ordinary reasons too, and a pattern that also fires on a
           # healthy build would relabel real lint findings as infrastructure, which is the
           # same mislabelling in the other direction.
-          if grep -qE 'OutOfMemoryError|GC overhead limit exceeded|Gradle build daemon disappeared|out of JVM memory' "$log"; then
+          # `running out of JVM heap space` is Gradle's OWN wording when the daemon dies of heap
+          # exhaustion, and it is the wording this failure actually produces: a fleet-lint run
+          # forced to -Xmx3g died after 9 of 1140 tasks with "Daemon will be stopped at the end of
+          # the build after running out of JVM heap space" and NO `OutOfMemoryError` anywhere in
+          # the log — so the four patterns below classified a 9-task truncation as `kind=lint`, a
+          # "real finding", which is the precise mislabelling this classifier exists to prevent
+          # (#5949). It stays inside the narrow rule stated above: it names heap exhaustion
+          # explicitly and cannot fire on a healthy build, unlike a bare "Daemon will be stopped".
+          # Verified BOTH ways against real logs — the 3g truncation now matches, and a clean 6g
+          # run (1140 tasks, BUILD SUCCESSFUL) still does not.
+          if grep -qE 'OutOfMemoryError|GC overhead limit exceeded|Gradle build daemon disappeared|out of JVM memory|running out of JVM heap space' "$log"; then
             echo "kind=infra" >> "$GITHUB_OUTPUT"
             echo "::error title=fleet-lint ABORTED (infrastructure, not a lint finding)::The Gradle daemon ran out of memory, so the task graph stopped part-way and the modules after the abort were NEVER LINTED. This red does not mean the fleet is broken and it does not mean it is clean — it means the gate did not run. Raise -Xmx in this workflow's GRADLE_OPTS (a ratchet; see the comment there) and re-run. Reached: ${tasks:-unknown}."
             exit 1

@@ -19,4 +19,13 @@ describe('accounts list usability', () => {
     expect(page).toContain('<Search size={13} aria-hidden="true"')
     expect(page).toContain('<Filter size={11} aria-hidden="true"')
   })
+
+  it('offers the shared party resolver and removes the stale coming-soon claim', () => {
+    expect(page).toContain("import { PartySearch, type PartyHit } from '@/components/party/PartySearch'")
+    expect(page).toContain('<PartySearch')
+    expect(page).toContain('void search(party.id)')
+    expect(page).toContain('party search above')
+    expect(page).not.toContain('coming soon')
+    expect(page).not.toContain('v přípravě')
+  })
 })

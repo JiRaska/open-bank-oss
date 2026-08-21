@@ -83,8 +83,43 @@ def service_namespace(short: str) -> str:
     and the PodMonitor coverage gate — three tools were each growing their own copy of this
     question, and two of them had already answered it wrong in two different ways (#2255). Only
     the display fallback is local: a service with no workload still needs *something* to render.
+
+    That fallback is a LIE for the one service it applies to, which is why
+    [deployment_status] exists: with no workload anywhere in gitops the runbook silently
+    interpolated the short name and told the on-call engineer to run `kubectl -n tax-reporting`
+    against a namespace that has never existed — the exact defect this function's second
+    paragraph records as fixed, surviving in the one case the fix could not resolve. The
+    fallback stays (the commands need to render as something) and the banner now says the
+    commands do not apply.
     """
     return gitops_facts.service_namespace(short, GITOPS) or short
+
+
+def deployment_status(short: str) -> str:
+    """A banner for a service with NO workload in gitops — Deployment, Rollout or nothing.
+
+    Derived, never declared: the same `gitops_facts.service_namespace` question the
+    prod-readiness collector asks for its NOT-DEPLOYED verdict (#5706, #5760), so the runbook
+    and the matrix cannot disagree about whether a service runs. Empty for every deployed
+    service, so this changes no committed runbook but the undeployed one.
+    """
+    if gitops_facts.service_namespace(short, GITOPS) is not None:
+        return ""
+    return (
+        "## Deployment status — NOT DEPLOYED\n"
+        "\n"
+        "**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,\n"
+        "no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no\n"
+        "PodMonitor coverage. It is a released component (it has a `version.txt`) that has never\n"
+        "run, so **every `kubectl` command below names a namespace that does not exist** and every\n"
+        "procedure here is a plan rather than a rehearsed one.\n"
+        "\n"
+        "The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the\n"
+        "same reason: the cells it fails are consequences of the absent workload, not controls\n"
+        "someone skipped, and none of them can be closed by a repo change. Whether this service\n"
+        "should be deployed is an owner decision — see the service's own `CLAUDE.md`.\n"
+        "\n"
+    )
 
 
 def is_stateless(datastore: str) -> bool:
@@ -189,7 +224,7 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `{short}` service. Data domain **{domain}**,
 > classification **{classification}**, datastore **{datastore}**.
 
-## Service identity
+{deployment_status}## Service identity
 
 | Field | Value |
 |---|---|
@@ -336,6 +371,7 @@ def render(short: str) -> str:
         short=short,
         module=gitops_facts.module_dir(short, REPO).name,
         ns=service_namespace(short),
+        deployment_status=deployment_status(short),
         failure_modes=failure_modes,
         domain=f.get("dataDomain", "—"),
         datastore=datastore,
@@ -435,6 +471,24 @@ def self_test() -> int:
     case("owns_no_db=True changes the answer for a service WITH a datastore",
          dr_for("Redis", has_backup=False, owns_no_db=True)
          != dr_for("Redis", has_backup=False, owns_no_db=False))
+
+    # --- the NOT-DEPLOYED banner (#5706, #5760) ---------------------------------------------
+    # Falsified against a real repo fact rather than a fixture, because the whole point is that
+    # the banner and the readiness matrix answer the SAME question from the SAME resolver: if
+    # gitops_facts ever starts resolving a namespace for an undeployed service, both this and
+    # the collector's NOT-DEPLOYED verdict go wrong together and this case is what says so.
+    undeployed = [x for x in all_services() if gitops_facts.service_namespace(x, GITOPS) is None]
+    deployed = [x for x in all_services() if gitops_facts.service_namespace(x, GITOPS) is not None]
+    case("a deployed service gets no deployment banner",
+         all(deployment_status(x) == "" for x in deployed[:5]))
+    if undeployed:
+        t = deployment_status(undeployed[0])
+        case("an undeployed service is told its kubectl commands name a namespace that does not exist",
+             says(t, "NOT DEPLOYED", "namespace that does not exist"))
+        case("...and the banner reaches the rendered runbook",
+             "NOT DEPLOYED" in render(undeployed[0]))
+    # No `else` that passes: an empty undeployed set is the expected steady state (every released
+    # component deployed), and the two cases above are then vacuous rather than wrong.
 
     # --- the ownsNoDatabase assertion itself ------------------------------------------------
     case("an explicit ownsNoDatabase: true is honoured",

@@ -12,6 +12,7 @@ import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.PartyMergeIndexRepository
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
@@ -70,7 +71,12 @@ class AuditConsumer {
     suspend fun consume(message: Message<String>) {
         val payload = message.payload
         try {
-            consume(payload, addressOf(message))
+            persist(payload, addressOf(message))
+        } catch (e: Exception) {
+            // This legacy multi-producer channel deliberately retains its historic availability
+            // behaviour. D5 agent events use AgentAuditConsumer instead: it acknowledges only a
+            // successful durable write, so a store failure is retried by Kafka rather than lost.
+            log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         } finally {
             // Switching the signature from `String` to `Message<String>` also switches SmallRye
             // from auto-ack to MANUAL ack, so the ack must be explicit — and in a `finally`, or an
@@ -106,79 +112,90 @@ class AuditConsumer {
 
     suspend fun consume(payload: String, address: EventAddress) {
         try {
-            val node: JsonNode = objectMapper.readTree(payload)
-            val eventTime = eventTime(node)
-            val resolvedSource = resolveSourceService(node, address)
-            val actor = resolveActor(node)
-            val entry = AuditEntry(
-                id = UUID.randomUUID(),
-                // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
-                // not "eventType" — the only #996-consumed producer that does so.
-                // `ce-type` is the outbox event type, and it is the LAST resort before the
-                // sentinel: it is the producer's own value, carried by the transport rather than
-                // the body, so it is a recovery of a fact and not an inference (#3994).
-                eventType = node.textOrNull("eventType")
-                    ?: node.textOrNull("type")
-                    ?: address.ceType
-                    ?: "UNKNOWN",
-                // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
-                // own "aggregateType" field survives verbatim while inferAggregateType's table below
-                // is all uppercase, so the column records WHICH resolution path fired, not what the
-                // aggregate is. Measured on the live audit_entries table before this fix:
-                // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
-                // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
-                // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
-                // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
-                // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
-                // this stops the split growing, it does not backfill the 10-year tamper-evident
-                // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
-                // its own decision, not a drive-by fix here).
-                aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
-                aggregateId = inferAggregateId(node),
-                actorId = actor.first,
-                actorType = actor.second,
-                payload = payload,
-                sourceService = resolvedSource.first,
-                sourceServiceSource = resolvedSource.second,
-                correlationId = node.textOrNull("correlationId"),
-                occurredAt = eventTime ?: Instant.now(clock),
-                recordedAt = Instant.now(clock),
-                occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
-                // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
-                // sweep after #4553 found the bare JSON key "channel" independently populated by
-                // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
-                // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
-                // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
-                // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
-                // (dispute-service, via openbank.dispute.events — the only one confirmed live
-                // before this fix, all rows spelled "APP"). Storing the bare value made the column
-                // ungroupable: a caller reading "API" could not tell an onboarding channel from an
-                // ingress one. See resolveChannel() for the mapping.
-                channel = resolveChannel(node.textOrNull("channel"), address.topic),
-                actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
-                sessionId = node.textOrNull("sessionId"),
-                // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
-                // the grant that permitted it. customer-edge flattens its audit details into the
-                // event JSON, so both arrive as top-level fields. Absent = a direct action.
-                onBehalfOf = node.textOrNull("onBehalfOf"),
-                delegationId = node.textOrNull("delegationId"),
-            )
-            if (eventTime == null) countMissingEventTime(entry.sourceService)
-            if (::meterRegistry.isInitialized) {
-                meterRegistry.countActorProvenance(
-                    entry.sourceService,
-                    actorProvenance(entry.actorId, entry.actorType),
-                )
-            }
-            if (entry.sourceServiceSource != AttributionSource.EVENT) {
-                countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
-            }
-            repo.save(entry)
-            if (entry.eventType == "PARTY_MERGED" && ::mergeIndex.isInitialized) {
-                recordPartyMergeIndex(mergeIndex, log, node, entry.occurredAt)
-            }
+            persist(payload, address)
         } catch (e: Exception) {
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
+        }
+    }
+
+    /**
+     * Writes an audit event and propagates a failure to the caller. The dedicated agent-provenance
+     * consumer uses this method before ACKing, while the legacy mixed stream keeps [consume]'s
+     * compatibility behaviour.
+     */
+    suspend fun persist(payload: String, address: EventAddress = EventAddress.NONE) {
+        val node: JsonNode = objectMapper.readTree(payload)
+        val eventTime = eventTime(node)
+        val resolvedSource = resolveSourceService(node, address)
+        val actor = resolveActor(node)
+        val entry = AuditEntry(
+            // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
+            // producers without one retain the previous random entry id behaviour.
+            id = node.textOrNull("eventId")?.let(UUID::fromString) ?: Ids.newId(),
+            // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
+            // not "eventType" — the only #996-consumed producer that does so.
+            // `ce-type` is the outbox event type, and it is the LAST resort before the
+            // sentinel: it is the producer's own value, carried by the transport rather than
+            // the body, so it is a recovery of a fact and not an inference (#3994).
+            eventType = node.textOrNull("eventType")
+                ?: node.textOrNull("type")
+                ?: address.ceType
+                ?: "UNKNOWN",
+            // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
+            // own "aggregateType" field survives verbatim while inferAggregateType's table below
+            // is all uppercase, so the column records WHICH resolution path fired, not what the
+            // aggregate is. Measured on the live audit_entries table before this fix:
+            // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
+            // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
+            // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
+            // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
+            // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
+            // this stops the split growing, it does not backfill the 10-year tamper-evident
+            // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
+            // its own decision, not a drive-by fix here).
+            aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
+            aggregateId = inferAggregateId(node),
+            actorId = actor.first,
+            actorType = actor.second,
+            payload = payload,
+            sourceService = resolvedSource.first,
+            sourceServiceSource = resolvedSource.second,
+            correlationId = node.textOrNull("correlationId"),
+            occurredAt = eventTime ?: Instant.now(clock),
+            recordedAt = Instant.now(clock),
+            occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
+            // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
+            // sweep after #4553 found the bare JSON key "channel" independently populated by
+            // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
+            // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
+            // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
+            // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
+            // (dispute-service, via openbank.dispute.events — the only one confirmed live
+            // before this fix, all rows spelled "APP"). Storing the bare value made the column
+            // ungroupable: a caller reading "API" could not tell an onboarding channel from an
+            // ingress one. See resolveChannel() for the mapping.
+            channel = resolveChannel(node.textOrNull("channel"), address.topic),
+            actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
+            sessionId = node.textOrNull("sessionId"),
+            // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
+            // the grant that permitted it. customer-edge flattens its audit details into the
+            // event JSON, so both arrive as top-level fields. Absent = a direct action.
+            onBehalfOf = node.textOrNull("onBehalfOf"),
+            delegationId = node.textOrNull("delegationId"),
+        )
+        if (eventTime == null) countMissingEventTime(entry.sourceService)
+        if (::meterRegistry.isInitialized) {
+            meterRegistry.countActorProvenance(
+                entry.sourceService,
+                actorProvenance(entry.actorId, entry.actorType),
+            )
+        }
+        if (entry.sourceServiceSource != AttributionSource.EVENT) {
+            countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
+        }
+        repo.save(entry)
+        if (entry.eventType == "PARTY_MERGED" && ::mergeIndex.isInitialized) {
+            recordPartyMergeIndex(mergeIndex, log, node, entry.occurredAt)
         }
     }
 
@@ -270,58 +287,59 @@ class AuditConsumer {
         }
     }
 
-    // Ordered (field name -> aggregate type) fallback chain, first match wins. One shared table
-    // backs both inferAggregateId/inferAggregateType instead of two parallel chains that drift —
-    // add a new topic's identifying field here rather than duplicating a branch in both functions
-    // (kept the two in sync by hand across #996 rounds 1-3 until this got too complex; also fixes
-    // a latent inconsistency where kycCaseId had a type but no matching id-extraction branch).
-    // "incident" (security.ict.incident) is the one exception: its id is nested, not a top-level
-    // field, so it is handled separately before this table.
-    private val aggregateFields = listOf(
-        "accountId" to "ACCOUNT",
-        "partyId" to "PARTY",
-        "transactionId" to "TRANSACTION",
-        "consentId" to "CONSENT",
-        "kycCaseId" to "KYC_CASE",
-        "batchId" to "CLEARING_BATCH",
-        "itemId" to "CLEARING_ITEM",
-        "cardId" to "CARD",
-        "disputeId" to "DISPUTE",
-        "paymentId" to "PAYMENT",
-        "loanApplicationId" to "LOAN_APPLICATION",
-        "loanId" to "LOAN",
-        "documentId" to "DOCUMENT",
-        "ceremonyId" to "SIGNATURE_CEREMONY",
-        "conversionId" to "FX_CONVERSION",
-        "swiftMessageId" to "SWIFT_MESSAGE",
-        "id" to "SANCTIONS_CHECK",
-    )
-
-    // Both halves test the SAME predicate ([textOrNull], not `has`) on purpose. `has` is true for a
-    // field explicitly set to JSON null, so the old pair disagreed on exactly that input: the type
-    // side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
-    // string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
-    // predicate identical is what makes the two sides answer about the same field (#3994).
-    private fun inferAggregateId(node: JsonNode): String {
-        node["incident"]?.textOrNull("id")?.let { return it }
-        for ((field, _) in aggregateFields) {
-            node.textOrNull(field)?.let { return it }
-        }
-        return "unknown"
-    }
-
-    private fun inferAggregateType(node: JsonNode): String {
-        if (node["incident"]?.textOrNull("id") != null) return "ICT_INCIDENT"
-        for ((field, type) in aggregateFields) {
-            if (node.textOrNull(field) != null) return type
-        }
-        return "UNKNOWN"
-    }
-
     private companion object {
         /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
+}
+
+// Ordered (field name -> aggregate type) fallback chain, first match wins. One shared table backs
+// both inferAggregateId/inferAggregateType instead of two parallel chains that drift — add a new
+// topic's identifying field here rather than duplicating a branch in both functions (kept the two
+// in sync by hand across #996 rounds 1-3 until this got too complex; also fixes a latent
+// inconsistency where kycCaseId had a type but no matching id-extraction branch). "incident"
+// (security.ict.incident) is the one exception: its id is nested, not a top-level field, so it is
+// handled separately before this table. Top-level, not a class member: it needs no instance
+// state, and `AuditConsumer` was already at detekt's TooManyFunctions threshold.
+private val aggregateFields = listOf(
+    "accountId" to "ACCOUNT",
+    "partyId" to "PARTY",
+    "transactionId" to "TRANSACTION",
+    "consentId" to "CONSENT",
+    "kycCaseId" to "KYC_CASE",
+    "batchId" to "CLEARING_BATCH",
+    "itemId" to "CLEARING_ITEM",
+    "cardId" to "CARD",
+    "disputeId" to "DISPUTE",
+    "paymentId" to "PAYMENT",
+    "loanApplicationId" to "LOAN_APPLICATION",
+    "loanId" to "LOAN",
+    "documentId" to "DOCUMENT",
+    "ceremonyId" to "SIGNATURE_CEREMONY",
+    "conversionId" to "FX_CONVERSION",
+    "swiftMessageId" to "SWIFT_MESSAGE",
+    "id" to "SANCTIONS_CHECK",
+)
+
+// Both halves test the SAME predicate ([textOrNull], not `has`) on purpose. `has` is true for a
+// field explicitly set to JSON null, so the old pair disagreed on exactly that input: the type
+// side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
+// string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
+// predicate identical is what makes the two sides answer about the same field (#3994).
+private fun inferAggregateId(node: JsonNode): String {
+    node["incident"]?.textOrNull("id")?.let { return it }
+    for ((field, _) in aggregateFields) {
+        node.textOrNull(field)?.let { return it }
+    }
+    return "unknown"
+}
+
+private fun inferAggregateType(node: JsonNode): String {
+    if (node["incident"]?.textOrNull("id") != null) return "ICT_INCIDENT"
+    for ((field, type) in aggregateFields) {
+        if (node.textOrNull(field) != null) return type
+    }
+    return "UNKNOWN"
 }
 
 /** Matches AuditRepository's `@Column(name = "channel", length = 32)` (V14, issue #4660). */

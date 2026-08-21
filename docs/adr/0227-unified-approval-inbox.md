@@ -23,11 +23,17 @@ federated only lending and the agent plane. Every money-path domain — ledger, 
 sepa-payment, domestic-payment, balance, sepa-instant, fx, clearing, swift — is invisible to the
 supervisor screen, and an unread source renders identically to a source with nothing in it.
 
-This PR closes the smaller half of that: sanctions was already serving its queue and the inbox
-was not reading it, so a parked `sanctions.clear` decision stayed invisible on the one screen
-built to show parked decisions. The remaining fourteen need their list endpoint first (one PR
-per service, each an API change under ADR-0048); tracked in #5679. D3 (filters, risk
-bands) and D4 (SCA-bound disposal in the governed UI) are untouched.
+That PR closed the smaller half: sanctions was already serving its queue and the inbox was not
+reading it. **2026-08-19 (this PR, ledger-service).** Ledger did not even have the smaller half —
+it served `PATCH /api/v1/journals/approvals/{id}` (decide) but no `GET` (list), so a
+`ledger.reverse` four-eyes decision parked at 202 was discoverable only by whoever had been
+handed its id out of band, on the highest-priority money-path service per #5679's own ordering.
+Now serves `GET /api/v1/journals/approvals`, federated into `/api/approvals/pending` as a fourth
+source. **3 of 16 services now expose a pending list (sanctions, lending, ledger); 13 remain**
+(transaction, sepa-payment, domestic-payment, balance, sepa-instant, fx, clearing, swift, account,
+billing, consent, notification, party) — tracked in #5679, one PR per service (each an API change
+under ADR-0048). D3 (filters, risk bands) and D4 (SCA-bound disposal in the governed UI) are
+untouched.
 
 Relates: ADR-0155 (four-eyes mechanism), ADR-0223 D4 (four-eyes rollout),
 ADR-0224 D3 (action-class propose/dispose), ADR-0031 (agents propose, humans dispose).

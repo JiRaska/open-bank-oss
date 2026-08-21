@@ -68,6 +68,7 @@ NO_CORPUS = {
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
+    "supersede-deploy-prs-ancestry",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
@@ -90,7 +91,6 @@ DEBT = {
     "compliance-matrix": DEBT_MARKER,
     "compliance-page-evidence": DEBT_MARKER,
     "configproperty-kotlin-defaults": DEBT_MARKER,
-    "configproperty-supplied": DEBT_MARKER,
     "critical-alert-egress": DEBT_MARKER,
     "db-backup-association-gate": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,

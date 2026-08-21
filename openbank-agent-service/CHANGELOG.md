@@ -1,5 +1,39 @@
 # Changelog
 
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.2...agent-service-v1.21.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** put the content-safety classifier on the operator plane too ([#6204](https://github.com/JiRaska/open-bank-oss/issues/6204)) ([13a21b5](https://github.com/JiRaska/open-bank-oss/commit/13a21b5835739937a16bcfdbb233381d305f3089)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+
+### Bug Fixes
+
+* **agent:** default the model endpoint to the LiteLLM gateway, not decommissioned Groq ([#6076](https://github.com/JiRaska/open-bank-oss/issues/6076)) ([026e071](https://github.com/JiRaska/open-bank-oss/commit/026e071106f6405b2343ed27a93210a8c800428c)), closes [#5736](https://github.com/JiRaska/open-bank-oss/issues/5736)
+* **agent:** run the oversight sweep off the event loop — enforcement was degrading ([#6223](https://github.com/JiRaska/open-bank-oss/issues/6223)) ([55b538d](https://github.com/JiRaska/open-bank-oss/commit/55b538d95125a7fae0643266ecde8b38068526fc))
+
+## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.1...agent-service-v1.20.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** record an LLM metric on every streaming outcome ([#5960](https://github.com/JiRaska/open-bank-oss/issues/5960)) ([f6fdb0f](https://github.com/JiRaska/open-bank-oss/commit/f6fdb0fc302acb7d84b288ee29d2d98b9de1e994))
+
+## [1.20.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.0...agent-service-v1.20.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **agent:** correct the model-selection notes — I measured the cap, not the models ([#5923](https://github.com/JiRaska/open-bank-oss/issues/5923)) ([0e9c8af](https://github.com/JiRaska/open-bank-oss/commit/0e9c8af3399d43d32463ada59623f69dd3bc5cb2))
+
+## [1.20.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.3...agent-service-v1.20.0) (2026-08-20)
+
+
+### Features
+
+* **copilot:** add model-based content-safety guardrail (Llama Guard) ([#5670](https://github.com/JiRaska/open-bank-oss/issues/5670)) ([e62a476](https://github.com/JiRaska/open-bank-oss/commit/e62a47656c403c9e9fcb608207313ec3e9c61a86))
+
 ## [1.19.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.19.2...agent-service-v1.19.3) (2026-08-17)
 
 

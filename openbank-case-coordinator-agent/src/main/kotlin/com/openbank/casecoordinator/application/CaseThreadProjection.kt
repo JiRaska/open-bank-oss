@@ -57,10 +57,15 @@ object CaseThreadProjection {
             proposals.forEach { p ->
                 add(
                     ThreadEntry(
-                        type = ThreadEntryType.PROPOSAL_EMITTED,
+                        type = if (p.status == "SHADOW") {
+                            ThreadEntryType.SHADOW_RECORDED
+                        } else {
+                            ThreadEntryType.PROPOSAL_EMITTED
+                        },
                         atEpochMs = p.emittedAtEpochMs,
                         proposalId = p.proposalId,
                         proposalType = p.proposalType,
+                        shadow = p.status == "SHADOW",
                     ),
                 )
             }

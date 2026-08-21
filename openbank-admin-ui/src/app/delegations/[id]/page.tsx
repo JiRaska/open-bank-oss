@@ -33,8 +33,20 @@ import {
 
 type CheckOutcome = { granted: boolean; reason?: string | null; code?: string | null }
 
+function formatDelegationTimestamp(
+  value: string | null | undefined,
+  locale: string,
+): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 export default function DelegationDetailPage() {
   const { t, language } = useLanguage()
+  const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
+  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const params = useParams<{ id: string }>()
   const id = params?.id
 
@@ -98,28 +110,28 @@ export default function DelegationDetailPage() {
               <dd>{grant.approvalPolicy ?? '—'}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Strop na transakci', 'Per-transaction cap')}</dt>
-              <dd>{formatCeiling(grant.perTransactionLimit)}</dd>
+              <dd>{formatCeiling(grant.perTransactionLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Denní strop', 'Daily cap')}</dt>
-              <dd>{formatCeiling(grant.dailyLimit)}</dd>
+              <dd>{formatCeiling(grant.dailyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Měsíční strop', 'Monthly cap')}</dt>
-              <dd>{formatCeiling(grant.monthlyLimit)}</dd>
+              <dd>{formatCeiling(grant.monthlyLimit, numberLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Platnost od', 'Valid from')}</dt>
-              <dd>{grant.validFrom ?? '—'}</dd>
+              <dd>{formatDelegationTimestamp(grant.validFrom, dateLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Platnost do', 'Valid until')}</dt>
-              <dd>{grant.validTo ?? t('bez omezení', 'no expiry')}</dd>
+              <dd>{grant.validTo ? formatDelegationTimestamp(grant.validTo, dateLocale) : t('bez omezení', 'no expiry')}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Vytvořeno', 'Created')}</dt>
-              <dd>{grant.createdAt ?? '—'}</dd>
+              <dd>{formatDelegationTimestamp(grant.createdAt, dateLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Naposledy změněno', 'Last changed')}</dt>
-              <dd>{grant.updatedAt ?? '—'}</dd>
+              <dd>{formatDelegationTimestamp(grant.updatedAt, dateLocale)}</dd>
 
               <dt style={{ color: 'var(--text-tertiary)' }}>{t('Ukončeno', 'Closed')}</dt>
-              <dd>{grant.closedAt ? `${grant.closedAt} — ${grant.closedReason ?? ''}` : '—'}</dd>
+              <dd>{grant.closedAt ? `${formatDelegationTimestamp(grant.closedAt, dateLocale)} — ${grant.closedReason ?? ''}` : '—'}</dd>
             </dl>
           </div>
 

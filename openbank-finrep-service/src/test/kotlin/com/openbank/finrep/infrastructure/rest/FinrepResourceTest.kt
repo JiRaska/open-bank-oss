@@ -6,6 +6,7 @@ package com.openbank.finrep.infrastructure.rest
 
 import com.openbank.finrep.application.port.inbound.FinrepUseCase
 import com.openbank.finrep.application.port.inbound.GetFinrepTemplateQuery
+import com.openbank.finrep.domain.model.BalanceVerdict
 import com.openbank.finrep.domain.model.FinrepCell
 import com.openbank.finrep.domain.model.FinrepTemplate
 import io.mockk.coEvery
@@ -44,6 +45,8 @@ class FinrepResourceTest {
             templateId = "F01.01",
             period = LocalDate.now(fixedClock),
             cells = listOf(FinrepCell(rowRef = "r010", colRef = "c010", value = BigDecimal.ZERO)),
+            isBalanced = true,
+            balanceVerdict = BalanceVerdict.AGREED_BALANCED,
         )
         val captured = slot<GetFinrepTemplateQuery>()
         coEvery { finrepUseCase.getTemplate(capture(captured)) } returns expected
@@ -63,6 +66,8 @@ class FinrepResourceTest {
             templateId = "F02.00",
             period = explicitDate,
             cells = emptyList(),
+            isBalanced = true,
+            balanceVerdict = BalanceVerdict.AGREED_BALANCED,
         )
         val captured = slot<GetFinrepTemplateQuery>()
         coEvery { finrepUseCase.getTemplate(capture(captured)) } returns expected

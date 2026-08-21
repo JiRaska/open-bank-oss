@@ -429,11 +429,27 @@ function scoreC4Data(short) {
   }
 }
 
+/**
+ * True when the service has NO workload in gitops at all — not a Deployment, not a Rollout.
+ * Distinct from 'deployed but unscraped' and from 'stateless': a released component with no
+ * workload cannot own a CNPG cluster or a scraped namespace, so those cells report absences it
+ * could not have avoided. openbank-tax-reporting-service is the one such service today and it is
+ * deliberate (#5760). Naming the state is honesty, not leniency — see computeGate.
+ */
+function isUndeployed(short) {
+  return serviceNamespace(short) === null
+}
+
 function scoreC5Backup(short) {
   if (isStateless(declaredDatastore(short))) {
     // No datastore, nothing to back up. finrep scored 0 ('no CNPG cluster') for the absence of a
     // cluster it must not have — an unachievable 0 that read like a missing backup.
     return { score: 2, evidence: 'n/a — declares no datastore (stateless), nothing to back up' }
+  }
+  if (isUndeployed(short)) {
+    // Still 0 — only the evidence changes. 'no CNPG cluster' reads as a backup someone forgot to
+    // configure; the cluster is absent because the whole workload is (#5760).
+    return { score: 0, evidence: 'no CNPG cluster — service has no gitops workload at all' }
   }
   const clusters = gitopsFilesWithKind(short, 'Cluster')
   const cnpg = clusters.filter(f => f.includes('postgres') || readText(f).toLowerCase().includes('cnpg'))
@@ -555,7 +571,11 @@ function computeGate(short, scores) {
   const critical = new Set(['C1', 'C5', 'C7'])
   for (const { code } of DIMENSIONS) {
     const need = mp && critical.has(code) ? 3 : 2
-    if ((scores[code] ?? 0) < need) return 'NO-GO'
+    // NOT-DEPLOYED is only ever reached in place of NO-GO, never in place of GO: the GO branch
+    // below is the fall-through, and a service with no namespace scores C8 <= 1 anyway. So no
+    // score reachable in this state is treated more leniently than before — 'not production
+    // ready' and 'not in production' simply stop rendering as the same fact (#5760, #5706).
+    if ((scores[code] ?? 0) < need) return isUndeployed(short) ? 'NOT-DEPLOYED' : 'NO-GO'
   }
   return 'GO'
 }
@@ -637,5 +657,5 @@ const payload = {
 
 writeFileSync(OUT, JSON.stringify(payload, null, 2))
 console.log(
-  `[collect-prod-readiness] ${results.length} services scored, ${go} GO / ${results.length - go} NO-GO → ${OUT}`,
+  `[collect-prod-readiness] ${results.length} services scored, ${go} GO / ${results.filter(r => r.gate === 'NO-GO').length} NO-GO / ${results.filter(r => r.gate === 'NOT-DEPLOYED').length} NOT-DEPLOYED → ${OUT}`,
 )

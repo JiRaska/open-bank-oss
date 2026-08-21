@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.8.0...clearing-service-v0.8.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.10...clearing-service-v0.8.0) (2026-08-19)
+
+
+### Features
+
+* **clearing:** expose pending four-eyes approvals via approval inbox ([#5679](https://github.com/JiRaska/open-bank-oss/issues/5679)) ([#5693](https://github.com/JiRaska/open-bank-oss/issues/5693)) ([dc25d40](https://github.com/JiRaska/open-bank-oss/commit/dc25d40b3de7f3f0460800c05e50eb24347a17ad))
+
 ## [0.7.10](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.7.9...clearing-service-v0.7.10) (2026-08-18)
 
 

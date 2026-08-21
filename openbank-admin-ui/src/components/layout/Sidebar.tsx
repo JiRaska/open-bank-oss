@@ -16,7 +16,7 @@ import {
   Layers, TrendingUp, MessageSquareWarning, Package, Receipt, Server, ShieldAlert, FlaskConical, Cloud,
   PiggyBank, GitBranch, Lock, ClipboardList, Scale, Smartphone,
   ClipboardCheck, Activity, Boxes, Bluetooth, Fingerprint, FileSignature, Network, Waypoints, Workflow,
-  Megaphone,
+  Megaphone, Radar,
   Target,
   Share2, Bug,
 } from 'lucide-react'
@@ -55,7 +55,7 @@ const customerNav: NavItem[] = [
   { nameCs: 'Strany',      nameEn: 'Parties',    href: '/parties',    icon: Users,          permission: 'parties:view' },
   { nameCs: 'KYC',         nameEn: 'KYC',         href: '/kyc',        icon: ShieldCheck,    permission: 'kyc:view' },
   { nameCs: 'Onboarding',  nameEn: 'Onboarding',  href: '/onboarding', icon: ClipboardList,  permission: 'onboarding:view' },
-  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'onboarding:view' },
+  { nameCs: 'Ověření identity', nameEn: 'Identity Cases', href: '/identity-cases', icon: Fingerprint, permission: 'identity-cases:view' },
   { nameCs: 'Delegovaný přístup', nameEn: 'Delegated Access', href: '/delegations', icon: Share2, permission: 'delegations:view' },
 ]
 
@@ -77,23 +77,21 @@ const paymentsNav: NavItem[] = [
 const complianceNav: NavItem[] = [
   { nameCs: 'AML',                nameEn: 'AML',              href: '/aml',               icon: AlertOctagon,          permission: 'compliance:view' },
   { nameCs: 'Fraud',              nameEn: 'Fraud',            href: '/fraud',             icon: ShieldAlert,           permission: 'compliance:view' },
-  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'compliance:view' },
+  { nameCs: 'Sankce',             nameEn: 'Sanctions',        href: '/sanctions',         icon: Shield,                permission: 'sanctions:view' },
   { nameCs: 'Spory',              nameEn: 'Disputes',         href: '/disputes',          icon: MessageSquareWarning,  permission: 'compliance:view' },
   { nameCs: 'Customer 360',        nameEn: 'Customer 360',     href: '/customer-360',      icon: Users,                 permission: 'compliance:view' },
-  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'compliance:view' },
-  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'compliance:view' },
+  { nameCs: 'Kampaně',            nameEn: 'Campaigns',        href: '/campaigns',         icon: Megaphone,             permission: 'campaign:view' },
+  { nameCs: 'Segmenty',           nameEn: 'Segments',         href: '/segments',          icon: Target,                permission: 'campaign:view' },
   { nameCs: 'Souhlasy',           nameEn: 'Consents',         href: '/consents',          icon: FileSignature,           permission: 'compliance:view' },
   // ADR-0212 D4: four-eyes activation of the jurisdictional credit compliance packs. Filed under
-  // compliance, not lending, because the backing endpoints are ROLE_COMPLIANCE/ROLE_ADMIN — a
-  // lending officer cannot propose or decide one.
-  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'compliance:view' },
+  { nameCs: 'Úvěrové compliance packy', nameEn: 'Credit Compliance Packs', href: '/lending/compliance-packs', icon: ShieldCheck, permission: 'lending:compliance:view' },
   { nameCs: 'Auditní záznamy',    nameEn: 'Audit Log',        href: '/audit',             icon: ScrollText,            permission: 'audit:view' },
   { nameCs: 'Regulatorní',        nameEn: 'Regulatory',       href: '/regulatory',        icon: FileText,              permission: 'regulatory:view' },
 ]
 
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'payments:view' },
-  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'system:view' },
+  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
 
@@ -103,6 +101,7 @@ const docsNav: NavItem[] = [
   { nameCs: 'Aplikace',       nameEn: 'Customer App',       href: '/docs/customer-app', icon: Smartphone, permission: 'docs:view' },
   { nameCs: 'Identita & dedup', nameEn: 'Identity & Dedup',  href: '/docs/identity-dedup', icon: Fingerprint, permission: 'docs:view' },
   { nameCs: 'QRlessPay',      nameEn: 'QRlessPay',          href: '/docs/qrlesspay',   icon: Bluetooth,  permission: 'docs:view' },
+  { nameCs: 'Senzory',        nameEn: 'Sensors',            href: '/docs/sensors',     icon: Radar,      permission: 'docs:view' },
   { nameCs: 'Správa dokumentů', nameEn: 'Document Management', href: '/docs/document-management', icon: FileSignature, permission: 'docs:view' },
   { nameCs: 'Cloud architektura', nameEn: 'Cloud Architecture', href: '/docs/cloud-architecture', icon: Cloud, permission: 'docs:view' },
   { nameCs: 'Cluster & kontejner', nameEn: 'Cluster & Container', href: '/docs/cluster', icon: Boxes, permission: 'docs:view' },
@@ -123,7 +122,7 @@ const platformNav: NavItem[] = [
   { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
   { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },
   { nameCs: 'Observability', nameEn: 'Observability', href: '/observability', icon: Activity, permission: 'system:view' },
-  { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'system:view' },
+  { nameCs: 'Schvalování', nameEn: 'Approvals', href: '/approvals', icon: ClipboardCheck, permission: 'approvals:view' },
 ]
 
 // Internal tool UIs, reachable at /tools/<tool> on this same host behind the
@@ -146,7 +145,7 @@ const sysNav: NavItem[] = [
   { nameCs: 'Test Coverage',    nameEn: 'Test Coverage',   href: '/system/tests',     icon: FlaskConical,      permission: 'system:view' },
   { nameCs: 'Připravenost prod',nameEn: 'Prod Readiness',  href: '/system/readiness', icon: ClipboardCheck,    permission: 'system:view' },
   { nameCs: 'Konfigurace',      nameEn: 'Configuration',   href: '/system/config',    icon: SlidersHorizontal, permission: 'system:config' },
-  { nameCs: 'Agent (MCP)',      nameEn: 'Agent (MCP)',     href: '/system/agent',     icon: Bot,               permission: 'system:view' },
+  { nameCs: 'Agent (MCP)',      nameEn: 'Agent (MCP)',     href: '/system/agent',     icon: Bot,               permission: 'agent:view' },
   { nameCs: 'Nastavení',        nameEn: 'Settings',        href: '/settings',         icon: Settings, lockedPermission: 'settings:view' },
 ]
 
@@ -166,6 +165,9 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
   const isLocked = (item: NavItem) =>
     (!!item.lockedPermission && !hasPermission(roles, item.lockedPermission)) ||
     (!!item.deniedRole && roles.includes(item.deniedRole))
+  const currentHref = ALL_NAV
+    .filter(item => pathname === item.href || pathname.startsWith(`${item.href}/`))
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href
 
   // ADR-0229 D4 (first cut): the persona's quick links pinned at the top — the full menu below
   // is untouched. Each link inherits its permission from the same destination's nav entry.
@@ -222,26 +224,26 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
       {/* Nav — the only scrollable region; brand + footer stay pinned. */}
       <nav ref={navRef} className={`ob-sidebar-nav ${styles.nav}`}>
         <SectionLabel>{t('Můj přehled', 'My workspace')} · {personaLabel(persona, language === 'cs' ? 'cs' : 'en')}</SectionLabel>
-        <NavSection items={filter(workspace)} pathname={pathname} />
-        <NavSection items={filter(coreNav)} pathname={pathname} />
+        <NavSection items={filter(workspace)} currentHref={currentHref} announceCurrent={false} />
+        <NavSection items={filter(coreNav)} currentHref={currentHref} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
-        <NavSection items={filter(revenueNav)} pathname={pathname} />
+        <NavSection items={filter(revenueNav)} currentHref={currentHref} />
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
-        <NavSection items={filter(customerNav)} pathname={pathname} />
+        <NavSection items={filter(customerNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>
-        <NavSection items={filter(paymentsNav)} pathname={pathname} />
+        <NavSection items={filter(paymentsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Compliance', 'Compliance')}</SectionLabel>
-        <NavSection items={filter(complianceNav)} pathname={pathname} />
+        <NavSection items={filter(complianceNav)} currentHref={currentHref} />
         <SectionLabel>{t('Operace', 'Operations')}</SectionLabel>
-        <NavSection items={filter(opsNav)} pathname={pathname} />
+        <NavSection items={filter(opsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platforma', 'Platform')}</SectionLabel>
-        <NavSection items={filter(platformNav)} pathname={pathname} />
+        <NavSection items={filter(platformNav)} currentHref={currentHref} />
         <SectionLabel>{t('Dokumentace', 'Documentation')}</SectionLabel>
-        <NavSection items={filter(docsNav)} pathname={pathname} />
+        <NavSection items={filter(docsNav)} currentHref={currentHref} />
         <SectionLabel>{t('Nástroje', 'Tools')}</SectionLabel>
-        <NavSection items={filter(toolsNav)} pathname={pathname} isLocked={isLocked} />
+        <NavSection items={filter(toolsNav)} currentHref={currentHref} isLocked={isLocked} />
         <SectionLabel>{t('Systém', 'System')}</SectionLabel>
-        <NavSection items={filter(sysNav)} pathname={pathname} isLocked={isLocked} />
+        <NavSection items={filter(sysNav)} currentHref={currentHref} isLocked={isLocked} />
       </nav>
 
       {/* Footer */}
@@ -261,14 +263,14 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
-function NavSection({ items, pathname, isLocked }: { items: NavItem[]; pathname: string; isLocked?: (item: NavItem) => boolean }) {
+function NavSection({ items, currentHref, announceCurrent = true, isLocked }: { items: NavItem[]; currentHref?: string; announceCurrent?: boolean; isLocked?: (item: NavItem) => boolean }) {
   const { language } = useLanguage()
 
   if (!items.length) return null
   return (
     <>
       {items.map(item => {
-        const active = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href))
+        const active = announceCurrent && item.href === currentHref
         const locked = isLocked?.(item) ?? false
         const Icon = item.icon
         const displayName = language === 'cs' ? item.nameCs : item.nameEn

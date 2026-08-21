@@ -34,40 +34,159 @@ spec:
     # `price_source` is carried deliberately: it is the difference between a number we can defend
     # and one we cannot, and it stays visible on the dashboard rather than living in a comment.
     - name: openbank.ai.price-book
-      interval: 1h
+      # 1m, not 1h. These rules are `vector(<constant>)` — evaluation is free, and the interval
+      # is not a cost knob here, it is what decides whether the series EXISTS when its consumers
+      # look.
+      #
+      # At 1h the price book was invisible for 55 minutes of every 60. Prometheus answers an
+      # instant query from a 5-minute lookback window, so a series written once an hour is
+      # resolvable for 5 of those 60 minutes — a 1-in-12 duty cycle. Measured against the live
+      # sandbox 2026-08-21, group lastEvaluation 06:26:11Z:
+      #
+      #   query at eval + 60s   -> 9 price series
+      #   query at eval + 600s  -> 0
+      #   query at eval + 3600s -> 0
+      #
+      # `openbank.ai.spend` below runs at 5m and joins `on (model, kind)` against this, so 11 of
+      # every 12 of its evaluations saw NO price and produced no cost sample. That is why
+      # `openbank:llm_cost_usd_24h:total` had no series at all, why AiFleetDailySpendHigh — the
+      # 25 USD/day ceiling — could not fire, and why AiSpendUnpriced fired for a model that IS
+      # priced: `unless on (model)` against a stale price series reports everything as unpriced.
+      #
+      # #6063 added the missing model prices and was correct; it just landed on a rule group its
+      # consumers could not see. Verified there: 9 series exist at eval+60s, so the entries
+      # themselves work.
+      interval: 1m
       rules:
-        # Authoritative: BerriAI/litellm model_prices_and_context_window.json, entry
-        # `groq/llama-3.3-70b-versatile` — $0.59/M input, $0.79/M output.
+        # DeepInfra's published rate card for `meta-llama/Llama-3.3-70B-Instruct-Turbo`, the route
+        # the caller-facing id `llama-3.3-70b-versatile` now resolves to — $0.10/M input,
+        # $0.32/M output. It carried Groq's $0.59/$0.79 until #5736, and kept carrying it for the
+        # whole time Groq had decommissioned the model and every call 404'd: a price keyed by a
+        # model id cannot notice the id no longer resolves. Keep this in lockstep with
+        # litellm-config.yaml's input_cost_per_token/output_cost_per_token for the same route.
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000059)
+          expr: vector(0.0000001)
           labels:
             model: llama-3.3-70b-versatile
             kind: prompt
-            price_source: litellm-map
+            price_source: provider-rate-card
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000079)
+          expr: vector(0.00000032)
           labels:
             model: llama-3.3-70b-versatile
             kind: completion
-            price_source: litellm-map
-        # APPROXIMATE. LiteLLM's price map has no `deepinfra/deepseek-ai/DeepSeek-V3.2` entry — the
-        # newest DeepInfra DeepSeek it knows is V3.1 ($0.27/M input, $1.00/M output), used here as
-        # the nearest published sibling. Every panel and alert built on this carries
-        # price_source="nearest-sibling" so the estimate is never mistaken for a billed figure.
-        # Replace with the real rate card when DeepInfra publishes V3.2, or when the invoice
-        # disagrees — the invoice is the authority, this is a leading indicator.
+            price_source: provider-rate-card
+        # WAS a nearest-sibling estimate off LiteLLM's map (V3.1, $0.27/M in, $1.00/M out),
+        # because "litellm's map has no V3.2 entry" was taken to mean no published rate existed.
+        # It does — DeepInfra publishes its own, api.deepinfra.com/models/deepseek-ai/DeepSeek-V3.2
+        # returns cents_per_input_token 2.6e-05 / cents_per_output_token 3.8e-05 for the exact id
+        # this gateway routes to, and litellm-config.yaml has carried those very numbers all along.
+        # The sibling estimate overstated COMPLETION by 2.6x. Read the provider's own rate card
+        # before reaching for another vendor's map of it (#6045).
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000027)
+          expr: vector(0.00000026)
           labels:
             model: deepseek-ai/DeepSeek-V3.2
             kind: prompt
-            price_source: nearest-sibling
+            price_source: provider-rate-card
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000100)
+          expr: vector(0.00000038)
           labels:
             model: deepseek-ai/DeepSeek-V3.2
             kind: completion
+            price_source: provider-rate-card
+        # openai/gpt-oss-120b — the model the gateway ACTUALLY serves traffic on, and it was
+        # missing from this file. Measured 2026-08-19: 32660 tokens in 24h on this model and 1306
+        # on BAAI/bge-m3, while the only two priced models (llama-3.3-70b-versatile,
+        # deepseek-ai/DeepSeek-V3.2) carried ZERO. So 100% of real spend was invisible:
+        # openbank:llm_cost_usd_24h:total had no series at all, and AiFleetDailySpendHigh — the
+        # 25 USD/day ceiling that "actually protects the card" — could not fire, because a
+        # threshold over an absent series matches nothing (the #5733 shape, one file over).
+        #
+        # The design caught this on its own: AiSpendUnpriced has been FIRING for
+        # openai/gpt-oss-120b. `unless on (model)` did exactly the job its comment claims. Nobody
+        # actioned it, which is why the gap survived — the falsifiability check worked and the
+        # response to it did not.
+        #
+        # CORRECTED (#6045), and this is the model carrying 100% of live traffic, so it is the
+        # figure that mattered most. It was taken from BerriAI/litellm's map
+        # (`deepinfra/openai/gpt-oss-120b`, $0.05/M in / $0.45/M out) and that map is a THIRD
+        # PARTY'S COPY of DeepInfra's rate card, which had drifted: DeepInfra's own
+        # api.deepinfra.com/models/openai/gpt-oss-120b returns cents_per_input_token 3.7e-06 and
+        # cents_per_output_token 1.7e-05 — $0.037/M in, $0.17/M out. The map OVERSTATED output by
+        # 2.6x and input by 35%, so every spend panel and the 25 USD/day AiFleetDailySpendHigh
+        # ceiling were reading high on the only model with traffic. litellm-config.yaml carried
+        # the correct provider figures the whole time; the two files simply had nothing keeping
+        # them in lockstep. `check-llm-price-book.py` is now that thing.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.000000037)
+          labels:
+            model: openai/gpt-oss-120b
+            kind: prompt
+            price_source: provider-rate-card
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000017)
+          labels:
+            model: openai/gpt-oss-120b
+            kind: completion
+            price_source: provider-rate-card
+        # meta-llama/llama-guard-4-12b. Authoritative: litellm entry
+        # `deepinfra/meta-llama/Llama-Guard-4-12B` — $0.18/M both directions. Zero traffic today,
+        # priced anyway: the point of this file is that turning a served model on must not also
+        # turn the cost figures into an understatement.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000018)
+          labels:
+            model: meta-llama/llama-guard-4-12b
+            kind: prompt
+            price_source: litellm-map
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000018)
+          labels:
+            model: meta-llama/llama-guard-4-12b
+            kind: completion
+            price_source: litellm-map
+        # BAAI/bge-m3, embeddings. APPROXIMATE: litellm's map has no DeepInfra entry for it. The
+        # nearest published siblings are the SAME model on other hosts — `novita/baai/bge-m3` and
+        # `libertai/bge-m3`, both $0.01/M input — so this is a same-model, different-host estimate
+        # rather than a different-model guess, which is the strongest nearest-sibling this file
+        # carries. Replace when DeepInfra's rate card is read directly, or when the invoice
+        # disagrees; the invoice is the authority.
+        #
+        # `prompt` only, deliberately: an embeddings call generates no completion, and measurement
+        # agrees — BAAI/bge-m3 emits kind="prompt" and nothing else. A completion entry here would
+        # be a price for tokens that cannot exist.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.00000001)
+          labels:
+            model: BAAI/bge-m3
+            kind: prompt
             price_source: nearest-sibling
+        # deepseek-ai/DeepSeek-V4-Pro. This entry used to be a deliberate ABSENCE, on the
+        # reasoning that litellm's map has no DeepInfra entry for it and the cross-provider
+        # figures span 1.74e-06 to 2.4e-06 — a 38% spread that would be a guess dressed as a
+        # price. Leaving it out was the right call given that premise; the premise was wrong.
+        # DeepInfra publishes the rate directly: api.deepinfra.com/models/deepseek-ai/DeepSeek-V4-Pro
+        # returns cents_per_input_token 0.00013 / cents_per_output_token 0.00026 — $1.30/M in,
+        # $2.60/M out — and litellm-config.yaml already declares exactly those two numbers on this
+        # route. So the authoritative same-provider figure was one HTTP GET and one sibling file
+        # away, and "no published rate exists" was really "the map I looked in did not have one".
+        #
+        # It carries no traffic today (0 tokens over 7d, measured 2026-08-21). Priced anyway: the
+        # point of this file is that turning a served model on must not also turn the cost figures
+        # into an understatement.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.0000013)
+          labels:
+            model: deepseek-ai/DeepSeek-V4-Pro
+            kind: prompt
+            price_source: provider-rate-card
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.0000026)
+          labels:
+            model: deepseek-ai/DeepSeek-V4-Pro
+            kind: completion
+            price_source: provider-rate-card
 
     # ── Derived spend ─────────────────────────────────────────────────────────
     - name: openbank.ai.spend
@@ -146,12 +265,45 @@ spec:
               figure on the AI dashboard UNDERSTATES the real cost by this model's share. Add the
               model to the price-book group in prometheus-rules-ai.yaml.
 
-        # Reliability. Deliberately excludes not_configured: a never-seeded agent is a different
+        # No absence alert here, on purpose (#5736). The obvious companion to the rule below —
+        # `sum(rate(openbank_llm_requests_total{outcome="success"}[15m])) == 0` — is blind exactly
+        # when the path breaks completely: with no success series in existence the expression has
+        # no vector to compare and returns nothing, which is the same output as a healthy fleet.
+        # It would need `absent_over_time` guarding (same shape as #5733), and even guarded it
+        # cannot be written safely yet: LLM calls here are made by cron-scheduled agents and an
+        # interactive assistant, so silence is the RESTING state and an absence alert would fire
+        # continuously while nothing is wrong. Add one only once a synthetic call runs on a known
+        # interval, so that absence means something. Until then AiCallErrorRateHigh below is the
+        # detector, and it only works while SOME calls are being attempted.
+
+        # A call whose token usage the provider never reported. Same family as AiSpendUnpriced
+        # above and a trust alert about the cost figures rather than a cost alert: streaming
+        # backends may send no usage chunk at all, and recording 0 there would be a silent
+        # understatement, so those calls are counted here instead (#5878).
+        - alert: AiSpendUnmeasured
+          expr: sum by (model) (increase(openbank_llm_tokens_unreported_total[24h])) > 0
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $value | printf \"%.0f\" }} LLM calls to {{ $labels.model }} reported no token usage"
+            description: >-
+              These calls completed but the backend sent no `usage`, so their tokens are absent from
+              openbank_llm_tokens_total and every spend figure derived from it UNDERSTATES the real
+              cost by their share. Usually a streaming call against a backend that omits the final
+              usage chunk — set `stream_options.include_usage` for that model, or price the path
+              from the provider invoice instead of the dashboard.
+
+        # Reliability. `stream_aborted` (#5878) is in the numerator: a stream that dies after its
+        # 200 delivered a truncated answer to a waiting user, which is a failure — and it is the
+        # SSE path's characteristic failure, so leaving it out would make the interactive path the
+        # one this alert cannot see. Deliberately excludes not_configured: a never-seeded agent is a different
         # problem with a different fix, and folding it in here would make the error rate unusable.
         - alert: AiCallErrorRateHigh
           expr: |
             100 * (
-              sum by (model) (rate(openbank_llm_requests_total{outcome=~"http_error|exception"}[15m]))
+              sum by (model) (rate(openbank_llm_requests_total{outcome=~"http_error|exception|stream_aborted"}[15m]))
               /
               sum by (model) (rate(openbank_llm_requests_total{outcome!="not_configured"}[15m]))
             ) > 20
@@ -166,6 +318,54 @@ spec:
               NOT page — nothing is down. It means the AI features are silently off: the agents
               still answer, with their non-model path. Check the gateway pod, the provider status
               and the API key.
+
+        # Alerts on the SUCCESS state, and exists because AiCallErrorRateHigh above cannot see a
+        # low-rate caller failing totally (#5736).
+        #
+        # MEASURED, not reasoned: `llama-3.3-70b-versatile` returned 404 on every call for 8h40m
+        # while its only caller ran twice an hour. AiCallErrorRateHigh went `pending` at 04:04 and
+        # was still only `pending` at 12:44 — 44 evaluation points, and it NEVER reached `firing`.
+        # A caller with a 30-minute period increments the counter once per `rate(...[15m])` window,
+        # so the ratio is 100% for about 15 minutes and then decays to nothing, resetting the
+        # `for: 15m` timer just short of maturity, forever. The alert was healthy, loaded and
+        # evaluating the whole time. Nothing was wrong with it except that its window is shorter
+        # than its subject's period — which is a property of the CALLER, not of the alert, so no
+        # threshold tuning fixes it and the same hole reopens for the next infrequent caller.
+        #
+        # So this one is deliberately rate-free. `increase(...[6h])` spans any caller that runs at
+        # least once in six hours, and `unless` is a set difference rather than a ratio: it needs
+        # no `outcome="success"` series to exist. That matters here more than it looks — a model
+        # that has NEVER once succeeded has no success series at all, so the arithmetic form
+        # (`success / total == 0`) matches nothing and is blind in exactly the total-failure case
+        # it would be written for. Same shape as #5733.
+        #
+        # Value at t=0 on a cold pod: every counter starts at 0, so the left side (`> 0`) yields no
+        # series and the rule is silent — no boot-time false positive, and no `for:` needed to
+        # suppress one. A model nobody calls is likewise absent from both sides and stays silent;
+        # "not deployed" is a different question and deliberately not this alert's (see the
+        # no-absence-alert note above). `for: 30m` only debounces a single failure at the edge of
+        # the window.
+        - alert: AiModelNeverSucceeds
+          expr: |
+            (sum by (model) (increase(openbank_llm_requests_total{outcome!="not_configured"}[6h])) > 0)
+            unless
+            (sum by (model) (increase(openbank_llm_requests_total{outcome="success"}[6h])) > 0)
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "Every LLM call to {{ $labels.model }} is failing — not one has succeeded in 6h"
+            description: >-
+              The gateway is answering and every answer is an error, so this is not an outage of
+              the gateway and the pod is Ready. Callers degrade to their deterministic fallback,
+              which is why nothing else goes red. Check the MODEL first: a provider that
+              decommissioned this id answers 404 `model_not_found` while its siblings still return
+              200, whereas a dead or unseeded key answers 401/403 on every model — the two need
+              opposite fixes and the metric label `http_error` distinguishes neither. Probe the
+              provider's own model list from inside the gateway pod; a model id in git is a claim
+              about someone else's catalogue, not a constant.
 
         # The gap this whole PR exists to close. An agent whose key was never seeded returns null
         # forever and logs one warning at startup; nothing else anywhere says so.
@@ -182,3 +382,64 @@ spec:
               to the deterministic fallback. This is the documented safe mode (an unseeded key must
               not CrashLoop the pod), but it is not a steady state: the feature is off. Seed the key
               via ESO/OpenBao.
+
+        # ── Guardrail and retrieval: alert on the SUCCESS state, not an error rate ──────────
+        #
+        # These two controls are designed to degrade quietly — that is the correct behaviour on a
+        # customer-help surface, and it is exactly why an error-rate alert cannot see them. An
+        # unconfigured content-safety guardrail makes no FAILING calls; it makes none at all, and
+        # reports `unavailable` for every message. A retrieval index that never got built produces
+        # keyword-only answers that look like slightly worse search. Both are silent by
+        # construction, so the alert has to be about the control WORKING, not about it erroring.
+        #
+        # This is the shape the fleet has now shipped twice: a push adapter that counted every
+        # skipped notification as delivered, and a liveness gauge nobody re-derived at t=0. The
+        # metric exists here specifically so the third instance is visible.
+        - alert: ContentSafetyClassifyingNothing
+          # Ratio, not a count: a low-traffic hour must not fire, and a busy one must not need a
+          # retuned threshold. 90% rather than 100% because a genuinely unreachable provider for a
+          # few minutes is normal and self-heals; a control that is OFF stays at 1.0 forever.
+          expr: |
+            sum by (model) (increase(openbank_guardrail_classifications_total{decision="unavailable"}[1h]))
+            /
+            sum by (model) (increase(openbank_guardrail_classifications_total[1h])) > 0.9
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "content-safety guardrail for {{ $labels.model }} is classifying nothing"
+            description: >-
+              Over 90% of classifications returned `unavailable` for the last 30 minutes, so the
+              model-based guardrail is effectively absent — on a fail-open surface every message is
+              going out unclassified, and on a fail-closed one every request is being refused. The
+              deterministic prompt-injection filter is unaffected either way. Causes, in the order
+              they occur: the API key is not seeded, the gateway route was removed or renamed, or
+              the provider decommissioned the model (which is how llama-guard-4-12b left Groq).
+              Check `openbank_llm_requests_total{model=~".*guard.*"}` for which one.
+
+        - alert: CopilotRetrievalKeywordOnly
+          # Same reasoning as above. Fires only where semantic retrieval is supposed to be on: with
+          # the feature off there are no `hybrid` samples at all, the ratio is a constant 1, and
+          # `openbank_copilot_retrieval_total{mode="hybrid"}` being ABSENT is what the second clause
+          # checks — an absent series and a series pinned at zero are different facts.
+          expr: |
+            sum(increase(openbank_copilot_retrieval_total{mode="keyword_only"}[1h]))
+            /
+            sum(increase(openbank_copilot_retrieval_total[1h])) > 0.9
+            and on() (sum(openbank_copilot_retrieval_total{mode="hybrid"}) > 0)
+          for: 30m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "copilot help search has fallen back to keyword-only"
+            description: >-
+              Semantic retrieval has produced results before (so it is configured) but over 90% of
+              searches in the last hour used the keyword scorer alone. Answers are still grounded
+              and cited — this is a quality regression, not an outage, hence info. Check the
+              embedding route on the gateway and whether `help_passage_embedding` still holds rows
+              for the CURRENT embedding model: a model swap without a re-index leaves the table
+              full and the query returning nothing, because rows are filtered by model id.

@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check } from 'lucide-react'
 
 const SVC = 'pid-service'
@@ -195,13 +196,13 @@ function DecisionForm({
           style={{ fontSize: '13px', padding: '6px 8px', flex: '1 1 160px', minWidth: '140px' }}
         />
 
-        <button className="btn btn-primary" onClick={submit} disabled={busy} style={{ fontSize: '13px' }}>
-          <Check size={14} style={{ marginRight: '4px' }} />
+        <button type="button" aria-busy={busy} className="btn btn-primary" onClick={submit} disabled={busy} style={{ fontSize: '13px' }}>
+          <Check size={14} aria-hidden="true" style={{ marginRight: '4px' }} />
           {isSecond ? t('Potvrdit a rozhodnout', 'Confirm & decide') : t('Odeslat hlas', 'Submit vote')}
         </button>
 
         {isSecond && (
-          <button className="btn btn-secondary" onClick={reopen} disabled={busy} style={{ fontSize: '13px' }}>
+          <button type="button" aria-busy={busy} className="btn btn-secondary" onClick={reopen} disabled={busy} style={{ fontSize: '13px' }}>
             {t('Znovu otevřít', 'Reopen')}
           </button>
         )}
@@ -243,14 +244,14 @@ export default function IdentityCasesPage() {
     load()
   }, [load])
 
-  return (
+  return <AuthGuard permission="identity-cases:view">
     <div>
       <PageHeader
         icon={<Fingerprint size={20} aria-hidden="true" />}
         title={t('Ověření identity — čtyři oči', 'Identity Verification — Four-Eyes')}
         subtitle={t('Nejednoznačné identity z onboardingu (kolize RČ nebo jmenovci). Rozhodnutí vyžaduje dva různé schvalovatele (ADR-0072 / ADR-0030).', 'Ambiguous onboarding identities (RČ collisions or namesakes). A decision requires two distinct approvers (ADR-0072 / ADR-0030).')}
-        actions={<button className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
-          <RefreshCw size={14} style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
+        actions={<button type="button" aria-busy={loading} className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
+          <RefreshCw size={14} aria-hidden="true" style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
         </button>}
       />
       {unavail ? (
@@ -327,11 +328,13 @@ export default function IdentityCasesPage() {
                 ))}
               </div>
 
-              <DecisionForm c={c} onDecided={load} />
+              <Can permission="identity-cases:decide" fallback={<div style={{ marginTop: '12px', color: 'var(--text-secondary)', fontSize: '12px' }}>{t('Rozhodnutí může provést pouze oprávněný schvalovatel.', 'Only an authorized approver can decide this case.')}</div>}>
+                <DecisionForm c={c} onDecided={load} />
+              </Can>
             </div>
           ))}
         </div>
       )}
     </div>
-  )
+  </AuthGuard>
 }

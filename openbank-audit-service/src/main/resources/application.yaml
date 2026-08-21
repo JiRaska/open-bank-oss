@@ -85,6 +85,14 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      # D5 provenance is isolated from the legacy mixed stream: its handler only acknowledges a
+      # Kafka record after append-only persistence succeeds.
+      agent-audit-events-in:
+        connector: smallrye-kafka
+        enabled: ${AUDIT_AGENT_AUDIT_KAFKA_ENABLED:false}
+        client.id: audit-service-agent-provenance-${quarkus.uuid}
+        topic: openbank.agent.audit.events
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
       # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
       # override loaded via QUARKUS_CONFIG_LOCATIONS) for where they're set instead. Summary:
@@ -196,8 +204,11 @@ openbank:
       enabled: true
       interval: 1h
       initial-delay: 30s
-      # Held outside the audit DB (env/Vault). Production replaces the default HMAC signer with a
-      # KMS/cosign-keyed adapter (follow-up); this key is the in-cluster fallback.
+      # hmac is local development only. Production switches to the dedicated ECC_NIST_P256 KMS
+      # key, so the private key never enters the workload.
+      signer: ${AUDIT_ANCHOR_SIGNER:hmac}
+      signing-required: ${AUDIT_ANCHOR_SIGNING_REQUIRED:false}
+      kms-key-id: ${AUDIT_ANCHOR_KMS_KEY_ID:}
       signing-key: ${AUDIT_ANCHOR_SIGNING_KEY:CHANGE_ME_LOCAL_DEV_ONLY}
     chain-verify:
       # ADR-0133: recompute the whole hash chain on a cadence and publish the verdict as metrics.

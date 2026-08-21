@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-copilot-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "eed18bb0b17c7eea"
+        openbank.tech/policy-checksum: "142f791b4be9f12e"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-3219c5de
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-21ef148e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -121,6 +121,46 @@ spec:
                   key: password
             - name: COPILOT_GUARDRAIL_MODE
               value: block
+            # Model-based content safety (ADR-0265 slice 2). Llama Guard through the SAME gateway and
+            # the SAME virtual key as the chat model — no second credential, no second egress.
+            - name: COPILOT_CONTENT_SAFETY_ENABLED
+              value: "true"
+            - name: COPILOT_CONTENT_SAFETY_ENDPOINT
+              value: http://litellm.ai-platform.svc:4000/v1
+            - name: COPILOT_CONTENT_SAFETY_MODEL
+              value: meta-llama/llama-guard-4-12b
+            - name: COPILOT_CONTENT_SAFETY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-service-secrets
+                  key: COPILOT_MODEL_API_KEY
+                  optional: true
+            # fail-closed=false on THIS surface, deliberately. Customer help: refusing to answer a
+            # balance question because a classifier is unreachable is worse than answering it, and
+            # the deterministic injection guard, the OPA tool gate and SCA all still stand between
+            # the customer and any action. Every unavailable verdict is still audited and counted
+            # (openbank_guardrail_classifications{decision="unavailable"}), so this is a declared
+            # posture rather than a silent one. Flip to "true" on any state-changing surface.
+            - name: COPILOT_CONTENT_SAFETY_FAIL_CLOSED
+              value: "false"
+            # Hybrid keyword + pgvector retrieval (ADR-0183 / ADR-0265 slice 4). Same gateway again;
+            # the embedding route is priced and budgeted separately in litellm-config.yaml.
+            - name: COPILOT_SEMANTIC_RETRIEVAL_ENABLED
+              value: "true"
+            - name: COPILOT_EMBEDDING_ENDPOINT
+              value: http://litellm.ai-platform.svc:4000/v1
+            - name: COPILOT_EMBEDDING_MODEL
+              value: BAAI/bge-m3
+            # MUST match V3__help_embeddings.sql's vector(1024). The adapter discards a batch whose
+            # width disagrees rather than letting Postgres reject rows one at a time.
+            - name: COPILOT_EMBEDDING_DIMENSIONS
+              value: "1024"
+            - name: COPILOT_EMBEDDING_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: copilot-service-secrets
+                  key: COPILOT_MODEL_API_KEY
+                  optional: true
             # Bearer-only resource server validating the CUSTOMER JWT — the openbank-customers realm
             # (same as the edge, ADR-0065), NOT the operator `openbank` realm. RS256/JWKS verification
             # needs no client secret (mirrors customer-edge), so no ESO secret dependency.

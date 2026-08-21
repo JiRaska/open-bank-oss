@@ -6,6 +6,7 @@ package com.openbank.fraud.infrastructure.messaging
 
 import com.fasterxml.jackson.core.JacksonException
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.application.usecase.FeatureOnlineUpdater
@@ -51,6 +52,7 @@ class TransactionSignalConsumer(
     private val featureUpdater: FeatureOnlineUpdater,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val metrics: FraudMetricsPort,
 ) {
     private val log = Logger.getLogger(TransactionSignalConsumer::class.java)
 
@@ -70,15 +72,31 @@ class TransactionSignalConsumer(
         val accountId = signal.sourceAccountId ?: return
         val amount = signal.amount ?: BigDecimal.ZERO
         val currency = signal.currencyCode ?: "CZK"
+        // Issue #6044. occurredAt is REQUIRED on TransactionInitiatedEvent, so the fallback should
+        // never be taken; if it is, every row written from this signal carries a business time
+        // nobody measured, and the redelivery guard cannot reach a later replay of it (the replay
+        // would substitute a different processing time and so target a different velocity bucket
+        // row). Substituting silently is what made the audit consumer's ingest-time fallback
+        // invisible for 7 of its 21 topics (#3883); this one is counted, so the absent case is
+        // visible from outside the database instead of being indistinguishable from a healthy one.
+        val eventTime = signal.occurredAt ?: run {
+            metrics.recordSignalMissingEventTime()
+            log.warnf(
+                "transaction.initiated signal for account %s carries no occurredAt; substituting processing time. " +
+                    "Velocity bucketing and redelivery dedupe are both degraded for this signal (#6044).",
+                accountId,
+            )
+            Instant.now(clock)
+        }
         @Suppress("TooGenericExceptionCaught") // DB / reactive layer exceptions have no common base
         runBlocking {
             try {
-                velocityRepo.recordTransaction(accountId, amount, currency)
+                velocityRepo.recordTransaction(accountId, amount, currency, signal.aggregateId, eventTime)
                 log.debugf("Velocity aggregate updated for account %s amount=%s %s", accountId, amount, currency)
             } catch (ex: Exception) {
                 log.warnf(ex, "Failed to record velocity aggregate for account %s", accountId)
             }
-            recordPayeeHistory(accountId, signal)
+            recordPayeeHistory(accountId, signal, eventTime)
             // ADR-0140 online feature store (shadow plane). Best-effort: a feature-store failure must
             // never break the velocity path. Skip silently when the event carries no business time.
             val occurredAt = signal.occurredAt ?: return@runBlocking
@@ -94,13 +112,13 @@ class TransactionSignalConsumer(
      * ADR-0084 §3 v4: best-effort payee-history update. Skipped silently when the signal carries no
      * `targetAccountId` (e.g. an external-rail payment with no internal counterparty account) — same
      * "missing signal degrades gracefully, never breaks the velocity path" contract as the feature
-     * store update below. Falls back to [clock] when `occurredAt` is absent so a history row is still
-     * recorded (unlike the feature store, which requires a business timestamp to stay meaningful).
+     * store update below. [eventTime] is the signal's `occurredAt`, or processing time when it
+     * carries none, so a history row is still recorded (unlike the feature store, which requires a
+     * business timestamp to stay meaningful) — the substitution is counted by the caller (#6044).
      */
     @Suppress("TooGenericExceptionCaught") // DB / reactive layer exceptions have no common base
-    private suspend fun recordPayeeHistory(accountId: UUID, signal: TransactionInitiatedSignal) {
+    private suspend fun recordPayeeHistory(accountId: UUID, signal: TransactionInitiatedSignal, occurredAt: Instant) {
         val payeeIdentifier = signal.targetAccountId?.toString() ?: return
-        val occurredAt = signal.occurredAt ?: Instant.now(clock)
         try {
             payeeHistoryRepo.recordPayment(accountId, payeeIdentifier, signal.aggregateId, occurredAt)
             log.debugf("Payee history updated for account %s payee %s", accountId, payeeIdentifier)

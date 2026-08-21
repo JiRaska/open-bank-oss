@@ -137,19 +137,19 @@ function formatAmount(n: number, currency: string, locale: string) {
 function TabNav({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   const { t } = useLanguage()
   return (
-    <div style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
+    <div role="group" aria-label={t('Rozsah plateb', 'Payment scope')} style={{ display: 'flex', gap: '2px', marginBottom: '24px', borderBottom: '1px solid var(--border)', paddingBottom: 0 }}>
       {TABS.map(tab => {
         const Icon = tab.icon
         const isActive = active === tab.key
         return (
-          <button key={tab.key} onClick={() => onChange(tab.key)}
+          <button key={tab.key} type="button" aria-pressed={isActive} onClick={() => onChange(tab.key)}
             style={{
               display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', fontSize: '13px',
               fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
               border: 'none', borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
               background: 'transparent', cursor: 'pointer', marginBottom: '-1px', transition: 'all 0.15s ease',
             }}>
-            <Icon size={14} />
+            <Icon size={14} aria-hidden="true" />
             {tab.key === 'sct-inst' ? 'SCT Inst' : (t(tab.labelCs, tab.labelEn))}
           </button>
         )
@@ -471,8 +471,15 @@ function PaymentsContent() {
         icon={<Banknote size={18} aria-hidden="true" />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platby', 'Payments')}</span></div>}
         actions={activeTab !== 'sct-inst' ? (
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit platby', 'Refresh payments')}
+          >
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         ) : undefined}
@@ -536,8 +543,15 @@ function PaymentsContent() {
                   style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                     border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
               </div>
-              <button aria-label={t('Obnovit SCT platby', 'Refresh SCT payments')} className="btn btn-secondary btn-sm" onClick={loadSct} disabled={sctLoading}>
-                <RefreshCw size={12} style={{ animation: sctLoading ? 'spin 0.8s linear infinite' : 'none' }} />
+              <button
+                aria-label={t('Obnovit SCT platby', 'Refresh SCT payments')}
+                className="btn btn-secondary btn-sm"
+                type="button"
+                onClick={loadSct}
+                disabled={sctLoading}
+                aria-busy={sctLoading}
+              >
+                <RefreshCw size={12} aria-hidden="true" style={{ animation: sctLoading ? 'spin 0.8s linear infinite' : 'none' }} />
               </button>
             </div>
             {sctLoading && !sctPayments.length ? (

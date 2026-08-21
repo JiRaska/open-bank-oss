@@ -74,9 +74,11 @@ not bundled here (see ADR-0155).
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated transition | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/sepa-payments/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "sepaPayment.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never payment amount, IBAN or other payload content, which stay behind the existing read-role gate (I1 above). Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `PATCH /status` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoint itself; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/sepa-payments/approvals/{id} → Redis (approval:*)`
+**DFD update:** adds `Operator (checker) → GET /api/v1/sepa-payments/approvals → Redis (approval:*)`
+and `Operator (checker) → PATCH /api/v1/sepa-payments/approvals/{id} → Redis (approval:*)`
 alongside the existing `PATCH /status` edge; the maker's retry reuses the existing DFD edge.
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do
@@ -100,7 +102,7 @@ from clearing-simulator (cluster-internal, `ROLE_SERVICE`). New trust boundary:
 |---|---|---|
 | **S**poofing | Rogue caller posts a forged pacs.004 to `/returns` | Endpoint requires `ROLE_SERVICE` (OIDC client-credentials); cluster-internal only (NetworkPolicy); clearing-simulator identity verified by OIDC CC token |
 | **T**ampering | Malformed or XXE-injected pacs.004 XML | `Pacs004Reader` (openbank-libs) configures `XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES = false` and `IS_RESOLVING_ENTITY_REFERENCES = false` before parsing |
-| **R**epudiation | Denial of having processed a return | All `/returns` invocations logged via existing `AuditService` with correlation id, `OrgnlEndToEndId`, reason code, and actor identity |
+| **R**epudiation | Denial of having processed a return | Every `/returns` invocation writes a `sepa.payment.returned` non-repudiation record into `sepa_payment_outbox` **in the same transaction as the `RETURNED` transition** (`SepaPaymentService.handlePaymentReturn` -> `SepaPaymentRepository.updateWithEvidence`), carrying the `OrgnlEndToEndId`, the pacs.004 reason code, the correlation id, whether the ledger reversal actually happened, and the **authenticated** actor — `SecurityContext.actorName`/`actorType`, derived server-side in `SepaPaymentResource`, never read from the pacs.004 body. The outbox dispatcher (`openbank.outbox.dispatch-enabled: true`) publishes it to `openbank.sepa.payment.events`, which openbank-audit-service already consumes into the append-only, hash-chained `audit_entries` store. Proved end to end by `SepaPaymentReturnAuditEvidenceIT` — real HTTP + real Postgres, row read back over an independent JDBC connection (issue #6056; before it, this row credited an `AuditService` present in no source file, and the service had no audit publisher of any kind) |
 | **I**nfo disclosure | Return reason codes (AC04, AM09, etc.) visible to unauthorised parties | Reason codes and return details accessible to `ROLE_OPERATOR`/`ROLE_ADMIN` only; `ROLE_VIEWER` sees payment status (`RETURNED`) but not raw reason code |
 | **D**oS | Replay of the same pacs.004 | `RETURNED` transition is idempotent — a second call with the same `OrgnlEndToEndId` returns 409 (already RETURNED), no double-reversal |
 | **E**oP | Reversal credited to wrong account | `transaction-service /reverse` validates that the transaction being reversed is owned by the payment's `debtorAccountId`; cross-account reversals are rejected with 403 |
@@ -139,6 +141,45 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-08-20** — The `/returns` non-repudiation control now exists (issue #6056). It did not
+  before: the R row of §5a credited an `AuditService` that is present in no source file in this
+  repository, and `openbank-sepa-payment/src/main` contained no audit publisher of any kind. The
+  two things that did happen — an application log line and the payment row's own status transition
+  — are both written by the same code path whose behaviour a repudiation dispute puts in question,
+  so neither could ever be evidence against it.
+  - **What was built**: a `SepaPaymentReturnedEvent` (`sepa.payment.returned`) written into the
+    existing transactional outbox in the SAME transaction as the `RETURNED` transition, so the
+    record and the act commit together or neither does. It carries `OrgnlEndToEndId`, the pacs.004
+    reason code, the correlation id, the measured `reversalPerformed` outcome, and the actor.
+  - **Where the evidence lands**: `openbank.sepa.payment.events` -> openbank-audit-service's
+    `AuditConsumer` -> the append-only, hash-chained `audit_entries` table. **Deliberately not**
+    `com.openbank.libs.audit.AuditEventPublisher`: the only implementation of that interface in
+    this repository is `LoggingAuditEventPublisher`, and a log line is not an evidentiary record.
+    The field names match what `AuditConsumer` actually reads (`eventType`, `actorId`, `actorType`,
+    `correlationId`, `occurredAt`, `sourceService`, `paymentId`), so the row is EVENT-attributed
+    rather than landing on its `"unknown"` sentinels — `source_service` is chain-hashed into
+    `record_hash`, so attribution cannot be corrected afterwards.
+  - **Attribution is server-derived**, from `SecurityContext`, never from the request body. The
+    pacs.004 carries no actor field and none is read from it; a record whose actor is supplied by
+    the party whose action is in dispute is not a control.
+  - **No new trust boundary, no new caller, no API change**: same endpoint, same role gate
+    (`ROLE_API`/`ROLE_ADMIN`), same OPA action, same topic, same request and response bodies. The
+    only new data on the wire is the evidence event itself, on an existing internal topic.
+  - **Risk class**: accountability/evidence (DORA Art. 17 reconstruction). **Rollback**: revert the
+    commit — the return path returns to transitioning with no record, i.e. the state this entry
+    describes as the defect.
+
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a
+  `sepaPayment.transitionStatus` four-eyes decision parked at 202 was discoverable only by
+  whoever had been handed its approval id out of band — the ceremony completed only if the two
+  operators were already talking, and the 24h Redis TTL then expired the request silently
+  otherwise (issue #5679, mirroring sanctions #3472). Added `GET /api/v1/sepa-payments/approvals`
+  (§4a new I row); no new trust boundary crossed — same `RedisApprovalStore`, same role gate
+  shape as the existing decide endpoint, additive-only OpenAPI change (1.6.0 -> 1.7.0, ADR-0048).
+  Verified via `opa eval` that both `sepaPayment.approval.read` (generic `operator-read-any`) and
+  the pre-existing `sepaPayment.approval.decide` (`role_action_matrix` + `operator-sepa-payment-write`)
+  already resolve `allow=true` for `ROLE_OPERATOR` under this service's live policy bundle — no
+  authorization gap, unlike the one #5679's balance-service slice found.
 - **2026-08-17** — Recorded here only because #3931's threat-model-diff gate maps the whole
   `openbank-infra/gitops/components/payments/network-policies.yaml` file to every money-path
   service that lives in this directory, not to the specific block that changed. **No trust

@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { useAuth } from '@/lib/auth/useAuth'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AgentInsightsPanel } from '@/components/agent/AgentInsightsPanel'
@@ -225,6 +226,8 @@ function toAgentFinding(f: DevOpsFinding, t: (cs: string, en: string) => string)
 
 function DevOpsContent() {
   const { t, language } = useLanguage()
+  const { hasPermission } = useAuth()
+  const canDecide = hasPermission('devops:decide')
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const numberLocale = dateLocale
   const [dora, setDora] = useState<DoraData | null>(null)
@@ -234,6 +237,7 @@ function DevOpsContent() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const [deciding, setDeciding] = useState<string | null>(null)
+  const [decisionError, setDecisionError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -266,19 +270,27 @@ function DevOpsContent() {
   // graceful-state rule (no raw HTTP status in the UI).
   const decide = useCallback(async (id: string, action: 'approve' | 'reject') => {
     setDeciding(id)
+    setDecisionError(null)
     try {
-      await fetch('/api/devops/decide', {
+      const res = await fetch('/api/devops/decide', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, action }),
       })
+      if (!res.ok) {
+        setDecisionError(t(
+          'Rozhodnutí se nepodařilo uložit. Pravděpodobně nemáte oprávnění nebo je služba nedostupná.',
+          'The decision could not be saved. You may not have permission or the service is unavailable.',
+        ))
+        return
+      }
       await load()
     } catch {
-      // swallow — the next 60s refresh reconciles state
+      setDecisionError(t('Služba DevOps neodpovídá. Zkuste to prosím znovu.', 'The DevOps service did not respond. Please try again.'))
     } finally {
       setDeciding(null)
     }
-  }, [load])
+  }, [load, t])
 
   useEffect(() => { load() }, [load])
   useEffect(() => {
@@ -336,13 +348,16 @@ function DevOpsContent() {
             </span>
           )}
           <button
+            type="button"
             onClick={load}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit DevOps metriky', 'Refresh DevOps metrics')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
           >
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
@@ -429,11 +444,16 @@ function DevOpsContent() {
             )}
             findings={findings.map(f => toAgentFinding(f, t))}
             emptyMessage={t('Žádné aktivní DevOps nálezy — pipeline v pořádku', 'No active DevOps findings — pipeline healthy')}
-            onApprove={id => decide(id, 'approve')}
-            onReject={id => decide(id, 'reject')}
-            decideLabels={{ approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') }}
-            decidingId={deciding}
+            onApprove={canDecide ? id => decide(id, 'approve') : undefined}
+            onReject={canDecide ? id => decide(id, 'reject') : undefined}
+            decideLabels={canDecide ? { approve: t('Schválit', 'Approve'), reject: t('Odmítnout', 'Reject') } : undefined}
+            decidingId={canDecide ? deciding : null}
           />
+          {decisionError && (
+            <div role="alert" style={{ marginBottom: '20px', padding: '12px 16px', borderRadius: '8px', background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', color: 'var(--danger-text)', fontSize: '12px' }}>
+              {decisionError}
+            </div>
+          )}
 
           {/* Data source guidance */}
           {dora && (!dora.sources.git || !dora.sources.prometheus) && (

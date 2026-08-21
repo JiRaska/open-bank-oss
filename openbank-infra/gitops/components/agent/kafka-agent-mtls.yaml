@@ -46,6 +46,12 @@ spec:
     acls:
       - resource:
           type: topic
+          name: openbank.agent.audit.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.oversight-triggers
           patternType: literal
         operations: [Read, Describe]

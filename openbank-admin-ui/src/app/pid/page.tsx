@@ -198,7 +198,14 @@ export default function PidPage() {
           breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">PID</span></div>}
           actions={<div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-secondary" onClick={load} disabled={loading}>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                onClick={load}
+                disabled={loading}
+                aria-busy={loading}
+                aria-label={t('Obnovit PID záznamy', 'Refresh PID records')}
+              >
                 <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>

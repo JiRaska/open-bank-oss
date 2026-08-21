@@ -142,6 +142,30 @@ out of it (they are path-scoped, not less important — several are live-inciden
   via `fleet-attestation.yml`) — it checks every image *declared* in gitops, incl. initContainers
   and sidecars, so a gap is caught while still latent. Green gate before any Enforce graduation
   (`rules.yaml: provenance.fleet_attestation_gate`).
+- **`gen-network-policies.py` emits INGRESS only, so a new in-cluster edge also needs the CALLER's
+  hand-written EGRESS rule — and the omission is silent in both directions.** Measured 2026-08-20:
+  LiteLLM's Langfuse trace callback died on `ConnectTimeout` to `langfuse.ai-platform.svc:3000`
+  while both pods were 1/1 Running, ArgoCD was Synced/Healthy, the generated
+  `langfuse-ingress-allow-list` correctly admitted the same namespace, and LiteLLM still answered
+  200 to every caller — the only symptom anywhere was `/api/public/traces` returning an empty list.
+  Same namespace is NOT the same as allowed: a pod carrying an egress policy is deny-by-default for
+  everything that policy does not name, and `networkpolicy-litellm-egress.yaml` named DNS, 443 to
+  the internet, and its own Postgres. Isolate it in one command — run a throwaway pod with no
+  egress policy in the same namespace and curl the target (HTTP 200 there + timeout from the
+  policed pod pins it to egress, not to the Service, DNS or the ingress allow-list). Note the
+  throwaway pod needs a `restricted` PodSecurity context or the namespace refuses it.
+- **A ConfigMap a pod parses ONCE at startup needs a pod-roll annotation, or the edit is a no-op
+  against a green ArgoCD.** LiteLLM reads `--config` at boot and the ConfigMap is a plain volume
+  mount, so a new model route reaches the pod's filesystem and the proxy keeps serving the list it
+  booted with: the caller gets `model not found` while ArgoCD reports Synced and Healthy and the
+  in-cluster ConfigMap genuinely contains the route. `litellm.yaml` has carried "BUMP THIS whenever
+  litellm-config.yaml changes" in a comment since #1919; prose is not a control, and three routes
+  were added in one week each depending on someone remembering it. Now enforced by
+  `check-litellm-config-revision.py` (`rules.yaml: litellm_gateway`) — any DIFFERENT annotation
+  value counts, so a revert is not blocked by a monotonicity rule nobody agreed to. Generalize past
+  LiteLLM: any workload that reads its config once (no `--watch`, no SIGHUP handler, no reloader
+  sidecar) has this shape, and the reloader sidecar pattern in the alloy/prometheus components is
+  the alternative fix.
 - **A provenance failure must fail the build that caused it.** `continue-on-error` /
   `|| echo "::warning::"` on a sign/attest step buys a green deploy that produces an
   undeployable image — the damage lands days later on whoever is on call, not on the author.
@@ -308,3 +332,44 @@ out of it (they are path-scoped, not less important — several are live-inciden
   directly.** Only `allow` also applies `hard_denied` / `charter_denied` / `skill_ok` — calling
   `charter_allowed` alone lets a fleet-wide hard-denied tool tier or a charter's own `tools.deny`
   glob silently reach a REST action anyway.
+
+### Prometheus / Loki rules — configured-looking and inert
+
+- **A recording rule's `interval` decides whether its output EXISTS for its consumers, not just
+  how fresh it is.** Prometheus answers an instant query from a 5-minute lookback window, so a
+  group at `interval: 1h` is resolvable for 5 of every 60 minutes — a 1-in-12 duty cycle.
+  `openbank.ai.price-book` ran hourly while `openbank.ai.spend` joined against it every 5m, so 11
+  of every 12 spend evaluations saw no price: `openbank:llm_cost_usd_24h:total` had NO SERIES,
+  `AiFleetDailySpendHigh` (the 25 USD/day ceiling) could not fire, and `AiSpendUnpriced` fired for
+  a model that WAS priced — `unless on (model)` against a stale price series reports everything as
+  unpriced, so the check meant to prove the price book complete was reporting the lookback window
+  instead. Measured at the group's own `lastEvaluation`: 9 series at eval+60s, 0 at eval+600s
+  (#6151). For a `vector(<constant>)` rule the interval is not a cost knob — evaluation is free.
+- **`loki.ruler` is not a chart key; it is `loki.rulerConfig`.** Helm drops unknown keys silently,
+  so a detailed, well-commented ruler block can sit in git while the deployed config has
+  `alertmanager_url` EMPTY and `storage.type: s3` instead of the sidecar's local directory. Three
+  rule ConfigMaps (`falco-runtime`, `endpoint-availability`, `silent-failures`) had never been
+  evaluated — `/prometheus/api/v1/rules` returned `groups: []` — and even a loaded rule would have
+  been delivered nowhere (#6032). Two plausible hypotheses that are NOT the cause, so nobody
+  re-runs them: restarting Loki does not fix it, and the rules volume IS shared with the loki
+  container (the sidecar writes `/rules/fake/*.yaml` and `ls` from either container shows them).
+  **Read `GET /config` on the pod and diff it against the values file** — that is the only probe
+  that distinguishes "configured" from "in effect".
+
+### A gate can run, print a healthy subject count, and have measured nothing
+
+- **A history-dependent gate must state which history it got.** `check-flyway-version-commit-order`
+  needed three attempts, and each intermediate version RAN and returned a confident verdict: first
+  from an empty order map (`origin/main` does not resolve on a PR checkout), then from the wrong
+  history (implicit HEAD is the PR merge commit, so it measured "order including this PR"), then
+  from a truncated one — **the gates shard checks out at `fetch-depth: 1`, and on a shallow repo
+  `git log --diff-filter=A` reports EVERY file as added at the graft point**, so all 355 migrations
+  shared one position, the per-service sort fell through to its version tiebreak, everything looked
+  monotonic and the gate was green. It printed `355 migrations ordered` throughout. Detect
+  shallowness (`git rev-parse --is-shallow-repository`), deepen in place rather than making the
+  whole shard pay `fetch-depth: 0`, pick the LONGEST candidate ref rather than the first that
+  answers, and refuse to report when the history is shorter than the corpus.
+- **Only the both-ways baseline caught all three.** With no violations found, every baselined entry
+  reads as stale, which is the one observable that separates "clean" from "measured nothing". A
+  baseline that can only be checked in the violation direction cannot do this — it is the whole
+  argument for the idiom, and it caught the checker rather than the corpus three times running.

@@ -47,6 +47,35 @@ JAVA_HOME=$(/usr/libexec/java_home -v 25) ./gradlew :openbank-agent-service:test
 
 ## Config gotchas
 
+- **`suspend` on a `@Scheduled` method buys a VERT.X context — which is the fix for reactive Panache
+  and the BUG when your collaborators are blocking.** This service has no reactive datasource
+  (jdbc-postgresql + narayana) and its sweep calls blocking REST clients, so on the event loop each
+  one throws `BlockingNotAllowedException`. Measured on the sandbox 2026-08-21, every scheduled
+  oversight sweep logged `BlockedThreadChecker: blocked for 19s`, `Tool call failed:
+  sanctions_list_pending: BlockingNotAllowedException`, and then the line that matters —
+  `agent policy BLOCK but PDP errored — falling back to ADVISORY`: the OPA query failed for reasons
+  that have nothing to do with OPA, so **enforcement silently downgraded on every sweep** while the
+  run still reported "oversight sweep done" and the liveness heartbeat still recorded success. Wrap
+  the scheduled body in `withContext(Dispatchers.IO)`. Only the scheduled path needs it — HTTP and
+  Kafka triggers already arrive on a worker thread. Note what this means for the fleet rule: "make
+  it a suspend fun" is right for a reactive service and insufficient here; the question is which
+  thread YOUR clients need, not which annotation is fashionable.
+  **A unit test cannot see this** — calling the method directly runs it on a test thread where
+  blocking is allowed, so it passes against the broken code. The only witnesses are a real
+  scheduled run's logs or a `@TestProfile` that re-enables the scheduler with a shrunken cron.
+
+- **A reasoning model spends `max_tokens` on REASONING before it emits any answer, so a low cap
+  returns an EMPTY `content` field — not a short answer.** Measured on `openai/gpt-oss-120b`
+  through the gateway: `max_tokens=40` gives `content=''` with `finish_reason=length` (the whole
+  budget went to reasoning), `128` truncates mid-sentence, `512` finishes normally in 189 tokens.
+  Both paid models in the picker are reasoning models, and the loop's `MAX_OUTPUT_TOKENS` is 512,
+  so this works today — but lowering that cap to save tokens turns replies into blanks, which the
+  dock renders as "(no reply)" and reads as a broken assistant. The same trap makes model
+  EVALUATION lie: `zai-org/GLM-5.2` and `moonshotai/Kimi-K3` were first measured at 120 tokens and
+  looked broken (empty content; Kimi's chain of thought where the answer should be, which is just a
+  truncated reasoning-prefixed stream). At 512 both answer cleanly. Measure a reasoning model at
+  the cap the caller actually sends, or you are measuring the cap.
+
 - `AGENT_MODEL_API_KEY` (or the legacy `GROQ_API_KEY` fallback) must be set for the
   `llama-3.3-70b-versatile` model; omit for mock-echo. Deployed, that key is the LiteLLM
   *virtual* key and `AGENT_MODEL_ENDPOINT` points at the in-cluster gateway — the provider

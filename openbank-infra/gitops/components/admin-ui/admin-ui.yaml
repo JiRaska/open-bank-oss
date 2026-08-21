@@ -47,7 +47,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: admin-ui
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-73b584e97
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-admin-ui:sandbox-ce55de694
           ports:
             - name: http
               containerPort: 3000
@@ -78,6 +78,26 @@ spec:
                 secretKeyRef:
                   name: admin-ui-oidc
                   key: nextauth-secret
+            # BFF tracing (issue #5735 follow-up). Until this, admin-ui had ZERO Prometheus
+            # scrape targets and ZERO spans, so an operator hitting a failure on a money-path
+            # route like /api/approvals/pending produced a backend trace with nothing linking
+            # it to the request the human made — while all 39 backend services were traced.
+            #
+            # Tempo directly on 4318, not the otel-collector: the backends already export to
+            # Tempo (QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT: tempo:4317) and it is Tempo's
+            # metrics-generator that produces traces_spanmetrics_*, which is how admin-ui gets
+            # RED metrics out of this without a /metrics endpoint or a second change. 4318 is
+            # the HTTP port — the SDK here uses the OTLP HTTP/protobuf exporter and appends
+            # /v1/traces itself.
+            #
+            # Setting this is what TURNS TRACING ON: src/lib/telemetry/tracing.ts starts no SDK
+            # at all without it, so dev and test export nothing (same gating shape as the
+            # GlitchTip DSN, ADR-0075 inv. 2). This is server-side only; ADR-0088 D4's rejection
+            # of browser RUM for this console is untouched and still stands.
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://tempo.observability.svc:4318
+            - name: OTEL_SERVICE_NAME
+              value: openbank-admin-ui
             # ADR-0051: domain namespaces the discovery route enumerates. Adding a
             # new domain namespace requires THREE steps (new namespace checklist):
             #   1. Add it here. 2. Add NS_GROUP entry in src/lib/discovery.ts.
