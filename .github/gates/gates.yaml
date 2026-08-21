@@ -1750,12 +1750,33 @@ gates:
   # application.yaml is PARSED, not grepped — a comment naming a property must not count as
   # supplying it, or a stale comment marks a service that cannot boot as configured.
   #
-  # ENFORCED: 38 required declarations, 0 findings. Proven by deleting one real key and watching it
-  # name the exact file, property and missing env var.
+  # Extended for #5946 with the two blind spots that let #5844 merge red and sit on main for days
+  # while every check was green:
+  #   * `defaultValue = ""` is NOT a default. Measured — SRCFG00014, "required but it could not be
+  #     found in any config source", thrown by ConfigRecorder.validateConfigProperties at STARTUP.
+  #     The original check skipped any declaration containing the token `defaultValue`.
+  #   * A property DEFINED as empty (`key: ${VAR:}`) into a non-Optional target is SRCFG00040. The
+  #     original check counted a key present in application.yaml as "supplied".
+  #     #5844 had BOTH, so both escape hatches fired on the one shape they most needed to catch.
+  #   * CONFIG_RE required `val`/`var`, so a @Produces METHOD PARAMETER — #5844's exact shape — was
+  #     invisible to it. 487 -> 515 declarations matched after the fix.
+  #
+  # ENFORCED: 46 required declarations, 481 subjects, 0 findings. Negative control (#5946): restore
+  # the pre-#5944 AnchorSignerProducer and it exits 1 naming the file, line, property and the
+  # `${AUDIT_ANCHOR_KMS_KEY_ID:}` value; restore the fix and it exits 0. Neither existing
+  # @ConfigProperty gate goes red against that revert — both were re-run against it to check.
   - id: configproperty-supplied
-    name: "a required @ConfigProperty has a value (SRCFG00040, enforced)"
+    name: "a required @ConfigProperty has a value (SRCFG00014/SRCFG00040, enforced)"
     group: kotlin
     mode: enforced
+    rationale: >-
+      A @ConfigProperty with no resolvable value does not warn, it stops the service booting, and
+      any require()/check() written below it is dead code that never runs. #5844 shipped that shape
+      into openbank-audit-service and left main red for days: path-scoped CI never rebuilt the
+      untouched module, and a module that cannot boot reports its tests as SKIPPED, which reads as
+      a pass. Documented in four places and re-broken anyway — prose is not a control.
+    review_after: '2027-02-21'
+    min_subjects: 240
     selftest: |
       python3 .github/scripts/check-configproperty-supplied.py --self-test
     run: |
