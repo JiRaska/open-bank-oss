@@ -17,6 +17,7 @@ import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralNotFoundException
 import com.openbank.referral.domain.ReferralProgram
+import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.ReferralValidationException
 import com.openbank.referral.domain.RewardStatus
@@ -190,7 +191,7 @@ class ReferralService(
             rewardedAt = null,
         )
         val created = rewards.create(reward)
-        events.publish(
+        publishAudited(
             ReferralEvent.Qualified(
                 eventId = Ids.randomId(),
                 occurredAt = now,
@@ -200,8 +201,11 @@ class ReferralService(
                 refereePartyId = invite.refereePartyId,
                 qualificationEventId = eventId,
             ),
+            created.id,
+            actor,
+            now,
         )
-        events.publish(
+        publishAudited(
             ReferralEvent.RewardRequested(
                 eventId = Ids.randomId(),
                 occurredAt = now,
@@ -211,6 +215,9 @@ class ReferralService(
                 amount = created.amount,
                 currency = created.currency,
             ),
+            created.id,
+            actor,
+            now,
         )
         audit.append("REWARD_REQUESTED", created.id, actor, created.rewardReference, now)
         return created
@@ -226,7 +233,7 @@ class ReferralService(
             LedgerOutcome.REVERSED -> RewardStatus.REVERSED
         }
         val updated = rewards.outcome(reference, next.name, now)
-        events.publish(
+        publishAudited(
             ReferralEvent.RewardOutcome(
                 eventId = Ids.randomId(),
                 occurredAt = now,
@@ -235,9 +242,30 @@ class ReferralService(
                 rewardReference = reference,
                 outcome = outcome,
             ),
+            updated.id,
+            actor,
+            now,
         )
         audit.append("LEDGER_${outcome.name}", updated.id, actor, reference, now)
         return updated
+    }
+
+    /**
+     * Publishes [event] and records the transport outcome in the audit trail when nothing left the
+     * process. An undelivered money-path event must be visible in the evidentiary record, not only
+     * in a log line — the caller cannot otherwise tell a dropped reward from a delivered one.
+     */
+    private suspend fun publishAudited(event: ReferralEvent, aggregateId: UUID, actor: String, at: Instant) {
+        val outcome = events.publish(event)
+        if (outcome != ReferralPublishOutcome.HANDED_TO_TRANSPORT) {
+            audit.append(
+                "EVENT_NOT_PUBLISHED",
+                aggregateId,
+                actor,
+                "type=${event.eventType} eventId=${event.eventId} outcome=${outcome.name}",
+                at,
+            )
+        }
     }
 
     private fun randomToken(): String {

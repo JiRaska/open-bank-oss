@@ -3,14 +3,12 @@ package com.openbank.referral.infrastructure.persistence
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.referral.application.ReferralService
 import com.openbank.referral.application.port.out.ReferralAuditRepository
-import com.openbank.referral.application.port.out.ReferralEventPublisher
 import com.openbank.referral.application.port.out.ReferralInviteRepository
 import com.openbank.referral.application.port.out.ReferralProgramRepository
 import com.openbank.referral.application.port.out.ReferralRewardRepository
 import com.openbank.referral.domain.InviteStatus
 import com.openbank.referral.domain.ProgramStatus
 import com.openbank.referral.domain.ReferralConflictException
-import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralProgram
 import com.openbank.referral.domain.ReferralReward
@@ -247,11 +245,5 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
                 },
             )
         }.awaitSuspending()
-    }
-}
-
-@ApplicationScoped class ContractReferralEventPublisher : ReferralEventPublisher {
-    override suspend fun publish(event: ReferralEvent) {
-        // Transport is deliberately contract-only until the event-schema PR.
     }
 }

@@ -6,6 +6,7 @@ package com.openbank.referral.application.port.out
 import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralProgram
+import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import java.util.UUID
 
@@ -30,7 +31,12 @@ interface ReferralRewardRepository {
 }
 
 interface ReferralEventPublisher {
-    suspend fun publish(event: ReferralEvent)
+    /**
+     * Hands [event] to the transport and reports what actually happened. Callers must branch on
+     * the returned [ReferralPublishOutcome] — there is deliberately no boolean, so an unwired
+     * adapter cannot be mistaken for a delivering one.
+     */
+    suspend fun publish(event: ReferralEvent): ReferralPublishOutcome
 }
 
 interface ReferralAuditRepository {
