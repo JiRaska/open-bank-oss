@@ -110,10 +110,9 @@ class CustomerQuoteResource(
      * A suppressed quote is a 409 with the reason code and NO price. Not a 200 with nulls: a body
      * shaped like a quote, holding no numbers, is the kind of thing a client renders as "0".
      */
-    private fun suppressed(decision: CreditOfferDecision.Suppressed): Response =
-        Response.status(HTTP_CONFLICT)
-            .entity(mapOf("error" to "quote unavailable", "reasonCode" to decision.code.name))
-            .build()
+    private fun suppressed(decision: CreditOfferDecision.Suppressed): Response = Response.status(HTTP_CONFLICT)
+        .entity(mapOf("error" to "quote unavailable", "reasonCode" to decision.code.name))
+        .build()
 
     @Suppress("ReturnCount")
     private fun refuse(partyHeader: String?, request: CustomerQuoteRequest): Response? {
@@ -124,7 +123,11 @@ class CustomerQuoteResource(
         }
         val partyId = partyHeader?.let { runCatching { UUID.fromString(it) }.getOrNull() }
             ?: return error(HTTP_BAD_REQUEST, "${CustomerIntakeResource.PARTY_HEADER} is missing or not a UUID")
-        if (partyId == ZERO_UUID) return error(HTTP_BAD_REQUEST, "${CustomerIntakeResource.PARTY_HEADER} is the nil UUID")
+        if (partyId ==
+            ZERO_UUID
+        ) {
+            return error(HTTP_BAD_REQUEST, "${CustomerIntakeResource.PARTY_HEADER} is the nil UUID")
+        }
         if (config.nominalAnnualRate.isEmpty) {
             return error(HTTP_FORBIDDEN, "self-service product has no configured price")
         }
