@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Lending Service API
-  version: 1.13.0
+  version: 1.14.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -85,6 +85,47 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '422':
           description: Refused by the origination guard (e.g. no active compliance pack)
+    get:
+      tags: [Lending]
+      operationId: listCustomerCreditJourneys
+      summary: The caller's own credit applications as customer-readable journeys (customer-edge only)
+      description: >-
+        ADR-0269 rule 3. Scoped to the party in X-Customer-Party-Id; carries no rate, instalment or
+        APRC — that is ADR-0269 rule 4 and arrives separately. Only the configured customer-edge principal may
+        call it.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The party's credit applications (possibly empty)
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/lending/intake/applications/{id}:
+    get:
+      tags: [Lending]
+      operationId: getCustomerCreditJourney
+      summary: One of the caller's own credit applications as a customer-readable journey
+      description: >-
+        A journey belonging to another party answers 404, not 403 — a not-found and a not-yours must
+        be indistinguishable, or the id space leaks.
+      parameters:
+        - $ref: '#/components/parameters/IdPath'
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: The credit application journey }
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404': { description: No such application for this caller }
+
   /api/v1/lending/applications/{id}:
     get:
       tags: [Lending]
