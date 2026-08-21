@@ -17,7 +17,7 @@
 //
 // Async is a first-class concept here (the whole reason this replaced the
 // hardcoded page): the real fleet is heavily event-driven (transactional outbox
-// + Kafka, ADR-0050/0073). A flow with `kind: async` is an event/outbox edge
+// + Kafka, ADR-0003/0050). A flow with `kind: async` is an event/outbox edge
 // (dashed, carries an optional Kafka `topic`); a step may `emits`/`consumes`
 // domain-event topics; a node of type `event` is a message catch/throw point.
 // ---------------------------------------------------------------------------

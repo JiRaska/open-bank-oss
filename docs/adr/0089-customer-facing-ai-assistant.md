@@ -194,7 +194,13 @@ gate rollout.
 All core decisions are implemented:
 
 - **D1** — SSE streaming endpoint deployed behind customer edge; LLM never called from device (fix #1690).
-- **D2** — Proposal sentinel emitted over SSE stream (PR #1709); HITL action card + SCA wiring in place.
+- **D2** — Proposal sentinel emitted over SSE stream (PR #1709): the app renders the non-AI-controlled
+  action card and routes the validated fields into the existing customer-edge payment + SCA
+  (dynamic-linking) flow. That is the live route. **Track A — the alternative server-side exchange
+  (`ProposalToken` + `POST /copilot/actions/{tokenId}/confirm`) — is NOT built** (#5900): the token
+  type, its two stores and the endpoint exist, but no production code issues a token and nothing
+  downstream executes a confirm, so that endpoint can only answer 404. Deferred deliberately; the
+  live D2 guarantee rests on the sentinel + edge-SCA route, not on Track A.
 - **D3** — OPA sidecar deployed (PR #1666, `copilot-opa-bundle.yaml`); schema validation before every tool call.
 - **D4** — Financial figures served from tool results only; RAG grounding over ADR-0019 corpus.
 - **D5** — Audience-scoped on-behalf-of token exchange via customer edge.
