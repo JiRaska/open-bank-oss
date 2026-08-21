@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.4...admin-ui-v0.183.5) (2026-08-21)
+
+
+### Performance
+
+* **admin-ui:** parallelize finops agents ([#6143](https://github.com/JiRaska/open-bank-oss/issues/6143)) ([caa15fa](https://github.com/JiRaska/open-bank-oss/commit/caa15faa3334132f15c89fb0c1bbb82baaebf2bf))
+
 ## [0.183.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.3...admin-ui-v0.183.4) (2026-08-21)
 
 
