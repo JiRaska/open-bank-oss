@@ -6,6 +6,8 @@ package com.openbank.lending.application.usecase
 
 import com.openbank.lending.application.port.out.BorrowerAccountLookupPort
 import com.openbank.lending.application.port.out.BorrowerCreditPort
+import com.openbank.lending.application.port.out.CatalogLoanProfile
+import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
 import com.openbank.lending.application.port.out.CollateralValuationPort
 import com.openbank.lending.application.port.out.InstallmentRepository
@@ -19,6 +21,7 @@ import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
 import com.openbank.lending.application.port.out.StarterCreditPolicy
+import com.openbank.lending.domain.model.CatalogLoanSnapshot
 import com.openbank.lending.domain.model.Collateral
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -82,6 +85,7 @@ class LendingServiceTest {
     private val provisioning = mockk<ProvisioningRepository>()
     private val borrowerAccounts = mockk<BorrowerAccountLookupPort>()
     private val borrowerCredit = mockk<BorrowerCreditPort>()
+    private val catalogLoanProfiles = mockk<CatalogLoanProfilePort>()
 
     private val service = LendingService(
         applications,
@@ -105,6 +109,7 @@ class LendingServiceTest {
         ),
         borrowerAccounts,
         borrowerCredit,
+        catalogLoanProfiles,
     )
 
     private val partyId = UUID.fromString("11111111-1111-1111-1111-111111111111")
@@ -328,6 +333,28 @@ class LendingServiceTest {
         assertThat(result.proposedBy).isEqualTo("alice")
         assertThat(result.decidedBy).isNull()
         verify(exactly = 1) { applications.save(any()) }
+    }
+
+    @Test
+    fun `catalog offering overrides client price and persists immutable snapshot`() {
+        val slot: CapturingSlot<LoanApplication> = slot()
+        val offeringId = UUID.fromString("10000000-0000-0000-0000-000000000012")
+        val snapshot = CatalogLoanSnapshot(
+            offeringId,
+            UUID.fromString("20000000-0000-0000-0000-000000000012"),
+            "b".repeat(64),
+            2,
+        )
+        every { catalogLoanProfiles.resolvePublished(offeringId) } returns Uni.createFrom().item(
+            CatalogLoanProfile(snapshot, "EUR", 12, AmortizationMethod.ANNUITY, BigDecimal("0.0699"), null, null),
+        )
+        every { applications.save(capture(slot)) } answers { Uni.createFrom().item(slot.captured) }
+
+        val result = service.apply(sampleRequest().copy(catalogOfferingId = offeringId), "alice").await().indefinitely()
+
+        assertThat(result.nominalAnnualRate).isEqualByComparingTo("0.0699")
+        assertThat(result.catalogSnapshot).isEqualTo(snapshot)
+        verify(exactly = 1) { catalogLoanProfiles.resolvePublished(offeringId) }
     }
 
     @Test

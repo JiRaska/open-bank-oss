@@ -9,6 +9,7 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import com.openbank.sepa.application.port.out.SepaPaymentEventPublisher
+import com.openbank.sepa.domain.event.SepaPaymentReturnedEvent
 import com.openbank.sepa.domain.event.toCreatedEvent
 import com.openbank.sepa.domain.event.toStatusChangedEvent
 import com.openbank.sepa.domain.model.SepaPayment
@@ -32,6 +33,27 @@ class KafkaSepaPaymentEventPublisher(
 
     override fun statusChangedPayload(previous: SepaPayment, current: SepaPayment): String =
         objectMapper.writeValueAsString(current.toStatusChangedEvent(previous.status, java.time.Clock.systemUTC()))
+
+    override fun returnEvidencePayload(
+        payment: SepaPayment,
+        originalEndToEndId: String,
+        returnReasonCode: String?,
+        actorId: String,
+        actorType: String,
+        correlationId: String?,
+        reversalPerformed: Boolean,
+    ): String = objectMapper.writeValueAsString(
+        SepaPaymentReturnedEvent(
+            paymentId = payment.id,
+            originalEndToEndId = originalEndToEndId,
+            returnReasonCode = returnReasonCode,
+            actorId = actorId,
+            actorType = actorType,
+            correlationId = correlationId,
+            reversalPerformed = reversalPerformed,
+            occurredAt = java.time.Instant.now(java.time.Clock.systemUTC()),
+        ),
+    )
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()

@@ -154,7 +154,7 @@ const NAMESPACES: NS[] = [
 
 function StatusDot({ status }: { status: Status }) {
   const m = STATUS_META[status]
-  return <m.Icon size={13} style={{ color: m.color, flexShrink: 0 }} />
+  return <m.Icon aria-hidden="true" size={13} style={{ color: m.color, flexShrink: 0 }} />
 }
 
 type CloudNodeBoxProps = { n: Node; selectedId: string | null; liveStatus: Record<string, InfraStatusResult> | null; t: (cs: string, en: string) => string; onSelect: (node: Node) => void }
@@ -165,7 +165,7 @@ function CloudNodeBox({ n, selectedId, liveStatus, t, onSelect }: CloudNodeBoxPr
   const probeId = INFRA_PROBE_MAP[n.id]
   const probe = probeId && liveStatus ? liveStatus[probeId] : null
   const pm = probe ? PROBE_META[probe.status] : null
-  return <button onClick={() => onSelect(n)} title={t(...n.desc)} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
+  return <button type="button" onClick={() => onSelect(n)} title={t(...n.desc)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px ${m.color}55` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
     <StatusDot status={n.status} />
     {t(...n.name)}
     {pm && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px', padding: '1px 5px', borderRadius: '10px', background: pm.bg, border: `1px solid ${pm.color}44`, fontSize: '10px', fontWeight: 700, color: pm.color }}><pm.Icon size={9} aria-hidden="true" />{pm.label}</span>}
@@ -235,20 +235,23 @@ export default function CloudArchitecturePage() {
         })}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', fontSize: '11px', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <Info size={13} />
+            <Info aria-hidden="true" size={13} />
             {t('Diagram = strategie (ADR-0027); badge', 'Diagram = strategy (ADR-0027); badge')}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: '#ecfdf5', border: '1px solid #6ee7b744', fontSize: '10px', fontWeight: 700, color: '#059669' }}>
-              <Wifi size={9} />UP
+              <Wifi aria-hidden="true" size={9} />UP
             </span>
             {t('= živý probe z EKS openbank-sandbox.', '= live probe from EKS openbank-sandbox.')}
           </span>
           {checkedAt && <span>{t('Naposledy:', 'Last:')} {checkedAt}</span>}
           <button
+            type="button"
             onClick={() => void fetchStatus()}
             disabled={refreshing}
+            aria-busy={refreshing}
+            aria-label={t('Obnovit stav infrastruktury', 'Refresh infrastructure status')}
             style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'none', border: '1px solid var(--border)', borderRadius: '6px', padding: '3px 8px', cursor: refreshing ? 'not-allowed' : 'pointer', color: 'var(--text-secondary)', fontSize: '11px', fontFamily: 'inherit', opacity: refreshing ? 0.6 : 1 }}
           >
-            <RefreshCw size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
+            <RefreshCw aria-hidden="true" size={11} style={{ animation: refreshing ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>
@@ -298,14 +301,14 @@ export default function CloudArchitecturePage() {
         </div>
 
         {selected && (
-          <div className="card" style={{ padding: '18px', position: 'sticky', top: '16px' }}>
+          <div id="cloud-architecture-selection" className="card" role="region" aria-label={t('Detail architektonického prvku', 'Architecture element details')} style={{ padding: '18px', position: 'sticky', top: '16px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '10px' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <StatusDot status={selected.status} />
                 <span style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>{t(...selected.name)}</span>
               </div>
-              <button onClick={() => setSelected(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}>
-                <X size={16} />
+              <button type="button" onClick={() => setSelected(null)} aria-label={t('Zavřít detail architektury', 'Close architecture details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-secondary)', padding: 0 }}>
+                <X aria-hidden="true" size={16} />
               </button>
             </div>
             <span style={{

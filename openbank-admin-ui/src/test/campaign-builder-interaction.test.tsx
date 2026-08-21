@@ -17,6 +17,12 @@ import { render, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import NewCampaignPage from '@/app/campaigns/new/page'
 
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
+  signIn: vi.fn(),
+  SessionProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
 let searchParams = ''
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),

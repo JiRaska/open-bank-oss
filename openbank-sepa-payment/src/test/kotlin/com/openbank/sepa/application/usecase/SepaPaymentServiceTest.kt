@@ -23,6 +23,8 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.slot
+import io.mockk.verify
 import io.temporal.client.WorkflowClient
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
@@ -70,8 +72,12 @@ class SepaPaymentServiceTest {
 
         coEvery { paymentRepository.save(any(), any()) } answers { firstArg() }
         coEvery { paymentRepository.update(any(), any()) } answers { firstArg() }
+        coEvery { paymentRepository.updateWithEvidence(any(), any(), any()) } answers { firstArg() }
         every { eventPublisher.paymentCreatedPayload(any()) } returns "{\"event\":\"created\"}"
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
+        every {
+            eventPublisher.returnEvidencePayload(any(), any(), any(), any(), any(), any(), any())
+        } returns "{\"event\":\"returned\"}"
     }
 
     @Test
@@ -210,6 +216,17 @@ class SepaPaymentServiceTest {
 
     private val pacs004Builder = Pacs004Builder()
 
+    /**
+     * The actor/correlation triple the REST adapter derives server-side (issue #6056). Written once
+     * here so a test cannot accidentally assert against an actor a caller could have chosen.
+     */
+    private fun returnCommand(xml: String) = HandlePaymentReturnCommand(
+        pacs004Xml = xml,
+        actorId = "service-account-openbank-services",
+        actorType = "ROLE_API",
+        correlationId = "corr-6056",
+    )
+
     private fun pacs004Xml(endToEndId: String, reasonCode: String? = "AC04"): String = pacs004Builder.build(
         PaymentReturn(
             messageId = "MSG-001",
@@ -229,10 +246,60 @@ class SepaPaymentServiceTest {
         val existing = payment(status = SepaPaymentStatus.PROCESSING)
         coEvery { paymentRepository.findByEndToEndId(existing.endToEndId) } returns existing
 
-        val result = service.handlePaymentReturn(HandlePaymentReturnCommand(pacs004Xml(existing.endToEndId)))
+        val result = service.handlePaymentReturn(returnCommand(pacs004Xml(existing.endToEndId)))
 
         assertThat(result.status).isEqualTo(SepaPaymentStatus.RETURNED)
-        coVerify { paymentRepository.update(match { it.status == SepaPaymentStatus.RETURNED }, any()) }
+        // The evidence-carrying write path, not the plain one — a return that transitions without
+        // its non-repudiation record is the defect this fixes (issue #6056).
+        coVerify {
+            paymentRepository.updateWithEvidence(
+                match { it.status == SepaPaymentStatus.RETURNED },
+                any(),
+                any(),
+            )
+        }
+        coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
+    }
+
+    @Test
+    fun `handlePaymentReturn writes the evidence outbox message in the same call as the transition`(): Unit =
+        runBlocking {
+            val existing = payment(status = SepaPaymentStatus.PROCESSING)
+            coEvery { paymentRepository.findByEndToEndId(existing.endToEndId) } returns existing
+            val evidence = slot<SepaPaymentOutboxMessage>()
+            val statusMessage = slot<SepaPaymentOutboxMessage>()
+            coEvery {
+                paymentRepository.updateWithEvidence(any(), capture(statusMessage), capture(evidence))
+            } answers { firstArg() }
+
+            service.handlePaymentReturn(returnCommand(pacs004Xml(existing.endToEndId)))
+
+            assertThat(evidence.captured.eventType).isEqualTo("sepa.payment.returned")
+            assertThat(evidence.captured.aggregateId).isEqualTo(existing.id)
+            assertThat(statusMessage.captured.eventType).isEqualTo("sepa.payment.status-changed")
+        }
+
+    @Test
+    fun `handlePaymentReturn takes the actor from the command, never from the pacs004 body`(): Unit = runBlocking {
+        val existing = payment(status = SepaPaymentStatus.PROCESSING)
+        coEvery { paymentRepository.findByEndToEndId(existing.endToEndId) } returns existing
+
+        service.handlePaymentReturn(returnCommand(pacs004Xml(existing.endToEndId, reasonCode = "AM09")))
+
+        verify {
+            eventPublisher.returnEvidencePayload(
+                payment = any(),
+                originalEndToEndId = existing.endToEndId,
+                returnReasonCode = "AM09",
+                actorId = "service-account-openbank-services",
+                actorType = "ROLE_API",
+                correlationId = "corr-6056",
+                // No transactionId on the seeded payment, so no reversal was performed. The record
+                // must say so: an evidence row claiming a reversal that did not happen is worse
+                // than none at all.
+                reversalPerformed = false,
+            )
+        }
     }
 
     @Test
@@ -240,7 +307,7 @@ class SepaPaymentServiceTest {
         val existing = payment(status = SepaPaymentStatus.RETURNED)
         coEvery { paymentRepository.findByEndToEndId(existing.endToEndId) } returns existing
 
-        val result = service.handlePaymentReturn(HandlePaymentReturnCommand(pacs004Xml(existing.endToEndId)))
+        val result = service.handlePaymentReturn(returnCommand(pacs004Xml(existing.endToEndId)))
 
         assertThat(result.status).isEqualTo(SepaPaymentStatus.RETURNED)
         coVerify(exactly = 0) { paymentRepository.update(any(), any()) }
@@ -249,7 +316,7 @@ class SepaPaymentServiceTest {
     @Test
     fun `handlePaymentReturn throws for invalid XML`() {
         assertThatThrownBy {
-            runBlocking { service.handlePaymentReturn(HandlePaymentReturnCommand("not-xml")) }
+            runBlocking { service.handlePaymentReturn(returnCommand("not-xml")) }
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Invalid pacs.004")
     }
@@ -261,7 +328,7 @@ class SepaPaymentServiceTest {
         val xml = pacs004Xml(unknownE2eId)
 
         assertThatThrownBy {
-            runBlocking { service.handlePaymentReturn(HandlePaymentReturnCommand(xml)) }
+            runBlocking { service.handlePaymentReturn(returnCommand(xml)) }
         }.isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("No payment found for endToEndId")
     }

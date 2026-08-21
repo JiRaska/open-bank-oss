@@ -20,7 +20,7 @@ info:
 
     Cells are always fully rendered: a value the platform cannot honestly derive is an explicit
     flagged zero (`isDataGap`), never an omitted row, so a regulatory return never has a silent gap.
-  version: 1.0.0
+  version: 1.2.0
 tags:
   - name: FINREP
   - name: COREP
@@ -127,9 +127,10 @@ components:
       type: object
       description: >-
         One rendered FINREP template. F01.01 populates rows r010 (total assets), r380 (total
-        liabilities) and r490 (derived equity); F02.00 populates r010 (total income), r030 (total
-        expense) and r450 (net profit).
-      required: [templateId, period, cells, isBalanced]
+        liabilities) and r490 (total equity); F02.00 populates r010 (total income), r030 (total
+        expense) and r450 (net profit). All rows are reported as positive magnitudes in their
+        natural reporting sign, not in the ledger's debit-minus-credit convention.
+      required: [templateId, period, cells, isBalanced, balanceVerdict]
       properties:
         templateId: { type: string, example: F01.01 }
         period:
@@ -142,8 +143,32 @@ components:
         isBalanced:
           type: boolean
           description: >-
-            Whether the template's internal accounting identity holds. Serialized as `isBalanced`,
-            not `balanced` — see the note at the top of this file.
+            Whether the double-entry identity of the trial balance this template was rendered from
+            holds: the sum of every GL line's debit-minus-credit net is zero, evaluated per
+            currency and required to hold for all of them. An empty trial balance holds trivially
+            — that is an under-reporting condition, reported separately, not a balance failure.
+            Serialized as `isBalanced`, not `balanced` — see the note at the top of this file.
+
+            Historical note (issue #5987): up to API version 1.0.0 both producers passed a
+            hardcoded `true` and F01.01 derived equity as `assets - liabilities`, so the value was
+            a constant and no consumer could ever observe `false`. Do not read a `true` served by
+            an older deployment as evidence that anything was checked.
+
+            Since API version 1.2.0 (issue #6011) `true` additionally requires that
+            openbank-ledger-service's OWN published `balanced` verdict for the same frozen trial
+            balance agrees — it is exactly `balanceVerdict == AGREED_BALANCED`. Requiring both is
+            what makes a truncated response visible: lines lost in transport whose survivors happen
+            to still sum to zero satisfy this service's recomputation on their own.
+        balanceVerdict:
+          type: string
+          enum: [AGREED_BALANCED, AGREED_IMBALANCED, SOURCES_DISAGREE, LEDGER_FLAG_ABSENT]
+          description: >-
+            Which of the two independent balance verdicts objected (issue #6011). `AGREED_BALANCED`
+            and `AGREED_IMBALANCED` are the two sources agreeing; `SOURCES_DISAGREE` means the lines
+            this service evaluated are not the lines the ledger evaluated (a truncated, filtered or
+            paginated response — an evidence defect, not an accounting one); `LEDGER_FLAG_ABSENT`
+            means the ledger response carried no verdict at all, which is a contract change rather
+            than a statement about the books, and is kept distinct from a verdict of `false`.
 
     CorepCell:
       type: object

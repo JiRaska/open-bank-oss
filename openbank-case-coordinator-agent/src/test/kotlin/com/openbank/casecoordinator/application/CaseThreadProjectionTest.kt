@@ -57,6 +57,7 @@ class CaseThreadProjectionTest {
         val proposal = ProposalEventRow(
             proposalId = "prop-1",
             proposalType = "case-synthesis",
+            status = "SENT",
             emittedAtEpochMs = T0 + 2 * LATER_MS,
         )
 
@@ -68,6 +69,22 @@ class CaseThreadProjectionTest {
             ThreadEntryType.PROPOSAL_EMITTED,
         )
         assertThat(thread.entries[2].proposalId).isEqualTo("prop-1")
+    }
+
+    @Test
+    fun `a shadow terminal result is not projected as a HITL proposal`() {
+        val shadow = ProposalEventRow(
+            proposalId = "shadow-1",
+            proposalType = "case-synthesis",
+            status = "SHADOW",
+            emittedAtEpochMs = T0 + LATER_MS,
+        )
+
+        val thread = CaseThreadProjection.project(caseRow, emptyList(), listOf(shadow))
+
+        val entry = thread.entries.single { it.type == ThreadEntryType.SHADOW_RECORDED }
+        assertThat(entry.shadow).isTrue()
+        assertThat(thread.entries.map { it.type }).doesNotContain(ThreadEntryType.PROPOSAL_EMITTED)
     }
 
     @Test

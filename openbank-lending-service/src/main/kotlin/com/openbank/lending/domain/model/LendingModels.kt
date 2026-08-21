@@ -19,6 +19,14 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
+/** Immutable catalog evidence used to price and constrain an originated loan. */
+data class CatalogLoanSnapshot(
+    val offeringId: UUID,
+    val revisionId: UUID,
+    val contentHash: String,
+    val schemaVersion: Int,
+)
+
 /** Servicing and termination lifecycle of a booked loan (ADR-0028, ADR-0215 D1). */
 enum class LoanStatus {
     ACTIVE,
@@ -133,6 +141,7 @@ data class LoanApplication(
     val policyVersions: String? = null,
     val decisionInputHash: String? = null,
     val decidedEngineAt: OffsetDateTime? = null,
+    val catalogSnapshot: CatalogLoanSnapshot? = null,
 )
 
 /** A live loan booked from an approved, disbursed application. */
@@ -225,6 +234,7 @@ data class LoanApplicationRequest(
     val ageYears: Int? = null,
     val residency: String? = null,
     val employmentTenureMonths: Int? = null,
+    val catalogOfferingId: UUID? = null,
 )
 
 /**

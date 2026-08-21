@@ -144,6 +144,7 @@ pact-provider = { module = "au.com.dius.pact.provider:junit5", version.ref = "pa
 # service build.gradle.kts by this ADR — only openbank-libs-runtime compiles against it
 # (compileOnly, see its build.gradle.kts comment); a consuming service opts in itself.
 aws-sdk-s3 = { module = "software.amazon.awssdk:s3", version.ref = "aws-sdk" }
+aws-sdk-kms = { module = "software.amazon.awssdk:kms", version.ref = "aws-sdk" }
 
 # Logic-less HTML template engine (ADR-0162 D2) — openbank-document-service only.
 handlebars = { module = "com.github.jknack:handlebars", version.ref = "handlebars" }

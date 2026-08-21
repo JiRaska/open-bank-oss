@@ -88,7 +88,7 @@ export function Header({ mobileNavOpen, onMenuToggle }: { mobileNavOpen?: boolea
     .find(r => roles.includes(r))
   const roleInfo = primaryRole ? ROLE_LABELS[primaryRole] : null
   const canReadDocs = hasPermission(roles, 'docs:view')
-  const canViewApprovals = hasPermission(roles, 'system:view')
+  const canViewApprovals = hasPermission(roles, 'approvals:view')
   const initials = user?.name
     ? user.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
     : user?.email?.[0]?.toUpperCase() ?? 'U'

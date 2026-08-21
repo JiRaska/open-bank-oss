@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.16.0...interest-service-v0.17.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.15.1...interest-service-v0.16.0) (2026-08-18)
 
 
