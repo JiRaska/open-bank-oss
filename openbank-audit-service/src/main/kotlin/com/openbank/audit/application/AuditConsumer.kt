@@ -125,75 +125,75 @@ class AuditConsumer {
      */
     suspend fun persist(payload: String, address: EventAddress = EventAddress.NONE) {
         val node: JsonNode = objectMapper.readTree(payload)
-            val eventTime = eventTime(node)
-            val resolvedSource = resolveSourceService(node, address)
-            val actor = resolveActor(node)
-            val entry = AuditEntry(
-                // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
-                // producers without one retain the previous random entry id behaviour.
-                id = node.textOrNull("eventId")?.let(UUID::fromString) ?: Ids.newId(),
-                // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
-                // not "eventType" — the only #996-consumed producer that does so.
-                // `ce-type` is the outbox event type, and it is the LAST resort before the
-                // sentinel: it is the producer's own value, carried by the transport rather than
-                // the body, so it is a recovery of a fact and not an inference (#3994).
-                eventType = node.textOrNull("eventType")
-                    ?: node.textOrNull("type")
-                    ?: address.ceType
-                    ?: "UNKNOWN",
-                // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
-                // own "aggregateType" field survives verbatim while inferAggregateType's table below
-                // is all uppercase, so the column records WHICH resolution path fired, not what the
-                // aggregate is. Measured on the live audit_entries table before this fix:
-                // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
-                // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
-                // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
-                // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
-                // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
-                // this stops the split growing, it does not backfill the 10-year tamper-evident
-                // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
-                // its own decision, not a drive-by fix here).
-                aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
-                aggregateId = inferAggregateId(node),
-                actorId = actor.first,
-                actorType = actor.second,
-                payload = payload,
-                sourceService = resolvedSource.first,
-                sourceServiceSource = resolvedSource.second,
-                correlationId = node.textOrNull("correlationId"),
-                occurredAt = eventTime ?: Instant.now(clock),
-                recordedAt = Instant.now(clock),
-                occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
-                // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
-                // sweep after #4553 found the bare JSON key "channel" independently populated by
-                // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
-                // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
-                // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
-                // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
-                // (dispute-service, via openbank.dispute.events — the only one confirmed live
-                // before this fix, all rows spelled "APP"). Storing the bare value made the column
-                // ungroupable: a caller reading "API" could not tell an onboarding channel from an
-                // ingress one. See resolveChannel() for the mapping.
-                channel = resolveChannel(node.textOrNull("channel"), address.topic),
-                actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
-                sessionId = node.textOrNull("sessionId"),
-                // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
-                // the grant that permitted it. customer-edge flattens its audit details into the
-                // event JSON, so both arrive as top-level fields. Absent = a direct action.
-                onBehalfOf = node.textOrNull("onBehalfOf"),
-                delegationId = node.textOrNull("delegationId"),
+        val eventTime = eventTime(node)
+        val resolvedSource = resolveSourceService(node, address)
+        val actor = resolveActor(node)
+        val entry = AuditEntry(
+            // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
+            // producers without one retain the previous random entry id behaviour.
+            id = node.textOrNull("eventId")?.let(UUID::fromString) ?: Ids.newId(),
+            // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
+            // not "eventType" — the only #996-consumed producer that does so.
+            // `ce-type` is the outbox event type, and it is the LAST resort before the
+            // sentinel: it is the producer's own value, carried by the transport rather than
+            // the body, so it is a recovery of a fact and not an inference (#3994).
+            eventType = node.textOrNull("eventType")
+                ?: node.textOrNull("type")
+                ?: address.ceType
+                ?: "UNKNOWN",
+            // Uppercased (issue #4553's pattern, confirmed live here 2026-08-13): a producer's
+            // own "aggregateType" field survives verbatim while inferAggregateType's table below
+            // is all uppercase, so the column records WHICH resolution path fired, not what the
+            // aggregate is. Measured on the live audit_entries table before this fix:
+            // ACCOUNT 656 / Account 126, Transaction 193 with ZERO uppercase TRANSACTION rows,
+            // Consent 11 with ZERO uppercase CONSENT rows. AuditConsumer's own KDoc already
+            // claims "the same fix as the analytics sink's #2598" for the attribution gap; this
+            // is the casing gap #2598's fix didn't cover, in the SAME shape #4553/#4576 found
+            // and fixed in openbank-analytics-sink. Rows already written keep their spelling —
+            // this stops the split growing, it does not backfill the 10-year tamper-evident
+            // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
+            // its own decision, not a drive-by fix here).
+            aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
+            aggregateId = inferAggregateId(node),
+            actorId = actor.first,
+            actorType = actor.second,
+            payload = payload,
+            sourceService = resolvedSource.first,
+            sourceServiceSource = resolvedSource.second,
+            correlationId = node.textOrNull("correlationId"),
+            occurredAt = eventTime ?: Instant.now(clock),
+            recordedAt = Instant.now(clock),
+            occurredAtSource = if (eventTime != null) OccurredAtSource.EVENT else OccurredAtSource.INGEST,
+            // Namespaced by source topic (issue #4660), not the bare producer value. A fleet
+            // sweep after #4553 found the bare JSON key "channel" independently populated by
+            // THREE producers with no shared vocabulary: AuditChannel (ADR-0226,
+            // ingress — this field's original intent, "ui"/"mcp"/"api"), OnboardingChannel
+            // (party-service, via RelationshipAddedEvent on openbank.party.events — "API"
+            // collides with AuditChannel's "api" on both case and meaning) and ComplaintChannel
+            // (dispute-service, via openbank.dispute.events — the only one confirmed live
+            // before this fix, all rows spelled "APP"). Storing the bare value made the column
+            // ungroupable: a caller reading "API" could not tell an onboarding channel from an
+            // ingress one. See resolveChannel() for the mapping.
+            channel = resolveChannel(node.textOrNull("channel"), address.topic),
+            actChain = node["actChain"]?.takeIf { it.isArray }?.map { it.asText() } ?: emptyList(),
+            sessionId = node.textOrNull("sessionId"),
+            // ADR-0232 D5: a delegated action names the grantor it was taken on behalf of and
+            // the grant that permitted it. customer-edge flattens its audit details into the
+            // event JSON, so both arrive as top-level fields. Absent = a direct action.
+            onBehalfOf = node.textOrNull("onBehalfOf"),
+            delegationId = node.textOrNull("delegationId"),
+        )
+        if (eventTime == null) countMissingEventTime(entry.sourceService)
+        if (::meterRegistry.isInitialized) {
+            meterRegistry.countActorProvenance(
+                entry.sourceService,
+                actorProvenance(entry.actorId, entry.actorType),
             )
-            if (eventTime == null) countMissingEventTime(entry.sourceService)
-            if (::meterRegistry.isInitialized) {
-                meterRegistry.countActorProvenance(
-                    entry.sourceService,
-                    actorProvenance(entry.actorId, entry.actorType),
-                )
-            }
-            if (entry.sourceServiceSource != AttributionSource.EVENT) {
-                countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
-            }
-            repo.save(entry)
+        }
+        if (entry.sourceServiceSource != AttributionSource.EVENT) {
+            countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
+        }
+        repo.save(entry)
         if (entry.eventType == "PARTY_MERGED" && ::mergeIndex.isInitialized) {
             recordPartyMergeIndex(mergeIndex, log, node, entry.occurredAt)
         }

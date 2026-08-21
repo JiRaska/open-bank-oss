@@ -5,10 +5,10 @@ package com.openbank.agent.infrastructure.audit
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.audit.AuditEvent
-import io.smallrye.reactive.messaging.kafka.Record
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.smallrye.reactive.messaging.kafka.Record
 import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Emitter
@@ -21,12 +21,27 @@ class DurableAgentAuditPublisherTest {
 
     @Test
     fun `publisher records the producer event id before any Kafka handoff`(): Unit = runBlocking {
-        val event = AuditEvent(actorId = "agent:rca", actorType = "AI_AGENT", operation = "agent.run", resourceType = "INCIDENT", resourceId = "inc-1")
+        val event =
+            AuditEvent(
+                actorId = "agent:rca",
+                actorType = "AI_AGENT",
+                operation = "agent.run",
+                resourceType = "INCIDENT",
+                resourceId = "inc-1",
+            )
         every { outbox.enqueue(any(), any()) } returns Unit
 
         DurableAgentAuditPublisher(outbox, jacksonObjectMapper().findAndRegisterModules()).publish(event)
 
-        verify { outbox.enqueue(event.eventId, match { it.contains("\"eventId\":\"${event.eventId}\"") && it.contains("\"sourceService\":\"agent-service\"") }) }
+        verify {
+            outbox.enqueue(
+                event.eventId,
+                match {
+                    it.contains("\"eventId\":\"${event.eventId}\"") &&
+                        it.contains("\"sourceService\":\"agent-service\"")
+                },
+            )
+        }
     }
 
     @Test
@@ -36,7 +51,8 @@ class DurableAgentAuditPublisherTest {
         val emitterInstance = mockk<Instance<Emitter<Record<String, String>>>>()
         every { outbox.claim(25) } returns listOf(AgentAuditOutbox.Claimed(id, "{}"))
         every { emitterInstance.get() } returns emitter
-        every { emitter.send(any()) } returns CompletableFuture.failedFuture(IllegalStateException("broker unavailable"))
+        every { emitter.send(any()) } returns
+            CompletableFuture.failedFuture(IllegalStateException("broker unavailable"))
         every { outbox.failed(any(), any()) } returns 1
 
         AgentAuditOutboxDispatcher(outbox, emitterInstance, true).dispatch()

@@ -44,7 +44,10 @@ class AgentAuditRedeliveryIT {
             occurredAtSource = OccurredAtSource.EVENT,
         )
 
-        onEventLoop { repository.save(entry); repository.save(entry) }
+        onEventLoop {
+            repository.save(entry)
+            repository.save(entry)
+        }
 
         assertThat(onEventLoop { repository.findByAggregateId("agent:rca") }.map { it.id })
             .containsExactly(eventId)
