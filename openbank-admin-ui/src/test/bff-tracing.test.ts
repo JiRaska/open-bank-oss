@@ -2,77 +2,129 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, expect, it } from 'vitest'
+import { existsSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 
-/**
- * Cover for the BFF tracing setup (admin-ui had zero spans and zero scrape targets before it).
- *
- * The assertions are on the two properties that can fail SILENTLY in production:
- *
- *  - the PII scrub, because a span carrying a bearer token or an account number in a query
- *    string exports successfully and looks exactly like a clean one; and
- *  - the gating, because "off because unconfigured" and "on but exporting nowhere" are the
- *    same from the outside, which is the shape this repo keeps finding (a disabled adapter
- *    reporting success).
- */
-describe('BFF tracing', () => {
-  const ORIGINAL = process.env.OTEL_EXPORTER_OTLP_ENDPOINT
+// The scrub rules are plain CommonJS at the package root, not a TS module under src/, because
+// `otel-bootstrap.cjs` is loaded by Node via --require before any application code exists and
+// cannot import TypeScript. Testing that exact file — rather than a TS copy of it — is the
+// point: a copy would let the exported spans and the tested behaviour drift apart.
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const scrub = require('../../otel-scrub.cjs') as {
+  UNTRACED_PATH: RegExp
+  stripQuery: (v: string) => string
+  scrubSpans: (spans: unknown[]) => unknown[]
+  scrubSpanUrls: (span: unknown) => void
+}
 
-  beforeEach(() => {
-    vi.resetModules()
-  })
-  afterEach(() => {
-    if (ORIGINAL === undefined) delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-    else process.env.OTEL_EXPORTER_OTLP_ENDPOINT = ORIGINAL
-  })
+/** Minimal stand-in for the SDK's concrete span: reads and writes the same attribute bag. */
+function fakeSpan(attributes: Record<string, unknown>) {
+  return {
+    attributes,
+    setAttribute(key: string, value: unknown) {
+      this.attributes[key] = value
+    },
+  }
+}
 
-  it('strips the query string, which is where tokens and customer ids live', async () => {
-    const { stripQuery } = await import('@/lib/telemetry/tracing')
-
-    // The realistic case: an operator opening a customer record through the BFF.
-    expect(stripQuery('https://svc/api/v1/parties/7f3?access_token=eyJhbGciOi&partyId=123'))
-      .toBe('https://svc/api/v1/parties/7f3')
-    // The PATH survives — knowing which route failed is the entire point of the span.
-    expect(stripQuery('https://svc/api/v1/approvals/pending')).toBe('https://svc/api/v1/approvals/pending')
-    // Fragments too: they are not sent to servers but they are exported on the span.
-    expect(stripQuery('https://svc/a?b=1#tok')).toBe('https://svc/a')
+describe('stripQuery', () => {
+  it('drops the query and fragment from an absolute URL', () => {
+    expect(scrub.stripQuery('https://h/api/x?token=SECRET#frag')).toBe('https://h/api/x')
   })
 
-  it('does not half-rewrite a value it cannot parse', async () => {
-    const { stripQuery } = await import('@/lib/telemetry/tracing')
-    // Relative URLs do not parse as absolute; cut at `?` rather than invent a base.
-    expect(stripQuery('/api/svc/ledger/accounts?token=abc')).toBe('/api/svc/ledger/accounts')
-    // No query, nothing to do — and crucially, unchanged rather than mangled.
-    expect(stripQuery('not a url at all')).toBe('not a url at all')
+  it('drops the query from a relative request target', () => {
+    // This is the shape `http.target` actually carries; an absolute-URL-only scrub let it through.
+    expect(scrub.stripQuery('/privacy?token=SECRET')).toBe('/privacy')
   })
 
-  it('scrubs both the current and the legacy URL attribute names', async () => {
-    const { scrubSpanUrls } = await import('@/lib/telemetry/tracing')
-    const set = vi.fn()
-    const span = {
-      attributes: {
-        'url.full': 'https://svc/x?tok=1',
-        'http.url': 'https://svc/y?tok=2',
-        'http.method': 'GET',
-      },
-      setAttribute: set,
+  it('leaves a value with no query untouched', () => {
+    expect(scrub.stripQuery('/api/approvals/pending')).toBe('/api/approvals/pending')
+  })
+})
+
+describe('scrubSpanUrls', () => {
+  it('removes a token from every attribute that can carry a query string', () => {
+    // Measured against the standalone build on 2026-08-21: a request to
+    // `/privacy?token=SECRET123` exported these three attributes verbatim.
+    const span = fakeSpan({
+      'http.target': '/privacy?token=SECRET123',
+      'url.query': 'token=SECRET123',
+      'url.full': 'https://admin/privacy?token=SECRET123',
+      'http.url': 'https://admin/privacy?token=SECRET123',
+      'url.path': '/privacy',
+    })
+
+    scrub.scrubSpanUrls(span)
+
+    expect(JSON.stringify(span.attributes)).not.toContain('SECRET123')
+    expect(span.attributes['http.target']).toBe('/privacy')
+    expect(span.attributes['url.query']).toBe('')
+    // The path is deliberately kept — knowing WHICH route failed is the whole point.
+    expect(span.attributes['url.path']).toBe('/privacy')
+  })
+
+  it('does not throw on a span with no attributes', () => {
+    expect(() => scrub.scrubSpanUrls({})).not.toThrow()
+  })
+})
+
+describe('scrubSpans (the exporter path)', () => {
+  it('scrubs a span no instrumentation hook of ours ever touches', () => {
+    // This is the case that made exporter-level scrubbing necessary: Next.js emits
+    // `BaseServer.handleRequest` through the OpenTelemetry API directly, so with
+    // per-instrumentation hooks alone the token reached the wire. Measured 2026-08-21.
+    const spans = [
+      { name: 'BaseServer.handleRequest', attributes: { 'http.target': '/privacy?token=SECRET123' } },
+      { name: 'GET', attributes: { 'url.query': 'token=SECRET123', 'url.path': '/privacy' } },
+    ]
+
+    scrub.scrubSpans(spans)
+
+    expect(JSON.stringify(spans)).not.toContain('SECRET123')
+    expect(spans[0].attributes['http.target']).toBe('/privacy')
+    expect(spans[1].attributes['url.path']).toBe('/privacy')
+  })
+
+  it('tolerates an empty batch and a span with no attributes', () => {
+    expect(() => scrub.scrubSpans([])).not.toThrow()
+    expect(() => scrub.scrubSpans([{}])).not.toThrow()
+  })
+})
+
+describe('UNTRACED_PATH', () => {
+  it('excludes build output and health probes', () => {
+    for (const p of ['/_next/static/chunk.js', '/favicon.ico', '/healthz', '/api/health']) {
+      expect(scrub.UNTRACED_PATH.test(p), p).toBe(true)
     }
-    scrubSpanUrls(span as never)
-
-    // Falsifying detail: a scrub that only knows `url.full` leaves the legacy attribute
-    // carrying the token, and the span still exports cleanly. Both must be rewritten.
-    expect(set).toHaveBeenCalledWith('url.full', 'https://svc/x')
-    expect(set).toHaveBeenCalledWith('http.url', 'https://svc/y')
-    // Non-URL attributes are left alone.
-    expect(set).not.toHaveBeenCalledWith('http.method', expect.anything())
   })
 
-  it('is a no-op when no OTLP endpoint is configured', async () => {
-    delete process.env.OTEL_EXPORTER_OTLP_ENDPOINT
-    const { startTracing } = await import('@/lib/telemetry/tracing')
-
-    // Returns false rather than throwing or silently pretending: a developer running
-    // `next dev`, and every test in this suite, must export nothing and pay nothing.
-    expect(startTracing()).toBe(false)
+  it('still traces the operator routes this exists to make visible', () => {
+    // The other half of the assertion: an over-broad exclusion would silently trace nothing,
+    // which is the failure this whole change was made to fix.
+    for (const p of ['/api/approvals/pending', '/api/svc/ledger/accounts', '/', '/privacy']) {
+      expect(scrub.UNTRACED_PATH.test(p), p).toBe(false)
+    }
   })
+})
+
+describe('standalone output', () => {
+  const modules = join(process.cwd(), '.next', 'standalone', 'node_modules', '@opentelemetry')
+
+  it.runIf(existsSync(modules))(
+    'carries the OpenTelemetry packages otel-bootstrap.cjs requires',
+    () => {
+      // Without these the container crashes on `--require` with MODULE_NOT_FOUND. They are in
+      // the image only because src/lib/telemetry/tracing.ts references them; see that file.
+      const present = readdirSync(modules)
+      for (const pkg of [
+        'sdk-node',
+        'exporter-trace-otlp-proto',
+        'instrumentation-http',
+        'instrumentation-undici',
+      ]) {
+        expect(present, pkg).toContain(pkg)
+      }
+    },
+  )
 })
