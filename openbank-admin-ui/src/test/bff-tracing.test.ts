@@ -10,7 +10,6 @@ import { join } from 'node:path'
 // `otel-bootstrap.cjs` is loaded by Node via --require before any application code exists and
 // cannot import TypeScript. Testing that exact file — rather than a TS copy of it — is the
 // point: a copy would let the exported spans and the tested behaviour drift apart.
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 const scrub = require('../../otel-scrub.cjs') as {
   UNTRACED_PATH: RegExp
   stripQuery: (v: string) => string
