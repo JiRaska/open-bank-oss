@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.184.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.0...admin-ui-v0.184.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize delegation timestamps ([#6159](https://github.com/JiRaska/open-bank-oss/issues/6159)) ([c3b3f12](https://github.com/JiRaska/open-bank-oss/commit/c3b3f120ed30bca18bcdf12c9e348c80750d4bb4))
+
 ## [0.184.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.6...admin-ui-v0.184.0) (2026-08-21)
 
 
