@@ -9,8 +9,12 @@ import com.openbank.lending.application.port.out.LedgerPosting
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.LendingOutboxMessage
 import com.openbank.lending.application.port.out.LoanEventEmitter
+import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import com.openbank.lending.application.port.out.PostingKind
+import com.openbank.lending.application.port.out.TimerArmingOutcome
+import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.lending.origination.OriginationState
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
@@ -35,6 +39,15 @@ private class JpaStubLoanEventEmitter : LoanEventEmitter {
     override fun emit(message: LendingOutboxMessage): Uni<Unit> = Uni.createFrom().item(Unit)
 }
 
+/** Stands in for the bound Temporal adapter: the name must not match the `NoOp`/`Logging` prefixes. */
+private class TemporalStubOriginationWorkflowPort : OriginationWorkflowPort {
+    override fun stateEntered(
+        applicationId: LoanApplicationId,
+        state: OriginationState,
+        reflectionPeriodDays: Int?,
+    ): Uni<TimerArmingOutcome> = Uni.createFrom().item(TimerArmingOutcome.ARMED)
+}
+
 /**
  * #6057: the `@IfBuildProperty` gates on the outbound adapters are resolved at augmentation and
  * frozen into the image, while the deployment activated them with container env vars. The
@@ -53,14 +66,18 @@ class LendingAdapterBindingVerifierTest {
         creditBackend: String,
         outboxBackend: String = "jpa",
         meters: SimpleMeterRegistry = SimpleMeterRegistry(),
+        originationWorkflow: OriginationWorkflowPort = TemporalStubOriginationWorkflowPort(),
+        temporalEnabled: String = "true",
     ) = LendingAdapterBindingVerifier(
         ledger,
         credit,
         events,
+        originationWorkflow,
         meters,
         ledgerBackend,
         creditBackend,
         outboxBackend,
+        temporalEnabled,
     )
 
     @Test
@@ -172,7 +189,7 @@ class LendingAdapterBindingVerifierTest {
         )
 
         val gauges = meters.find("openbank_lending_adapter_real_backend_bound").gauges()
-        assertThat(gauges).hasSize(3)
+        assertThat(gauges).hasSize(4) // ledger, borrower-credit, outbox, and the workflow port (#6085)
 
         val ledgerGauge = gauges.single { it.id.getTag("property") == "lending.ledger.backend" }
         assertThat(ledgerGauge.value()).isEqualTo(1.0)
@@ -181,6 +198,66 @@ class LendingAdapterBindingVerifierTest {
         val creditGauge = gauges.single { it.id.getTag("property") == "lending.borrower-credit.backend" }
         assertThat(creditGauge.value()).isEqualTo(0.0)
         assertThat(creditGauge.id.getTag("implementation")).isEqualTo("NoOpBorrowerCreditPort")
+    }
+
+    // --- #6085: the same mechanism on openbank.temporal.enabled ---------------------------------
+
+    @Test
+    fun `refuses to boot when the runtime enables Temporal and the no-op workflow port is bound`() {
+        // Exactly the deployed state measured on the running pod: OPENBANK_TEMPORAL_ENABLED=true in
+        // the container environment, NoOpOriginationWorkflowPort baked into the image by
+        // augmentation, TemporalOriginationWorkflowAdapter absent from it entirely.
+        assertThatThrownBy {
+            verifier(
+                ledger = RestStubLedgerPort(),
+                credit = RestStubBorrowerCreditPort(),
+                events = JpaStubLoanEventEmitter(),
+                ledgerBackend = "rest",
+                creditBackend = "rest",
+                originationWorkflow = NoOpOriginationWorkflowPort(),
+                temporalEnabled = "true",
+            )
+        }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("openbank.temporal.enabled")
+            .hasMessageContaining("NoOpOriginationWorkflowPort")
+    }
+
+    @Test
+    fun `boots when Temporal is disabled and the no-op workflow port is bound`() {
+        // The offline build (ADR-0028 D3) is a legitimate combination and must stay bootable —
+        // otherwise this guard would trade a missing control for an unusable dev and test story.
+        assertThatCode {
+            verifier(
+                ledger = RestStubLedgerPort(),
+                credit = RestStubBorrowerCreditPort(),
+                events = JpaStubLoanEventEmitter(),
+                ledgerBackend = "rest",
+                creditBackend = "rest",
+                originationWorkflow = NoOpOriginationWorkflowPort(),
+                temporalEnabled = "false",
+            )
+        }.doesNotThrowAnyException()
+    }
+
+    @Test
+    fun `publishes the bound-implementation gauge for the workflow port too`() {
+        val meters = SimpleMeterRegistry()
+        verifier(
+            ledger = RestStubLedgerPort(),
+            credit = RestStubBorrowerCreditPort(),
+            events = JpaStubLoanEventEmitter(),
+            ledgerBackend = "rest",
+            creditBackend = "rest",
+            meters = meters,
+            originationWorkflow = TemporalStubOriginationWorkflowPort(),
+            temporalEnabled = "true",
+        )
+        val gauge = meters.find("openbank_lending_adapter_real_backend_bound")
+            .tag("property", "openbank.temporal.enabled")
+            .gauge()
+        assertThat(gauge).describedAs("the workflow port must be reported like every other port").isNotNull
+        assertThat(gauge!!.value()).isEqualTo(1.0)
     }
 }
 

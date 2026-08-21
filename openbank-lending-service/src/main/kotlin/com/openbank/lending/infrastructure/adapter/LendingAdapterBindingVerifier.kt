@@ -7,6 +7,7 @@ package com.openbank.lending.infrastructure.adapter
 import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.LedgerPostingPort
 import com.openbank.lending.application.port.out.LoanEventEmitter
+import com.openbank.lending.application.port.out.OriginationWorkflowPort
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.Tag
 import io.quarkus.arc.ClientProxy
@@ -50,7 +51,7 @@ data class AdapterBinding(
  *
  * ## The defect this exists to make impossible
  *
- * The three outbound ports below are selected with `@IfBuildProperty`, which Quarkus resolves
+ * The four outbound ports below are selected with `@IfBuildProperty`, which Quarkus resolves
  * during augmentation and freezes into the image: ArC removes the losing bean's class outright.
  * The deployment, however, activated them with container **env vars** — `LENDING_LEDGER_BACKEND`,
  * `LENDING_BORROWER_CREDIT_BACKEND` — which are read at runtime and cannot change a decision the
@@ -62,6 +63,11 @@ data class AdapterBinding(
  * `LENDING_LEDGER_BACKEND=rest`. The `lending.outbox.backend` pair was the control that proved the
  * probe could tell the two apart (`JpaLoanEventEmitter` 4, `LoggingLoanEventEmitter` 0), and it
  * only worked because its `application.yaml` default already *was* the production value.
+ *
+ * The same probe, re-run independently for #6085, found the third property in the same state:
+ * `TemporalOriginationWorkflowAdapter` **0** occurrences, `NoOpOriginationWorkflowPort` **4**,
+ * with `OPENBANK_TEMPORAL_ENABLED=true` in that pod's environment. No origination durable timer —
+ * document SLA, offer expiry, consumer-credit reflection period — had ever been armed.
  *
  * ## Why a boot-time check, and why `@Startup`
  *
@@ -79,14 +85,22 @@ data class AdapterBinding(
  */
 @Startup
 @ApplicationScoped
+// LongParameterList (detekt fires AT the threshold of 9, not above it): every parameter is load-
+// bearing and none can move to field injection — the verification runs in `init {}`, which is
+// exactly the point, and `@Inject lateinit var` fields are not populated until after it. Each port
+// is here to be UNWRAPPED, and each property to be compared against the class that unwrapping
+// reveals; dropping either half of a pair would remove a check rather than tidy a signature.
+@Suppress("LongParameterList")
 class LendingAdapterBindingVerifier(
     ledger: LedgerPostingPort,
     borrowerCredit: BorrowerCreditPort,
     events: LoanEventEmitter,
+    originationWorkflow: OriginationWorkflowPort,
     meters: MeterRegistry,
     @ConfigProperty(name = "lending.ledger.backend") ledgerBackend: String,
     @ConfigProperty(name = "lending.borrower-credit.backend") borrowerCreditBackend: String,
     @ConfigProperty(name = "lending.outbox.backend") outboxBackend: String,
+    @ConfigProperty(name = "openbank.temporal.enabled") temporalEnabled: String,
 ) {
     /** Strongly held so the Micrometer gauges below are not collected out from under the registry. */
     private val gaugeValues = mutableListOf<AtomicInteger>()
@@ -113,6 +127,17 @@ class LendingAdapterBindingVerifier(
                 outboxBackend,
                 JPA,
                 implementationOf(events),
+            ),
+            // #6085, the same mechanism on a third property this class did not originally cover.
+            // Its "real" value is the boolean `true` rather than a backend name, which is why
+            // AdapterBinding compares strings: what matters is whether the runtime selection and
+            // the bound class agree, not what the selector is spelled like.
+            AdapterBinding(
+                "openbank.temporal.enabled",
+                "OPENBANK_TEMPORAL_ENABLED",
+                temporalEnabled,
+                ENABLED,
+                implementationOf(originationWorkflow),
             ),
         )
 
@@ -172,6 +197,7 @@ class LendingAdapterBindingVerifier(
         val LOG: Logger = Logger.getLogger(LendingAdapterBindingVerifier::class.java)
         const val REST = "rest"
         const val JPA = "jpa"
+        const val ENABLED = "true"
 
         fun implementationOf(port: Any): String = ClientProxy.unwrap(port)::class.java.simpleName
     }

@@ -11,6 +11,7 @@
 # the service's application.yaml, not the LENDING_*_BACKEND env vars below. Those env vars
 # read as activation switches and are not: until #6057 the image shipped the no-op ledger
 # adapter, which returned success, while this Rollout set LENDING_LEDGER_BACKEND=rest.
+# OPENBANK_TEMPORAL_ENABLED is the third instance of the same shape (#6085).
 # See the per-var comments in the container spec.
 #
 # Money-path service (ADR-0030): 2 approvals + threat model required on every PR.
@@ -140,6 +141,16 @@ spec:
             # expiry, reflection wait). The temporal-platform-ingress NetworkPolicy
             # lists the lending namespace, otherwise the worker's onStart gRPC to
             # temporal-frontend:7233 is DROPPED and the service never boots.
+            #
+            # ⚠ Same build-time caveat as LENDING_LEDGER_BACKEND above (#6085). This var did
+            # NOT activate TemporalOriginationWorkflowAdapter: @IfBuildProperty is resolved at
+            # augmentation and the class was removed from the image, so the @Default
+            # NoOpOriginationWorkflowPort was bound and returned the real adapter's success
+            # value. No origination durable timer was ever armed — while the worker half, which
+            # is NOT build-time gated, polled the task queue the whole time with nothing ever
+            # starting a workflow on it. The shipped selection is now the `%prod` default in
+            # the service's application.yaml; this var is kept only so it stays consistent with
+            # the image, and LendingAdapterBindingVerifier refuses to boot if the two disagree.
             - name: OPENBANK_TEMPORAL_ENABLED
               value: "true"
             - name: OPENBANK_TEMPORAL_SERVER_URL
