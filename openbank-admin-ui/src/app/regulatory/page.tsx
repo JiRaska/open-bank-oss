@@ -8,7 +8,7 @@ import { useState } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl, type BffFailure } from '@/lib/services/bff'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
-import { blockReasonCopy, evaluateExportReadiness } from '@/lib/regulatory/exportReadiness'
+import { blockReasonCopy, evaluateExportReadiness, type BalanceVerdict } from '@/lib/regulatory/exportReadiness'
 import { Ban } from 'lucide-react'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -38,6 +38,8 @@ interface RegulatoryTemplate {
   period: string
   cells: RegulatoryCell[]
   isBalanced?: boolean
+  /** Which of the two independent balance verdicts objected (finrep, issue #6011). */
+  balanceVerdict?: BalanceVerdict
   hasDataGaps?: boolean
 }
 
