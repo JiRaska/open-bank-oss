@@ -47,3 +47,36 @@ spec:
   config:
     retention.ms: 604800000
     cleanup.policy: delete
+---
+# #5698: dead-letter topic for notification-service's party-events-in channel (SmallRye
+# failure-strategy: dead-letter-queue, set in the service's application.yaml). A PARTY_ERASED
+# event whose GDPR Art. 17 erasure survives PartyErasureConsumer's bounded retry is parked here
+# for inspection/replay instead of being acked and lost.
+#
+# Explicitly named (openbank.party.events.notification.dlq) rather than left to SmallRye's default
+# `dead-letter-topic-<channel>`, because account-service already owns that name for its OWN
+# party-events-in channel — the two would otherwise share one topic and be misattributed by the
+# existing AccountPartyEventDeadLettered alert. The name is supplied via the msg-override
+# ConfigMap, since `dead-letter-queue.topic` is a dotted leaf key SmallRye's YAML source would
+# silently mis-quote (issue #686).
+#
+# A CR is required, not optional: this cluster does not auto-create topics, so without it the
+# DLQ send fails and the consumer wedges on the failure it was meant to park.
+#
+# Longer retention than the source topic: a dead-lettered erasure is a real compliance incident
+# that may outlive a 7-day window before someone replays it. No consumer by design — it is a
+# quarantine, invisible to the event-consumer-liveness gate (that gate reads `outgoing:` channels,
+# and this producer is the connector's implicit DLQ, not a declared channel).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.party.events.notification.dlq
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
