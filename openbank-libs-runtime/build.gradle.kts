@@ -136,6 +136,30 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
     jvmArgs("-Dnet.bytebuddy.experimental=true")
+
+    // OutboxDeadLetterAlertNamingTest asserts that the committed PrometheusRule selector matches
+    // what a real Micrometer registration exports — a producer/consumer seam whose two halves live
+    // in different trees. Without declaring the rule file as an input, Gradle sees no reason to
+    // re-run: editing the alert to `openbank_TOTALLY_WRONG` reports `test UP-TO-DATE` and BUILD
+    // SUCCESSFUL, and only `--rerun-tasks` goes red. Combined with path-scoped CI — a gitops-only
+    // PR never builds this module — the guard could not see the change it exists to catch.
+    inputs.file(rootProject.file("openbank-infra/gitops/components/payments/prometheus-rules.yaml"))
+        .withPropertyName("alertRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(rootProject.file("openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"))
+        .withPropertyName("billingAlertRulesUnderTest")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
+
+    // `every dead-letter gauge binding is covered here` derives its scope by walking the service
+    // modules for `*OutboxDeadLetterGauge.kt`. Without these as declared inputs the task is
+    // UP-TO-DATE when a NEW binding appears — measured: adding an uncovered gauge left the suite
+    // green, so the scope guard was blind to the one event it exists to catch.
+    inputs.files(
+        rootProject.fileTree(rootProject.projectDir) {
+            include("openbank-*/src/main/kotlin/**/*OutboxDeadLetterGauge.kt")
+        },
+    ).withPropertyName("deadLetterGaugeBindings")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
 }
 
 kover {
