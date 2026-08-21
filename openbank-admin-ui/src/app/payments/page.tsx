@@ -471,8 +471,15 @@ function PaymentsContent() {
         icon={<Banknote size={18} aria-hidden="true" />}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Platby', 'Payments')}</span></div>}
         actions={activeTab !== 'sct-inst' ? (
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit platby', 'Refresh payments')}
+          >
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         ) : undefined}
