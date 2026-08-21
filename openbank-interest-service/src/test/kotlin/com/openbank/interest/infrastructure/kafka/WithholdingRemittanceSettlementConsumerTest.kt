@@ -19,7 +19,11 @@ import kotlinx.coroutines.runBlocking
 import org.apache.kafka.clients.consumer.ConsumerRecord
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.util.UUID
+
+/** Named so detekt's TooGenericExceptionThrown does not fire at the throw site in a mockk answer. */
+private class TransientRailFailure : RuntimeException("connection reset")
 
 class WithholdingRemittanceSettlementConsumerTest {
 
@@ -114,15 +118,53 @@ class WithholdingRemittanceSettlementConsumerTest {
         verify(exactly = 1) { remitUseCase.settle(remittanceId) }
     }
 
+    /**
+     * Replaces a test that asserted the OPPOSITE — "does not settle the batch and does not throw".
+     * Not throwing ACKS the message, so a due regulatory tax remittance was stranded PENDING with
+     * the event gone and nothing left to re-drive it, while the code comment right there promised
+     * "the batch stays PENDING for retry (a redelivery of this event)". That redelivery could never
+     * happen (#5698). The batch must still not settle — but the message must now reach the DLQ.
+     */
     @Test
-    fun `a non-2xx-non-409 response does not settle the batch and does not throw`(): Unit = runBlocking {
+    fun `a persistent non-2xx-non-409 response is RETHROWN so the connector dead-letters`(): Unit = runBlocking {
         every { transactionClient.initiateTransaction(any()) } returns
             Uni.createFrom().item(Response.status(500).build())
 
+        assertThrows<RemittanceBookingFailedException> { runBlocking { consumer.consume(record()) } }
+
+        verify(exactly = 3) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 0) { remitUseCase.settle(any()) }
+    }
+
+    @Test
+    fun `a TRANSIENT rail failure is retried and the batch settles without dead-lettering`(): Unit = runBlocking {
+        var calls = 0
+        every { transactionClient.initiateTransaction(any()) } answers {
+            calls++
+            if (calls == 1) throw TransientRailFailure() else Uni.createFrom().item(Response.status(201).build())
+        }
+        every { remitUseCase.settle(remittanceId) } returns Uni.createFrom().item(Unit)
+
         consumer.consume(record())
 
-        verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
-        verify(exactly = 0) { remitUseCase.settle(any()) }
+        verify(exactly = 2) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 1) { remitUseCase.settle(remittanceId) }
+    }
+
+    /**
+     * The settle() leg is a downstream call too: booking the money and then silently failing to
+     * advance the batch would leave it PENDING against a rail that already moved the cash.
+     */
+    @Test
+    fun `a persistent settle failure after a successful booking is RETHROWN`(): Unit = runBlocking {
+        every { transactionClient.initiateTransaction(any()) } returns
+            Uni.createFrom().item(Response.status(201).build())
+        every { remitUseCase.settle(remittanceId) } returns
+            Uni.createFrom().failure(TransientRailFailure())
+
+        assertThrows<TransientRailFailure> { runBlocking { consumer.consume(record()) } }
+
+        verify(exactly = 3) { remitUseCase.settle(remittanceId) }
     }
 
     @Test
@@ -176,10 +218,30 @@ class WithholdingRemittanceSettlementConsumerTest {
         verify(exactly = 1) { remitUseCase.settle(remittanceId) }
     }
 
+    /**
+     * The other half of the split, and the reason the fix is not a blanket rethrow: a payload that
+     * cannot be decoded fails identically on every redelivery, so it is the one genuinely
+     * unretryable case and must still ACK. A suite that only proved the rethrow could not tell this
+     * fix from "throw on everything", which would wedge the partition on the first bad event.
+     */
     @Test
-    fun `a malformed payload is swallowed, not thrown`(): Unit = runBlocking {
+    fun `a malformed payload still ACKS and never reaches the rail`(): Unit = runBlocking {
         consumer.consume(record(payload = "{bad-json"))
 
         verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 0) { remitUseCase.settle(any()) }
+    }
+
+    /**
+     * A NEGATIVE total is an upstream data defect, not an infrastructure blip — no
+     * WithholdingTaxPolicy path produces one, so a redelivery decodes the same negative amount
+     * forever. It must be refused and ACKED, never retried onto the rail.
+     */
+    @Test
+    fun `a negative amount ACKS without retrying the rail`(): Unit = runBlocking {
+        consumer.consume(record(payload = remittedPayload(totalTaxAmount = "\"-5\"", itemCount = 3)))
+
+        verify(exactly = 0) { transactionClient.initiateTransaction(any()) }
+        verify(exactly = 0) { remitUseCase.settle(any()) }
     }
 }
