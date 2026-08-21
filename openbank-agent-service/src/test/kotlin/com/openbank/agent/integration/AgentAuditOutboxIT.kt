@@ -15,13 +15,19 @@ import javax.sql.DataSource
 
 /** Exercises the real V4 schema: a duplicate producer id persists once and remains claimable. */
 @QuarkusTest
-@QuarkusTestResource(PostgresTestResource::class)
+// restrictToAnnotatedClass=true — without it, PostgresTestResource's injected
+// `agent.model.openai.api-key=test-not-used` placeholder leaks into other @QuarkusTest classes
+// sharing the same test JVM whose own @TestProfile expects a different value (e.g.
+// ModelGatewayRoutingOverrideTest), the same defect class ProposalApiIT and
+// McpEndpointRoutingIT already guard against.
+@QuarkusTestResource(PostgresTestResource::class, restrictToAnnotatedClass = true)
 class AgentAuditOutboxIT {
     @Inject lateinit var outbox: AgentAuditOutbox
+
     @Inject lateinit var dataSource: DataSource
 
     @Test
-    fun `V4 durable handoff deduplicates producer event id before dispatch`(): Unit {
+    fun `V4 durable handoff deduplicates producer event id before dispatch`() {
         val eventId = UUID.randomUUID()
         outbox.enqueue(eventId, "{\"eventId\":\"$eventId\"}")
         outbox.enqueue(eventId, "{\"eventId\":\"$eventId\"}")
@@ -30,7 +36,9 @@ class AgentAuditOutboxIT {
 
         assertThat(claimed).containsExactly(AgentAuditOutbox.Claimed(eventId, "{\"eventId\":\"$eventId\"}"))
         dataSource.connection.use { connection ->
-            connection.prepareStatement("SELECT count(*), MAX(publish_attempts) FROM agent_audit_outbox WHERE event_id = ?").use { statement ->
+            connection.prepareStatement(
+                "SELECT count(*), MAX(publish_attempts) FROM agent_audit_outbox WHERE event_id = ?",
+            ).use { statement ->
                 statement.setObject(1, eventId)
                 statement.executeQuery().use { rs ->
                     rs.next()
