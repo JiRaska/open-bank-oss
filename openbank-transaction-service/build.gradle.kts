@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import java.time.Duration
+
 plugins {
     id("openbank.quarkus-service")
     // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
@@ -113,6 +115,21 @@ tasks.withType<Test> {
     // a runner until the fleet job timeout takes the whole matrix down with it. Same guard and same
     // value as openbank-swift-service, added there for the same failure shape (#2320 item 3).
     systemProperty("junit.jupiter.execution.timeout.default", "8m")
+
+    // The JUnit timeout above only fires while a test is RUNNING, and the #5940 hang was not that:
+    // the last test activity was at 12:09:46Z and the job was cancelled at 12:43:38Z, with seven
+    // `Terminate orphan process: pid (java)` at teardown. A Kafka producer's network thread is
+    // non-daemon and keeps reconnecting for as long as the producer object is open, so a leaked
+    // Quarkus application from a previous boot can hold its JVM alive after every test has
+    // finished — a state no per-test timeout can observe.
+    //
+    // Gradle's task timeout does cover it: it bounds the whole task, forked JVM included. At 25
+    // minutes the module fails with a named task, 20 minutes inside the 45-minute fleet job
+    // timeout, which is what lets the `build/test-results/**/*.xml` upload actually run. In the
+    // #5940 job it did not: `No files were found with the provided path:
+    // openbank-transaction-service/build/test-results/`. A cancelled job produces no report at
+    // all, so the cost is not just the runner slot — it is that nothing survives to diagnose from.
+    timeout.set(Duration.ofMinutes(25))
 }
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266). Weekly +
