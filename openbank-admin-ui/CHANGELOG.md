@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.3...admin-ui-v0.183.4) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize dora incident timestamps ([#6139](https://github.com/JiRaska/open-bank-oss/issues/6139)) ([daa660c](https://github.com/JiRaska/open-bank-oss/commit/daa660c4bb0a2d339334265330449880ee76ac53))
+
 ## [0.183.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.2...admin-ui-v0.183.3) (2026-08-21)
 
 
