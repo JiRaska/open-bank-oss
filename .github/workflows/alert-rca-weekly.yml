@@ -79,13 +79,22 @@ jobs:
           # With zero envelopes the ledger is rendered UNCHANGED — the run must not
           # fold an empty observation, which observe() would read as "every open
           # critical resolved this morning".
+          # Exit 2 means "no observation covered this window" — the producer is down
+          # and this review measured nothing. That must NOT abort the step: the RCA
+          # document recording the gap is exactly the evidence worth publishing. So
+          # capture the code, keep going, and fail the JOB at the end (below).
+          rc=0
           python3 .github/scripts/alert-rca-ledger.py \
             --ledger docs/runbooks/alert-rca/ledger.jsonl \
             "${observe_args[@]}" \
             --granularity-seconds 86400 \
             --source alertmanager-daily-poll \
             --rca-output "docs/runbooks/alert-rca/${month}.md" \
-            --recurrence-output recurrences.json
+            --recurrence-output recurrences.json || rc=$?
+          if [ "$rc" -ne 0 ] && [ "$rc" -ne 2 ]; then
+            echo "::error::alert-rca-ledger.py failed with exit $rc"; exit "$rc"
+          fi
+          echo "LEDGER_EXIT=$rc" >> "$GITHUB_ENV"
           cat recurrences.json
 
       - name: Open a follow-up issue for each recurring critical alert
@@ -151,7 +160,21 @@ jobs:
             --title "chore(governance): weekly critical-alert RCA log" \
             --body-file "docs/runbooks/alert-rca/$(date -u +%Y-%m).md"
 
+      # A control that reports healthy because it structurally cannot report anything
+      # else is the defect this whole workflow exists to prevent, so the run must go
+      # RED when it measured nothing — after the evidence is published, never instead
+      # of it. Placed before the upload so the artifact still attaches (`always()`).
+      - name: Fail the review when no observation covered the window
+        if: env.LEDGER_EXIT == '2'
+        run: |
+          echo "::error title=Weekly RCA review measured nothing::No standing-critical" \
+               "observation envelope covered the last 7 days. The daily digest archives" \
+               "an envelope even on a zero-alert day, so this is NOT a quiet week - the" \
+               "producer did not run. See docs/runbooks/alert-rca/ and issue #5869."
+          exit 1
+
       - name: Upload the RCA review artifact
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: alert-rca-review-${{ github.run_id }}

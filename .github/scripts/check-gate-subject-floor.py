@@ -54,6 +54,7 @@ MANIFEST = ".github/gates/gates.yaml"
 NO_CORPUS = {
     "agent-review-proof-falsifiable",
     "agent-review-scope-falsifiable",
+    "alert-rca-ledger-guards",
     "auto-deploy-reconcile-probe-unit-test",
     "blocking-counterpart-probe-unit-test",
     "can-i-deploy-block-classifier-unit-test",
@@ -68,6 +69,7 @@ NO_CORPUS = {
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
+    "standing-critical-digest-guards",
 }
 
 # Gates that examine a real corpus and do not yet report how much of it they found. This list
