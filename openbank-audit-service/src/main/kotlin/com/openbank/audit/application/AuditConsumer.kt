@@ -73,9 +73,14 @@ class AuditConsumer {
         try {
             persist(payload, addressOf(message))
         } catch (e: Exception) {
-            // This legacy multi-producer channel deliberately retains its historic availability
-            // behaviour. D5 agent events use AgentAuditConsumer instead: it acknowledges only a
-            // successful durable write, so a store failure is retried by Kafka rather than lost.
+            // best-effort: DELIBERATE, and #6209 is where it was decided — this legacy
+            // multi-producer channel keeps its historic availability behaviour rather than wedging
+            // ~20 producers on one store failure. Stated plainly because the marker suppresses the
+            // event-handler-swallow gate (#5698) and the cost is real: a store failure here loses
+            // an evidentiary row, and an acked message is indistinguishable from a stored one.
+            // The strict path is AgentAuditConsumer — it acknowledges only a successful durable
+            // write, so a D5 provenance store failure is retried by Kafka rather than lost. Any
+            // producer that cannot tolerate this trade belongs on that consumer, not this one.
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         } finally {
             // Switching the signature from `String` to `Message<String>` also switches SmallRye
@@ -114,6 +119,9 @@ class AuditConsumer {
         try {
             persist(payload, address)
         } catch (e: Exception) {
+            // best-effort: the same deliberate #6209 trade as the @Incoming overload above, and for
+            // the same channel — this is the no-broker-metadata entry point into it. See there for
+            // why, and for the strict alternative (AgentAuditConsumer).
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         }
     }
