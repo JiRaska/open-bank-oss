@@ -85,7 +85,26 @@ data class BorrowerDistressSignals(
     val lastCreditContactAt: Instant?,
     val inputsChangedSinceLastContact: Boolean,
     val complete: Boolean,
-)
+) {
+    /**
+     * The same signals with contact history cleared.
+     *
+     * Frequency capping and materiality exist to stop the bank speaking too often; neither is a
+     * reason to refuse an answer the customer just asked for. A PULL evaluation therefore drops
+     * them rather than reporting FREQUENCY_CAP to someone who opened the screen themselves.
+     */
+    fun withoutContactHistory(): BorrowerDistressSignals =
+        copy(lastCreditContactAt = null, inputsChangedSinceLastContact = true)
+}
+
+/**
+ * Who started the conversation — the axis ADR-0269's pull-only rule turns on.
+ *
+ * PUSH is the bank speaking unprompted and needs consent; PULL is the customer asking and does not.
+ * Modelled as a type rather than a boolean parameter so a call site cannot get it backwards
+ * silently: `evaluate(partyId, PUSH)` reads as what it is, `evaluate(partyId, true)` does not.
+ */
+enum class OfferSurface { PUSH, PULL }
 
 /** Thresholds, versioned as one object so a change is a single reviewable diff (ADR-0213 shape). */
 data class CreditOfferPolicy(
