@@ -66,7 +66,8 @@ stays correct across key rotation: each anchor names the exact key generation th
 python3 .github/scripts/verify-audit-anchors.py \
     --anchors anchors.json \
     --public-key kms-pub.pem \
-    --entries  entries.json      # optional but see §6
+    --public-key-id <the keyId recorded on the anchors> \
+    --entries entries.json       # optional but see §6
 ```
 
 Requires only Python 3 and the `cryptography` package. It imports **no OpenBank code** — the two
@@ -81,7 +82,7 @@ change either form and exactly one side goes red.
 |---|---|---|
 | `0` | `VERIFIED` | Every anchor recomputed to its stored digest and verified under the public key |
 | `2` | `TAMPERED` | Something was rejected; the message names what and where |
-| `3` | `UNVERIFIABLE` | Nothing to verify, or no usable key — **never** report this as a pass |
+| `3` | `UNVERIFIABLE` | Nothing to verify, or no usable key for that generation — **never** report this as a pass |
 | `4` | `INPUT_ERROR` | Bad arguments or a malformed export |
 
 `UNVERIFIABLE` is deliberately its own exit code. An absent anchor set, an unsigned anchor, and an
@@ -108,6 +109,30 @@ Note why the DB rules do not make these impossible: `no_update_audit` / `no_dele
 `DO INSTEAD NOTHING` rules, so an `UPDATE` affects zero rows **and reports success**. They stop
 casual mutation; they are not a control, because anything with rights to drop the rule leaves no
 error behind. The chain plus the anchor are what make such a change *detectable*.
+
+## 5a. Two findings you WILL hit on a real export, and what each means
+
+Verified against the live audit database on 2026-08-21 (1212 anchors, read-only):
+
+**Most anchors here are still HMAC-signed, and they are `UNVERIFIABLE`, not verified.** The KMS
+cutover is recent; anchors captured before it carry `keyId=local-hmac-sha256`. A shared secret
+cannot produce a signature a public key can check, so the tool declines to rule on them. It is
+important that it declines rather than rejects: feeding an HMAC tag to an ECDSA verify fails, and
+an earlier cut of this tool consequently reported *the entire pre-cutover history as forged*. A
+false accusation of tampering is the most expensive wrong answer available here, so the key id is
+inspected before any verification is attempted, and a mismatched key **generation** is treated the
+same way. Practical consequence for a reader: **the independently verifiable window starts at the
+KMS cutover**, and anything earlier rests on the operator's custody of the HMAC secret.
+
+**Some anchors attest `chainStatus=BROKEN`.** This is not a forged anchor — the digest recomputes
+and (for KMS anchors) the signature verifies. It is the producer faithfully recording that its own
+`verifyChain()` walk was not intact *at capture time*. On this platform that population is bounded
+(2026-07-09 to 2026-08-05) and corresponds to the pre-#3586 legacy hash segment: rows hashed in a
+canonical form whose digits `timestamptz` truncated, which can never be recomputed (#3505). Those
+rows are unverifiable rather than tampered with, and the walk was later corrected to count them
+separately — which is why the `BROKEN` anchors stop. Do not read a `BROKEN` anchor as proof of
+tampering, and do not read it as noise either: check whether the affected range is the known legacy
+segment (`hash_version IS NULL` on `audit_entries`) before concluding either way.
 
 ## 6. What this does NOT establish — state this in any report
 

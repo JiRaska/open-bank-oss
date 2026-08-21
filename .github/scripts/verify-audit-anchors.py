@@ -171,7 +171,21 @@ class Findings:
         self.unverifiable.append(message)
 
 
-def verify_anchor_bundle(anchors, public_key_pem, findings):
+def is_symmetric_key_id(key_id: str) -> bool:
+    """True when the recorded key id names a shared secret rather than a key pair.
+
+    `LocalHmacAnchorSigner` records the fixed literal `local-hmac-sha256`; an asymmetric anchor
+    records the immutable KMS key id (an `arn:aws:kms:...` / `key/...` reference) that `Sign`
+    returned. The distinction has to be drawn BEFORE verification is attempted, because an HMAC
+    signature fed to an ECDSA verify is indistinguishable from a forgery -- and reporting the
+    platform's whole pre-cutover history as forged is a far more damaging error than declining
+    to rule on it.
+    """
+    lowered = key_id.strip().lower()
+    return lowered.startswith("local-") or "hmac" in lowered
+
+
+def verify_anchor_bundle(anchors, public_key_pem, findings, public_key_id=None):
     """Recompute, signature-check and sequence-check every anchor."""
     ordered = sorted(anchors, key=lambda a: parse_instant(a["signedAt"]))
     previous = None
@@ -202,25 +216,41 @@ def verify_anchor_bundle(anchors, public_key_pem, findings):
             )
 
         signature = anchor.get("signature")
+        key_id = anchor.get("keyId") or ""
         if not signature:
             findings.cannot_verify(
                 f"UNSIGNED ANCHOR: {label} -- captured with no signature, so it attests nothing "
                 f"a third party can check"
             )
+        elif is_symmetric_key_id(key_id):
+            # NOT a rejection. A symmetric key cannot produce a signature any public key can
+            # check, so this anchor is outside what a third party can decide -- calling it
+            # TAMPERED would be a false accusation, and on this platform it would be levelled at
+            # every anchor captured before the KMS cutover.
+            findings.cannot_verify(
+                f"SYMMETRIC (HMAC) ANCHOR: {label} keyId={key_id} -- signed with a shared "
+                f"secret, so it is not third-party verifiable by construction. Only the "
+                f"producer can check it, which is precisely what an anchor must not require."
+            )
+        elif public_key_id and key_id != public_key_id:
+            findings.cannot_verify(
+                f"KEY GENERATION MISMATCH: {label} was signed by keyId={key_id}, but the "
+                f"supplied public key is for {public_key_id} -- fetch that generation's key "
+                f"before drawing any conclusion about this anchor."
+            )
         elif not public_key_pem:
-            findings.cannot_verify(f"NO PUBLIC KEY SUPPLIED for keyId={anchor.get('keyId')}: {label}")
+            findings.cannot_verify(f"NO PUBLIC KEY SUPPLIED for keyId={key_id}: {label}")
         else:
             outcome = verify_signature(public_key_pem, recomputed, signature)
             if outcome is False:
                 findings.reject(
-                    f"INVALID SIGNATURE: {label} keyId={anchor.get('keyId')} -- the signature "
-                    f"does not verify under the supplied public key"
+                    f"INVALID SIGNATURE: {label} keyId={key_id} -- the signature does not "
+                    f"verify under the public key recorded for that same key id"
                 )
             elif outcome is None:
                 findings.cannot_verify(
-                    f"KEY CANNOT VERIFY THIS ANCHOR: {label} keyId={anchor.get('keyId')} -- "
-                    f"symmetric or unsupported key material (an HMAC anchor is not "
-                    f"third-party verifiable by construction)"
+                    f"KEY CANNOT VERIFY THIS ANCHOR: {label} keyId={key_id} -- unsupported "
+                    f"key material, or python 'cryptography' is not installed"
                 )
             else:
                 findings.verified += 1
@@ -306,7 +336,7 @@ def verify_entries_against_anchors(entries, ordered_anchors, findings):
             )
 
 
-def run(anchors, public_key_pem, entries):
+def run(anchors, public_key_pem, entries, public_key_id=None):
     findings = Findings()
     if not anchors:
         findings.cannot_verify(
@@ -314,7 +344,7 @@ def run(anchors, public_key_pem, entries):
             "nothing can be verified -- this is NOT the same result as a verified log."
         )
         return findings, EXIT_UNVERIFIABLE
-    ordered = verify_anchor_bundle(anchors, public_key_pem, findings)
+    ordered = verify_anchor_bundle(anchors, public_key_pem, findings, public_key_id)
     if entries is not None:
         verify_entries_against_anchors(entries, ordered, findings)
     if findings.rejections:
@@ -493,6 +523,34 @@ def self_test():
     expect("backwards re-anchor is rejected", None, [long_anchor, short_anchor],
            EXIT_TAMPERED, "ANCHOR SEQUENCE WENT BACKWARDS")
 
+    # 11. an HMAC anchor must be UNVERIFIABLE, NOT tampered. Regression test for a real defect:
+    # the first cut of this tool fed the HMAC signature to an ECDSA verify, which of course
+    # failed, and reported all 1186 pre-cutover production anchors as forged. A false accusation
+    # of tampering is the most expensive wrong answer this tool can give.
+    hmac_anchor = make_anchor(clean)
+    hmac_anchor["keyId"] = "local-hmac-sha256"
+    hmac_anchor["signature"] = base64.b64encode(b"an-hmac-tag-not-an-ecdsa-signature").decode("ascii")
+    expect("HMAC anchor is UNVERIFIABLE, not tampered", clean, [hmac_anchor],
+           EXIT_UNVERIFIABLE, "SYMMETRIC (HMAC) ANCHOR")
+
+    # 12. a key for a DIFFERENT generation must likewise decline rather than accuse.
+    other_generation = make_anchor(clean)
+    other_generation["keyId"] = "arn:aws:kms:eu-north-1:000000000000:key/some-other-generation"
+    findings, code = run([other_generation], pem, None,
+                         "arn:aws:kms:eu-north-1:000000000000:key/self-test")
+    cases += 1
+    messages = " | ".join(findings.rejections + findings.unverifiable)
+    if code != EXIT_UNVERIFIABLE or "KEY GENERATION MISMATCH" not in messages:
+        failures.append(f"key-generation mismatch: expected UNVERIFIABLE, got {code} ({messages})")
+    else:
+        print("  ok  wrong key generation is UNVERIFIABLE, not tampered: "
+              f"exit {code} -- KEY GENERATION MISMATCH")
+
+    # 13. ...but the matching generation must still VERIFY, or 12 passes by refusing everything.
+    matching = make_anchor(clean)
+    matching["keyId"] = "arn:aws:kms:eu-north-1:000000000000:key/self-test"
+    expect("matching key generation still verifies", clean, [matching], EXIT_VERIFIED, "")
+
     if failures:
         print("\nSELF-TEST FAILED:", file=sys.stderr)
         for failure in failures:
@@ -502,7 +560,7 @@ def self_test():
     # stopped constructing cases cannot read as a pass on the strength of the ones left.
     print(f"SUBJECTS={cases}")
     print(f"\nself-test: {cases}/{cases} cases behaved as specified "
-          "(1 acceptance, 7 rejections, 2 distinct UNVERIFIABLE outcomes)")
+          "(2 acceptances, 7 rejections, 4 distinct UNVERIFIABLE outcomes)")
     return 0
 
 
@@ -518,6 +576,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--anchors", help="anchor export from GET /api/v1/audit/anchors")
     parser.add_argument("--public-key", help="PEM public key (KMS GetPublicKey)")
+    parser.add_argument("--public-key-id",
+                        help="key id the --public-key belongs to; anchors signed by any other "
+                             "generation are reported UNVERIFIABLE rather than invalid")
     parser.add_argument("--entries", help="optional audit-entry export, to check attested heads")
     parser.add_argument("--self-test", action="store_true", help="falsify this verifier")
     args = parser.parse_args()
@@ -552,7 +613,7 @@ def main():
             print(f"cannot read public key from {args.public_key}: {exc}", file=sys.stderr)
             sys.exit(EXIT_INPUT_ERROR)
 
-    findings, code = run(anchors, public_key_pem, entries)
+    findings, code = run(anchors, public_key_pem, entries, args.public_key_id)
     report(findings, code, anchors, entries)
     sys.exit(code)
 
