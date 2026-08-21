@@ -98,6 +98,23 @@ kover {
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 
+tasks.withType<Test> {
+    // Fail fast, not fail wide (issue #5940). This module boots a real Kafka producer against a
+    // Redpanda Testcontainer, and Quarkus tears that container down whenever the set of
+    // @QuarkusTestResource classes changes between test classes. A producer left over from the
+    // previous boot then retries against a dead port. On job 96416555756 that left the job with no
+    // output but reconnect attempts from 12:09:46Z until it was cancelled at the 45-minute fleet
+    // job timeout at 12:43:38Z, and `build/test-results/` was never written — so the job burned a
+    // full runner slot and produced no JUnit XML to diagnose from.
+    //
+    // The Kafka client bounds in src/test/resources/application.properties are the direct fix. This
+    // is the backstop for anything else in this module that can stall past a test boundary: JUnit
+    // kills the test at 8 minutes and the module goes RED with a named test, instead of sitting on
+    // a runner until the fleet job timeout takes the whole matrix down with it. Same guard and same
+    // value as openbank-swift-service, added there for the same failure shape (#2320 item 3).
+    systemProperty("junit.jupiter.execution.timeout.default", "8m")
+}
+
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3; fleet rollout #1266). Weekly +
 // manual via pitest.yml, advisory — never a per-PR gate. info.solidsoft.pitest 1.19.0 supports Gradle 9.
 pitest {
