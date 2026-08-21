@@ -382,6 +382,45 @@ spec:
         falcosidekick:
           enabled: false
 
+        # Falco's own Prometheus metrics (issue #6236, follow-up to #6237).
+        #
+        # Before this, Prometheus held ZERO `falco_*` series — measured 2026-08-21 — so the only
+        # thing the estate knew about the runtime-security agent was whether its pods were Ready.
+        # `FalcoAgentNotReady` (prometheus-rules-runtime-security.yaml) is built on exactly that
+        # DaemonSet-readiness proxy, and it was chosen because it was the only observable available,
+        # not because it was the best one. A Ready pod with a ruleset that failed to load, or one
+        # dropping syscalls, is indistinguishable from a healthy one through that proxy.
+        #
+        # `metrics.enabled` is the only switch needed: the chart derives
+        # `webserver.prometheus_metrics_enabled` from it (verified by rendering 9.1.0 — the
+        # rendered falco.yaml carries `prometheus_metrics_enabled: true`). Two separate keys that
+        # must agree is the shape that produces a configured-looking, inert feature, so it is worth
+        # stating that the chart, not this file, keeps them in step.
+        metrics:
+          enabled: true
+          # THE DEFAULT IS 1h AND WOULD HAVE MADE THIS INERT-LOOKING-BUT-STALE. `interval` is how
+          # often Falco RECOMPUTES its metrics snapshot, not how often Prometheus reads it. Left at
+          # the chart default, a 30s scrape would return the same hour-old numbers 120 times, every
+          # gauge lagging reality by up to an hour — and nothing would look broken. This estate has
+          # already shipped that exact defect once, in the LLM price book recording rules, where an
+          # `interval: 1h` rule was resolvable for 5 minutes in every 60 against Prometheus's 5m
+          # lookback (#6063 merged inert, fixed by #6151).
+          interval: 1m
+          # Per-CPU kernel counters multiply every counter by the core count on every node. Left off
+          # (the chart default) deliberately: 13 nodes is already the multiplier that matters, and
+          # per-rule counters below are the signal worth paying for.
+          kernelEventCountersPerCPUEnabled: false
+
+        serviceMonitor:
+          create: true
+          # 30s against a 1m recompute rather than the chart's 15s: scraping four times per refresh
+          # buys nothing but samples, and scraping exactly once per refresh risks aliasing past an
+          # update. The Service and the `type: falco-metrics` label the selector needs are both
+          # created by the chart when metrics.enabled is set.
+          interval: 30s
+          labels:
+            release: kube-prometheus-stack
+
         # Node-agent priority (same class as CNI/kube-proxy): sandbox nodes
         # run at the max-pods (ENI IP) limit, where a default-priority DS pod
         # finds "Too many pods" and no preemption victim — the security agent
