@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.domain.model.CampaignBannerPlacement
 import com.openbank.engagement.domain.model.SurfaceSlot
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -29,7 +30,7 @@ class CampaignBannerPlacementConsumer(
 
         // The write is the opposite case — a DB failure here is transient and the placement must
         // still land once it recovers, so it is retried and then rethrown for the DLQ (#5698).
-        withBoundedRetry(log, "campaign banner placement for interaction ${placement.interactionRef}") {
+        EventRetry.withRetry(log, "campaign banner placement for interaction ${placement.interactionRef}", null) {
             placements.save(placement)
         }
     }

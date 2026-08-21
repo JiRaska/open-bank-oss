@@ -243,6 +243,11 @@ class StandingOrderDueConsumer(
     private fun toMajorUnits(minorUnits: Long, currency: String): BigDecimal =
         BigDecimal.valueOf(minorUnits, CurrencyCode.of(currency).defaultFractionDigits)
 
+    // best-effort: this is the COMPENSATING write on the failure path — it runs while an execution
+    // failure is already being handled, so letting it throw would replace the real error with the
+    // error of recording it, and the caller would dead-letter on the wrong cause. The order stays
+    // due and the next tick re-executes it, so nothing is silently dropped. Stated because
+    // runCatching + onFailure is otherwise indistinguishable from the #5698 swallow.
     private suspend fun recordFailureSafely(orderId: UUID) {
         runCatching { useCase.recordFailure(orderId) }
             .onFailure { log.warnf(it, "[standing-order-exec] recordFailure failed for order %s", orderId) }
