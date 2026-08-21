@@ -22,7 +22,7 @@ class UnconfiguredAdverseMediaSourceTest {
 
     @Test
     fun `screening a party without a configured source is SOURCE_NOT_CONFIGURED, not NO_HIT`(): Unit = runBlocking {
-        val result = source.screen("Andrej Babiš", "kyc-adverse-media-1")
+        val result = source.screen("Adverse Subject Zero", "kyc-adverse-media-1")
 
         assertThat(result.outcome).isEqualTo(AdverseMediaOutcome.SOURCE_NOT_CONFIGURED)
         assertThat(result.outcome).isNotEqualTo(AdverseMediaOutcome.NO_HIT)
@@ -33,8 +33,10 @@ class UnconfiguredAdverseMediaSourceTest {
     @Test
     fun `the unconfigured outcome never resolves a check to PASSED`(): Unit = runBlocking {
         // Every name, adversely-reported or not, lands in the same unresolved state — the honest
-        // answer when nothing was read.
-        listOf("Andrej Babiš", "Jan Novák", "").forEach { name ->
+        // answer when nothing was read. Subjects are fictional by construction: this is a PUBLIC
+        // repository and adverse-media screening is negative-news search, so a real person's name
+        // must never appear as a test subject here.
+        listOf("Adverse Subject Zero", "Jan Novák", "").forEach { name ->
             assertThat(source.screen(name, "k").outcome.toCheckStatus()).isEqualTo(CheckStatus.MANUAL_REVIEW)
         }
     }
