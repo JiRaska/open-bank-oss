@@ -11,6 +11,8 @@ import com.openbank.settlement.application.workflow.SettlementActivities
 import com.openbank.settlement.application.workflow.SettlementWorkflowImpl
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
+import com.openbank.settlement.infrastructure.observability.SettlementMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -42,6 +44,16 @@ class SettlementServiceOriginateTest {
     private lateinit var worker: Worker
     private lateinit var service: SettlementService
 
+    // A REAL metrics adapter over a real registry, not a mock: the point of these two assertions is
+    // that originate() actually moves a counter, which a verified mock cannot establish.
+    private val registry = SimpleMeterRegistry()
+    private val metrics = SettlementMetricsAdapter().apply { bindTo(registry) }
+
+    private fun originatedCount(outcome: String): Double = registry.find(SettlementMetricsAdapter.ORIGINATED_METRIC)
+        .tag("outcome", outcome)
+        .counter()
+        ?.count() ?: 0.0
+
     private companion object {
         const val TASK_QUEUE = "openbank-settlement"
     }
@@ -54,7 +66,7 @@ class SettlementServiceOriginateTest {
         worker.registerActivitiesImplementations(RelaxedActivities())
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(repo, temporalConfig, env.workflowClient)
+        service = SettlementService(repo, temporalConfig, env.workflowClient, metrics)
     }
 
     @AfterEach
@@ -85,6 +97,10 @@ class SettlementServiceOriginateTest {
         assertThat(created.captured.status).isEqualTo(SettlementStatus.PENDING)
         assertThat(result.id).isEqualTo(created.captured.id)
         coVerify { repo.create(any()) }
+        // A new row is `created`, and specifically NOT `replayed` — the pair is what makes the
+        // outcome tag load-bearing rather than a constant.
+        assertThat(originatedCount("created")).isEqualTo(1.0)
+        assertThat(originatedCount("replayed")).isEqualTo(0.0)
     }
 
     @Test
@@ -110,6 +126,8 @@ class SettlementServiceOriginateTest {
 
         assertThat(result.id).isEqualTo(existing.id)
         coVerify(exactly = 0) { repo.create(any()) }
+        assertThat(originatedCount("replayed")).isEqualTo(1.0)
+        assertThat(originatedCount("created")).isEqualTo(0.0)
     }
 
     /** Activities stub that never throws — originate coverage only exercises settle() dispatch. */
