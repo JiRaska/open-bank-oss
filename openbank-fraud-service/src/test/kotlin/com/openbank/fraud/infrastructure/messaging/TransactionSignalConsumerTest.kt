@@ -7,6 +7,7 @@ package com.openbank.fraud.infrastructure.messaging
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
+import com.openbank.fraud.application.port.out.FraudMetricsPort
 import com.openbank.fraud.application.port.out.PayeeHistoryRepository
 import com.openbank.fraud.application.port.out.VelocityAggregateRepository
 import com.openbank.fraud.application.usecase.FeatureOnlineUpdater
@@ -30,10 +31,11 @@ class TransactionSignalConsumerTest {
     private val objectMapper = ObjectMapper()
         .registerModule(kotlinModule())
         .registerModule(JavaTimeModule())
+    private val metrics = mockk<FraudMetricsPort>(relaxed = true)
     private val fixedClock = Clock.fixed(Instant.parse("2026-07-09T00:00:00Z"), ZoneOffset.UTC)
 
     private val consumer =
-        TransactionSignalConsumer(velocityRepo, payeeHistoryRepo, featureUpdater, objectMapper, fixedClock)
+        TransactionSignalConsumer(velocityRepo, payeeHistoryRepo, featureUpdater, objectMapper, fixedClock, metrics)
 
     @Test
     fun `happy path records velocity for valid signal`() {
@@ -49,7 +51,68 @@ class TransactionSignalConsumerTest {
 
         consumer.onTransactionInitiated(payload)
 
-        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("250.00"), "CZK", any()) }
+        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("250.00"), "CZK", any(), any()) }
+    }
+
+    /**
+     * Issue #6044: the velocity bucket must be derived from the event's own business time. The
+     * repository is what applies it, but the consumer is the only place that can supply it — and it
+     * used to supply nothing, leaving the repository to read its clock. Asserted here as the exact
+     * `occurredAt` from the wire, not merely "some Instant": a fallback to processing time is
+     * precisely the bug, and `any()` would agree with it.
+     */
+    @Test
+    fun `forwards the event occurredAt to the velocity repository as the bucket time`() {
+        val accountId = UUID.randomUUID()
+        val occurredAt = Instant.parse("2026-07-09T10:59:00Z")
+        val eventTimeSlot = slot<Instant>()
+        coEvery {
+            velocityRepo.recordTransaction(any(), any(), any(), any(), capture(eventTimeSlot))
+        } returns Unit
+        val payload = """
+            {
+              "aggregateId": "${UUID.randomUUID()}",
+              "sourceAccountId": "$accountId",
+              "amount": "250.00",
+              "currencyCode": "CZK",
+              "occurredAt": "$occurredAt"
+            }
+        """.trimIndent()
+
+        consumer.onTransactionInitiated(payload)
+
+        assertThat(eventTimeSlot.captured).isEqualTo(occurredAt)
+        // Nothing was substituted, so the substitution must not be reported.
+        coVerify(exactly = 0) { metrics.recordSignalMissingEventTime() }
+    }
+
+    /**
+     * `occurredAt` is required on `TransactionInitiatedEvent`, so this should never happen — which is
+     * exactly why it must be counted rather than absorbed. Processing time is still substituted (a
+     * velocity row with an invented bucket beats no velocity row at all for a fraud control), but the
+     * substitution is now visible from outside the database. #3883 is the precedent: the audit
+     * consumer substituted ingest time for 7 of its 21 topics and nothing anywhere said so.
+     */
+    @Test
+    fun `counts the substitution when the signal carries no occurredAt`() {
+        val accountId = UUID.randomUUID()
+        val eventTimeSlot = slot<Instant>()
+        coEvery {
+            velocityRepo.recordTransaction(any(), any(), any(), any(), capture(eventTimeSlot))
+        } returns Unit
+        val payload = """
+            {
+              "aggregateId": "${UUID.randomUUID()}",
+              "sourceAccountId": "$accountId",
+              "amount": "250.00",
+              "currencyCode": "CZK"
+            }
+        """.trimIndent()
+
+        consumer.onTransactionInitiated(payload)
+
+        coVerify(exactly = 1) { metrics.recordSignalMissingEventTime() }
+        assertThat(eventTimeSlot.captured).isEqualTo(Instant.parse("2026-07-09T00:00:00Z"))
     }
 
     @Test
@@ -58,7 +121,7 @@ class TransactionSignalConsumerTest {
         val aggregateId = UUID.randomUUID()
         val transactionIdSlot = slot<UUID>()
         coEvery {
-            velocityRepo.recordTransaction(any(), any(), any(), capture(transactionIdSlot))
+            velocityRepo.recordTransaction(any(), any(), any(), capture(transactionIdSlot), any())
         } returns Unit
         val payload = """
             {
@@ -108,7 +171,7 @@ class TransactionSignalConsumerTest {
     fun `bad JSON is dropped without calling repository`() {
         consumer.onTransactionInitiated("not-valid-json{{{")
 
-        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any(), any(), any()) }
     }
 
     @Test
@@ -117,14 +180,14 @@ class TransactionSignalConsumerTest {
 
         consumer.onTransactionInitiated(payload)
 
-        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { velocityRepo.recordTransaction(any(), any(), any(), any(), any()) }
     }
 
     @Test
     fun `missing amount defaults to zero`() {
         val accountId = UUID.randomUUID()
         val amountSlot = slot<BigDecimal>()
-        coEvery { velocityRepo.recordTransaction(any(), capture(amountSlot), any(), any()) } returns Unit
+        coEvery { velocityRepo.recordTransaction(any(), capture(amountSlot), any(), any(), any()) } returns Unit
 
         val payload = """{"sourceAccountId": "$accountId", "currencyCode": "CZK"}"""
         consumer.onTransactionInitiated(payload)
@@ -136,7 +199,7 @@ class TransactionSignalConsumerTest {
     fun `missing currencyCode defaults to CZK`() {
         val accountId = UUID.randomUUID()
         val currencySlot = slot<String>()
-        coEvery { velocityRepo.recordTransaction(any(), any(), capture(currencySlot), any()) } returns Unit
+        coEvery { velocityRepo.recordTransaction(any(), any(), capture(currencySlot), any(), any()) } returns Unit
 
         val payload = """{"sourceAccountId": "$accountId", "amount": "50.00"}"""
         consumer.onTransactionInitiated(payload)
@@ -147,7 +210,7 @@ class TransactionSignalConsumerTest {
     @Test
     fun `repository exception is caught and does not propagate`() {
         val accountId = UUID.randomUUID()
-        coEvery { velocityRepo.recordTransaction(any(), any(), any(), any()) } throws RuntimeException("DB down")
+        coEvery { velocityRepo.recordTransaction(any(), any(), any(), any(), any()) } throws RuntimeException("DB down")
 
         val payload = """{"sourceAccountId": "$accountId", "amount": "100.00", "currencyCode": "CZK"}"""
 
@@ -231,6 +294,6 @@ class TransactionSignalConsumerTest {
         // Must not throw, and must not prevent the velocity path from running
         consumer.onTransactionInitiated(payload)
 
-        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("100.00"), "CZK", any()) }
+        coVerify(exactly = 1) { velocityRepo.recordTransaction(accountId, BigDecimal("100.00"), "CZK", any(), any()) }
     }
 }

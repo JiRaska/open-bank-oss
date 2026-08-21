@@ -35,10 +35,14 @@ class VelocityAggregateRepositoryImpl(
         amount: BigDecimal,
         currency: String,
         transactionId: UUID?,
+        occurredAt: Instant,
     ) {
-        val now = Instant.now(clock)
+        // Issue #6044: the bucket comes from the event's own time, never from Instant.now(clock).
+        // window_start is part of the PK, so a redelivery processed on the other side of an hour
+        // boundary would otherwise target a different ROW — and the applied-id guard below is per
+        // row, so it would not see the first application and would count the replay again.
         VelocityWindow.entries.forEach { window ->
-            val start = window.bucketStart(now).toOffsetDateTime()
+            val start = window.bucketStart(occurredAt).toOffsetDateTime()
             val result = pool.preparedQuery(UPSERT_SQL).execute(
                 Tuple.of(
                     accountId.toString(),
