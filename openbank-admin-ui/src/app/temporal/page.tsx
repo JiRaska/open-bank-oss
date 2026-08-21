@@ -325,8 +325,11 @@ export default function TemporalPage() {
                 </div>
               )}
               <button
+                type="button"
                 onClick={load}
                 disabled={loading}
+                aria-busy={loading}
+                aria-label={t('Obnovit stav Temporal', 'Refresh Temporal status')}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '6px',
                   padding: '8px 14px', borderRadius: '8px',
@@ -334,7 +337,7 @@ export default function TemporalPage() {
                   color: 'var(--text)', fontSize: '13px', fontWeight: 600, cursor: loading ? 'wait' : 'pointer',
                 }}
               >
-                <RefreshCw size={14} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+                <RefreshCw size={14} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
           </div>}
