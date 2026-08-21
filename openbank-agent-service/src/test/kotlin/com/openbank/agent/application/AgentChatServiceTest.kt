@@ -51,6 +51,13 @@ class AgentChatServiceTest {
         every { it.blocks() } returns true
     }
 
+    // Content safety is a separate governance step with its own test; here it must return a
+    // definite "nothing blocked" so the loop assertions are about the loop.
+    private val passThroughContentSafety = mockk<AgentContentSafetyGuard>().also {
+        coEvery { it.checkUserInput(any(), any()) } returns false
+        coEvery { it.checkAssistantOutput(any(), any()) } returns false
+    }
+
     // Kill switch that never halts (the default for the loop tests; the halt path has its own test).
     private val noHaltKillSwitch = mockk<KillSwitchService>().also {
         every { it.haltReason(any()) } returns null
@@ -100,6 +107,7 @@ class AgentChatServiceTest {
                 this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
                 this.runAuditor = this@AgentChatServiceTest.runAuditor
                 this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
                 this.killSwitch = noHaltKillSwitch
             }
 
@@ -154,6 +162,7 @@ class AgentChatServiceTest {
                 this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
                 this.runAuditor = this@AgentChatServiceTest.runAuditor
                 this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
                 this.killSwitch = noHaltKillSwitch
             }
 
@@ -188,6 +197,7 @@ class AgentChatServiceTest {
                 this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
                 this.runAuditor = this@AgentChatServiceTest.runAuditor
                 this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
                 this.killSwitch = noHaltKillSwitch
             }
 
@@ -223,6 +233,7 @@ class AgentChatServiceTest {
                 this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
                 this.runAuditor = this@AgentChatServiceTest.runAuditor
                 this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
                 this.killSwitch = noHaltKillSwitch
             }
 
@@ -259,6 +270,7 @@ class AgentChatServiceTest {
                 this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
                 this.runAuditor = this@AgentChatServiceTest.runAuditor
                 this.injectionGuard = guard
+                this.contentSafety = passThroughContentSafety
                 this.killSwitch = noHaltKillSwitch
             }
 
@@ -293,6 +305,7 @@ class AgentChatServiceTest {
                 this.charterRegistry = mockk { every { allowedCapabilities(any()) } returns emptySet() }
                 this.runAuditor = this@AgentChatServiceTest.runAuditor
                 this.injectionGuard = passThroughGuard
+                this.contentSafety = passThroughContentSafety
                 this.killSwitch = haltedSwitch
             }
 
