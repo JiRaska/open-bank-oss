@@ -560,11 +560,11 @@ function IAOpsContent() {
                         )}
                       </div>
 
-                      {/* Cost / Budget column */}
+                      {/* Cost / Budget column: a missing budget is an explicit state, never an implied zero. */}
                       {costEntry && (
                         <div style={{ padding: '8px 10px', borderRadius: '8px', background: 'var(--surface)', border: '1px solid var(--border)', marginBottom: '10px' }}>
                           <div style={{ fontSize: '10px', fontWeight: 700, color: 'var(--text-tertiary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                            {t('Náklady / Budget', 'Cost / Budget')}
+                            {t('Náklady / rozpočet', 'Cost / Budget status')}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
                             <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
@@ -582,6 +582,11 @@ function IAOpsContent() {
                                   {budgetPct.toFixed(0)}%
                                 </span>
                               </div>
+                            )}
+                            {budgetPct == null && (
+                              <span role="status" style={{ fontSize: '10px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                                {t('Měsíční rozpočet není nastaven; intenzita používá denní prahy.', 'Monthly budget is not configured; burn rate uses daily thresholds ($1 / $5 / $10).')}
+                              </span>
                             )}
                           </div>
                         </div>

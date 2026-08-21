@@ -15,7 +15,9 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.domain.model.BalanceVerdict
 import com.openbank.finrep.infrastructure.client.ClosedPeriodTrialBalanceResponse
 import com.openbank.finrep.infrastructure.client.LedgerRestClient
 import io.restassured.RestAssured.given
@@ -69,9 +71,11 @@ import java.time.LocalDate
  * template still fixes the required field types for a non-empty response, and finrep's mappers fold
  * over an empty list to an all-zero template.
  *
- * Only the three line fields finrep actually consumes (`code`, `type`, `net`) are declared — a
- * consumer contract must not pin provider fields it does not read (`glAccountId`, `name`,
- * `currency`, `totalDebit`, `totalCredit` are ledger's business).
+ * Only the four line fields finrep actually consumes (`code`, `type`, `net`, `currency`) are
+ * declared — a consumer contract must not pin provider fields it does not read (`glAccountId`,
+ * `name`, `totalDebit`, `totalCredit` are ledger's business). `currency` moved from the second
+ * list to the first with issue #5987, when the balance check began evaluating the double-entry
+ * identity per currency.
  */
 @ExtendWith(PactConsumerTestExt::class)
 @PactTestFor(providerName = "openbank-ledger-service", pactVersion = PactSpecVersion.V3)
@@ -107,6 +111,13 @@ class LedgerTrialBalancePactConsumerTest {
                     line.stringType("code", "1100-CASH-CLEARING-CZK")
                     line.stringType("type", "ASSET")
                     line.decimalType("net", 150_000.00)
+                    // Added with issue #5987: finrep now READS `currency`, because the double-entry
+                    // identity behind `isBalanced` holds per currency and a global sum would let a
+                    // CZK line cancel a lost EUR one. A consumer pact must pin exactly the fields
+                    // the consumer consumes — no more (that was the rule when this line was absent)
+                    // and no fewer (the client's `currency` is non-nullable, so a provider that
+                    // stopped sending it would fail deserialization at runtime, not here).
+                    line.stringType("currency", "CZK")
                 }
             }.build(),
         )
@@ -130,15 +141,31 @@ class LedgerTrialBalancePactConsumerTest {
         assertThat(line.code).isNotBlank()
         assertThat(line.type).isNotBlank()
         assertThat(line.net).isNotNull()
+        assertThat(line.currency).isNotBlank()
 
         // ... and the mapper must accept them: proves the contract feeds a real F01.01 render,
         // not merely that some JSON parsed.
         val template = F0101Mapper.map(
-            response.lines.map { TrialBalanceLineDto(code = it.code, accountType = it.type, net = it.net) },
+            TrialBalanceSnapshot(
+                lines = response.lines.map {
+                    TrialBalanceLineDto(code = it.code, accountType = it.type, net = it.net, currency = it.currency)
+                },
+                ledgerReportsBalanced = response.balanced,
+            ),
             LocalDate.parse(REPORTING_DATE),
         )
         assertThat(template.cells.map { it.rowRef }).containsExactly("r010", "r380", "r490")
         assertThat(template.cells.first().value).isEqualByComparingTo(BigDecimal("150000.00"))
+        // The pact's single ASSET line does not tie out on its own, so the contract also proves the
+        // balance check runs over real contract data and can answer `false` (issue #5987) — it is
+        // not merely unit-testable against hand-built fixtures.
+        assertThat(template.isBalanced).isFalse()
+        // And the contract body is itself a disagreement: it declares `balanced: true` alongside a
+        // lines array that does not tie out. That is exactly the wire shape a truncated response
+        // has — a producer verdict computed over lines the consumer did not all receive — so the
+        // cross-check of issue #6011 is exercised against contract data rather than a fixture.
+        assertThat(response.balanced).isTrue()
+        assertThat(template.balanceVerdict).isEqualTo(BalanceVerdict.SOURCES_DISAGREE)
     }
 
     /** Issues the request against the path the production client is annotated with. */

@@ -34,4 +34,4 @@ interface ProductCatalogClient {
 
 /** The subset of product-catalog's `Product` this service actually consumes (issue #668). */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ProductCatalogResponse(val id: String, val code: String, val status: String)
+data class ProductCatalogResponse(val id: String, val code: String, val status: String, val currency: String)

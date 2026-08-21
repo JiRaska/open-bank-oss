@@ -14,6 +14,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
 // Cap every request and the rendered list. The operator never needs the full
@@ -46,6 +47,7 @@ export default function AccountsPage() {
   const { t, language } = useLanguage()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [query, setQuery]               = useState('')
+  const [selectedParty, setSelectedParty] = useState<PartyHit | null>(null)
   const [statusFilter, setStatusFilter] = useState('')
   const [typeFilter, setTypeFilter]     = useState('')
   const [result, setResult]             = useState<CursorPage<Account> | null>(null)
@@ -64,6 +66,7 @@ export default function AccountsPage() {
 
   function resetFilters() {
     setQuery('')
+    setSelectedParty(null)
     setStatusFilter('')
     setTypeFilter('')
     setResult(null)
@@ -72,8 +75,9 @@ export default function AccountsPage() {
     setVisibleCount(PAGE_SIZE)
   }
 
-  async function search() {
-    const k = classifyQuery(query)
+  async function search(value = query) {
+    const rawQuery = value
+    const k = classifyQuery(rawQuery)
     setIbanHint(null)
     setUnavailable(null)
     setVisibleCount(PAGE_SIZE)
@@ -100,12 +104,12 @@ export default function AccountsPage() {
       // Strip glob wildcards (`*`, `?`) and normalize to upper-case before sending
       // as a fragment — IBANs are stored upper-case and the backend escapes `*`
       // literally, so "CZ*" would never match without this normalisation.
-      const fragment = query.trim().replace(/[*?]/g, '').toUpperCase()
+      const fragment = rawQuery.trim().replace(/[*?]/g, '').toUpperCase()
       const url = k === 'iban'
-        ? `${ACCOUNT_SERVICE}/api/v1/accounts/iban/${normalizeIban(query)}`
+        ? `${ACCOUNT_SERVICE}/api/v1/accounts/iban/${normalizeIban(rawQuery)}`
         : k === 'fragment'
           ? `${ACCOUNT_SERVICE}/api/v1/accounts/search?q=${encodeURIComponent(fragment)}&limit=${PAGE_SIZE}`
-          : `${ACCOUNT_SERVICE}/api/v1/accounts?partyId=${encodeURIComponent(query.trim())}&limit=${PAGE_SIZE}`
+          : `${ACCOUNT_SERVICE}/api/v1/accounts?partyId=${encodeURIComponent(rawQuery.trim())}&limit=${PAGE_SIZE}`
 
       const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
       if (!res.ok) {
@@ -151,6 +155,17 @@ export default function AccountsPage() {
         </Link></Can>}
       />
 
+      <PartySearch
+        selectedId={selectedParty?.id}
+        busy={loading}
+        onSelect={party => {
+          setSelectedParty(party)
+          setQuery(party.id)
+          void search(party.id)
+        }}
+        placeholder={t('Jméno, název firmy nebo UUID party…', 'Party name, company name, or party UUID…')}
+      />
+
       <div className="card">
         {/* Search toolbar */}
         <div style={{
@@ -172,7 +187,7 @@ export default function AccountsPage() {
                 aria-invalid={Boolean(ibanHint)}
                 placeholder={t('Fragment čísla účtu, IBAN nebo Party ID (UUID)…', 'Account-number fragment, IBAN, or Party ID (UUID)…')}
                 value={query}
-                onChange={e => { setQuery(e.target.value); if (ibanHint) setIbanHint(null) }}
+                onChange={e => { setQuery(e.target.value); setSelectedParty(null); if (ibanHint) setIbanHint(null) }}
                 onKeyDown={e => e.key === 'Enter' && search()}
               />
             </div>
@@ -202,7 +217,8 @@ export default function AccountsPage() {
             </select>
             <button
               className="btn btn-primary"
-              onClick={search}
+              aria-label={t('Vyhledat účty', 'Search accounts')}
+              onClick={() => void search()}
               disabled={loading || !canSearch}
             >
               <Search size={13} aria-hidden="true" />
@@ -229,8 +245,8 @@ export default function AccountsPage() {
           {queryHelpVisible && (
             <span id="accounts-query-help" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
               {t(
-                'Hledejte podle fragmentu čísla účtu (trigram, ≥2 znaky), přesného IBANu nebo Party ID (UUID). Vyhledávání podle jména/příjmení/rodného čísla vyžaduje party-service (v přípravě, #66–68).',
-                'Search by an account-number fragment (trigram, ≥2 chars), an exact IBAN, or a Party ID (UUID). Search by name / surname / birth number needs party-service (coming soon, #66–68).',
+                'Hledejte podle fragmentu čísla účtu (trigram, ≥2 znaky), přesného IBANu nebo Party ID (UUID). Jméno a název firmy vyřeší vyhledávání party výše.',
+                'Search by an account-number fragment (trigram, ≥2 chars), an exact IBAN, or a Party ID (UUID). Use the party search above for names and companies.',
               )}
             </span>
           )}
@@ -244,8 +260,8 @@ export default function AccountsPage() {
             lang={language}
             title={t('Zadejte alespoň 2 znaky', 'Enter at least 2 characters')}
             detail={t(
-              'Fragmentové vyhledávání čísla účtu potřebuje aspoň 2 znaky. Zadejte fragment čísla účtu, přesný IBAN nebo Party ID (UUID). Hledání podle jména vyžaduje party-service (v přípravě).',
-              'Account-number fragment search needs at least 2 characters. Enter an account-number fragment, an exact IBAN, or a Party ID (UUID). Name search needs party-service (coming soon).',
+              'Fragmentové vyhledávání čísla účtu potřebuje aspoň 2 znaky. Zadejte fragment čísla účtu, přesný IBAN nebo Party ID (UUID), nebo použijte vyhledávání party výše.',
+              'Account-number fragment search needs at least 2 characters. Enter an account-number fragment, an exact IBAN, or a Party ID (UUID), or use the party search above.',
             )}
             dense
           />
@@ -279,7 +295,7 @@ export default function AccountsPage() {
               </thead>
               <tbody>
                 {!result && !loading && (
-                  <tr><td colSpan={7}><div className="empty-state">{t('Zadejte IBAN nebo Party ID pro vyhledání účtů.', 'Enter an IBAN or Party ID to search for accounts.')}</div></td></tr>
+                  <tr><td colSpan={7}><div className="empty-state">{t('Vyberte party výše nebo zadejte IBAN či fragment čísla účtu.', 'Select a party above or enter an IBAN or account-number fragment.')}</div></td></tr>
                 )}
                 {loading && (
                   <tr><td colSpan={7}><div className="empty-state">{t('Hledám…', 'Searching…')}</div></td></tr>

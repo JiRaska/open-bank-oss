@@ -36,9 +36,17 @@ const CATEGORY_LABEL_EN: Record<string, string> = {
   BUG: 'Bug', IDEA: 'Idea', CONFUSING: 'Confusing',
 }
 
+function formatFeedbackTimestamp(value: string | null | undefined, locale: string): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' })
+}
+
 export default function ScreenFeedbackPage() {
   const { language } = useLanguage()
   const cs = language === 'cs'
+  const dateLocale = cs ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<ScreenFeedbackBoard | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -125,7 +133,7 @@ export default function ScreenFeedbackPage() {
           <tbody>
             {data.recent.map((r) => (
               <tr key={r.reference}>
-                <td>{r.occurredAt}</td>
+                <td>{formatFeedbackTimestamp(r.occurredAt, dateLocale)}</td>
                 <td>{r.screenId}</td>
                 <td>{catLabel(r.category)}</td>
                 <td>{r.comment}</td>

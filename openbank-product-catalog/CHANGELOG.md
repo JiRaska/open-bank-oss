@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.0...product-catalog-v0.18.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **product-catalog:** return canonical product IDs ([#6013](https://github.com/JiRaska/open-bank-oss/issues/6013)) ([7b458b7](https://github.com/JiRaska/open-bank-oss/commit/7b458b732dca1739f0f5be7797cf84355ca325b9))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.17.0...product-catalog-v0.18.0) (2026-08-20)
+
+
+### Features
+
+* **product-catalog:** govern downstream product terms ([#5841](https://github.com/JiRaska/open-bank-oss/issues/5841)) ([932d639](https://github.com/JiRaska/open-bank-oss/commit/932d63921fb3b8a8c63741deaeb4214a6e8fa142))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.16.0...product-catalog-v0.17.0) (2026-08-18)
 
 

@@ -54,20 +54,21 @@ class AuditAnchorSigningTest {
     @Test
     fun `signer round-trips a valid signature`() {
         val d = digest().toByteArray()
-        assertThat(signer.verify(d, signer.sign(d))).isTrue()
+        val signed = signer.sign(d)
+        assertThat(signer.verify(d, signed.value, signed.keyId)).isTrue()
     }
 
     @Test
     fun `signer rejects a signature over a different digest (chain rewrite)`() {
         val signed = signer.sign(digest().toByteArray())
         val rewritten = digest(lastRecordHash = "b".repeat(64)).toByteArray()
-        assertThat(signer.verify(rewritten, signed)).isFalse()
+        assertThat(signer.verify(rewritten, signed.value, signed.keyId)).isFalse()
     }
 
     @Test
     fun `signer rejects a tampered signature`() {
         val d = digest().toByteArray()
-        assertThat(signer.verify(d, "not-a-valid-signature")).isFalse()
+        assertThat(signer.verify(d, "not-a-valid-signature", signer.keyId)).isFalse()
     }
 
     @Test

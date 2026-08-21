@@ -1,13 +1,52 @@
-# RUM gateway cardinality budget alerts (ADR-0088 O2).
-# Fires when the number of unique `route` or `screen` label values seen by Tempo
-# over the last hour exceeds the agreed ADR-0088 budgets (route ≤ 100, screen ≤ 50).
-# High cardinality from mobile apps can explode Tempo's index and query latency;
-# catching it early lets SREs add a transform/routing processor before it compounds.
+# RUM cardinality budget alerts (ADR-0088 O2).
 #
-# Metric source: Tempo span-metrics-generator emits
-#   traces_spanmetrics_calls_total{route="...", screen="...",...}
-# into the in-cluster Prometheus. The `count(count by (route) (...))` idiom counts
-# the number of distinct label values without pulling all series into memory.
+# Fires when the number of distinct RUM span-metric label values exceeds the
+# ADR-0088 budgets. High cardinality from mobile apps can explode Tempo's index
+# and query latency; catching it early lets SREs add a transform/routing
+# processor before it compounds.
+#
+# ---------------------------------------------------------------------------
+# 2026-08-20 (#5735): BOTH rules in this file were structurally unable to fire.
+# Measured against the live sandbox Prometheus, not inferred:
+#
+#   count(traces_spanmetrics_calls_total{service_name=~".+"})  -> 0 series
+#
+# Tempo's metrics-generator labels span-metrics with exactly:
+#   service, span_name, span_kind, status_code   (+ __metrics_gen_instance)
+#
+# So every clause of the old expressions was wrong, independently:
+#   * `service_name=` -- that label does not exist; the label is `service`.
+#     A selector on a non-existent label matches nothing, always.
+#   * `="rum-gateway"` -- the gateway is a pass-through collector, not a span
+#     PRODUCER. span-metrics carry the emitting service, which is `openbank-app`
+#     (verified present as a `service` label value). The dashboard
+#     `dashboard-openbank-rum.yaml` already selects `service=~"openbank-app.*"`;
+#     these rules disagreed with the dashboard they were meant to protect.
+#   * `by (route)` / `by (screen_name)` -- neither dimension is exported.
+#     `tempo.yaml` configures no `dimensions:` customisation, so span-metrics
+#     have the four labels above and nothing else. `count by (<absent label>)`
+#     collapses every series into one, so the count is 1 and never exceeds a
+#     budget of 50 or 100 even when data flows.
+#
+# What is actually measurable today, and what these rules now use:
+#   * The RUM screen IS the span name -- the app emits spans literally named
+#     `screen.HOME`, so `count by (span_name)` IS the screen-cardinality count.
+#   * There is no `http.route` dimension to count. Adding one to Tempo would
+#     change span-metrics for all ~43 services at once (a cardinality risk in
+#     itself), so the route budget is expressed as a TOTAL series budget for
+#     the RUM service instead, and the alert is renamed to say so rather than
+#     naming a dimension that is not there.
+#
+# Positive control for anyone changing these: the same expression shape over a
+# service that definitely emits must return a value --
+#   count(count by (span_name) (traces_spanmetrics_calls_total{service="openbank-ledger-service"}))
+# returned 6 on 2026-08-20. If your edit makes that return nothing, the
+# expression is broken, not the data.
+#
+# NOTE ON EMPTINESS: these are BUDGET alerts. They stay silent while RUM has no
+# data, and that is correct -- absence is covered by the `rum-attribute-audit`
+# CronJob (which exits 1 on `rum-mobile-signal-absent`), not by an alert here.
+# ---------------------------------------------------------------------------
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -20,25 +59,27 @@ spec:
     - name: rum.cardinality
       interval: 5m
       rules:
-        - alert: RumRouteCardinalityHigh
+        - alert: RumSpanMetricsCardinalityHigh
           expr: |
-            count(count by (route) (traces_spanmetrics_calls_total{service_name="rum-gateway"})) > 100
+            count(traces_spanmetrics_calls_total{service=~"openbank-app.*"}) > 100
           for: 10m
           labels:
             severity: warning
             component: rum-gateway
           annotations:
-            summary: "RUM route cardinality exceeds budget (ADR-0088 O2)"
+            summary: "RUM span-metrics cardinality exceeds budget (ADR-0088 O2)"
             description: >
-              {{ $value }} unique `route` label values seen on Tempo span-metrics in the last 10 minutes.
+              {{ $value }} distinct RUM span-metric series for the mobile app in the last 10 minutes.
               Budget is 100. High cardinality inflates Tempo index and query latency.
-              Inspect the rum-gateway transform processor allow-list or add a routing processor to cap
-              the `http.route` attribute cardinality.
-            runbook_url: "https://github.com/openbank/openbank/blob/main/docs/runbooks/rum-cardinality.md"
+              Was `count by (route)` until #5735; Tempo exports no `http.route` dimension, so this
+              counts total series (span_name x span_kind x status_code) instead.
+              Inspect the rum-gateway `transform` processor allow-list, or normalise the span names
+              the app emits, before adding a routing processor.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0013-rum-cardinality.md"
 
         - alert: RumScreenCardinalityHigh
           expr: |
-            count(count by (screen_name) (traces_spanmetrics_calls_total{service_name="rum-gateway"})) > 50
+            count(count by (span_name) (traces_spanmetrics_calls_total{service=~"openbank-app.*"})) > 50
           for: 10m
           labels:
             severity: warning
@@ -46,7 +87,8 @@ spec:
           annotations:
             summary: "RUM screen cardinality exceeds budget (ADR-0088 O2)"
             description: >
-              {{ $value }} unique `screen_name` label values seen on Tempo span-metrics in the last 10 minutes.
-              Budget is 50. Check the mobile SDK for unbounded screen-name generation (e.g. dynamic IDs in
-              screen names). Add a transform processor entry to normalise or drop high-cardinality values.
-            runbook_url: "https://github.com/openbank/openbank/blob/main/docs/runbooks/rum-cardinality.md"
+              {{ $value }} unique RUM screen span names (`screen.<NAME>`) in the last 10 minutes.
+              Budget is 50. Check the mobile SDK for unbounded screen-name generation (e.g. dynamic
+              IDs interpolated into screen names). Add a transform processor entry to normalise or
+              drop high-cardinality values.
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0013-rum-cardinality.md"

@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 export type CaseStatus = 'OPEN' | 'CONVERGING' | 'CONTESTED' | 'SYNTHESIZED' | 'CLOSED'
-export type CaseEntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED'
+export type CaseEntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED'
 
 export interface CaseThreadEntry {
   type: CaseEntryType
@@ -17,7 +17,7 @@ export interface CaseThreadForBrief {
   entries: CaseThreadEntry[]
 }
 
-export type DecisionBriefStage = 'proposal_recorded' | 'needs_convergence' | 'gathering_evidence'
+export type DecisionBriefStage = 'proposal_recorded' | 'shadow_recorded' | 'needs_convergence' | 'gathering_evidence'
 
 export interface CaseDecisionBrief {
   stage: DecisionBriefStage
@@ -34,9 +34,16 @@ export function deriveCaseDecisionBrief(thread: CaseThreadForBrief): CaseDecisio
   const evidenceRefCount = new Set(activeContributions.flatMap(entry => entry.evidenceRefs ?? [])).size
   const contestedContributionCount = activeContributions.filter(entry => entry.contested).length
   const proposalEmitted = thread.entries.some(entry => entry.type === 'PROPOSAL_EMITTED')
+  const shadowRecorded = thread.entries.some(entry => entry.type === 'SHADOW_RECORDED')
 
   return {
-    stage: proposalEmitted ? 'proposal_recorded' : thread.status === 'CONTESTED' ? 'needs_convergence' : 'gathering_evidence',
+    stage: proposalEmitted
+      ? 'proposal_recorded'
+      : shadowRecorded
+        ? 'shadow_recorded'
+        : thread.status === 'CONTESTED'
+          ? 'needs_convergence'
+          : 'gathering_evidence',
     contributorCount,
     evidenceRefCount,
     contestedContributionCount,

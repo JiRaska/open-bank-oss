@@ -50,6 +50,9 @@ private const val LIST_LIMIT = 50
 private const val ACCOUNT_STATUS_ACTIVE = "ACTIVE"
 private const val ACCOUNT_TYPE_CURRENT = "CURRENT"
 
+// `@Unremovable`: see the note on BorrowerCreditClient — a test asserts this bean's PRESENCE
+// (LedgerAdapterBindingIT, #6057) and the test-scope stub would otherwise make it removable.
+@io.quarkus.arc.Unremovable
 @ApplicationScoped
 @Alternative
 @Priority(REST_ADAPTER_PRIORITY)

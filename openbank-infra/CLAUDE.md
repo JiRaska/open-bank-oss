@@ -142,6 +142,30 @@ out of it (they are path-scoped, not less important — several are live-inciden
   via `fleet-attestation.yml`) — it checks every image *declared* in gitops, incl. initContainers
   and sidecars, so a gap is caught while still latent. Green gate before any Enforce graduation
   (`rules.yaml: provenance.fleet_attestation_gate`).
+- **`gen-network-policies.py` emits INGRESS only, so a new in-cluster edge also needs the CALLER's
+  hand-written EGRESS rule — and the omission is silent in both directions.** Measured 2026-08-20:
+  LiteLLM's Langfuse trace callback died on `ConnectTimeout` to `langfuse.ai-platform.svc:3000`
+  while both pods were 1/1 Running, ArgoCD was Synced/Healthy, the generated
+  `langfuse-ingress-allow-list` correctly admitted the same namespace, and LiteLLM still answered
+  200 to every caller — the only symptom anywhere was `/api/public/traces` returning an empty list.
+  Same namespace is NOT the same as allowed: a pod carrying an egress policy is deny-by-default for
+  everything that policy does not name, and `networkpolicy-litellm-egress.yaml` named DNS, 443 to
+  the internet, and its own Postgres. Isolate it in one command — run a throwaway pod with no
+  egress policy in the same namespace and curl the target (HTTP 200 there + timeout from the
+  policed pod pins it to egress, not to the Service, DNS or the ingress allow-list). Note the
+  throwaway pod needs a `restricted` PodSecurity context or the namespace refuses it.
+- **A ConfigMap a pod parses ONCE at startup needs a pod-roll annotation, or the edit is a no-op
+  against a green ArgoCD.** LiteLLM reads `--config` at boot and the ConfigMap is a plain volume
+  mount, so a new model route reaches the pod's filesystem and the proxy keeps serving the list it
+  booted with: the caller gets `model not found` while ArgoCD reports Synced and Healthy and the
+  in-cluster ConfigMap genuinely contains the route. `litellm.yaml` has carried "BUMP THIS whenever
+  litellm-config.yaml changes" in a comment since #1919; prose is not a control, and three routes
+  were added in one week each depending on someone remembering it. Now enforced by
+  `check-litellm-config-revision.py` (`rules.yaml: litellm_gateway`) — any DIFFERENT annotation
+  value counts, so a revert is not blocked by a monotonicity rule nobody agreed to. Generalize past
+  LiteLLM: any workload that reads its config once (no `--watch`, no SIGHUP handler, no reloader
+  sidecar) has this shape, and the reloader sidecar pattern in the alloy/prometheus components is
+  the alternative fix.
 - **A provenance failure must fail the build that caused it.** `continue-on-error` /
   `|| echo "::warning::"` on a sign/attest step buys a green deploy that produces an
   undeployable image — the damage lands days later on whoever is on call, not on the author.

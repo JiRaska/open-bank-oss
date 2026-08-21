@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.6.0...settlement-service-v0.6.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **settlement:** actually reverse money in the compensation path ([#6037](https://github.com/JiRaska/open-bank-oss/issues/6037)) ([#6048](https://github.com/JiRaska/open-bank-oss/issues/6048)) ([a0ab439](https://github.com/JiRaska/open-bank-oss/commit/a0ab439084f5e5cba39a6bd7b067f3f80698f51e))
+
 ## [0.6.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.5.1...settlement-service-v0.6.0) (2026-08-18)
 
 
