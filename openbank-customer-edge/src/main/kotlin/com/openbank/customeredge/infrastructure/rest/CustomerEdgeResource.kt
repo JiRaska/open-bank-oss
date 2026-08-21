@@ -751,6 +751,39 @@ class CustomerEdgeResource(
     }
 
     /**
+     * An indicative, non-binding price for an amount and term (ADR-0269 rule 4).
+     *
+     * The ONLY route by which the app may learn what a loan costs. The client computes no price:
+     * rate, instalment, APRC and total come from lending-service, which resolves them from the
+     * pinned catalog revision. The body carries amount and term and nothing else — a
+     * customer-supplied rate would let the applicant price their own loan.
+     *
+     * Deliberately NOT fail-soft, and deliberately passes the upstream status through. A 409 means
+     * lending's distress floor suppressed pricing and carries a reason code; turning that into an
+     * empty 200 would leave the app rendering a quote-shaped hole, which is exactly how a client
+     * ends up showing "0".
+     */
+    @POST
+    @Path("/credit/quotes")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun quoteCredit(request: Map<String, Any?>): Response {
+        val customer = customer()
+        val body = objectMapper.writeValueAsString(
+            mapOf("amount" to request["amount"], "termMonths" to request["termMonths"]),
+        )
+        val resp = upstream.post(
+            "$lendingServiceUrl/api/v1/lending/intake/quotes",
+            customer.partyId.toString(),
+            body,
+        )
+        return Response.status(resp.status)
+            .entity(resp.entity ?: "{}")
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+    }
+
+    /**
      * The caller's OWN credit applications, as customer-readable journeys (ADR-0269 rule 3).
      *
      * The read half of the intake pair: `applyForLoan` above files an application, this says where

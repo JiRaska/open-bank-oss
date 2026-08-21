@@ -1206,6 +1206,36 @@ paths:
                 type: array
                 items: {$ref: '#/components/schemas/Loan'}
 
+  /credit/quotes:
+    post:
+      tags: [Lending]
+      summary: Indicative, non-binding price for an amount and term
+      description: >-
+        ADR-0269 rule 4 — the only route by which the app may learn what a loan costs. The client
+        computes no price. Not fail-soft: a 409 (distress floor suppressed pricing, with a reason
+        code) passes through rather than becoming an empty 200, which a client renders as zero.
+      operationId: quoteCredit
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amount, termMonths]
+              properties:
+                amount: {type: string}
+                termMonths: {type: integer, minimum: 1}
+      responses:
+        '200':
+          description: The indicative quote
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditQuote'}
+        '400': {description: Amount or term outside the product bounds}
+        '409': {description: Pricing suppressed; body carries reasonCode}
+
   /credit-applications:
     get:
       tags: [Lending]
@@ -3300,6 +3330,30 @@ components:
 
     # Edge's projected view of lending-service's Loan (internal fields dropped — see
     # CustomerEdgeResource.projectLoan).
+    CreditQuote:
+      type: object
+      description: >-
+        An indicative price. Structurally not an offer: no id, no accept path, and `binding` is
+        always false.
+      required: [amount, currency, termMonths, monthlyPayment, totalPayable, totalCostOfCredit,
+                 validUntil, binding]
+      properties:
+        amount: {type: string}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        termMonths: {type: integer}
+        nominalAnnualRatePercent: {type: string}
+        monthlyPayment: {type: string}
+        totalPayable: {type: string}
+        totalCostOfCredit: {type: string}
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must render as an absent figure, never
+            as 0% — which reads to a customer as free credit.
+        validUntil: {type: string, format: date-time}
+        binding: {type: boolean}
+
     CreditJourney:
       type: object
       description: >-
