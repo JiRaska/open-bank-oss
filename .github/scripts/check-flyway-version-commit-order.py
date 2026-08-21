@@ -109,43 +109,60 @@ def first_commit_order(paths: list[pathlib.Path]) -> tuple[dict[pathlib.Path, in
     # therefore green. It was only visible because the KNOWN_VIOLATIONS both-ways check then
     # reported every baseline entry as stale -- the ratchet catching the checker, which is the
     # single reason that idiom is worth its cost.
-    # The mainline is FETCHED, never guessed. An earlier version tried a candidate chain ending
-    # in HEAD, and that is unsound by construction: on a PR run HEAD is the merge commit, so
-    # `rev-list HEAD` includes the branch's own commits and the gate silently stops measuring
-    # "order on main" and starts measuring "order including this PR" -- a different question,
-    # answered confidently. That is how the same commit produced 349 ordered / 2 violations
-    # locally and 350 / 0 in CI. A gate that cannot obtain its ground truth must fail, not
-    # substitute the nearest available history.
-    mainline = "FETCH_HEAD"
-    fetched = subprocess.run(
-        ["git", "fetch", "--quiet", "origin", "main"],
-        cwd=REPO, capture_output=True, text=True, check=False,
-    )
+    # HEAD is never a candidate: on a PR run it is the merge commit, so `rev-list HEAD`
+    # includes the branch's own commits and the gate stops measuring "order on main" and
+    # starts measuring "order including this PR" -- a different question, answered
+    # confidently.
+    #
+    # The mainline is FETCHED and its DEPTH is checked. Both matter, and the second one is
+    # what the first two attempts at this function missed.
+    #
+    # The gates shard checks out at fetch-depth: 1 (ci.yml says so in its own comment). On a
+    # shallow repo `git log --diff-filter=A` reports every file as ADDED at the shallow
+    # boundary commit, because that grafted root is where history appears to begin. So all 355
+    # migrations resolved to ONE position, the per-service sort fell through to its version
+    # tiebreak, every service looked monotonic, and the gate reported zero violations while
+    # printing a healthy "355 migrations ordered". Measured: CI resolved
+    # `FETCH_HEAD@15dd7273d (3 commits)` and found nothing, where a full local history finds
+    # two — campaign V15 at rev-list position 4094 against V13 at 4167, security-scanner V5 at
+    # 4382 against V4 at 4476.
+    #
+    # A mainline shorter than the corpus it must order cannot order it. That is checkable, so
+    # it is checked, rather than trusted.
+    if subprocess.run(["git", "rev-parse", "--is-shallow-repository"], cwd=REPO,
+                      capture_output=True, text=True, check=False).stdout.strip() == "true":
+        # Deepen in place rather than requiring fetch-depth: 0 on the shard — 60 other gates
+        # do not need full history and should not pay for it.
+        for args in (["--unshallow"], ["--depth=2147483647"]):
+            if subprocess.run(["git", "fetch", "--quiet", *args, "origin", "main"], cwd=REPO,
+                              capture_output=True, text=True, check=False).returncode == 0:
+                break
+    else:
+        subprocess.run(["git", "fetch", "--quiet", "origin", "main"],
+                       cwd=REPO, capture_output=True, text=True, check=False)
+
+    # Every candidate is evaluated and the LONGEST wins, never the first that answers: a
+    # truncated FETCH_HEAD is a plausible-looking answer that silently changes the question.
     revs: list[str] = []
-    if fetched.returncode == 0:
+    mainline = "unresolved"
+    for ref in ("FETCH_HEAD", "origin/main", "main"):
         try:
-            revs = subprocess.run(
-                ["git", "rev-list", "--reverse", "FETCH_HEAD"],
+            candidate = subprocess.run(
+                ["git", "rev-list", "--reverse", ref],
                 cwd=REPO, capture_output=True, text=True, check=True,
             ).stdout.splitlines()
         except subprocess.CalledProcessError:
-            revs = []
-    if not revs:
-        # Offline or no remote: fall back to a local mainline ref, but NEVER to HEAD.
-        for ref in ("origin/main", "main"):
-            try:
-                revs = subprocess.run(
-                    ["git", "rev-list", "--reverse", ref],
-                    cwd=REPO, capture_output=True, text=True, check=True,
-                ).stdout.splitlines()
-            except subprocess.CalledProcessError:
-                continue
-            if revs:
-                mainline = ref
-                break
+            continue
+        if len(candidate) > len(revs):
+            revs, mainline = candidate, ref
     position = {sha: i for i, sha in enumerate(revs)}
     if revs:
         provenance = f"{mainline}@{revs[-1][:9]} ({len(revs)} commits)"
+
+    # The depth guard. A history with fewer commits than there are migrations cannot have
+    # introduced them one at a time, so it is truncated whatever it claims to be.
+    if len(revs) < len(paths):
+        return {}, f"{provenance} — TOO SHALLOW for {len(paths)} migrations"
 
     wanted = {str(p.relative_to(REPO)) for p in paths}
     try:
@@ -288,11 +305,11 @@ def main() -> int:
         print(f"mainline resolved as: {provenance}")
         # Never report "clean" from a scan that resolved nothing. A gate that cannot see its
         # corpus must say so, not agree with it.
-        print("::error::could not obtain main's history (git fetch origin main failed and no "
-              "local origin/main or main ref resolved), so no migration could be ordered. The "
-              "check did not run -- this is a broken scan, not a clean result. HEAD is "
-              "deliberately NOT used as a substitute: on a PR it is the merge commit, and "
-              "ordering against it answers a different question than this gate asks.")
+        print("::error::could not obtain a usable history for main, so no migration could be "
+              "ordered. Either the fetch failed, or the repository is shallow and could not be "
+              "deepened — a history shorter than the migration corpus reports every file as "
+              "added at the shallow boundary, which makes every service look monotonic and the "
+              "gate green about work it did not do. See the resolved-mainline line above.")
         gatelib.subjects(0, "migrations ordered")
         return 1
 
