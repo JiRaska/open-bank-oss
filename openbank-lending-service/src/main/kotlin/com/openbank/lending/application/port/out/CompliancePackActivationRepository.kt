@@ -87,7 +87,19 @@ class JpaCompliancePackActivationRepository :
 
     @WithSession
     override fun findByState(state: ProposalState): Uni<List<CompliancePackActivationEntity>> =
-        list("state = ?1 order by proposed_at", state)
+        // `proposedAt`, the ENTITY PROPERTY — not `proposed_at`, the column. This is HQL, so the
+        // column spelling is not a synonym: Hibernate answers
+        // `SemanticException: Could not interpret path expression 'proposed_at'` and the endpoint
+        // 500s. GET /api/v1/lending/compliance-packs/proposals/pending did exactly that on every
+        // call from the day it shipped, with no parameters needed to trigger it.
+        //
+        // The sibling below already spells its ordering correctly (`jurisdiction, productType,
+        // packVersion`), which is what made this line read as fine. Nothing could catch it:
+        // CompliancePackActivationServiceTest substitutes a hand-written in-memory
+        // findByState that filters a map, so no HQL is ever issued — the same shape as the
+        // consent SuppressionEntity defect (#5711). Only a query against a real database can,
+        // which is what CompliancePackPendingQueryIT now does.
+        list("state = ?1 order by proposedAt", state)
 
     @WithSession
     override fun findActivated(): Uni<List<CompliancePackActivationEntity>> = list(
