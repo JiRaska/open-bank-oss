@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.182.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.7...admin-ui-v0.182.8) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** align approval inbox rbac ([#6114](https://github.com/JiRaska/open-bank-oss/issues/6114)) ([0c6e5a7](https://github.com/JiRaska/open-bank-oss/commit/0c6e5a7e235f8a97248a5d0a550479960e4122eb))
+
 ## [0.182.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.6...admin-ui-v0.182.7) (2026-08-20)
 
 
