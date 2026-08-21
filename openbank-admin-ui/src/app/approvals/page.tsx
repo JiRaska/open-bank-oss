@@ -127,7 +127,8 @@ export default function ApprovalsPage() {
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
         title={t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
         subtitle={t('Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.', 'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.')}
-        actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+        actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading}
+          aria-label={t('Obnovit schvalovací frontu', 'Refresh approval queue')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />
