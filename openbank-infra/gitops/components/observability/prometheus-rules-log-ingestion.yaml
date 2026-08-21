@@ -40,6 +40,11 @@ spec:
             severity: critical
             team: platform
           annotations:
+            # Subject: real log traffic from every workload in the estate, not a scheduled job —
+            # measured at ~445 lines/second steady state on 2026-08-21. There is no invocation
+            # period for the 10m window to span, so `continuous` is the honest declaration rather
+            # than a duration invented to satisfy the gate.
+            subject_period: continuous
             summary: "Loki has ingested no log lines for 10m — every log-based alert is blind"
             description: >-
               Loki's distributor has accepted zero log lines over 10 minutes, sustained for 15. This
