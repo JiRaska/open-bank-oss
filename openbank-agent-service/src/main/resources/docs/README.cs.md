@@ -19,8 +19,8 @@ Tuto dokumentaci publikuje služba přímo na management endpointu `/q/openbank/
 
 - **Tech stack:** Kotlin / Quarkus 3 (RESTEasy Reactive) / JDK 21+ / Kotlin coroutines — PostgreSQL přes **čisté JDBC + Flyway**, **bez JPA**
 - **Port:** 8109 (app HTTP), 8085 (management — health, metriky, docs)
-- **Perzistence:** jedna tabulka. `governance.yaml` deklaruje `primaryDatastore: PostgreSQL` / `databaseName: openbank_agent`; Flyway verzuje frontu HITL schvalování `agent_proposal` (ADR-0031 D4) a nic dalšího. Stav rate-limiteru je pouze **v paměti**
-- **Outbox:** žádný. Služba emituje **AI-atribuované audit eventy** přes `openbank-libs` `AuditEventPublisher` (žádná doménová outbox tabulka)
+- **Perzistence:** PostgreSQL ukládá HITL frontu `agent_proposal` (ADR-0031 D4) a odolný `agent_audit_outbox`; stav rate-limiteru je pouze **v paměti**
+- **Outbox:** `agent_audit_outbox` potvrdí AI-atribuovaný audit event před doručením do Kafky; runtime aktivace zůstává řízená do atestace
 - **Idempotence:** N/A — všechny operace jsou read-only / neměnící stav
 - **Auth:** Keycloak OIDC (resource server, realm `openbank`); odchozí MCP volání nesou `openbank-services` client-credentials Bearer (ADR-0031 / ADR-0034)
 - **Governance:** každé volání nástroje prochází OPA-backed **AgentPolicyGate** (deny-by-default), ohraničeno charterem `ui-assistant` v `agents.yaml`; vynucení je defaultně `advisory`, přepíná se na `block` (ADR-0031 D9)

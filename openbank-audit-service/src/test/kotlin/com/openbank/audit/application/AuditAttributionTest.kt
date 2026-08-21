@@ -7,6 +7,7 @@ package com.openbank.audit.application
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
+import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
@@ -400,6 +401,28 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `statement-service's restated event is attributed to the producer too`(): Unit = runBlocking {
+        // The sweep patched period.closed.v1 and period.close_failed.v1 and missed the third type,
+        // account.statement.period.restated.v1, which lives in its own service class
+        // (StatementRestatementService) rather than in StatementService/CloseOrchestrator. It also
+        // carried no `occurredAt`, so the row was stamped with the consumer's INGEST time and that
+        // was recorded as the business time — asserted here as OccurredAtSource.EVENT.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"account.statement.period.restated.v1",""" +
+                """"accountId":"${UUID.randomUUID()}","occurredAt":"2026-02-01T02:30:00Z",""" +
+                """"sourceService":"statement-service"}""",
+            EventAddress(topic = "openbank.statement.event"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("statement-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+        assertThat(entry.captured.occurredAt).isEqualTo(Instant.parse("2026-02-01T02:30:00Z"))
+        assertThat(entry.captured.occurredAtSource).isEqualTo(OccurredAtSource.EVENT)
+    }
+
+    @Test
     fun `document-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
         // Issue #3994/#5256's document-service fix: DocumentGenerated and
         // SignatureCeremonyCompleted (both objectMapper.writeValueAsString) now carry
@@ -456,6 +479,31 @@ class AuditAttributionTest {
         assertThat(entry.captured.eventType).isEqualTo("ICT_INCIDENT_REPORTED")
         assertThat(entry.captured.sourceService).isEqualTo("security-scanner")
         assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+    }
+
+    @Test
+    fun `sca-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256: sca-service's DEVICE_ENROLLED payload (ScaService.kt, a hand-built map
+        // serialised onto the outbox) carries "sourceService" — but it was the ONE producer of the
+        // 21 audited topics with no wire-payload test, so nothing held the claim. The topic is live:
+        // #5369 added openbank.sca.events to this service's consumed-topics list, closing #5338,
+        // where SCA device enrollment had never been audited at all. sca-service is money-path.
+        //
+        // This test is what the sweep's own closure criterion asks for and is the last of the 21
+        // producers to get it. The payload shape below is ScaService.kt's verbatim.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"DEVICE_ENROLLED","deviceId":"${UUID.randomUUID()}",""" +
+                """"partyId":"${UUID.randomUUID()}","credentialId":"cred-1","algorithm":"ES256",""" +
+                """"occurredAt":"2026-08-09T11:00:00Z","sourceService":"sca-service"}""",
+            EventAddress(topic = "openbank.sca.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sca-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+        assertThat(entry.captured.occurredAt).isEqualTo(Instant.parse("2026-08-09T11:00:00Z"))
+        assertThat(entry.captured.occurredAtSource).isEqualTo(OccurredAtSource.EVENT)
     }
 
     @Test

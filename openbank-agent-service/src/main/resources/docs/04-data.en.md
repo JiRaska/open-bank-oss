@@ -4,9 +4,9 @@
 
 `openbank-agent-service` is a **stateless reasoning and routing layer**. It has:
 
-- ❌ **No JPA / Hibernate entities** — the one table it does own is read and written with plain JDBC.
-- ✅ **Flyway migrations** — `src/main/resources/db/migration/` versions the single `agent_proposal` table (ADR-0031 D4, the HITL approval queue). That table is the service's only persistence.
-- ❌ **No domain outbox table** — the two trust boundaries publish audit events instead (see below).
+- ❌ **No JPA / Hibernate entities** — both owned tables are read and written with plain JDBC.
+- ✅ **Flyway migrations** — `agent_proposal` is the HITL approval queue (ADR-0031 D4); `agent_audit_outbox` is the durable handoff for AI provenance.
+- ✅ **Audit outbox** — it records the producer event id and supplied audit envelope before a retrying Kafka delivery attempt.
 
 The per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-service/governance.yaml)) declares:
 
@@ -20,7 +20,7 @@ The per-service governance manifest ([`governance.yaml`](../../../../openbank-ag
 | `retentionPolicy` | `1 year` |
 | `evidenceExported` | `false` |
 
-> **Scope of that datastore:** `PostgreSQL` / `openbank_agent` covers the HITL proposal queue only — the tables live in the `public` schema of the service's own database. Everything else the service keeps is **in-memory**: the rate-limit counters in `CharterRateLimiter` (`ConcurrentHashMap`, reset on pod restart) are not persisted and not distributed. There is **no Redis wiring in the code**; distributed charter/run state remains a follow-up.
+> **Scope of that datastore:** `PostgreSQL` / `openbank_agent` covers the HITL proposal queue and durable AI-provenance handoff (`agent_proposal`, `agent_audit_outbox`) in the service's `public` schema. Rate-limit counters in `CharterRateLimiter` (`ConcurrentHashMap`, reset on pod restart) remain **in-memory** and undistributed. There is **no Redis wiring in the code**; distributed charter/run state remains a follow-up.
 
 ## Transient / in-process state
 

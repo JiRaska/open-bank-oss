@@ -23,7 +23,7 @@ interface ReadinessService {
   money_path: boolean
   scores: Record<string, number>
   evidence: Record<string, string>
-  gate: 'GO' | 'NO-GO'
+  gate: 'GO' | 'NO-GO' | 'NOT-DEPLOYED'
 }
 
 interface ReadinessReport {

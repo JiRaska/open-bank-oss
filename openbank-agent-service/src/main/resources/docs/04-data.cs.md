@@ -4,9 +4,9 @@
 
 `openbank-agent-service` je **bezstavová vrstva uvažování a směrování**. Má:
 
-- ❌ **Žádné JPA / Hibernate entity** — jedinou vlastní tabulku čte a zapisuje čistým JDBC.
-- ✅ **Flyway migrace** — `src/main/resources/db/migration/` verzuje jedinou tabulku `agent_proposal` (ADR-0031 D4, fronta HITL schvalování). Tato tabulka je jedinou perzistencí služby.
-- ❌ **Žádnou doménovou outbox tabulku** — místo toho obě hranice důvěry publikují audit eventy (viz níže).
+- ❌ **Žádné JPA / Hibernate entity** — obě vlastní tabulky čte a zapisuje čistým JDBC.
+- ✅ **Flyway migrace** — `agent_proposal` je HITL schvalovací fronta (ADR-0031 D4); `agent_audit_outbox` je odolné předání AI provenance.
+- ✅ **Auditní outbox** — před retry doručením do Kafky ukládá producer event id a předaný auditní envelope.
 
 Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-service/governance.yaml)) deklaruje:
 
@@ -20,7 +20,7 @@ Per-service governance manifest ([`governance.yaml`](../../../../openbank-agent-
 | `retentionPolicy` | `1 year` |
 | `evidenceExported` | `false` |
 
-> **Rozsah úložiště:** `PostgreSQL` / `openbank_agent` pokrývá pouze frontu HITL návrhů — tabulky žijí ve schématu `public` vlastní databáze služby. Vše ostatní si služba drží **in-memory**: rate-limit čítače v `CharterRateLimiter` (`ConcurrentHashMap`, vynulované při restartu podu) se nikam neukládají a nejsou distribuované. **V kódu není žádné zapojení Redisu**; distribuovaný charter/run stav zůstává follow-upem.
+> **Rozsah úložiště:** `PostgreSQL` / `openbank_agent` pokrývá HITL frontu i odolné předání AI provenance (`agent_proposal`, `agent_audit_outbox`) ve schématu `public` služby. Rate-limit čítače v `CharterRateLimiter` (`ConcurrentHashMap`, vynulované při restartu podu) zůstávají **in-memory** a nejsou distribuované. **V kódu není žádné zapojení Redisu**; distribuovaný charter/run stav zůstává follow-upem.
 
 ## Přechodný / in-process stav
 

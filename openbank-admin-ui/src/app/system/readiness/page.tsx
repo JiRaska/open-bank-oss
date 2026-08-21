@@ -6,7 +6,7 @@
 
 import { useState, useEffect } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
-import { ClipboardCheck, RefreshCw, Star, CheckCircle2, XCircle } from 'lucide-react'
+import { ClipboardCheck, RefreshCw, Star, CheckCircle2, XCircle, CircleSlash } from 'lucide-react'
 import { PageHeader, StatCard, StatusBadge, SWATCH_CLASS, type Tone } from '@/components/ui'
 
 interface ReadinessService {
@@ -14,7 +14,7 @@ interface ReadinessService {
   money_path: boolean
   scores: Record<string, number>
   evidence: Record<string, string>
-  gate: 'GO' | 'NO-GO'
+  gate: 'GO' | 'NO-GO' | 'NOT-DEPLOYED'
 }
 interface ReadinessReport {
   generated_for: string
@@ -54,7 +54,11 @@ export default function ReadinessPage() {
   const services = data?.services ?? []
   const dims = data?.dimensions ?? []
   const go = services.filter(s => s.gate === 'GO').length
-  const nogo = services.length - go
+  // Counted, not derived as `length - go`: NOT-DEPLOYED is a third verdict (#5760), and folding it
+  // into NO-GO is exactly the conflation the collectors stopped making — "not production ready"
+  // and "not in production" are different facts and need different work from different people.
+  const nogo = services.filter(s => s.gate === 'NO-GO').length
+  const undeployed = services.filter(s => s.gate === 'NOT-DEPLOYED').length
   const mp = services.filter(s => s.money_path)
 
   return (
@@ -88,6 +92,14 @@ export default function ReadinessPage() {
         <StatCard label={t('Služeb', 'Services')} value={services.length} />
         <StatCard label="GO" value={go} tone="success" icon={<CheckCircle2 size={16} />} />
         <StatCard label="NO-GO" value={nogo} tone="danger" icon={<XCircle size={16} />} />
+        {undeployed > 0 && (
+          <StatCard
+            label={t('Nenasazeno', 'Not deployed')}
+            value={undeployed}
+            tone="neutral"
+            icon={<CircleSlash size={16} />}
+          />
+        )}
         <StatCard
           label={t('Money-path', 'Money-path')}
           value={`${mp.filter(s => s.gate === 'GO').length}/${mp.length}`}
