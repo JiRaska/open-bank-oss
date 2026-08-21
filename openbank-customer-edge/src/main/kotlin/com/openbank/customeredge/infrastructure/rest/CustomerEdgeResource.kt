@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
+import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
@@ -107,6 +108,9 @@ class CustomerEdgeResource(
     // detekt tolerates here and every test constructs this resource positionally.
     @Inject
     lateinit var partyMergeResolver: PartyMergeResolver
+
+    @Inject
+    lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 
     @ConfigProperty(name = "openbank.edge.account-service-url")
     lateinit var accountServiceUrl: String
@@ -524,6 +528,32 @@ class CustomerEdgeResource(
             .entity(resp.entity ?: "{}")
             .type(MediaType.APPLICATION_JSON)
             .build()
+    }
+
+    /**
+     * One credit-journey funnel event (ADR-0269 rule 8's metrics).
+     *
+     * Authenticated on purpose — see [CreditFunnelPublisher] for why this is not the onboarding
+     * funnel's public endpoint. The party is taken from the JWT and never from the body, so a
+     * caller can only ever describe their own journey.
+     *
+     * Always 202, even for a rejected value: telemetry must not teach a client anything, and a 400
+     * here would turn the allow-list into an oracle for what the bank tracks. Rejected values are
+     * counted, not answered.
+     */
+    @POST
+    @Path("/credit/events")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun trackCreditEvent(body: String): Response {
+        val customer = customer()
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+        val step = node?.get("step")?.asText()
+        val action = node?.get("action")?.asText()
+        if (step in CreditFunnelPublisher.VALID_STEPS && action in CreditFunnelPublisher.VALID_ACTIONS) {
+            creditFunnel.emit(customer.partyId, step!!, action!!)
+        }
+        return Response.accepted().build()
     }
 
     /**

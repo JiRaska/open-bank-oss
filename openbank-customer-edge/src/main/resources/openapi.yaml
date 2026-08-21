@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.45.0
+  version: 1.46.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1114,6 +1114,40 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/HealthPillar'}
+
+  /credit/events:
+    post:
+      tags: [Lending]
+      summary: One credit-journey funnel event
+      description: >-
+        ADR-0269 rule 8's metrics. AUTHENTICATED, unlike the onboarding funnel's public endpoint —
+        these events say "this person is looking at borrowing", which must not ride a stream anyone
+        can post to. The party comes from the JWT and a partyId in the body is ignored.
+
+        Always 202, including for a value outside the allow-list: a 400 would make the allow-list an
+        oracle for what the bank tracks, and telemetry has no business teaching a client anything.
+
+        The action vocabulary deliberately cannot express a conversion. The programme measures
+        self-activation and opt-out, not how many customers borrowed.
+      operationId: trackCreditEvent
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [step, action]
+              properties:
+                step: {type: string, enum: [CONSENT, HEALTH, FINANCING, QUOTE, APPLICATION]}
+                action:
+                  type: string
+                  enum: [VIEWED, CONSENT_GRANTED, CONSENT_WITHDRAWN, QUOTE_REQUESTED,
+                         QUOTE_SUPPRESSED, APPLICATION_STARTED, APPLICATION_ABANDONED]
+      responses:
+        '202':
+          description: Accepted (or silently dropped — the caller cannot tell, by design)
 
   /credit/consents:
     get:
