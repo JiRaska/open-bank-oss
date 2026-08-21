@@ -339,6 +339,21 @@ agent:
           - query.payments.readonly
           - query.disputes.readonly
           - query.observability.readonly
+  # Model-based content safety (Llama Guard via the LiteLLM gateway, ADR-0031 guardrails /
+  # ADR-0265). Complements the deterministic filter above; neither replaces the other. Off by
+  # default, and when off every classification reports `unavailable` rather than `safe`, so the
+  # state is visible in openbank_guardrail_classifications{decision="unavailable"} instead of
+  # looking like a clean bill of health.
+  content-safety:
+    enabled: ${AGENT_CONTENT_SAFETY_ENABLED:false}
+    # The in-cluster gateway; the provider key never reaches this pod (ADR-0175).
+    endpoint: ${AGENT_CONTENT_SAFETY_ENDPOINT:}
+    model: ${AGENT_CONTENT_SAFETY_MODEL:meta-llama/llama-guard-4-12b}
+    api-key: ${AGENT_CONTENT_SAFETY_API_KEY:}
+    # What an UNAVAILABLE verdict means on the operator plane. false: refusing an operator's
+    # read-only question because a classifier is down is worse than answering it, and the charter
+    # allow-list, the OPA gate and the HITL queue still bound what any answer can cause.
+    fail-closed: ${AGENT_CONTENT_SAFETY_FAIL_CLOSED:false}
 
 mp:
   messaging:

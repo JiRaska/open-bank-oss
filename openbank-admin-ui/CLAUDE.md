@@ -288,6 +288,25 @@ npx eslint .            # lint
   manifest test enforces it, so a colliding topic caption is fixed by shortening the node label, not
   by dropping the topic.
 
+- **A `standalone` build silently un-instruments OpenTelemetry unless every OTel package is in
+  `serverExternalPackages`.** `@opentelemetry/instrumentation-*` works by PATCHING a module at
+  load time; webpack bundling changes module identity, so the patch lands on webpack's copy and
+  never on the module Next.js actually calls out through. The SDK still starts, installs a global
+  propagator into its own bundled copy of `@opentelemetry/api`, logs nothing wrong — and emits
+  zero spans. Measured on the artifact (#6164): with only `pg` external,
+  `.next/standalone/node_modules/@opentelemetry` held exactly ONE entry (`api`); with the OTel
+  packages listed, 29. **"The SDK failed to start" is the wrong diagnosis** and sends the next
+  reader hunting in the wrong place — with `OTEL_LOG_LEVEL=debug` it starts in BOTH builds, and
+  the only difference is the stack frame: `.next/server/instrumentation.js` (broken) versus
+  `node_modules/@opentelemetry/sdk-node/build/src/sdk.js` (working). The pod is Ready with 0
+  restarts and a clean log either way.
+- **Nothing unauthenticated reaches a backend, so a smoke test cannot prove BFF tracing works.**
+  `src/proxy.ts` sends every path except `/auth`, `/privacy` and `/.well-known/` to login
+  (ADR-0080 P0, post-pentest). Every other route answers 307 before the handler runs, `/privacy`
+  is static, and `/api/auth/*` is served locally — so no outbound `fetch` happens and no span can
+  exist. Verifying tracing end-to-end needs a real operator session; the synthetic journey does
+  not help either, it only GETs `/`.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
