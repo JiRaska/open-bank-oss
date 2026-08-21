@@ -19,7 +19,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import React from 'react'
 import { render, screen, cleanup, waitFor, fireEvent } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { SessionProvider } from '@/components/auth/SessionProvider'
+import { SessionProvider } from 'next-auth/react'
 import CompliancePacksPage from '@/app/lending/compliance-packs/page'
 
 const PROPOSAL_ID = '019fb939-3e0a-7716-a1ed-7854754c8786'
@@ -40,7 +40,11 @@ const PENDING = [{
 const ACTIVE = [{ ...PENDING[0], id: '00000000-0000-0000-0000-000000000000', state: 'EXECUTED', proposedBy: '-' }]
 
 function Providers({ children }: { children: React.ReactNode }) {
-  return React.createElement(SessionProvider, null, React.createElement(LanguageProvider, null, children))
+  return React.createElement(
+    SessionProvider,
+    { session: { user: { roles: ['ROLE_COMPLIANCE'], email: 'compliance@openbank.local' } } as never },
+    React.createElement(LanguageProvider, null, children),
+  )
 }
 
 type Case = { active?: { status: number; body: unknown }; pending?: { status: number; body: unknown }; decide?: { status: number; body: unknown } }

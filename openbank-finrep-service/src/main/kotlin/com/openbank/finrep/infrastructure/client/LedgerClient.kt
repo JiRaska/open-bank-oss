@@ -6,6 +6,7 @@ package com.openbank.finrep.infrastructure.client
 
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -47,25 +48,46 @@ interface LedgerRestClient {
     fun getTrialBalance(@PathParam("asOf") asOf: String): Uni<ClosedPeriodTrialBalanceResponse>
 }
 
-data class TrialBalanceLineResponse(val code: String, val type: String, val net: BigDecimal)
+data class TrialBalanceLineResponse(val code: String, val type: String, val net: BigDecimal, val currency: String)
 
+/**
+ * Ledger's frozen trial balance as it arrives on the wire.
+ *
+ * [balanced] is NULLABLE (issue #6011), although ledger declares it unconditionally and the
+ * committed pact pins it. A non-null `Boolean` here is not the stricter choice it looks like:
+ * jackson-module-kotlin coerces an absent JSON field to `false` for a non-null Boolean without a
+ * default, so a response that lost the field would deserialize into ledger asserting an imbalance —
+ * a contract defect reported as an accounting one, with nothing anywhere able to tell them apart.
+ * Nullable makes absence its own fact, which `TrialBalanceAssurance` renders as
+ * `BalanceVerdict.LEDGER_FLAG_ABSENT`.
+ */
 data class ClosedPeriodTrialBalanceResponse(
     val period: String,
-    val balanced: Boolean,
+    val balanced: Boolean?,
     val lines: List<TrialBalanceLineResponse>,
 )
 
 @ApplicationScoped
 class LedgerAdapter(@RestClient private val client: LedgerRestClient) : LedgerPort {
 
-    override suspend fun getTrialBalance(asOf: LocalDate): List<TrialBalanceLineDto> {
+    /**
+     * Maps the lines AND carries ledger's own `balanced` verdict through (issue #6011). The verdict
+     * used to be deserialised here and then silently dropped, so the one check finrep could not
+     * make for itself — whether the lines it received are the lines ledger evaluated — was
+     * unavailable to it.
+     */
+    override suspend fun getTrialBalance(asOf: LocalDate): TrialBalanceSnapshot {
         val response = client.getTrialBalance(asOf.toString()).awaitSuspending()
-        return response.lines.map { line ->
-            TrialBalanceLineDto(
-                code = line.code,
-                accountType = line.type,
-                net = line.net,
-            )
-        }
+        return TrialBalanceSnapshot(
+            lines = response.lines.map { line ->
+                TrialBalanceLineDto(
+                    code = line.code,
+                    accountType = line.type,
+                    net = line.net,
+                    currency = line.currency,
+                )
+            },
+            ledgerReportsBalanced = response.balanced,
+        )
     }
 }

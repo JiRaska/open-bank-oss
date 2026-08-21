@@ -150,7 +150,7 @@ class AccountService(
         }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
-        // event-driven (ADR-0073): balance-service's BalanceInitConsumer creates the zero
+        // event-driven (ADR-0267): balance-service's BalanceInitConsumer creates the zero
         // balance from the AccountCreated event below. The previous synchronous REST init
         // failed for onboarding accounts opened from a Kafka consumer (no request JWT to
         // propagate → fail-closed; blocking REST call on the Vert.x event loop threw) and,
@@ -236,7 +236,7 @@ class AccountService(
                 version = updated.version,
                 previousStatus = previous,
                 newStatus = updated.status,
-                reason = "KYC + AML cleared (ADR-0073)",
+                reason = "KYC + AML cleared (ADR-0267)",
                 occurredAt = clock.instant(),
                 sourceService = "account-service",
             ),

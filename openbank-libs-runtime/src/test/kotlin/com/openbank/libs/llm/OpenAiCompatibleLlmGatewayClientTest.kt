@@ -61,6 +61,7 @@ class OpenAiCompatibleLlmGatewayClientTest {
             val promptTokens: Int,
             val completionTokens: Int,
             val durationNanos: Long,
+            val provider: String,
         )
 
         val calls = mutableListOf<Call>()
@@ -71,8 +72,9 @@ class OpenAiCompatibleLlmGatewayClientTest {
             promptTokens: Int,
             completionTokens: Int,
             durationNanos: Long,
+            provider: String,
         ) {
-            calls += Call(model, outcome, promptTokens, completionTokens, durationNanos)
+            calls += Call(model, outcome, promptTokens, completionTokens, durationNanos, provider)
         }
     }
 
@@ -176,6 +178,17 @@ class OpenAiCompatibleLlmGatewayClientTest {
     }
 
     @Test
+    fun `the recorded provider comes from the configured endpoint, not from a second knob`() {
+        // No network: the blank-key path records before sending, so this asserts the derivation
+        // against the literal endpoint string gitops sets (#5736) without a live gateway.
+        val metrics = RecordingMetrics()
+
+        runBlocking { client("http://litellm.ai-platform.svc:4000/v1", "", metrics).chat("s", "u") }
+
+        assertThat(metrics.calls.single().provider).isEqualTo(LlmCallMetricsPort.PROVIDER_LITELLM)
+    }
+
+    @Test
     fun `a non-2xx response is reported as http_error and still timed`() {
         val base = startStub(503, """{"error":"upstream unavailable"}""")
         val metrics = RecordingMetrics()
@@ -184,5 +197,7 @@ class OpenAiCompatibleLlmGatewayClientTest {
         val call = metrics.calls.single()
         assertThat(call.outcome).isEqualTo(LlmCallMetricsPort.OUTCOME_HTTP_ERROR)
         assertThat(call.durationNanos).isGreaterThan(0)
+        // An unrecognised endpoint must not invent a series of its own (the stub is on 127.0.0.1).
+        assertThat(call.provider).isEqualTo(LlmCallMetricsPort.PROVIDER_OTHER)
     }
 }

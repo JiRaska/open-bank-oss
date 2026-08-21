@@ -72,6 +72,10 @@ class AgentChatServiceTracingTest {
                 coEvery { sanitizeToolResult(any(), any()) } answers { secondArg() }
                 every { blocks() } returns true
             }
+            contentSafety = mockk {
+                coEvery { checkUserInput(any(), any()) } returns false
+                coEvery { checkAssistantOutput(any(), any()) } returns false
+            }
             killSwitch = mockk { every { haltReason(any()) } returns null }
             tracer = tracerProvider.get("test")
         }

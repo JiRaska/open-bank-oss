@@ -24,11 +24,14 @@ import com.openbank.campaign.domain.model.ExperimentCohort
 import com.openbank.campaign.domain.model.Segment
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SegmentRule
+import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Regression coverage for #2953 — a failed journey start used to strand its party forever.
@@ -47,6 +50,17 @@ class CampaignEnrolmentFailureTest {
 
     private val campaignId = UUID.randomUUID()
     private val parties = List(3) { UUID.randomUUID() }
+
+    // A REAL adapter over a real registry (#5705): the per-party `failed` count is the one the
+    // sweep swallows into a return value nobody watches, so the assertion has to be that the
+    // counter moved, not that a mock was called.
+    private val registry = SimpleMeterRegistry()
+    private val metrics = CampaignMetricsAdapter().apply { bindTo(registry) }
+
+    private fun enrolments(outcome: String): Double = registry.find(CampaignMetricsAdapter.ENROLMENTS_METRIC)
+        .tag("outcome", outcome)
+        .counter()
+        ?.count() ?: 0.0
 
     private val campaign = Campaign(
         id = campaignId,
@@ -125,6 +139,7 @@ class CampaignEnrolmentFailureTest {
         // Enrolment never touches the scheduler — a stub that throws proves it, and would fail
         // loudly if a future change started scheduling from inside the enrol path.
         scheduler = ThrowingScheduler,
+        metrics = metrics,
         explicitGraphActivationEnabled = false,
     )
 
@@ -172,6 +187,13 @@ class CampaignEnrolmentFailureTest {
             .describedAs("the loop used to abort on the first failure, so parties 2 and 3 were never reached")
             .containsExactly(parties[1], parties[2])
         assertThat(outcome).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
+        assertThat(enrolments("started")).isEqualTo(2.0)
+        assertThat(enrolments("failed")).isEqualTo(1.0)
+        assertThat(enrolments("holdout")).isEqualTo(0.0)
+        // The sweep is the only caller of this timer, so a batch that ran must leave a sample.
+        val timer = registry.find(CampaignMetricsAdapter.ENROL_DURATION_METRIC).timer()
+        assertThat(timer!!.count()).isEqualTo(1L)
+        assertThat(timer.totalTime(TimeUnit.NANOSECONDS)).isGreaterThan(0.0)
     }
 
     @Test
@@ -199,6 +221,11 @@ class CampaignEnrolmentFailureTest {
         assertThat(holdout.completedAt).isNotNull()
         assertThat(enrolments.saved.single { it.partyId == treatmentParty }.experimentCohort)
             .isEqualTo(ExperimentCohort.TREATMENT)
+        // A control-cohort assignment is not a started journey and must not be counted as one —
+        // otherwise a 100% holdout reads exactly like a fully working campaign.
+        assertThat(enrolments("holdout")).isEqualTo(1.0)
+        assertThat(enrolments("started")).isEqualTo(1.0)
+        assertThat(enrolments("failed")).isEqualTo(0.0)
     }
 
     private fun partyIn(cohort: ExperimentCohort): UUID = generateSequence(1L) { it + 1 }

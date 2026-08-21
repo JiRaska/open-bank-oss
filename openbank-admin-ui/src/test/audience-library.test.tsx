@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import SegmentsPage from '@/app/segments/page'
+import { SessionProvider } from 'next-auth/react'
 
 describe('audience library', () => {
   it('uses the real segment preview and carries its version into campaign authoring', async () => {
@@ -14,7 +15,8 @@ describe('audience library', () => {
       return { ok: true, json: async () => ({ state: 'ok', items: [{ name: 'actives', version: 1, rules: ['party status is ACTIVE'] }] }) }
     }))
 
-    const { container } = render(React.createElement(LanguageProvider, null, React.createElement(SegmentsPage)))
+    const session = { user: { roles: ['ROLE_OPERATOR'] }, expires: '2099-01-01' }
+    const { container } = render(React.createElement(SessionProvider, { session }, React.createElement(LanguageProvider, null, React.createElement(SegmentsPage))))
     await waitFor(() => expect(screen.getByText('Active customers')).toBeTruthy())
 
     const start = container.querySelector('[data-use-audience="actives@1"]') as HTMLAnchorElement

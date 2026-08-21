@@ -89,7 +89,19 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
 - **Always fast-jar, never uber-jar.** Service Dockerfiles use `-Dquarkus.package.jar.type=fast-jar`
   and COPY `quarkus-app/`; an uber-jar leaves `quarkus-app/` empty → crashlooping pod.
 - **`@ConfigProperty` optional fields must be `Optional<String>`,** not plain `String`, or a missing
-  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`.
+  value throws `SRCFG00040` at boot. Use `Optional<String>` + `defaultValue`. **`defaultValue = ""`
+  is NOT a way to make one optional** — measured 2026-08-21, SmallRye answers `SRCFG00014: required
+  but it could not be found in any config source`, so an empty default leaves the property exactly
+  as required as no default at all. Nor does bean scope help: validation happens once at STARTUP in
+  `ConfigRecorder.validateConfigProperties`, over every injection point, so an `@ApplicationScoped`
+  bean's laziness defers nothing and the service simply does not boot. This bullet had existed for
+  months and audit-service shipped the shape anyway (#5844) — prose is not a control, so
+  `check-configproperty-supplied.py` now enforces both halves, plus the sibling case where
+  `application.yaml` DEFINES the value as empty (`key: ${VAR:}`), which no `defaultValue` rescues.
+  Two things made #5844 cost days rather than minutes, and both generalise: a module CI never
+  rebuilt stays red on `main` unseen, and **a service that cannot boot reports its tests as
+  SKIPPED** — that module read `1 failed, 15 skipped` instead of 143 failures, and a skip count
+  scans as a pass. Read the SKIPPED number, not just the failure count.
 - **Kotlin JUnit5 + `runBlocking` silent drop.** `fun foo() = runBlocking { }` infers a non-`Unit`
   return type and JUnit5 ignores the method. Write `fun foo(): Unit = runBlocking { }` or use a
   coroutine test runner.
@@ -161,6 +173,22 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   named explicitly in the Kotlin use-site form `@field:Column(name = ...)` that a `@Column`-only
   regex cannot match. A gate that cries wolf about correct code is worth less than nothing, so it
   checks the convention, which is fully decidable.
+- **A NUL byte (U+0000) reaching Postgres is a 500, and it arrives ESCAPED — so a raw-byte scan of
+  the request finds nothing and reports clean.** Postgres cannot store U+0000 in any `text`/`varchar`
+  column (`invalid byte sequence for encoding "UTF8": 0x00`, SQLState 22021); Hibernate raises it at
+  flush, far past every handler, so `GenericExceptionMapper` renders a well-formed `INTERNAL_ERROR`
+  body — which is why "it did not crash" and "the response parsed" both pass against it. Rejected
+  fleet-wide now by `libs-runtime`'s `NulByteGuards` (#5913), and two things about it generalise.
+  First, the carrier: five services, **six** operations, and two of them carried the NUL in a QUERY
+  PARAMETER, not a body — those requests have no entity at all, so a Jackson-only guard is
+  structurally green about them. Enumerate the carriers from the fuzz artifacts before choosing where
+  a guard goes. Second, the wire form: inside JSON the character is the six ASCII characters of a
+  `\u0000` escape, legal JSON that Jackson decodes happily, so only the DECODED value answers the
+  question — scanning the stream for byte `0x00` sees nothing, and scanning for the escape as text
+  false-positives on a doubly-escaped backslash. Sibling of the `value too long` / duplicate-key
+  cases in the same issue, which are deliberately NOT this: a length limit is per-column and a
+  `ConstraintViolationException` is 409-or-400 depending on which constraint, so neither is decidable
+  fleet-wide. U+0000 is, because no valid request can carry it and no column can accept it.
 - **A Kotlin annotation binds to the NEXT declaration — a top-level function between `@Path` and its
   class silently steals it.** `McpEndpoint` had `@Path("/mcp")`, then a top-level
   `private fun String?.sanitizeForLog()`, then `class McpEndpoint`. The `@Path` bound to the

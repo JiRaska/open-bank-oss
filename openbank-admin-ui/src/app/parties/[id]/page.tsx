@@ -123,7 +123,16 @@ function PartyDetailPage() {
         subtitle={<span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px' }}>{party.id}</span>}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/parties" style={{ color: 'var(--text-secondary)', textDecoration: 'none' }}>{t('Subjekty', 'Parties')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{party.legalName}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={load}><RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}</button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit detail subjektu', 'Refresh party detail')}
+          >
+            <RefreshCw size={13} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
+          </button>
           <Link href="/parties" className="btn btn-secondary" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '6px' }}>
             <ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}
           </Link>

@@ -215,6 +215,7 @@ def check_fleet() -> int:
     cache = pathlib.Path(tempfile.mkdtemp(prefix="helm-values-gate-"))
     findings: list[str] = []
     stale: list[str] = []
+    unreachable: list[str] = []
     checked = 0
 
     try:
@@ -223,11 +224,24 @@ def check_fleet() -> int:
             if not chart_root.exists():
                 pull_error = _pull_chart(chart, repo_url, version, chart_root)
                 if pull_error is not None:
-                    print(f"FAIL {name}: could not reach {repo_url} to pull "
-                          f"{chart}@{version} after {PULL_RETRY_ATTEMPTS} attempts — this is "
-                          f"an upstream network failure, not a values-key finding: "
-                          f"{pull_error[:300]}", file=sys.stderr)
-                    return 1
+                    # COULD-NOT-CHECK is a third state, and collapsing it into FAIL was wrong in
+                    # both directions. Measured 2026-08-21: gitlab.com answered 502 for the
+                    # glitchtip chart, which (a) failed an enforced gate on an unrelated PR as if
+                    # the repo were broken, and (b) `return 1` here ABORTED the scan, so the other
+                    # 19 charts were never examined — a green run and a red run both told you
+                    # nothing about them.
+                    #
+                    # Now: record it, keep going, and let the SUBJECT FLOOR decide. One unreachable
+                    # repo leaves 19 of 20 checked and the gate passes with a loud warning; a real
+                    # outage drops the count under `min_subjects: 15` and run-gates fails the gate
+                    # for examining too little. That is the repo's existing mechanism for "this
+                    # gate did not see enough to mean anything", and it is the honest one here.
+                    unreachable.append(
+                        f"{name}: could not reach {repo_url} to pull {chart}@{version} after "
+                        f"{PULL_RETRY_ATTEMPTS} attempts — upstream network failure, NOT a "
+                        f"values-key finding: {pull_error[:200]}"
+                    )
+                    continue
 
             chart_yamls = list(chart_root.glob("*/Chart.yaml"))
             if not chart_yamls:
@@ -261,13 +275,18 @@ def check_fleet() -> int:
 
     for line in findings + stale:
         print(f"FAIL {line}", file=sys.stderr)
+    for line in unreachable:
+        # ::warning, not ::error: this is the build telling you it could not look, which must not
+        # read the same as the build telling you something is wrong.
+        print(f"::warning::helm-values-key-effect SKIPPED a source — {line}")
 
     if findings or stale:
         return 1
 
     total_baselined = sum(len(v) for v in KNOWN_IGNORED.values())
+    skipped_note = f", {len(unreachable)} unreachable (see warnings)" if unreachable else ""
     print(f"PASS helm valuesObject key-effect gate: {checked} Helm source(s) checked, "
-          f"0 silently-ignored keys ({total_baselined} baselined in KNOWN_IGNORED).")
+          f"0 silently-ignored keys ({total_baselined} baselined in KNOWN_IGNORED){skipped_note}.")
     # Declare the subject count so run-gates.py can enforce min_subjects. Without it a
     # renamed apps/ directory or a changed glob turns this gate into a no-op that still
     # exits 0 — which is precisely the shape of defect it was written to catch.
@@ -280,6 +299,56 @@ class _FakeCompletedProcess:
         self.returncode = returncode
         self.stderr = stderr
         self.stdout = ""
+
+
+def _self_test_unreachable_is_not_a_finding() -> str | None:
+    """An unreachable chart repo must NOT fail the gate, and must NOT stop the scan.
+
+    Both halves are the 2026-08-21 defect. gitlab.com answered 502 for one chart, and the
+    gate (a) failed an enforced build on an unrelated PR as though the repo were broken and
+    (b) returned immediately, so the other 19 sources were never examined — a state in
+    which neither pass nor fail said anything about them.
+
+    The replacement contract, asserted here: exit 0, a ::warning naming the source, and
+    every reachable source still checked. Systemic outages are caught by `min_subjects`
+    instead, because `checked` no longer counts what could not be pulled.
+    """
+    import io
+    import unittest.mock as mock
+    import contextlib
+
+    sources = [
+        ("reachable-a", "chart-a", "https://example.invalid/a", "1.0.0", {"k": 1}),
+        ("dead-repo", "chart-b", "https://example.invalid/b", "2.0.0", {"k": 1}),
+        ("reachable-c", "chart-c", "https://example.invalid/c", "3.0.0", {"k": 1}),
+    ]
+    pulled: list[str] = []
+
+    def _pull(chart, repo_url, version, dest):
+        pulled.append(chart)
+        if chart == "chart-b":
+            return "502 Bad Gateway"
+        pathlib.Path(dest, "inner").mkdir(parents=True, exist_ok=True)
+        pathlib.Path(dest, "inner", "Chart.yaml").write_text("name: x\n")
+        return None
+
+    out, err = io.StringIO(), io.StringIO()
+    with mock.patch(f"{__name__}.iter_helm_sources", return_value=sources), \
+         mock.patch(f"{__name__}._pull_chart", side_effect=_pull), \
+         mock.patch(f"{__name__}.ignored_top_level_keys", return_value=[]), \
+         contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        rc = check_fleet()
+
+    if rc != 0:
+        return f"an unreachable repo failed the gate (rc={rc}); it is a could-not-check, not a finding"
+    if [c for c in pulled] != ["chart-a", "chart-b", "chart-c"]:
+        return f"the scan stopped at the unreachable repo instead of continuing: pulled={pulled}"
+    combined = out.getvalue() + err.getvalue()
+    if "::warning" not in combined or "dead-repo" not in combined:
+        return "the unreachable source was not reported as a warning naming it"
+    if "SUBJECTS=2" not in combined:
+        return f"subject count must exclude the unreachable source, got: {combined[-200:]!r}"
+    return None
 
 
 def _self_test_pull_retry() -> str | None:
@@ -351,6 +420,11 @@ def self_test() -> int:
     retry_error = _self_test_pull_retry()
     if retry_error is not None:
         print(f"FAIL self-test (network retry): {retry_error}", file=sys.stderr)
+        return 1
+
+    unreachable_error = _self_test_unreachable_is_not_a_finding()
+    if unreachable_error is not None:
+        print(f"FAIL self-test (unreachable handling): {unreachable_error}", file=sys.stderr)
         return 1
 
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="helm-values-selftest-"))

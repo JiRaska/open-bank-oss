@@ -54,7 +54,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: agent-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-e62a4765
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-agent-service:sandbox-55b538d9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -109,6 +109,27 @@ spec:
               value: http://litellm.ai-platform.svc:4000/v1
             # LiteLLM virtual key (OpenBao litellm/KEY_AGENT_SERVICE via ESO), not a provider key.
             # Optional so an un-seeded key degrades the chat call instead of CrashLooping the pod.
+            # Model-based content safety on the operator plane (ADR-0265). Same gateway, same
+            # virtual key as the chat model — no second credential and no second egress path.
+            - name: AGENT_CONTENT_SAFETY_ENABLED
+              value: "true"
+            - name: AGENT_CONTENT_SAFETY_ENDPOINT
+              value: http://litellm.ai-platform.svc:4000/v1
+            - name: AGENT_CONTENT_SAFETY_MODEL
+              value: meta-llama/llama-guard-4-12b
+            # fail-closed stays FALSE here, deliberately: refusing an operator's read-only question
+            # because a classifier is unreachable is worse than answering it, and the charter tool
+            # allow-list, the OPA gate and the HITL proposal queue still bound what any answer can
+            # cause. Every unavailable verdict is audited and counted regardless, so this is a
+            # declared posture rather than a silent one.
+            - name: AGENT_CONTENT_SAFETY_FAIL_CLOSED
+              value: "false"
+            - name: AGENT_CONTENT_SAFETY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: agent-service-secrets
+                  key: AGENT_MODEL_API_KEY
+                  optional: true
             - name: AGENT_MODEL_API_KEY
               valueFrom:
                 secretKeyRef:

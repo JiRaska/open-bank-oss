@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.9.0...statement-service-v0.10.0) (2026-08-20)
+
+
+### Features
+
+* **analytics:** fail closed without durable backfill ([#6050](https://github.com/JiRaska/open-bank-oss/issues/6050)) ([8fca000](https://github.com/JiRaska/open-bank-oss/commit/8fca000162af7d6f6c3ed0bcb4c9fcba5d8742d8))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.8.7...statement-service-v0.9.0) (2026-08-18)
 
 

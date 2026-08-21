@@ -20,7 +20,25 @@ summary: "AI agents run as least-privilege workloads declared in agents.yaml, pa
   - `agent.model.complete` (`ModelGateway`): captures `model_id`, `model_version`, `prompt_hash` — ✅
   - `agent.run` (`AgentRunAuditor`): captures `model_id`, `prompt_hash`, `tool_calls[]` — ✅
   - `agent.mcp.tool_call` (`AgentPolicyGate`): captures `policy_decision` (ALLOW/DENY) — ✅; `model_id` NOT YET captured — fix in flight on branch `feat/agent-charter-model-id` (issue #3667; `prompt_hash` and `tool_calls` are architecturally N/A at the gate — the gate runs before any LLM call)
-  - Production KMS/cosign-keyed anchor signer (asymmetric, third-party-verifiable) — ⬜ Planned
+  - Production KMS/cosign-keyed anchor signer (asymmetric) — 🟢 Built. `AwsKmsAnchorSigner`
+    (ECC_NIST_P256, ECDSA_SHA_256) under Pod Identity holding only Sign/Verify/GetPublicKey;
+    `AUDIT_ANCHOR_SIGNING_REQUIRED=true` in gitops, so a signer failure aborts capture rather
+    than storing an unsigned row that would later read as a checkpoint.
+  - Offline third-party verification — 🟢 Built (issue #5838).
+    `.github/scripts/verify-audit-anchors.py` recomputes each anchor digest and checks its
+    signature from **public material only**, importing no OpenBank code; both canonical forms are
+    pinned to shared test vectors from either side (`OfflineVerifierConformanceTest` in Kotlin,
+    `--self-test` in Python). See runbook 0014. `GET /api/v1/audit/anchors/verify` is explicitly
+    NOT this control: it is the suspect component grading itself against the very database whose
+    tampering the anchor exists to detect.
+  - **D5 stays 🟡 Partial, and the public control score does not advance.** Two gaps are
+    structural, not backlog: (a) the verifier can reject a forged anchor but cannot reject an
+    ABSENT one — a period never anchored, or a range dropped before export, presents nothing to
+    reject, so completeness rests on reading the capture cadence, not on the signature; and
+    (b) `signedAt` is the producer's own claim, so a backdated history signed with a live key
+    still verifies. Closing either needs an external RFC 3161 timestamping authority or a public
+    transparency log — ⬜ Planned, neither exists in this platform today. Describing what ships
+    here as full independent verification would overstate it.
 - **D6 (technology stack)** — See D6 section; amended 2026-08-03 (issue #3676).
 - **D8 (AGPL agent-runtime public repo)** — ⬜ Planned (issue JiRaska/open-bank#224).
 

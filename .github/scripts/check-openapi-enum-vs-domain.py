@@ -129,10 +129,6 @@ BASELINE: dict[str, str] = {
         "#5962 — CloseFailureReason: undeclared NOT_VIABLE",
     "openbank-swift-service:ACKNOWLEDGED,FAILED,PENDING,REJECTED,SENT,VALIDATED":
         "#5962 — SwiftStatus: undeclared COMPLETED",
-    "openbank-transaction-service:COMPLETED,FAILED,PENDING,REVERSED":
-        "#5962 — TransactionStatus: undeclared PROCESSING",
-    "openbank-transaction-service:CREDIT,DEBIT,FEE,REVERSAL":
-        "#5962 — TransactionType: undeclared ADJUSTMENT/INTEREST/TRANSFER",
 }
 
 SPEC_ENUM_INLINE = re.compile(r"enum:\s*\[([^\]]*)\]")
@@ -140,10 +136,14 @@ SPEC_ENUM_BLOCK = re.compile(r"enum:[ \t]*\n((?:[ \t]*-[ \t]*\S+[ \t]*\n)+)")
 KOTLIN_ENUM = re.compile(r"enum\s+class\s+(\w+)\s*(?::[^{]*)?\{([^}]*)\}")
 BLOCK_ITEM = re.compile(r"^[ \t]*-[ \t]*[\"\']?([A-Za-z0-9_]+)[\"\']?[ \t]*$", re.M)
 # A constant is the leading identifier of a member; the rest of a member may be a constructor
-# call (`ACTIVE("active")`) or an override block, and must not be mined for tokens.
-MEMBER = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*(?:\(|$)")
+# call (`ACTIVE("active")`) or an override block, and must not be mined for tokens. A member may
+# also carry its own annotation (`@Deprecated("...") LEGACY,`) before the identifier — skipped
+# here, not matched as part of it, run AFTER string literals are blanked so an annotation's
+# `(...)` argument list can't itself hide a stray `)` that would break the skip.
+MEMBER = re.compile(r"^\s*(?:@\w+(?:\([^)]*\))?\s*)*([A-Z][A-Z0-9_]*)\s*(?:\(|$)")
 LINE_COMMENT = re.compile(r"//[^\n]*")
 BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+STRING_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"')
 VALUE = re.compile(r"[A-Z][A-Z0-9_]*")
 
 
@@ -165,7 +165,16 @@ def _kotlin_values(body: str) -> frozenset[str]:
     out of doc comments. A drift gate whose findings are mostly noise gets baselined wholesale
     and then protects nothing, so this is load-bearing, not tidiness.
     Only the part before a `;` is constants; anything after it is ordinary class body.
+
+    String literals are blanked before that `;` split, too — a `@Deprecated("...; ...")`
+    message containing a semicolon otherwise truncates the constant list right there, silently
+    dropping every member after it. That is exactly how this gate went blind to
+    `SettlementStatus.LEDGER_REVERSED` (issue #6208): the deprecation message read "Never
+    produced; the stub...", the real `;` inside it looked like the constants/methods boundary,
+    and the enum's actual last member never got extracted — reported as "the code does not
+    have" a value the code plainly declares.
     """
+    body = STRING_LITERAL.sub('""', body)
     body = LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", body))
     constants = body.split(";", 1)[0]
     out = set()
@@ -295,6 +304,10 @@ def self_test() -> int:
          _kotlin_values('SEPA("sepa"), SWIFT("swift")'), frozenset({"SEPA", "SWIFT"})),
         ("members after the `;` are not constants",
          _kotlin_values("OPEN, CLOSED;\n    fun isOPEN() = this == OPEN"),
+         frozenset({"OPEN", "CLOSED"})),
+        ("a `;` inside a string literal (e.g. a @Deprecated message) does not truncate the "
+         "constant list — issue #6208",
+         _kotlin_values('OPEN,\n    @Deprecated("Never produced; see OPEN instead")\n    CLOSED,'),
          frozenset({"OPEN", "CLOSED"})),
         ("lowercase tokens are not constants", _kotlin_values("identity, address"), frozenset()),
         ("an inline spec enum", _spec_values("IDENTITY, ADDRESS"),

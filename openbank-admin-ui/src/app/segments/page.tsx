@@ -10,6 +10,7 @@ import { ArrowRight, Clock3, Plus, ShieldCheck, Sparkles, Users } from 'lucide-r
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 // Read-only by design. ADR-0201 D1: a segment is a versioned artifact defined in code, reviewed and
 // released like anything else — "no free-form SQL from a UI". A marketer picks from this catalogue;
@@ -97,6 +98,7 @@ export default function SegmentsPage() {
     if (!p) {
       return (
         <button
+          type="button"
           onClick={() => loadPreview(s)}
           className="rounded-lg border border-violet-200 bg-white px-3 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-400 hover:bg-violet-50"
           data-audience-count={key(s)}
@@ -132,7 +134,7 @@ export default function SegmentsPage() {
     )
   }
 
-  return (
+  return <AuthGuard permission="campaign:view">
     <div className="space-y-6">
       <PageHeader
         title={t('Publika', 'Audiences')}
@@ -141,7 +143,7 @@ export default function SegmentsPage() {
           'Choose an audience by intent, verify its current reach, then go straight to designing the journey.',
         )}
         icon={<Users className="h-6 w-6" />}
-        actions={<Link href="/segments/new" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link>}
+        actions={<Can permission="campaign:create"><Link href="/segments/new" className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-violet-700"><Plus className="h-4 w-4" />{t('Vytvořit publikum', 'Create audience')}</Link></Can>}
       />
 
       {loading && <p className="text-sm text-muted-foreground">{t('Načítám…', 'Loading…')}</p>}
@@ -196,7 +198,7 @@ export default function SegmentsPage() {
                     data-use-audience={key(s)}
                   >
                     {t('Použít v kampani', 'Use in campaign')} <ArrowRight className="h-3.5 w-3.5" />
-                  </Link> : s.state === 'DRAFT' ? <button onClick={() => lifecycle(s, 'submit')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800">{t('Odeslat ke schválení', 'Submit for approval')}</button> : <button onClick={() => lifecycle(s, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">{t('Schválit publikum', 'Approve audience')}</button>}
+                  </Link> : s.state === 'DRAFT' ? <Can permission="campaign:submit" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného autora', 'Awaiting an authorized author')}</span>}><button type="button" onClick={() => lifecycle(s, 'submit')} className="rounded-lg bg-violet-700 px-3 py-2 text-xs font-semibold text-white transition hover:bg-violet-800">{t('Odeslat ke schválení', 'Submit for approval')}</button></Can> : <Can permission="campaign:activate" fallback={<span className="text-xs text-muted-foreground">{t('Čeká na oprávněného schvalovatele', 'Awaiting an authorized approver')}</span>}><button type="button" onClick={() => lifecycle(s, 'approve')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-emerald-700">{t('Schválit publikum', 'Approve audience')}</button></Can>}
                 </div>
                 <p className="mt-3 flex items-center gap-1.5 text-[.68rem] text-slate-400"><Clock3 className="h-3 w-3" />{t('Dosah se mění s aktuálním stavem; verze pravidel zůstává stejná.', 'Reach changes with current state; the rule version stays fixed.')}</p>
               </article>
@@ -205,5 +207,5 @@ export default function SegmentsPage() {
         </>
       )}
     </div>
-  )
+  </AuthGuard>
 }

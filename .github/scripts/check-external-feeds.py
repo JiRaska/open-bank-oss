@@ -172,9 +172,7 @@ FEEDS = [
 # Each needs a reason. This list is the thing a human has to justify, not the coverage.
 NOT_PROBED = [
     ("https://api.github.com", "authenticated API, not a data feed; failure is loud at call time"),
-    ("https://api.groq.com/openai/v1", "authenticated LLM gateway (ADR-0139); needs a key"),
     ("https://api.deepinfra.com/v1/openai", "authenticated LLM gateway; needs a key"),
-    ("https://integrate.api.nvidia.com/v1", "authenticated LLM gateway; needs a key"),
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
