@@ -96,7 +96,14 @@ export default function ScreenFeedbackPage() {
         icon={<MessageSquare size={18} aria-hidden="true" />}
         title={cs ? 'Zpětná vazba k obrazovkám' : 'Screen feedback'}
         subtitle={cs ? 'Kvalitativní signály z operátorských obrazovek.' : 'Qualitative signals from operator screens.'}
-        actions={<button className="btn btn-secondary" onClick={() => void load()}>
+        actions={<button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => void load()}
+          disabled={loading}
+          aria-busy={loading}
+          aria-label={cs ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}
+        >
           <RefreshCw size={16} aria-hidden="true" /> {cs ? 'Obnovit' : 'Refresh'}
         </button>}
       />
