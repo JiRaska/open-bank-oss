@@ -109,15 +109,31 @@ copilot:
       - id: mock-echo
         provider: mock
         sensitivity: hosted
-      # OpenAI-compatible backend (NVIDIA NIM, Groq, vLLM, …). id is sent verbatim as the upstream
-      # model name and is env-driven (COPILOT_MODEL_ID) so the served model can be swapped without an
-      # image rebuild — set COPILOT_MODEL_ID and COPILOT_DEFAULT_MODEL to the SAME value.
-      # Endpoint is also env-driven (COPILOT_MODEL_ENDPOINT) so the backend can be swapped without a
-      # rebuild — e.g. switch between NVIDIA NIM and Groq by updating GitOps env vars only.
+      # OpenAI-compatible backend. `id` is sent verbatim as the upstream model name and is the
+      # CALLER-FACING id: reached through the gateway it is a litellm-config `model_name`, never a
+      # provider's own id. Both id and endpoint are env-driven (COPILOT_MODEL_ID /
+      # COPILOT_MODEL_ENDPOINT) so the backend can be swapped without an image rebuild — set
+      # COPILOT_MODEL_ID and COPILOT_DEFAULT_MODEL to the SAME value.
+      #
+      # ADR-0174/0175 (#1919): the in-cluster LiteLLM gateway is the single pod allowed to egress to
+      # a hosted LLM provider, so the provider key never lands in this pod. Endpoint and id therefore
+      # DEFAULT to exactly what the deployment sets in
+      # openbank-infra/gitops/components/copilot/copilot-service.yaml — one route, exercised by both
+      # local dev and prod, instead of two of which only one is ever used. Same shape as the
+      # content-safety and embedding endpoints above/below, which already go through this gateway.
+      #
+      # It used to default to `https://integrate.api.nvidia.com/v1` + `mistralai/mistral-nemotron`.
+      # NVIDIA does still serve that id, but the gateway does NOT (#6077): a provider base-URL
+      # hard-coded next to a caller-facing id asserts a mapping this file cannot see and nothing
+      # validates — the defect class of #5736/#6076. To go direct to a provider instead, override
+      # BOTH env vars together; changing one alone is the bug.
+      #
       # HOSTED (off-cluster) — sandbox/synthetic data only; production must pin to in-cluster/EU (D6).
-      - id: ${COPILOT_MODEL_ID:mistralai/mistral-nemotron}
+      # Local dev: `kubectl port-forward -n ai-platform svc/litellm 4000:4000`, or override
+      # COPILOT_MODEL_ENDPOINT. Neither the build nor the tests need it — they run on `mock-echo`.
+      - id: ${COPILOT_MODEL_ID:deepseek-ai/DeepSeek-V3.2}
         provider: openai-compat
-        endpoint: ${COPILOT_MODEL_ENDPOINT:https://integrate.api.nvidia.com/v1}
+        endpoint: ${COPILOT_MODEL_ENDPOINT:http://litellm.ai-platform.svc:4000/v1}
         sensitivity: hosted
       # Production (deferred): register a self-hosted/EU model and flip COPILOT_DEFAULT_MODEL to it.
       # - id: vllm-cs
