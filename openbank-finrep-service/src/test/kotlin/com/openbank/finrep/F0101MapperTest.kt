@@ -5,7 +5,9 @@
 package com.openbank.finrep
 
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.domain.model.BalanceVerdict
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -36,7 +38,7 @@ class F0101MapperTest {
 
     @Test
     fun `F01_01 reports assets liabilities and equity as positive magnitudes`() {
-        val template = F0101Mapper.map(balancedTrialBalance(), asOf)
+        val template = F0101Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf)
 
         assertThat(template.templateId).isEqualTo("F01.01")
         assertThat(cell(template.cells, "r010")).isEqualByComparingTo("500000")
@@ -56,7 +58,7 @@ class F0101MapperTest {
             line("5000", "EXPENSE", "60000"),
         )
 
-        val template = F0101Mapper.map(lines, asOf)
+        val template = F0101Mapper.map(tb(lines, ledgerSays = false), asOf)
 
         assertThat(cell(template.cells, "r490")).isEqualByComparingTo("150000")
         assertThat(template.isBalanced).isFalse()
@@ -64,7 +66,7 @@ class F0101MapperTest {
 
     @Test
     fun `a trial balance that ties out is reported as balanced`() {
-        assertThat(F0101Mapper.map(balancedTrialBalance(), asOf).isBalanced).isTrue()
+        assertThat(F0101Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf).isBalanced).isTrue()
     }
 
     @Test
@@ -74,7 +76,7 @@ class F0101MapperTest {
         // into the frozen evidence.
         val lines = balancedTrialBalance() + line("1001", "ASSET", "70000")
 
-        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isFalse()
+        assertThat(F0101Mapper.map(tb(lines, ledgerSays = false), asOf).isBalanced).isFalse()
     }
 
     @Test
@@ -83,7 +85,7 @@ class F0101MapperTest {
         // row this template reports as a top-line total, yet a residual introduced there is caught.
         val lines = balancedTrialBalance() + line("5001", "EXPENSE", "12000")
 
-        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isFalse()
+        assertThat(F0101Mapper.map(tb(lines, ledgerSays = false), asOf).isBalanced).isFalse()
     }
 
     @Test
@@ -98,7 +100,14 @@ class F0101MapperTest {
             line("2000", "LIABILITY", "-140000", currency = "EUR"),
         )
 
-        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isFalse()
+        // NOTE the ledger flag passed here is `true`, and that is what a real ledger would send:
+        // its own verdict is a single UNGROUPED scalar (`Σ totalDebit == Σ totalCredit`), which
+        // this fixture satisfies exactly. So this is also a live SOURCES_DISAGREE case — the
+        // per-currency grouping is finrep seeing something the producer's own check cannot.
+        val template = F0101Mapper.map(tb(lines, ledgerSays = true), asOf)
+
+        assertThat(template.isBalanced).isFalse()
+        assertThat(template.balanceVerdict).isEqualTo(BalanceVerdict.SOURCES_DISAGREE)
     }
 
     @Test
@@ -110,7 +119,7 @@ class F0101MapperTest {
             line("2000", "LIABILITY", "-150000.0000"),
         )
 
-        assertThat(F0101Mapper.map(lines, asOf).isBalanced).isTrue()
+        assertThat(F0101Mapper.map(tb(lines, ledgerSays = true), asOf).isBalanced).isTrue()
     }
 
     @Test
@@ -118,11 +127,20 @@ class F0101MapperTest {
         // An absent trial balance is an under-reporting defect with its own detector
         // (`openbank.finrep.trial_balance.lines`); collapsing it onto this flag would make two
         // different failures indistinguishable to a consumer acting on either.
-        val template = F0101Mapper.map(emptyList(), asOf)
+        val template = F0101Mapper.map(tb(emptyList(), ledgerSays = true), asOf)
 
         assertThat(template.isBalanced).isTrue()
         assertThat(template.cells).allMatch { it.value.compareTo(BigDecimal.ZERO) == 0 }
     }
+
+    /**
+     * The ledger verdict is passed EXPLICITLY at every call site, never derived from `lines`
+     * (issue #6011). Deriving it here would make both sides of the cross-check move together and
+     * every `SOURCES_DISAGREE` case in this file structurally unreachable — the same vacuity
+     * #6010 removed one level down.
+     */
+    private fun tb(lines: List<TrialBalanceLineDto>, ledgerSays: Boolean?) =
+        TrialBalanceSnapshot(lines = lines, ledgerReportsBalanced = ledgerSays)
 
     private fun line(code: String, accountType: String, net: String, currency: String = "CZK") =
         TrialBalanceLineDto(code = code, accountType = accountType, net = BigDecimal(net), currency = currency)
