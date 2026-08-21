@@ -21,7 +21,8 @@ degrade quietly rather than crash:
 **The Langfuse row is a real gap, not an oversight to be argued away.** Langfuse v2 exposes no
 Prometheus endpoint and LiteLLM's callback metrics are an Enterprise feature, so a green Langfuse
 pod with a rejected key is indistinguishable from an idle gateway. Until that is closed (#5671) the
-only proof is the manual check in step 4.
+only proof is the manual check in step 4 — which is now an exact lookup rather than a sample, because
+the caller chooses the trace id, but is still a check somebody has to run rather than one that fires.
 
 ## 1. Seed the secrets (operator, break-glass)
 
@@ -80,17 +81,38 @@ kubectl -n platform exec deploy/copilot-service -c copilot-service -- \
 kubectl -n platform exec deploy/copilot-service -c copilot-service -- \
   sh -c 'curl -s localhost:8085/q/metrics | grep copilot_retrieval'
 
-# Langfuse ingestion — the manual check, because no metric exists yet (#5671).
-# Drive one LLM call, then ask Langfuse whether it stored a trace:
+# Langfuse ingestion — still manual, but now ADDRESSED rather than sampled (#5671).
+#
+# `OpenAiCompatibleLlmGatewayClient` sends the caller's own W3C trace id as LiteLLM
+# `metadata.trace_id`, and LiteLLM passes metadata through to its logging callback — so the
+# Langfuse trace carries the SAME id as the calling service's OTel span. That turns the check
+# below from "is there any trace at all" into "is the trace for the call I just made there",
+# which is the difference between a sample and a probe.
+#
+# 1. Drive one real LLM call through a traced service and capture its trace id from the log
+#    line Quarkus already stamps with it (`traceId=`), e.g. a copilot chat request:
+kubectl -n platform logs deploy/copilot-service -c copilot-service --tail=200 \
+  | grep -oE 'traceId=[0-9a-f]{32}' | tail -1
+
+# 2. Ask Langfuse for THAT id (substitute it for $TID). 200 = ingestion works; 404 = it does not.
 kubectl -n ai-platform exec deploy/langfuse -- \
-  sh -c 'curl -s -u "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY:$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
-    localhost:3000/api/public/traces?limit=1'
+  sh -c 'curl -s -o /dev/null -w "%{http_code}\n" \
+    -u "$LANGFUSE_INIT_PROJECT_PUBLIC_KEY:$LANGFUSE_INIT_PROJECT_SECRET_KEY" \
+    localhost:3000/api/public/traces/'"$TID"
 ```
 
-A `data: []` from that last command after a known LLM call means the callback is not landing — check
-the LiteLLM pod log for a rejected key, and that `litellm-config-revision` was bumped so the pod
-actually re-read its config (LiteLLM parses `--config` once at startup; editing the ConfigMap alone
-changes nothing).
+A 404 for an id you know was sent means the callback is not landing — check the LiteLLM pod log for
+a rejected key, and that `litellm-config-revision` was bumped so the pod actually re-read its config
+(LiteLLM parses `--config` once at startup; editing the ConfigMap alone changes nothing).
+
+**Two ways this probe can still answer "no" for the wrong reason, and both are checkable.** If the
+calling service does not apply `quarkus-opentelemetry` there is no trace id to send, so LiteLLM mints
+its own and the lookup 404s while ingestion is fine — fall back to `?limit=1` to separate the cases.
+And an unsampled span yields OpenTelemetry's all-zero id, which the client refuses to send by design
+(it would fuse every untraced call onto one shared trace); step 1 will simply find no `traceId=` line.
+
+**What this still is not.** It is a probe a human runs, not a control that watches. Nothing alerts
+when ingestion stops, because there is no series to alert on — that half of #5671 is open.
 
 ## 5. Rollback
 

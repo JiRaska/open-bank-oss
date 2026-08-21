@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.2...copilot-service-v0.13.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **copilot:** record an LLM metric on every streaming outcome ([#5960](https://github.com/JiRaska/open-bank-oss/issues/5960)) ([f6fdb0f](https://github.com/JiRaska/open-bank-oss/commit/f6fdb0fc302acb7d84b288ee29d2d98b9de1e994))
+
 ## [0.13.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.1...copilot-service-v0.13.2) (2026-08-20)
 
 

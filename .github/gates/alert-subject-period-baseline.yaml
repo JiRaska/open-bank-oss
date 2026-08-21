@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# THE FROZEN SIDE for check-alert-window-vs-subject-period.py.
+#
+# Every alert rule whose expression carries a rate/increase window must declare, in its
+# annotations, the invocation period of the SUBJECT it measures — `continuous` for something
+# driven by real traffic, or a duration for something driven by a cron. The gate then does the
+# arithmetic that #6041 proved nobody had done: a window no wider than its subject's period,
+# paired with a `for:` no shorter than that window, is a rule that can sit `pending` forever
+# and never once reach `firing`.
+#
+# Annotating all 49 windowed rules in the PR that introduces the gate would be a diff nobody
+# can review and would conflict with every parallel change to the alerting tree. So the rules
+# that were undeclared on the day the gate landed are listed here BY NAME.
+#
+# This list is the FROZEN SIDE, never a difference — openbank-infra/CLAUDE.md, on the Keycloak
+# baseline: "any baseline keyed to A - B where only B is frozen will fire on changes to A".
+# The gate fails in BOTH directions:
+#
+#   * a NEW windowed rule that is not listed here and declares nothing  -> fail
+#   * a listed rule that has since declared a subject_period            -> fail, stale entry
+#   * a listed rule that no longer exists                               -> fail, stale entry
+#
+# So the debt can only shrink, and a new alert cannot join it quietly. Removing an entry means
+# adding the declaration to the rule, which is the point.
+#
+# A listed rule is NOT asserted to be correct. It is asserted to be UNCHECKED. Two of them are
+# known to be defective and are called out where they appear below.
+undeclared_baseline:
+  # KNOWN DEFECTIVE — the rule this entire gate was derived from. `rate(...[15m])` with
+  # `for: 15m` against a 30-minute subject (agent-service OversightService,
+  # AGENT_OVERSIGHT_CRON `0 0/30 * * * ?`). Prometheus's own ALERTS series across the 8h40m
+  # #5736 outage: 44 points at `pending`, zero at `firing`; eight pending episodes of
+  # [6,15,15,15,15,15,15,15] minutes at 30-minute gaps — the gap is the cron and the length is
+  # the window. Left undeclared here ONLY because prometheus-rules-ai.yaml is being rewritten
+  # by PR #6041 in parallel and this change is deliberately kept disjoint from it. #6041 adds
+  # AiModelNeverSucceeds, which is rate-free and covers the outage; narrowing this rule itself
+  # is follow-up work on that file.
+  - alert: AiCallErrorRateHigh
+  - alert: AiCallsNotConfigured
+  - alert: AiSpendUnmeasured
+  - alert: BillingServerErrorsWhileHealthy
+  - alert: CampaignEnrolmentFailuresElevated
+  - alert: CampaignJourneysNotResolving
+  - alert: CampaignNoSendsInBusinessHours
+  - alert: CampaignSendHandoffsFailing
+  - alert: CampaignSendsAreAllDryRuns
+  - alert: CampaignSuppressingEverything
+  - alert: EmailChannelMockedOnly
+  - alert: EmailDeliveryRejected
+  - alert: FeedbackEmitFailing
+  - alert: FeedbackScreenshotStoreFailing
+  - alert: FinOpsEbsAttachmentFailing
+  - alert: FinOpsFleetEgressHigh
+  - alert: FinOpsKarpenterChurnOutsideMaintenance
+  - alert: FinOpsKarpenterNodeChurnHigh
+  - alert: FinOpsNatEgressSpikeAbsolute
+  - alert: FinOpsNatEgressSpikeRelative
+  - alert: FraudScoringMostlySynthetic
+  - alert: HighErrorRate
+  # KNOWN DEFECTIVE for one of its subjects — found by this sweep, and NOT covered by #6041.
+  # `rate(traces_spanmetrics_latency_bucket[5m])` with `for: 10m` is correct for the ~25
+  # services driven by real traffic, and structurally unable to fire for
+  # openbank-agent-service, whose only traffic is that same 30-minute cron. Measured over 11h
+  # of live ALERTS history: 12 pending episodes of exactly 4 minutes at exactly 30-minute gaps,
+  # zero firing. Replaying the same expression at [45m] over the same window yields 311
+  # consecutive true minutes, so the condition really was continuous and only the window hid
+  # it. Not fixed here: widening the window fleet-wide costs every other service its detection
+  # latency, so this wants a per-subject companion rule rather than a retune — a judgement
+  # call, tracked as its own issue.
+  - alert: HighLatencyP99
+  - alert: KyvernoAdmissionDenied
+  - alert: KyvernoAuditPolicyFailingBeforeEnforce
+  - alert: KyvernoEnforcePolicyBlocking
+  - alert: LendingHighErrorRate
+  - alert: NodeDiskWillFillIn4h
+  - alert: OnboardingAccountsNotFollowingParties
+  - alert: PartyEventDeadLettered
+  - alert: PaymentSLOFastBurn
+  - alert: PaymentSLOSlowBurn
+  - alert: PersistentVolumeWillFillIn6h
+  - alert: PostgresDeadlocksGrowing
+  - alert: PostgresLowCacheHitRatio
+  - alert: PostgresWALArchiveFailing
+  - alert: PushChannelSkippedOnly
+  - alert: PushDeliveryRejected
+  - alert: PushNoDevicesRegistered
+  - alert: ScreenFeedbackBugReported
+  - alert: ScreenFeedbackScreenshotStoreFailing
+  - alert: ScreenFeedbackSpike
+  - alert: SpanLatencyTrendAnomaly
+  - alert: StatementCloseFailures
+  - alert: TrafficDropAnomaly

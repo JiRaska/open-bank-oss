@@ -59,7 +59,6 @@ BASELINE = {
     "openbank-aml-service",
     "openbank-card-issuance-service",
     "openbank-interest-service",
-    "openbank-notification-service",
     "openbank-onboarding-service",
     "openbank-sanctions-service",
     "openbank-sdd-service",

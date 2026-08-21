@@ -29,6 +29,9 @@
 #   SERVICES                 JSON array of changed service names        (required)
 #   EVENT_NAME               github.event_name                          (required)
 #   INPUT_CODEPLOY           github.event.inputs.codeploy, may be empty
+#   INPUT_CODEPLOY_PACT_VERSIONS
+#                            optional JSON object mapping a co-deployed service to an exact
+#                            Pact version that this gate proves equivalent to GITHUB_SHA
 #   PACT_BROKER_URL/_USERNAME/_PASSWORD, PACT_STANDALONE_VERSION        (job env)
 #   GITHUB_OUTPUT            written for: gate_ran, deployable, and the rest below
 #
@@ -95,16 +98,82 @@ BLOCKS_FILE="$(mktemp)"
 
 # ── #1985: co-deploy mode ───────────────────────────────────────────────────────
 # Services that block EACH OTHER cannot converge one deploy at a time; this asks
-# the broker whether THOSE versions are mutually compatible. Full reasoning in
+# the broker whether THOSE exact build versions are mutually compatible. Full reasoning in
 # derive-codeploy-set.py's header. It is a gate, not a bypass — a red verdict
 # deploys nothing — but a DIFFERENT question, so it is opt-in on workflow_dispatch
-# and never reachable from a push or a scheduled tick.
+# and never reachable from a push or a scheduled tick. Do not use `--latest main` here:
+# a later, unrelated main build can move that tag between selection and the question, turning
+# this into a verdict about a different image.
 if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
    && [ "${INPUT_CODEPLOY}" = "true" ]; then
+  explicit_versions="${INPUT_CODEPLOY_PACT_VERSIONS:-}"
+  use_explicit_versions=false
+  if [ -n "$explicit_versions" ] && [ "$explicit_versions" != "{}" ]; then
+    if ! jq -e --argjson services "$SERVICES" \
+      'type == "object" and (keys | sort) == ($services | sort)' >/dev/null <<< "$explicit_versions"; then
+      echo "::error::codeploy_pact_versions must map exactly the requested services to 40-hex versions"
+      echo "deployable=[]" >> "$GITHUB_OUTPUT"
+      exit 1
+    fi
+    use_explicit_versions=true
+  fi
   CODEPLOY_ARGS=()
+  codeploy_skipped=()
   for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-    CODEPLOY_ARGS+=(--pacticipant "$svc" --latest main)
+    if [ "$use_explicit_versions" = true ]; then
+      pact_version="$(jq -r --arg svc "$svc" '.[$svc] // empty' <<< "$explicit_versions")"
+      if ! grep -qE '^[0-9a-f]{40}$' <<< "$pact_version"; then
+        echo "::error::codeploy_pact_versions has no valid 40-hex version for ${svc}"
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        exit 1
+      fi
+      if ! bash .github/scripts/pact-version-tree-equivalent.sh "$svc" "$pact_version" "$GITHUB_SHA"; then
+        echo "::error::codeploy_pact_versions entry for ${svc} is not byte-identical to the deploy ref in every build input"
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        exit 1
+      fi
+      CID_SELECTOR=(--version "$pact_version")
+      echo "    ${svc}: --version ${pact_version} (explicit version proven byte-identical to deploy ref)"
+    else
+      # #5993: the co-deploy matrix may ONLY be asked at exact versions. The shared
+      # selector is right for the per-service loop below, where `--latest main` is a
+      # documented ADR-0092 fallback — but here that moving tag makes the one question
+      # this branch exists to ask a question about a DIFFERENT artifact, and on the
+      # `unknown` (broker probe inconclusive) path it can answer GREEN for a pair that is
+      # not being deployed. resolve-codeploy-selector.sh narrows it to exact | SKIP |
+      # REFUSE; its --self-test asserts no branch can ever emit a moving tag again.
+      vpresent="$(bash .github/scripts/probe-pact-version.sh "$svc" "$GITHUB_SHA")"
+      sel_line="$(PACT_VERSION_PRESENT="$vpresent" \
+        bash .github/scripts/resolve-codeploy-selector.sh "$svc" "$GITHUB_SHA")"
+      read -ra CID_SELECTOR <<< "$(printf '%s' "$sel_line" | cut -f1)"
+      if [ "${CID_SELECTOR[0]}" = "REFUSE" ]; then
+        echo "::error::can-i-deploy co-deploy set cannot be asked safely for ${svc}: $(printf '%s' "$sel_line" | cut -f2)"
+        echo "deployable=[]" >> "$GITHUB_OUTPUT"
+        exit 1
+      fi
+      if [ "${CID_SELECTOR[0]}" = "SKIP" ]; then
+        # Not a pacticipant at all — no contracts either way, so it cannot break any pair.
+        # It stays in the deploy set and leaves the MATRIX, which is the per-service loop's
+        # 404 rule applied here. Pinning it to `--latest main` instead made the whole set
+        # read as a contract break that does not exist.
+        echo "    ${svc}: not in the matrix ($(printf '%s' "$sel_line" | cut -f2))"
+        codeploy_skipped+=("$svc")
+        continue
+      fi
+      echo "    ${svc}: ${CID_SELECTOR[*]} ($(printf '%s' "$sel_line" | cut -f2))"
+    fi
+    CODEPLOY_ARGS+=(--pacticipant "$svc" "${CID_SELECTOR[@]}")
   done
+  if [ "${#CODEPLOY_ARGS[@]}" -eq 0 ]; then
+    # Every requested service turned out to have no contracts in the broker. There is no
+    # matrix to ask, and asking `can-i-deploy` with zero pacticipants is a CLI error that
+    # would read as a contract break. Nothing here can break a contract, so the set is
+    # deployable — but say so explicitly rather than letting an empty question answer it.
+    echo "  ✓ none of the requested services is a Pacticipant — no contracts to check (ADR-0092)"
+    echo "deployable=${SERVICES}" >> "$GITHUB_OUTPUT"
+    echo "blocked=[]" >> "$GITHUB_OUTPUT"
+    exit 0
+  fi
   echo "==> can-i-deploy CO-DEPLOY SET (#1985): $(echo "$SERVICES" | jq -r 'join(" ")')"
   if "$CLI" can-i-deploy "${CODEPLOY_ARGS[@]}" \
        --broker-base-url "$PACT_BROKER_URL" \
@@ -117,6 +186,10 @@ if [ "${EVENT_NAME}" = "workflow_dispatch" ] \
     {
       echo "### can-i-deploy: co-deploy set verified (#1985)"
       echo "Asked as ONE question, not per service: \`$(echo "$SERVICES" | jq -r 'join(" ")')\`"
+      if [ "${#codeploy_skipped[@]}" -gt 0 ]; then
+        echo ""
+        echo "Not in the matrix (no contracts in the broker, ADR-0092): \`${codeploy_skipped[*]}\`"
+      fi
     } >> "$GITHUB_STEP_SUMMARY"
     exit 0
   fi
