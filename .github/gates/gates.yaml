@@ -986,6 +986,31 @@ gates:
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
 
+  # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
+  # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
+  # machine, to decide whether OpenBank's audit log was tampered with. Nothing in CI can
+  # exercise it against production data, and that is exactly why its rejection paths need a
+  # home here: a verifier whose only observed behaviour is "VERIFIED" is decoration, and the
+  # party it would mislead is an auditor or a regulator rather than a developer.
+  #
+  # The suite constructs, from a throwaway EC key and no infrastructure, the four tamperings
+  # the anchors exist to catch (altered entry, deleted entry, re-ordered pair, chain gap),
+  # three the anchor row itself must catch (edited row, foreign-key signature, backwards
+  # re-anchor), and — the case this repo has paid for before (PushResult.skipped(), #4348) —
+  # the four cases that must land on their own outcome rather than sharing one with
+  # success: no anchors at all, and an unsigned anchor. One clean range is accepted, because
+  # ten rejections prove nothing if the tool rejects everything.
+  - id: audit-anchor-offline-verifier-unit-test
+    selftest_exempt: "is-a-test-suite — the run: IS the verifier's own --self-test"
+    name: "offline audit-anchor verifier self-test (ADR-0031 D5)"
+    group: security
+    mode: enforced
+    min_subjects: 13   # 2 acceptances + 7 rejections + 4 distinct UNVERIFIABLE outcomes
+    rationale: "The offline anchor verifier is the only D5 control an auditor can run without trusting the bank, and nothing in CI can exercise it against production data; its rejection paths would otherwise be code that has never run, so a tool whose only observed behaviour is VERIFIED would read as tamper-evidence while being decoration — and the party it misleads is a regulator rather than a developer."
+    review_after: "2027-02-21"
+    run: |
+      python3 .github/scripts/verify-audit-anchors.py --self-test
+
   # can-i-deploy block classifier unit test (issue #2549). The reconcile probe above
   # decides WHICH stranded services to re-drive; this one decides whether a block that
   # survives the re-drive is a build-queue lag (self-clearing) or a contract regression
