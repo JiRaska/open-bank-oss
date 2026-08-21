@@ -153,7 +153,8 @@ export default function PartiesPage() {
         subtitle={t('Zákazníci a společnosti registrované v platformě', 'Customers and companies registered in the platform')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Subjekty', 'Parties')}</span></div>}
         actions={<div style={{ display: 'flex', gap: '8px' }}>
-          <button className="btn btn-secondary" onClick={load} disabled={loading || inSearchMode}>
+          <button className="btn btn-secondary" type="button" onClick={load} disabled={loading || inSearchMode}
+            aria-busy={loading} aria-label={t('Obnovit subjekty', 'Refresh parties')}>
             <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
