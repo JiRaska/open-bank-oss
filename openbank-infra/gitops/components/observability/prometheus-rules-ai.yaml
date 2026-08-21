@@ -34,7 +34,29 @@ spec:
     # `price_source` is carried deliberately: it is the difference between a number we can defend
     # and one we cannot, and it stays visible on the dashboard rather than living in a comment.
     - name: openbank.ai.price-book
-      interval: 1h
+      # 1m, not 1h. These rules are `vector(<constant>)` — evaluation is free, and the interval
+      # is not a cost knob here, it is what decides whether the series EXISTS when its consumers
+      # look.
+      #
+      # At 1h the price book was invisible for 55 minutes of every 60. Prometheus answers an
+      # instant query from a 5-minute lookback window, so a series written once an hour is
+      # resolvable for 5 of those 60 minutes — a 1-in-12 duty cycle. Measured against the live
+      # sandbox 2026-08-21, group lastEvaluation 06:26:11Z:
+      #
+      #   query at eval + 60s   -> 9 price series
+      #   query at eval + 600s  -> 0
+      #   query at eval + 3600s -> 0
+      #
+      # `openbank.ai.spend` below runs at 5m and joins `on (model, kind)` against this, so 11 of
+      # every 12 of its evaluations saw NO price and produced no cost sample. That is why
+      # `openbank:llm_cost_usd_24h:total` had no series at all, why AiFleetDailySpendHigh — the
+      # 25 USD/day ceiling — could not fire, and why AiSpendUnpriced fired for a model that IS
+      # priced: `unless on (model)` against a stale price series reports everything as unpriced.
+      #
+      # #6063 added the missing model prices and was correct; it just landed on a rule group its
+      # consumers could not see. Verified there: 9 series exist at eval+60s, so the entries
+      # themselves work.
+      interval: 1m
       rules:
         # DeepInfra's published rate card for `meta-llama/Llama-3.3-70B-Instruct-Turbo`, the route
         # the caller-facing id `llama-3.3-70b-versatile` now resolves to — $0.10/M input,
