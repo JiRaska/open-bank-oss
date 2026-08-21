@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.184.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.6...admin-ui-v0.184.0) (2026-08-21)
+
+
+### Features
+
+* **admin-ui:** trace the BFF, the one service in the fleet with no spans ([#6153](https://github.com/JiRaska/open-bank-oss/issues/6153)) ([e4c1c5b](https://github.com/JiRaska/open-bank-oss/commit/e4c1c5b06c47b37928f8f4d5602225b1c740e18d))
+
 ## [0.183.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.5...admin-ui-v0.183.6) (2026-08-21)
 
 
