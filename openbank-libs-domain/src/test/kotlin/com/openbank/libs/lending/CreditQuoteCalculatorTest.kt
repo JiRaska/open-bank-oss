@@ -36,8 +36,7 @@ class CreditQuoteCalculatorTest {
         monthlyFee = monthly?.let { czk(it) },
     )
 
-    private fun quote(r: CreditQuoteRequest = request()) =
-        CreditQuoteCalculator.quote(r, now, validity, firstDue)
+    private fun quote(r: CreditQuoteRequest = request()) = CreditQuoteCalculator.quote(r, now, validity, firstDue)
 
     // ── Consistency with the loan that would actually be booked ───────────────
 
