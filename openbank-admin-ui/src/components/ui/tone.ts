@@ -146,6 +146,10 @@ const TONE_BY_STATUS: Record<string, Tone> = {
   GO: 'success',
   'NO-GO': 'danger',
   NOGO: 'danger',
+  // A released component with no gitops workload at all (#5760). Neutral on purpose: it is not a
+  // failed control (danger) and emphatically not a pass (success) — there is nothing running to
+  // judge. Reached only in place of NO-GO; see the collectors' computeGate.
+  'NOT-DEPLOYED': 'neutral',
 }
 
 /**
