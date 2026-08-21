@@ -113,7 +113,18 @@ class CustomerCreditJourneyResourceTest {
 
     @Test
     fun `a missing party header is refused, not treated as fleet-wide`() {
+        // 400, not 403: the caller IS the edge, the request just carries no scope. Keeping the two
+        // apart keeps 403 meaning exactly one thing — "you are not the edge".
         val response = resource(listOf(application())).list(null).await().indefinitely()
+        assertThat(response.status).isEqualTo(400)
+    }
+
+    @Test
+    fun `a well-formed party header does not earn access for a caller that is not the edge`() {
+        // The permission decision must not depend on request data at all (CodeQL
+        // java/tainted-permissions-check): a perfect header from the wrong principal is still 403.
+        val response = resource(listOf(application()), principal = "service-account-someone-else")
+            .list(party.toString()).await().indefinitely()
         assertThat(response.status).isEqualTo(403)
     }
 
@@ -145,9 +156,8 @@ class CustomerCreditJourneyResourceTest {
 
     @Test
     fun `no price of any kind is exposed — rate, instalment and APRC are ADR-0269 rule 4`() {
-        val dto = bodyOf(resource(listOf(application())).list(party.toString()).await().indefinitely()).single()
-        val fields = CustomerCreditJourneyDto::class.java.declaredFields.map { it.name.lowercase() }
-        assertThat(fields).noneMatch { it.contains("rate") || it.contains("apr") || it.contains("instal") }
+        assertThat(CustomerCreditJourneyDto::class.java.declaredFields.map { it.name.lowercase() })
+            .noneMatch { it.contains("rate") || it.contains("apr") || it.contains("instal") }
     }
 
     @Test
