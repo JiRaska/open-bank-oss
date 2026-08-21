@@ -189,7 +189,7 @@ jobs:
           # proof to REJECT it. A gate that has only ever passed is unfalsified, and this
           # one's failure mode (a silently narrower charter document) is invisible from
           # every other angle — `data.agents.<missing>` is undefined in Rego, not an error.
-          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          bash .github/scripts/install-pyyaml-hash-pinned.sh
           python3 .github/scripts/gen-agents-opa-data.py --self-test
           python3 .github/scripts/gen-agents-opa-data.py --check
 
@@ -201,7 +201,7 @@ jobs:
           # below, or they would hash a stale input and the diff check would pass about
           # the wrong thing. The key set is derived from the .rego sources, so adding
           # data.rules.<new> to a policy fails here until the subset is regenerated.
-          python3 -m pip install --quiet --disable-pip-version-check pyyaml
+          bash .github/scripts/install-pyyaml-hash-pinned.sh
           python3 .github/scripts/gen-rules-opa-data.py --check
 
       - name: Verify service OPA bundles + pod-roll annotations are in sync with the policy source

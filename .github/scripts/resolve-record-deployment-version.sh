@@ -251,12 +251,15 @@ main() {
 
   # Newest published version for this pacticipant. `latest` is the broker's own ordering, so we
   # inherit its definition of newest rather than inventing one.
-  local published
-  published="$(curl -s -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-    "${PACT_BROKER_URL}/pacticipants/${svc}/latest-version" \
-    | python3 -c 'import json,sys;
+  # Captured, then fed via a here-string rather than `curl | python3` (OpenSSF Scorecard
+  # Pinned-Dependencies: downloadThenRun flags any curl-into-interpreter pipe, code or not —
+  # this is JSON data, not a downloaded script, but the check can't tell the two apart).
+  local latest_json published
+  latest_json="$(curl -s -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
+    "${PACT_BROKER_URL}/pacticipants/${svc}/latest-version")"
+  published="$(python3 -c 'import json,sys;
 try: print(json.load(sys.stdin).get("number",""))
-except Exception: print("")' 2>/dev/null)"
+except Exception: print("")' <<<"$latest_json" 2>/dev/null)"
   case "$published" in
     [0-9a-f]*) ;;
     *) echo "none"; return 0 ;;
