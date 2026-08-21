@@ -3,7 +3,10 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.8.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
+  # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
+  # ApprovalResponse (makerId, createdAt). No breaking change.
+  version: 1.9.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -274,6 +277,35 @@ paths:
         '404':
           description: No reconciliation has been run yet
 
+  /api/v1/balances/approvals:
+    get:
+      tags: [Balances]
+      summary: >-
+        List pending four-eyes approvals, oldest first — the checker's queue (ADR-0227 D2,
+        issue #5679). Without it a decision parked at 202 is discoverable only by whoever was
+        handed its id. Requires ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/balances/approvals/{id}:
     patch:
       tags: [Balances]
@@ -306,22 +338,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [id, action, status]
-                properties:
-                  id:
-                    type: string
-                  action:
-                    type: string
-                    description: The gated action this approval was raised for.
-                  resourceId:
-                    type: string
-                    nullable: true
-                  status:
-                    type: string
-                  decidedBy:
-                    type: string
-                    nullable: true
+                $ref: '#/components/schemas/ApprovalResponse'
         '404':
           $ref: '#/components/responses/NotFound'
 
@@ -356,6 +373,39 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record (ADR-0155). `makerId` is the principal that requested the gated
+        action; a DIFFERENT principal must decide it — enforced in RedisApprovalStore.decide, so the
+        queue is readable by anyone who may decide, including the maker (seeing a request is not
+        authority over it).
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+          description: The value the maker replays as the X-Approval-Id header once approved.
+        action:
+          type: string
+          example: balance.credit
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, EXECUTED]
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          nullable: true
+          description: >-
+            Request time. The store expires a PENDING approval after 24h, so age is the only
+            visible sign of one about to lapse.
+        decidedBy:
+          type: string
+          nullable: true
     BalanceResponse:
       type: object
       properties:

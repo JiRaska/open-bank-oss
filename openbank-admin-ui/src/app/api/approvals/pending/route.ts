@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 // ADR-0227 D2 (phase 1): the federated approval inbox read. One BFF route merges each
-// domain's pending queue — lending's, sanctions' and clearing's maker-checker approvals plus
+// domain's pending queue — lending's, sanctions', clearing's and balance's maker-checker approvals plus
 // the agent plane's proposals — into one canonical item shape for the /approvals screen. Read-only by
 // design: disposal happens in the governed per-domain decide flows (money-path disposal
 // additionally requires SCA, ADR-0227 D4 — that is the phase-2 design, deliberately NOT a
@@ -23,7 +23,6 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 // the most dangerous state look healthy to an operator.
 const NOT_CONFIGURED_SOURCES = {
   account: 'not-configured',
-  balance: 'not-configured',
   billing: 'not-configured',
   consent: 'not-configured',
   notification: 'not-configured',
@@ -32,7 +31,7 @@ const NOT_CONFIGURED_SOURCES = {
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'balance' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -55,6 +54,7 @@ type SanctionsApproval = LendingApproval
 
 // transaction-service serves the same libs `PendingApproval` shape too (#5679).
 type TransactionApproval = LendingApproval
+
 // fx-service serves the same libs `PendingApproval` shape (issue #5679, money-path first per
 // that issue's own ordering). Before this, an `fx.convert` four-eyes decision parked at 202
 // was discoverable only by whoever had been handed its id out of band.
@@ -64,6 +64,11 @@ type FxApproval = LendingApproval
 // first per that issue's own ordering). Before this, an `sctInstPayment.recall` four-eyes
 // decision parked at 202 was discoverable only by whoever had been handed its id out of band.
 type SepaInstantApproval = LendingApproval
+
+// balance-service serves the same shape too (issue #5679, the money-path slice of #5679's
+// 14-of-16 gap): `balance.credit`/`balance.debit` are both four-eyes-gated, and until now a
+// parked decision there was invisible on this screen exactly like sanctions' was before #3472.
+type BalanceApproval = LendingApproval
 
 // domestic-payment-service serves the same libs `PendingApproval` shape (issue #5679, money-path
 // first per that issue's own ordering). Before this, a `domestic-payment.transitionStatus`
@@ -272,6 +277,21 @@ async function sepaInstantPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function balancePending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('balance-service', 'balance', 8103, '/api/v1/balances/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as BalanceApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'balance' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -299,7 +319,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, balance, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -310,9 +330,10 @@ export async function GET() {
     swiftPending(headers).catch(() => unavailable),
     sepaPaymentPending(headers).catch(() => unavailable),
     sepaInstantPending(headers).catch(() => unavailable),
+    balancePending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...balance.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -328,6 +349,7 @@ export async function GET() {
       swift: swift.state,
       'sepa-payment': sepaPayment.state,
       'sepa-instant': sepaInstant.state,
+      balance: balance.state,
       agent: agent.state,
     },
   })

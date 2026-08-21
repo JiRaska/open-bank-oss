@@ -110,11 +110,12 @@ Deployment/Service (`openbank-infra/gitops/components/balances/redis.yaml`) back
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
 | **R**epudiation | No record of who approved a gated credit/debit | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals account/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random id (`RedisApprovalStore`, not sequential) |
+| **I**nfo disclosure | (issue #5679) `GET /api/v1/balances/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `Roles.OPERATOR`/`Roles.ADMIN` + `@Authorize(action = "balance.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never balance amounts or account holder data, which stay behind the existing read-role gate. Limit clamped to 200 (`MAX_PENDING_LIMIT`) — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
 | **D**oS | Flooding `POST /{accountId}/credit`\|`/debit` to exhaust Redis with pending approvals | Bounded by the same rate-limit/idempotency controls as the gated endpoints themselves; each `PendingApproval` is TTL-bounded (86400s) so abandoned records expire |
 
-**DFD update:** adds `Operator (checker) → PATCH /api/v1/balances/approvals/{id} → Redis
-(approval:*)` alongside the existing `POST /{accountId}/credit`|`/debit` edges; the maker's retry
-reuses the existing DFD edges. New same-namespace-only trust boundary: `balance-service pod →
+**DFD update:** adds `Operator (checker) → GET /api/v1/balances/approvals → Redis (approval:*)`
+and `Operator (checker) → PATCH /api/v1/balances/approvals/{id} → Redis (approval:*)` alongside the
+existing `POST /{accountId}/credit`|`/debit` edges; the maker's retry reuses the existing DFD edges. New same-namespace-only trust boundary: `balance-service pod →
 redis.balances.svc:6379` (NetworkPolicy `redis-ingress-allow-list`, in-namespace callers only).
 **Risk class:** integrity (segregation of duties) + confidentiality (approval record scope).
 **Rollback:** `authz.four-eyes.enforce=false` (default) — the endpoint and store exist but do not
@@ -172,6 +173,15 @@ also be deleted (nothing else in balance-service depends on it).
   maker/checker runbook is reviewed, tracked under issue #413.
 
 ## 7. Change log
+
+- **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `balance.credit`
+  or `balance.debit` four-eyes decision parked at 202 was discoverable only by whoever had been
+  handed its approval id out of band — the ceremony completed only if the two operators were
+  already talking, and the 24h Redis TTL then expired the request silently otherwise (issue #5679,
+  mirroring sanctions #3472). Added `GET /api/v1/balances/approvals` (§4a new I row); no new trust
+  boundary crossed — same `RedisApprovalStore`, same role gate shape as the existing decide
+  endpoint, additive-only OpenAPI change (ADR-0048). Rollback: revert the commit — the decide
+  endpoint and the store are untouched.
 
 - **2026-08-05** — Prohibit the customer-edge M2M principal from balance writes (#3734). The
   `operator-balance-write` ext rule was role-only, and `rules.yaml`'s `role_action_matrix` grants

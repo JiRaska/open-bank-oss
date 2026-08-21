@@ -11,7 +11,10 @@ const pageSource = fs.readFileSync(path.join(process.cwd(), 'src/app/approvals/p
 describe('approval inbox source truthfulness', () => {
   it('exposes known-but-unwired queues instead of treating them as empty', () => {
     expect(routeSource).toContain("'not-configured'")
-    expect(routeSource).toContain("balance: 'not-configured'")
+    // The exemplar moves each time a queue gets wired — balance was it until #5679's balance
+    // slice wired it. `account` is the next still-unwired one; it must stay a queue this repo
+    // knows exists and does NOT read, or the guard stops discriminating.
+    expect(routeSource).toContain("account: 'not-configured'")
     expect(routeSource).toContain('...NOT_CONFIGURED_SOURCES')
   })
 
