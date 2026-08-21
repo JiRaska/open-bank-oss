@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.3...copilot-service-v0.14.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** put the content-safety classifier on the operator plane too ([#6204](https://github.com/JiRaska/open-bank-oss/issues/6204)) ([13a21b5](https://github.com/JiRaska/open-bank-oss/commit/13a21b5835739937a16bcfdbb233381d305f3089)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.13.2...copilot-service-v0.13.3) (2026-08-20)
 
 

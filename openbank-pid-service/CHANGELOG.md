@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.9.0...pid-service-v0.9.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.8.17...pid-service-v0.9.0) (2026-08-18)
 
 

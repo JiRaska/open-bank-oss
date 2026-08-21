@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.11.0...kyc-service-v0.11.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.10.12...kyc-service-v0.11.0) (2026-08-18)
 
 
