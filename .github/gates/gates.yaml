@@ -2387,6 +2387,45 @@ gates:
     run: |
       python3 .github/scripts/check-kafka-acl-coverage.py --enforce
 
+  # billing-service's outbox producer read KAFKA_BOOTSTRAP_SERVERS from its own
+  # application.yaml since ADR-0248 shipped it, and its Deployment never supplied it — no env
+  # var, no KafkaUser, no cert Secret at all. SmallRye's connector fell through to its bare
+  # default of localhost:9092; the pod stayed Ready, only its own readiness probe reported the
+  # reactive-messaging channel DOWN, and the outbox dispatcher's circuit breaker quietly parked
+  # every event DEAD after retry exhaustion. Found only by reading a log by hand (#4701).
+  - id: kafka-deployment-wiring
+    name: "Kafka-using service has KAFKA_BOOTSTRAP_SERVERS wired in its Deployment (issue #4701, enforced)"
+    group: data
+    mode: enforced
+    rationale: "A service whose outbox producer reads KAFKA_BOOTSTRAP_SERVERS falls through to SmallRye's bare localhost:9092 default when its Deployment omits the env var — the pod stays Ready and only the reactive-messaging channel's own readiness probe (or a hand-read log) shows the outbox dispatcher parking every event DEAD after retry exhaustion (#4701)."
+    review_after: "2027-02-19"
+    min_subjects: 30   # 42 Kafka-using services checked today (2026-08-19)
+    selftest: |
+      python3 .github/scripts/check-kafka-deployment-wiring.py --selftest
+    run: |
+      python3 .github/scripts/check-kafka-deployment-wiring.py --enforce
+
+  # security-scanner-service was in CrashLoopBackOff for 4+ hours (issue #5628):
+  # V4__drop_security_outbox.sql's own PR (#4940) merged AFTER V5__create_ict_incidents.sql's
+  # PR (#4939) had already deployed and applied V5 live. Flyway refuses to boot once a
+  # lower-numbered migration than the highest already applied shows up on the classpath, and
+  # neither PR's own CI could see it — each ran green against its own base, per this repo's
+  # documented "PR green is about the base, not main" trap. This is a detect-fast gate (runs on
+  # push to main too, per ci.yml), not a prevention — see the script's own header for why a race
+  # between two PRs cannot be fully prevented pre-merge, only caught within minutes instead of
+  # by a crashed pod hours later.
+  - id: flyway-version-commit-order
+    name: "Flyway migration version must not regress against main's commit order (issue #5628, enforced)"
+    group: data
+    mode: enforced
+    rationale: "A migration whose PR merges after a higher-numbered sibling has already been applied live crashes the service on every boot ('Detected resolved migration not applied to database: N') — each PR's own CI ran green against its own base and could not see the other, per this repo's own 'PR green is about the base, not main' trap (#5628, security-scanner's 4h+ outage)."
+    review_after: "2027-02-19"
+    min_subjects: 250   # 350 migrations across 53 services checked today (2026-08-19)
+    selftest: |
+      python3 .github/scripts/check-flyway-version-commit-order.py --selftest
+    run: |
+      python3 .github/scripts/check-flyway-version-commit-order.py --enforce
+
   # Guard the silent SmallRye Config / SnakeYAML footgun: a duplicate mapping
   # key is NOT merged — the last occurrence wins and earlier ones are silently
   # dropped to library defaults, so a boot smoke-test never catches it. Flags
