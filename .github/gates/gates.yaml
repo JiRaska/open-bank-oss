@@ -983,6 +983,8 @@ gates:
     group: security
     mode: enforced
     min_subjects: 10   # 1 acceptance + 7 rejections + 2 distinct UNVERIFIABLE outcomes
+    rationale: "The offline anchor verifier is the only D5 control an auditor can run without trusting the bank, and nothing in CI can exercise it against production data; its rejection paths would otherwise be code that has never run, so a tool whose only observed behaviour is VERIFIED would read as tamper-evidence while being decoration — and the party it misleads is a regulator rather than a developer."
+    review_after: "2027-02-21"
     run: |
       python3 .github/scripts/verify-audit-anchors.py --self-test
 
