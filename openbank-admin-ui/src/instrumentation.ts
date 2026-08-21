@@ -12,14 +12,15 @@ export async function register() {
     Sentry.init(buildSentryOptions('server'))
   }
 
-  // BFF tracing. `nodejs` ONLY, and imported dynamically: the OpenTelemetry NodeSDK pulls in
-  // node:async_hooks and other Node built-ins that the edge runtime does not provide, so a
-  // static import would break the edge bundle even though the call is guarded. Also a no-op
-  // without OTEL_EXPORTER_OTLP_ENDPOINT — see lib/telemetry/tracing.ts for the gating and the
-  // reason this is server-side tracing rather than the browser RUM ADR-0088 D4 rejected.
+  // BFF tracing. The SDK itself is NOT started here: `@opentelemetry/instrumentation-http`
+  // patches `node:http` at require time, and by the time Next.js calls register() the standalone
+  // server has already loaded it — measured 2026-08-21 as zero exported spans. It is started by
+  // otel-bootstrap.cjs, preloaded via NODE_OPTIONS=--require. This import exists so Next.js file
+  // tracing copies the OpenTelemetry packages into the standalone output, which is what makes
+  // that preload resolvable at runtime. `nodejs` only and dynamic: the NodeSDK pulls in
+  // node:async_hooks and other built-ins the edge runtime does not provide.
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    const { startTracing } = await import('@/lib/telemetry/tracing')
-    startTracing()
+    await import('@/lib/telemetry/tracing')
   }
 }
 
