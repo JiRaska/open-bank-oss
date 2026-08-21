@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.5...admin-ui-v0.183.6) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** mark fx config preview-only ([#6152](https://github.com/JiRaska/open-bank-oss/issues/6152)) ([d7a62b3](https://github.com/JiRaska/open-bank-oss/commit/d7a62b31869536b43a1b8bac530e55baaac1c702))
+
 ## [0.183.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.4...admin-ui-v0.183.5) (2026-08-21)
 
 
