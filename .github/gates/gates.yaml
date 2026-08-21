@@ -2407,6 +2407,23 @@ gates:
     run: |
       python3 .github/scripts/check-dashboard-metric-emitted.py --enforce
 
+  # Scope is DERIVED from litellm-config.yaml's `model_name` keys, never a list in the script.
+  # A gate whose subject set is a hand-kept list of the thing it checks reads as PASSING when the
+  # list is short, never as UNCHECKED — so adding a model to the gateway is what grows this gate,
+  # and forgetting the price book is what reddens it.
+  - id: llm-price-book
+    name: "every gateway-routable LLM model is priced, and the price agrees with litellm-config (issue #6045, enforced)"
+    group: data
+    mode: enforced
+    min_subjects: 6   # 6 model_name routes in litellm-config.yaml today (2026-08-21)
+    rationale: "An unpriced model is costed at $0, so the spend dashboards and the 25 USD/day AiFleetDailySpendHigh ceiling understate real cost with no error anywhere; and a price book that disagrees with the gateway's own declared cost means the control that meters and the control that alerts are enforcing two different numbers. AiSpendUnpriced detects the first at runtime, but only once the model carries traffic and only if somebody actions it — it fired for openai/gpt-oss-120b and nobody did."
+    review_after: "2027-02-21"
+    selftest: |
+      python3 .github/scripts/check-llm-price-book.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-llm-price-book.py --enforce
+
   - id: alert-metric-emitted
     name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
     group: data
