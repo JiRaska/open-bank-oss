@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.182.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.8...admin-ui-v0.182.9) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** gate lending advance action ([#6118](https://github.com/JiRaska/open-bank-oss/issues/6118)) ([cdce9e7](https://github.com/JiRaska/open-bank-oss/commit/cdce9e75f8230da8cf4b1913441da632bac01d3d))
+
 ## [0.182.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.7...admin-ui-v0.182.8) (2026-08-21)
 
 
