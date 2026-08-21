@@ -15,7 +15,9 @@ import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0101Mapper
+import com.openbank.finrep.domain.model.BalanceVerdict
 import com.openbank.finrep.infrastructure.client.ClosedPeriodTrialBalanceResponse
 import com.openbank.finrep.infrastructure.client.LedgerRestClient
 import io.restassured.RestAssured.given
@@ -144,9 +146,12 @@ class LedgerTrialBalancePactConsumerTest {
         // ... and the mapper must accept them: proves the contract feeds a real F01.01 render,
         // not merely that some JSON parsed.
         val template = F0101Mapper.map(
-            response.lines.map {
-                TrialBalanceLineDto(code = it.code, accountType = it.type, net = it.net, currency = it.currency)
-            },
+            TrialBalanceSnapshot(
+                lines = response.lines.map {
+                    TrialBalanceLineDto(code = it.code, accountType = it.type, net = it.net, currency = it.currency)
+                },
+                ledgerReportsBalanced = response.balanced,
+            ),
             LocalDate.parse(REPORTING_DATE),
         )
         assertThat(template.cells.map { it.rowRef }).containsExactly("r010", "r380", "r490")
@@ -155,6 +160,12 @@ class LedgerTrialBalancePactConsumerTest {
         // balance check runs over real contract data and can answer `false` (issue #5987) — it is
         // not merely unit-testable against hand-built fixtures.
         assertThat(template.isBalanced).isFalse()
+        // And the contract body is itself a disagreement: it declares `balanced: true` alongside a
+        // lines array that does not tie out. That is exactly the wire shape a truncated response
+        // has — a producer verdict computed over lines the consumer did not all receive — so the
+        // cross-check of issue #6011 is exercised against contract data rather than a fixture.
+        assertThat(response.balanced).isTrue()
+        assertThat(template.balanceVerdict).isEqualTo(BalanceVerdict.SOURCES_DISAGREE)
     }
 
     /** Issues the request against the path the production client is annotated with. */

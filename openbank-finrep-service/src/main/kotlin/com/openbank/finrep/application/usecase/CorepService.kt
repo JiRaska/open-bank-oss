@@ -11,7 +11,7 @@ import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
 import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
-import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.C0100Mapper
 import com.openbank.finrep.domain.model.CorepTemplate
 import jakarta.enterprise.context.ApplicationScoped
@@ -33,9 +33,9 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
 
     override suspend fun getTemplate(query: GetCorepTemplateQuery): CorepTemplate {
         val startedAt = System.nanoTime()
-        val lines = trialBalance(query.asOf)
+        val snapshot = trialBalance(query.asOf)
         val template = when (query.templateId) {
-            "C_01.00" -> C0100Mapper.map(lines, query.asOf)
+            "C_01.00" -> C0100Mapper.map(snapshot.lines, query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
                 throw IllegalArgumentException("Unknown or unimplemented COREP template: ${query.templateId}")
@@ -45,11 +45,13 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
             TemplateRender(
                 framework = RegulatoryFramework.COREP,
                 templateId = template.templateId,
-                trialBalanceLines = lines.size,
+                trialBalanceLines = snapshot.lines.size,
                 cells = template.cells.size,
                 dataGapCells = template.cells.count { it.isDataGap },
                 // COREP defines no balance-sheet identity, so "balanced" is neither true nor false.
                 balanced = null,
+                // ... and therefore no cross-check verdict either: there is nothing to agree with.
+                balanceVerdict = null,
                 duration = Duration.ofNanos(System.nanoTime() - startedAt),
             ),
         )
@@ -62,7 +64,7 @@ class CorepService(private val ledgerPort: LedgerPort, private val metrics: Finr
      * REST-client failure mode (connect, timeout, 5xx, deserialisation) means the same thing here.
      */
     @Suppress("TooGenericExceptionCaught")
-    private suspend fun trialBalance(asOf: LocalDate): List<TrialBalanceLineDto> = try {
+    private suspend fun trialBalance(asOf: LocalDate): TrialBalanceSnapshot = try {
         ledgerPort.getTrialBalance(asOf)
     } catch (e: Exception) {
         metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.LEDGER_UNAVAILABLE)
