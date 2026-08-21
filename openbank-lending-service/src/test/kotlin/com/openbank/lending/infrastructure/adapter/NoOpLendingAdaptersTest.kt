@@ -106,4 +106,27 @@ class NoOpLendingAdaptersTest {
 
         assertThat(result).isEqualTo(Unit)
     }
+
+    @Test
+    fun `the no-op workflow port reports NOT_ARMED, not the real adapter's success value`() {
+        // #6085. The whole defect was that this returned Uni<Unit> — byte for byte what
+        // TemporalOriginationWorkflowAdapter returns after starting and signalling the timers
+        // workflow. Asserting merely that the Uni completes would restate the bug; the assertion
+        // has to be on the OUTCOME, which is the thing that now differs.
+        val outcome = com.openbank.lending.infrastructure.adapter.NoOpOriginationWorkflowPort()
+            .stateEntered(
+                com.openbank.libs.domain.identifiers.LoanApplicationId(java.util.UUID.randomUUID()),
+                com.openbank.libs.lending.origination.OriginationState.OFFERED,
+                14,
+            )
+            .await().indefinitely()
+
+        assertThat(outcome)
+            .describedAs(
+                "a no-op must never share a success signal with the real implementation: with " +
+                    "ARMED returned here, no document-SLA, offer-expiry or reflection-period timer " +
+                    "is armed and nothing anywhere disagrees.",
+            )
+            .isEqualTo(com.openbank.lending.application.port.out.TimerArmingOutcome.NOT_ARMED_NO_WORKFLOW_BACKEND)
+    }
 }
