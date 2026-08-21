@@ -43,6 +43,7 @@ class CustomerQuoteResourceTest {
         inHardshipArrangement = false,
         lastAffordabilityFailureAt = null,
         bufferDays = 90,
+        monthsObserved = 12,
         lastCreditContactAt = null,
         inputsChangedSinceLastContact = true,
         complete = true,
