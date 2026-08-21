@@ -24,7 +24,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import RegulatoryPage from '@/app/regulatory/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { evaluateExportReadiness } from '@/lib/regulatory/exportReadiness'
+import { blockReasonCopy, evaluateExportReadiness } from '@/lib/regulatory/exportReadiness'
 
 afterEach(() => vi.unstubAllGlobals())
 
@@ -68,12 +68,70 @@ describe('evaluateExportReadiness', () => {
     expect(verdict.ok === false && verdict.reason).toBe('data_gaps')
   })
 
-  it('blocks as UNBALANCED when a template says its identity does not hold', () => {
+  it('blocks as UNBALANCED when a template says its identity does not hold and carries no verdict', () => {
+    // A deployment predating #6163 serves `isBalanced` alone. It must still block, under the
+    // plain accounting reason.
     const verdict = evaluateExportReadiness({
       status: 'ready',
       templates: [{ templateId: 'F01.01', cells: [cell()], isBalanced: false }],
     })
     expect(verdict).toEqual({ ok: false, reason: 'unbalanced', templateIds: ['F01.01'] })
+  })
+
+  // ── balanceVerdict (#6163 / issue #6011): three non-balanced verdicts, three defects ──────
+  it.each([
+    ['AGREED_IMBALANCED' as const, 'unbalanced'],
+    ['SOURCES_DISAGREE' as const, 'balance_sources_disagree'],
+    ['LEDGER_FLAG_ABSENT' as const, 'ledger_verdict_absent'],
+  ])('blocks %s under its own reason %s', (balanceVerdict, reason) => {
+    const verdict = evaluateExportReadiness({
+      status: 'ready',
+      templates: [{ templateId: 'F01.01', cells: [cell()], isBalanced: false, balanceVerdict }],
+    })
+    expect(verdict).toEqual({ ok: false, reason, templateIds: ['F01.01'] })
+  })
+
+  it('permits AGREED_BALANCED — the only verdict for which isBalanced is true', () => {
+    expect(evaluateExportReadiness({
+      status: 'ready',
+      templates: [{ templateId: 'F01.01', cells: [cell()], isBalanced: true, balanceVerdict: 'AGREED_BALANCED', hasDataGaps: false }],
+    })).toEqual({ ok: true })
+  })
+
+  it('names only the templates carrying the reported verdict, not every non-balanced one', () => {
+    // Otherwise an operator is sent to look at F02.00 for a defect it does not have.
+    const verdict = evaluateExportReadiness({
+      status: 'ready',
+      templates: [
+        { templateId: 'F02.00', cells: [cell()], isBalanced: false, balanceVerdict: 'AGREED_IMBALANCED' },
+        { templateId: 'F01.01', cells: [cell()], isBalanced: false, balanceVerdict: 'SOURCES_DISAGREE' },
+      ],
+    })
+    expect(verdict).toEqual({ ok: false, reason: 'balance_sources_disagree', templateIds: ['F01.01'] })
+  })
+
+  it('reports an absent ledger verdict ahead of disagreeing sources', () => {
+    // Both are claims about the evidence rather than the books; a missing flag is the more
+    // fundamental of the two, because with no flag there is nothing left to disagree with.
+    const verdict = evaluateExportReadiness({
+      status: 'ready',
+      templates: [
+        { templateId: 'F01.01', cells: [cell()], isBalanced: false, balanceVerdict: 'SOURCES_DISAGREE' },
+        { templateId: 'F02.00', cells: [cell()], isBalanced: false, balanceVerdict: 'LEDGER_FLAG_ABSENT' },
+      ],
+    })
+    expect(verdict).toEqual({ ok: false, reason: 'ledger_verdict_absent', templateIds: ['F02.00'] })
+  })
+
+  it('blocks on isBalanced === false even when the verdict claims agreement', () => {
+    // finrep computes `isBalanced` as `verdict == AGREED_BALANCED`, so this pair cannot come
+    // from a correct producer. The gate must still refuse rather than trust the friendlier field.
+    const verdict = evaluateExportReadiness({
+      status: 'ready',
+      templates: [{ templateId: 'F01.01', cells: [cell()], isBalanced: false, balanceVerdict: 'AGREED_BALANCED' }],
+    })
+    expect(verdict.ok).toBe(false)
+    expect(verdict.ok === false && verdict.reason).toBe('unbalanced')
   })
 
   it('blocks as MISSING when a template renders no cells at all', () => {
@@ -89,6 +147,33 @@ describe('evaluateExportReadiness', () => {
       templates: [{ templateId: 'F01.01', cells: [cell({ isDataGap: true })], isBalanced: false, hasDataGaps: true }],
     })
     expect(verdict.ok === false && verdict.reason).toBe('unbalanced')
+  })
+})
+
+// ── Operator copy: each verdict must say what is actually wrong ──────────────
+describe('blockReasonCopy for the balance verdicts', () => {
+  it.each(['cs', 'en'] as const)('does not call an evidence defect an accounting one (%s)', lang => {
+    const disagree = blockReasonCopy('balance_sources_disagree', ['F01.01'], lang)
+    const absent = blockReasonCopy('ledger_verdict_absent', ['F01.01'], lang)
+    const imbalanced = blockReasonCopy('unbalanced', ['F01.01'], lang)
+
+    // The old copy said "the return does not balance / výkaz nevychází" for all three. That
+    // sentence is only true of AGREED_IMBALANCED.
+    const doesNotBalance = lang === 'cs' ? 'nevychází' : 'does not balance'
+    expect(imbalanced.title).toContain(doesNotBalance)
+    expect(disagree.title).not.toContain(doesNotBalance)
+    expect(absent.title).not.toContain(doesNotBalance)
+
+    // Each names the verdict it is about, so the message can be traced to the field.
+    expect(disagree.detail).toContain('SOURCES_DISAGREE')
+    expect(absent.detail).toContain('LEDGER_FLAG_ABSENT')
+    expect(imbalanced.detail).toContain('AGREED_IMBALANCED')
+
+    // All three are still a block.
+    for (const copy of [disagree, absent, imbalanced]) {
+      expect(copy.title).toContain(lang === 'cs' ? 'zablokován' : 'blocked')
+      expect(copy.detail).toContain('F01.01')
+    }
   })
 })
 
