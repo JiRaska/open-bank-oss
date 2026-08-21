@@ -68,8 +68,15 @@ export default function KycPage() {
         title={t('KYC Případy', 'KYC Cases')}
         subtitle={t('Ověření totožnosti zákazníka — přehled případů', 'Know Your Customer verification cases')}
         icon={<ShieldCheck size={20} aria-hidden="true" />}
-        actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
-          <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+        actions={<button
+          type="button"
+          className="btn btn-secondary"
+          onClick={load}
+          disabled={loading}
+          aria-busy={loading}
+          aria-label={t('Obnovit KYC případy', 'Refresh KYC cases')}
+        >
+          <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           {t('Obnovit', 'Refresh')}
         </button>}
       />
@@ -77,13 +84,20 @@ export default function KycPage() {
       {/* Toolbar */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
-          <Search size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <Search aria-hidden="true" size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <label className="sr-only" htmlFor="kyc-search">{t('Hledat KYC případy', 'Search KYC cases')}</label>
           <input id="kyc-search" className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Hledat podle ID nebo stavu…', 'Search by ID or status…')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <label className="sr-only" htmlFor="kyc-party-id">{t('Filtrovat podle Party ID', 'Filter by Party ID')}</label>
         <input id="kyc-party-id" className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyId} onChange={e => setPartyId(e.target.value)} />
-        <button className="btn btn-secondary" onClick={load}>{t('Hledat', 'Search')}</button>
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={load}
+          disabled={loading}
+          aria-busy={loading}
+          aria-label={t('Vyhledat KYC případy', 'Search KYC cases')}
+        >{t('Hledat', 'Search')}</button>
       </div>
 
       {unavailable && (

@@ -32,8 +32,11 @@
 #     broker's cluster-DNS name) and runs ONLY on a main push / an on-main workflow_dispatch
 #     (verify-provider.yml). Downloads `build`'s pact artifact rather than regenerating it —
 #     a missing/failed download FAILS the job (no silent skip): see the download step.
-#     Runs the `providerPactTest` Gradle task (build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts)
-#     — a source set/task independent of `test`, so invoking it never forces `test` to re-run.
+#     Runs the `providerPactTest` Gradle task when the module exposes one
+#     (build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts) — a source set/task
+#     independent of `test`, so invoking it never forces `test` to re-run. Consumer-only and
+#     non-service modules still publish their consumer contracts, but correctly skip provider
+#     verification rather than failing on a task they do not own.
 name: _service-ci
 
 on:
@@ -630,6 +633,30 @@ jobs:
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
           [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
 
+      # A full-fleet run discovers every Gradle module, including consumer-only modules such as
+      # analytics-sink that intentionally do not apply openbank.quarkus-service and therefore
+      # do not own providerPactTest. Discover the task after a successful Gradle configuration:
+      # this keeps publishing their consumer Pact, while an actual provider test without the
+      # task remains a loud configuration failure rather than a silent verification skip.
+      - name: Discover provider Pact task
+        id: provider_pact_task
+        env:
+          SERVICE: ${{ inputs.service }}
+        run: |
+          set -euo pipefail
+          task_list="$(./gradlew ":${SERVICE}:tasks" --all --console=plain)"
+          provider_test="$(find "${SERVICE}/src/test" -type f -name '*ProviderVerificationTest.kt' -print -quit 2>/dev/null || true)"
+          if grep -Eq '^[[:space:]]*providerPactTest([[:space:]]|$)' <<< "$task_list"; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "${SERVICE} exposes providerPactTest — provider verification will run."
+          elif [ -n "$provider_test" ]; then
+            echo "::error::${SERVICE} has ${provider_test} but does not expose providerPactTest. Apply the service convention or register an equivalent provider task."
+            exit 1
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "${SERVICE} owns no provider Pact tests — consumer Pact publication is complete; provider verification is not applicable."
+          fi
+
       # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
       # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
       # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
@@ -637,6 +664,7 @@ jobs:
       # cached providerPactTest would silently skip the publish (#1964's original reason,
       # narrowed here to a task this job ALONE runs — no PR-lane cache to protect).
       - name: Provider verification (:${{ inputs.service }}:providerPactTest)
+        if: ${{ steps.provider_pact_task.outputs.available == 'true' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |

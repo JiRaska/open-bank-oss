@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.19.1](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.19.0...transaction-service-v1.19.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **transaction:** publish the full TransactionType and TransactionStatus vocabularies ([#5982](https://github.com/JiRaska/open-bank-oss/issues/5982)) ([11baea4](https://github.com/JiRaska/open-bank-oss/commit/11baea4482c50d838f8c913d4ae466ccc198a53c))
+
 ## [1.19.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.18.1...transaction-service-v1.19.0) (2026-08-20)
 
 

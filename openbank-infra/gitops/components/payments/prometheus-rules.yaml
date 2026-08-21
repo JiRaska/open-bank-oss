@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Per-service PrometheusRule alerts for the payments namespace (money-path, ADR-0077/0079).
 # Covers: transaction-service, clearing-service, swift-service, sepa-payment, sepa-instant,
-# domestic-payment, sdd-service. Complements the fleet-wide tier-1 rules with payment-rail
+# domestic-payment, sdd-service, settlement-service. Complements the fleet-wide tier-1 rules with payment-rail
 # specific saga and settlement observability.
 ---
 apiVersion: monitoring.coreos.com/v1
@@ -276,3 +276,94 @@ spec:
               {{ $value | humanizePercentage }} of fraud-scoring attempts on {{ $labels.service }}
               returned an invented verdict over the last 30m — a flapping fraud-service or an open
               circuit breaker, rather than a clean outage.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-settlement-progress-alerts
+  namespace: payments
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: settlement-service
+spec:
+  groups:
+    # settlement-service — a declared money_path_service (rules.yaml) — had NO rule of its own and
+    # emitted NO application metric at all until #5705. It was not un-monitored, which is what made
+    # it hard to see: the pod is scraped by the fleet PodMonitor, `PaymentServiceDown` in
+    # prometheus-rules-tier1.yaml covers `namespace="payments"` and so covers this container, and
+    # both Pyrra money-path SLOs exist for it. Every one of those measures whether the service
+    # ANSWERS. None measures whether the debit -> credit -> ledger-book saga it accepted PROGRESSES,
+    # and a settlement whose workflow stopped advancing answers nothing at all — its originating
+    # request returned 2xx in milliseconds, hours before.
+    #
+    # There is deliberately no SettlementServiceDown rule here: PaymentServiceDown already owns
+    # `up{job="observability/openbank-services", namespace="payments"}`, and a second rule over the
+    # same target would page twice for one outage.
+    #
+    # Scope: this document is the PROGRESS half of #5705 only — "is this settlement still moving".
+    # The OUTCOME half ("what did settlements do") is PR #5723's saga-step and terminal-state
+    # counters, which this deliberately does not duplicate; the two are complementary and the
+    # rule names, the metric names and the PrometheusRule object name are disjoint so they can
+    # land in either order. Nothing here is a throughput floor: that is the shape #5733 deleted
+    # twice from this file (ClearingSettlementWindowMissed, SwiftMtMessageProcessingStalled).
+    # settlement-service is REST- and Temporal-driven with no @Scheduled sweep and no @Incoming
+    # consumer, so an idle hour is the normal resting state, not a fault. What an idle service
+    # must still never have is a settlement that stopped advancing, and that is an age.
+    - name: openbank.settlement.progress
+      rules:
+        - alert: SettlementStrandedMidSaga
+          # PENDING / DEBITED / CREDITED are hand-off states the Temporal workflow drives through
+          # in seconds. DEBITED is the one that matters most: the payer has been debited, the payee
+          # has not been credited, and the funds are in neither account.
+          #
+          # 3h is derived from the code, not guessed. SettlementWorkflowImpl sets a per-activity
+          # scheduleToCloseTimeout of 2h (SCHEDULE_TO_CLOSE_HOURS), so a settlement can legitimately
+          # sit in any one of these states for up to 2h while its next activity retries before the
+          # workflow gives up and compensates. 3h clears that ceiling with an hour of slack, so this
+          # rule cannot fire on a slow-but-working retry — only on a settlement whose workflow is
+          # gone (worker not polling, Temporal unreachable, or a run lost).
+          expr: |
+            max by (status) (
+              openbank_settlement_non_terminal_oldest_age_seconds{
+                service="settlement", status=~"PENDING|DEBITED|CREDITED"
+              }
+            ) > 10800
+          for: 15m
+          labels:
+            severity: critical
+            service: settlement
+          annotations:
+            summary: "Settlement stranded in {{ $labels.status }} for over three hours"
+            description: >-
+              The oldest settlement in {{ $labels.status }} is {{ $value | humanizeDuration }} old,
+              past the 2h per-activity scheduleToClose ceiling of the settlement workflow. In DEBITED
+              the payer's funds have left and have not arrived; in CREDITED the money has moved but
+              was never booked to the general ledger. Check whether the Temporal worker for task
+              queue `openbank-settlement` is polling and whether a run exists for `settlement-<id>`.
+        - alert: SettlementStuckAfterCompensation
+          # The three *_REVERSED states mean the saga already unwound: money was moved and moved
+          # back. SettlementWorkflowImpl always calls rejectSettlement after compensating, so these
+          # states are transient by construction and a row parked in one has a workflow that died
+          # between the compensation and the terminal write — funds are safe, the record is not.
+          #
+          # 8h, again from the code: the longest legitimate compensation chain starts at
+          # LEDGER_REVERSED and still owes reverseCredit + reverseDebit + rejectSettlement, three
+          # activities at 2h scheduleToClose each. 8h clears that 6h worst case. Warning rather than
+          # critical because no customer money is in limbo — only the settlement record is.
+          expr: |
+            max by (status) (
+              openbank_settlement_non_terminal_oldest_age_seconds{
+                service="settlement", status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED"
+              }
+            ) > 28800
+          for: 30m
+          labels:
+            severity: warning
+            service: settlement
+          annotations:
+            summary: "Settlement stuck in compensation state {{ $labels.status }} for over eight hours"
+            description: >-
+              The oldest settlement in {{ $labels.status }} is {{ $value | humanizeDuration }} old.
+              Its compensations ran but it never reached REJECTED, so the settlements table now
+              disagrees with the ledger about a settlement that was unwound. Reconcile before the
+              next accounting-day close.

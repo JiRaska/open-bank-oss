@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: SEPA Instant (SCT Inst) Service API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -95,16 +95,16 @@ paths:
           schema:
             type: string
             format: uuid
-        - name: limit
-          in: query
-          schema:
-            type: integer
-            default: 20
-        - name: offset
+        - name: page
           in: query
           schema:
             type: integer
             default: 0
+        - name: size
+          in: query
+          schema:
+            type: integer
+            default: 20
       responses:
         '200':
           description: List of payments
@@ -213,26 +213,38 @@ components:
 
   schemas:
     SubmitSctInstRequest:
+      # Field-for-field with SubmitSctInstRequest in SctInstDtos.kt. `idempotencyKey`,
+      # `debtorIban` and `debtorName` are non-nullable there, so a body omitting any of them
+      # fails to deserialise; the `Idempotency-Key` header, when present, overrides the body
+      # field but does not make it optional (SctInstResource.submit reads `body.idempotencyKey`).
       type: object
-      required: [debtorAccountId, creditorIban, creditorName, amount, endToEndId]
+      required: [idempotencyKey, debtorAccountId, debtorIban, debtorName, creditorIban, creditorName, amount, endToEndId]
       properties:
+        idempotencyKey:
+          type: string
         debtorAccountId:
           type: string
           format: uuid
+        debtorIban:
+          type: string
+        debtorName:
+          type: string
         creditorIban:
           type: string
         creditorName:
           type: string
         creditorBic:
           type: string
+          nullable: true
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
           default: EUR
-        endToEndId:
-          type: string
         remittanceInfo:
+          type: string
+          nullable: true
+        endToEndId:
           type: string
 
     RecallRequest:
@@ -244,34 +256,38 @@ components:
           enum: [FRAUD, DUPLICATE, WRONG_AMOUNT, WRONG_BENEFICIARY]
 
     SctInstPaymentResponse:
+      # Field-for-field with SctInstPaymentResponse in SctInstDtos.kt, which SctInstResource
+      # .toResponse() populates directly from the SctInstPayment aggregate.
       type: object
+      required: [paymentId, status, debtorIban, creditorIban, amount, currency, endToEndId, createdAt]
       properties:
-        id:
+        paymentId:
           type: string
           format: uuid
-        endToEndId:
+        status:
           type: string
-        debtorAccountId:
+          enum: [PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED]
+        debtorIban:
           type: string
-          format: uuid
         creditorIban:
-          type: string
-        creditorName:
           type: string
         amount:
           type: number
-        currencyCode:
+        currency:
           type: string
-        status:
+        endToEndId:
           type: string
-          enum: [SUBMITTED, ACCEPTED, SETTLED, REJECTED, RECALLED]
-        submittedAt:
+        executionTimeoutAt:
           type: string
           format: date-time
+          nullable: true
         settledAt:
           type: string
           format: date-time
           nullable: true
+        createdAt:
+          type: string
+          format: date-time
 
     ApiError:
       type: object

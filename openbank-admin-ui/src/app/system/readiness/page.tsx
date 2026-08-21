@@ -67,12 +67,18 @@ export default function ReadinessPage() {
           'Derived maturity matrix per service × 9 technical/operational dimensions (C1–C9). Generated in CI by prod-readiness-collector.py from the repo + TTL attestations — never hand-edited. Gate: money-path needs all ≥ Verified, critical (Code/Backup/Security) = Bank-grade.',
         )}
         actions={
-          <button onClick={load} style={{
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit připravenost na produkci', 'Refresh production readiness')}
+            style={{
             display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', cursor: 'pointer',
             background: 'var(--card-bg)', border: '1px solid var(--border)', borderRadius: '8px',
             color: 'var(--text-secondary)', fontSize: '13px', fontWeight: 600,
           }}>
-            <RefreshCw size={15} /> {t('Obnovit', 'Refresh')}
+            <RefreshCw size={15} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
           </button>
         }
       />
