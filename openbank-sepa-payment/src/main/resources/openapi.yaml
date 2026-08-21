@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.6 -> 1.7): additive
   # only — GET /approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -63,7 +63,7 @@ paths:
           in: query
           schema:
             type: string
-            enum: [PENDING, PROCESSING, COMPLETED, REJECTED, RECALLED]
+            enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
         - name: debtorAccountId
           in: query
           schema:
@@ -362,8 +362,16 @@ components:
       properties:
         targetStatus:
           type: string
-          enum: [PROCESSING, COMPLETED, REJECTED, RECALLED]
-        reason:
+          # The full SepaPaymentStatus vocabulary, which is what the endpoint parses. Which of
+          # these is reachable depends on the payment's current state (SepaPayment.canTransitionTo);
+          # an illegal transition is a 409, not a 400. RECEIVED is the creation state and is
+          # therefore never a legal target from any state.
+          enum: [RECEIVED, VALIDATED, PROCESSING, COMPLETED, REJECTED, RETURNED, CANCELLED]
+        rejectReason:
+          type: string
+          # Required by the domain when targetStatus is REJECTED.
+          enum: [INSUFFICIENT_FUNDS, INVALID_IBAN, ACCOUNT_CLOSED, ACCOUNT_FROZEN, INVALID_BIC, AMOUNT_LIMIT_EXCEEDED, AML_HOLD, SANCTIONS_HIT, TECHNICAL_ERROR]
+        rejectDetail:
           type: string
 
     SepaPaymentResponse:
