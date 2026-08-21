@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.184.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.1...admin-ui-v0.184.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** externalise the OTel packages or the tracing emits nothing ([#6164](https://github.com/JiRaska/open-bank-oss/issues/6164)) ([abb58a2](https://github.com/JiRaska/open-bank-oss/commit/abb58a27ae4b12ede50308edc05bc4e750819dc8)), closes [#5735](https://github.com/JiRaska/open-bank-oss/issues/5735)
+* **admin-ui:** give each balance verdict its own export-block message ([#6167](https://github.com/JiRaska/open-bank-oss/issues/6167)) ([88936e5](https://github.com/JiRaska/open-bank-oss/commit/88936e596d20da8f672d8201f53e1efe1b9dbac5)), closes [#6011](https://github.com/JiRaska/open-bank-oss/issues/6011) [#6163](https://github.com/JiRaska/open-bank-oss/issues/6163)
+
 ## [0.184.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.0...admin-ui-v0.184.1) (2026-08-21)
 
 
