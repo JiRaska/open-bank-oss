@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.0...admin-ui-v0.183.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify finops budget state ([#6127](https://github.com/JiRaska/open-bank-oss/issues/6127)) ([7dccef6](https://github.com/JiRaska/open-bank-oss/commit/7dccef65feab5ce25a75674fa0f9e51a3aba770c))
+
 ## [0.183.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.9...admin-ui-v0.183.0) (2026-08-21)
 
 
