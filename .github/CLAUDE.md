@@ -384,6 +384,33 @@
   destructive (`gh run rerun`, a deploy, a delete), stub the binary on `PATH` — **and validate
   the stub against a known-positive first**, or a silent passthrough runs the real thing.
 
+### main-protection: the bypass has two halves, and only one had a reader
+- **`rulesets/rule-suites` (the bypass LOG) is private and rejects fine-grained tokens;
+  `rulesets/{id}` (the bypass CONFIG) is world-readable.** Same feature, opposite access, and it
+  decides what kind of control each half can carry. The log needs a **classic** PAT with `repo`
+  (or a GitHub App token with Administration:read) — a fine-grained token holding
+  `Read access to administration and metadata` still answers `403 Resource not accessible by
+  personal access token`, and the 403 names no permission, so it reads like a scope problem
+  forever (#4791). A workflow `GITHUB_TOKEN` can never read it: `permissions:` has no
+  `administration:` key, and declaring one makes GitHub refuse to parse the whole workflow (zero
+  jobs, every push). Because of that the log half can only ever be a scheduled watch
+  (`merged-past-red-check-watch.yml`, #4240) — never a required check. The config half needs no
+  token at all and therefore can be one (`ruleset-bypass-actors`, Refs #4828).
+- **Detection and prevention are different halves, and the fleet had only detection.** The watch
+  names a merge that already went past a failing required check, up to twelve hours late. Who is
+  *permitted* to do that is one field, `bypass_actors` — today a single entry, RepositoryRole#5
+  (`admin`), `bypass_mode: pull_request`. Nothing in CI can stop that override: GitHub evaluates
+  the bypass at merge time, after every check has reported. What CI *can* do is notice the surface
+  being widened — a bot, a team, or an existing entry flipped to `always` (which additionally
+  permits a **direct push** to `main`) — which otherwise produces no diff, no PR and no red check
+  anywhere. Widening it is a Settings edit; after the gate it is a reviewed commit.
+- **`bypass_mode` must be compared, not just the actor id.** `pull_request` -> `always` keeps the
+  same `actor_id` and is the difference between "can merge a PR past a red check" and "can push
+  straight to main". A comparison keyed on the id alone calls that clean.
+- **Every agent here runs as an identity that CAN bypass.** `current_user_can_bypass` reads
+  `pull_requests_only`, not `never`, for the owner credentials `gh` is authenticated with — which
+  is why the prompt-level prohibition on override flags is load-bearing rather than belt-and-braces.
+
 ### CI / bot commit signing
 - **What signs a bot commit is the *endpoint*, not the token — and `main-protection` enforces
   `required_signatures`.** GitHub auto-signs the GraphQL `createCommitOnBranch` mutation and the
