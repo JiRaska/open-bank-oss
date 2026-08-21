@@ -175,12 +175,12 @@ class VelocityAggregateRepositoryImplIT {
     fun `a signal without a transaction id does not freeze the row against later signals`(): Unit = runBlocking {
         val accountId = UUID.randomUUID()
 
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID())
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID(), eventTime)
         // No aggregateId: applied unconditionally, and deliberately not remembered.
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, null)
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, null, eventTime)
         // Two genuinely new signals, after the NULL. Both must still count.
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID())
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID())
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID(), eventTime)
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, UUID.randomUUID(), eventTime)
 
         assertAllWindows(accountId, count = 4L, total = "40.00")
     }
@@ -195,10 +195,10 @@ class VelocityAggregateRepositoryImplIT {
         val accountId = UUID.randomUUID()
         val c = UUID.randomUUID()
 
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, c)
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, null)
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, c, eventTime)
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, null, eventTime)
         // Replay of C, after the NULL. Must be suppressed.
-        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, c)
+        repository.recordTransaction(accountId, BigDecimal("10.00"), CURRENCY, c, eventTime)
 
         assertAllWindows(accountId, count = 2L, total = "20.00")
     }
