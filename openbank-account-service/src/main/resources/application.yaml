@@ -180,7 +180,7 @@ mp:
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
     incoming:
-      # Onboarding account lifecycle (ADR-0266): open a PENDING_ACTIVATION account on
+      # Onboarding account lifecycle (ADR-0267): open a PENDING_ACTIVATION account on
       # PARTY_CREATED and activate it when the party clears KYC + AML.
       party-events-in:
         connector: smallrye-kafka
