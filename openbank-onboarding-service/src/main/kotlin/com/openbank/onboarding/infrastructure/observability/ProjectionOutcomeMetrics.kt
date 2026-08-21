@@ -27,11 +27,18 @@ import jakarta.inject.Inject
  * [Outcome.UNRECOGNISED] is its own value rather than being folded into a generic "handled",
  * the same reason `PushSendOutcome.SKIPPED` is not a flag shared with success.
  *
- * Suggested rule (per topic, over a window in which the topic delivered anything at all):
+ * Suggested rules (per topic, over a window in which the topic delivered anything at all).
+ * Producer and consumer disagree about the wire format:
  *   sum by (topic) (rate(...{outcome="UNRECOGNISED"}[1h])) > 0
  *     and sum by (topic) (rate(...{outcome="PROJECTED"}[1h])) == 0
+ * Events are arriving for parties the read model does not have, i.e. cross-topic ordering is
+ * losing them (#6248):
+ *   sum by (topic) (rate(...{outcome="SKIPPED_UNKNOWN_PARTY"}[1h])) > 0
  *
- * Cardinality is bounded: three topics, three outcomes.
+ * The second rule needs no PROJECTED == 0 companion: unlike an unrecognised payload, a skip is
+ * per-party, so a steady trickle among healthy traffic is exactly the shape to alert on.
+ *
+ * Cardinality is bounded: three topics, four outcomes.
  *
  * Service-local [MeterRegistry], null-safe via [Instance] — same shape as
  * [OnboardingFunnelGauge] and notification-service's `PushMetricsAdapter` (ADR-0085 §2).
@@ -57,6 +64,18 @@ class ProjectionOutcomeMetrics(private val registry: MeterRegistry?) {
          * both report healthy.
          */
         UNRECOGNISED,
+
+        /**
+         * Parsed and recognised, but the projection had nothing to update: the event names a
+         * party with no row yet. Its own value rather than part of [PROJECTED], because the two
+         * are opposite states — one means the read model advanced, the other means an enrolment
+         * or a KYC transition was discarded.
+         *
+         * This is the outcome that was missing when this class was written, and its absence is
+         * why the rule below could not fire for #6248: the drops were being counted as
+         * [PROJECTED], the very series the rule requires to be zero.
+         */
+        SKIPPED_UNKNOWN_PARTY,
 
         /** Malformed payload, or the projection itself threw. Already logged at ERROR. */
         FAILED,
