@@ -75,7 +75,14 @@ function NotificationsContent() {
         icon={<Bell size={18} aria-hidden="true" />}
         title={t('Oznámení', 'Notifications')}
         subtitle={t('Odchozí oznámení — e-maily, upozornění, webhooky', 'Outbound notification log — emails, alerts, webhooks')}
-        actions={<button className="btn btn-secondary" onClick={load} disabled={loading}>
+        actions={<button
+          className="btn btn-secondary"
+          type="button"
+          onClick={load}
+          disabled={loading}
+          aria-busy={loading}
+          aria-label={t('Obnovit oznámení', 'Refresh notifications')}
+        >
           <RefreshCw aria-hidden="true" size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
           {t('Obnovit', 'Refresh')}
         </button>}
