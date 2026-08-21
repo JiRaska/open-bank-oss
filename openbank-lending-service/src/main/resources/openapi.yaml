@@ -91,7 +91,7 @@ paths:
       summary: The caller's own credit applications as customer-readable journeys (customer-edge only)
       description: >-
         ADR-0269 rule 3. Scoped to the party in X-Customer-Party-Id; carries no rate, instalment or
-        APRC — that is ADR-0269 rule 4 and arrives separately. Only the configured customer-edge principal may
+        APRC — that is ADR-0269 rule 4, served by /quotes below. Only the configured customer-edge principal may
         call it.
       parameters:
         - name: X-Customer-Party-Id
@@ -125,6 +125,43 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: No such application for this caller }
+
+  /api/v1/lending/intake/quotes:
+    post:
+      tags: [Lending]
+      operationId: quoteCustomerCredit
+      summary: Indicative, non-binding price for a requested amount and term (customer-edge only)
+      description: >-
+        ADR-0269 rule 4 — the only place an instalment or an APRC may come from. Nothing is
+        persisted: an indicative price with an id would be one lookup away from being treated as a
+        binding offer. Price, currency and bounds are lending-side configuration; the body carries
+        only the amount and term. Refused 409 with a reason code when the ADR-0269 rule-2 distress
+        floor suppresses pricing — never a 200 with empty numbers, which a client renders as zero.
+      parameters:
+        - name: X-Customer-Party-Id
+          in: header
+          required: true
+          description: The applicant's party id, set by customer-edge from the customer JWT.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomerQuoteRequest'
+      responses:
+        '200':
+          description: The indicative quote (binding is always false)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerQuote'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: Pricing suppressed by the distress floor; body carries the reason code
 
   /api/v1/lending/applications/{id}:
     get:
@@ -845,6 +882,43 @@ components:
         principal:
           type: array
           items: { $ref: '#/components/schemas/MoneyTotal' }
+    CustomerQuoteRequest:
+      type: object
+      required: [amount, termMonths]
+      description: >-
+        The same two fields the intake accepts, and for the same reason: a customer may choose how
+        much and how long, never at what price.
+      properties:
+        amount: { type: string, description: Decimal in the product's configured currency }
+        termMonths: { type: integer, minimum: 1 }
+
+    CustomerQuote:
+      type: object
+      required: [amount, currency, termMonths, nominalAnnualRatePercent, monthlyPayment,
+                 totalPayable, totalCostOfCredit, validUntil, binding]
+      description: >-
+        An indicative price. Structurally distinct from a binding offer: no id, no accept path.
+      properties:
+        amount: { type: string }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        termMonths: { type: integer }
+        nominalAnnualRatePercent: { type: string }
+        monthlyPayment: { type: string }
+        totalPayable: { type: string }
+        totalCostOfCredit: { type: string }
+        aprcPercent:
+          type: string
+          nullable: true
+          description: >-
+            RPSN/APRC. NULL means "could not be computed" and must be rendered as an absent figure —
+            never as 0%, which reads to a customer as free credit.
+        validUntil: { type: string, format: date-time }
+        binding:
+          type: boolean
+          description: >-
+            Always false. Present so a client never has to infer it; an unwritten assumption is the
+            kind that gets forgotten.
+
     CustomerIntakeRequest:
       type: object
       required: [amount, termMonths]

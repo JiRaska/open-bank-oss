@@ -11,6 +11,7 @@ import com.openbank.lending.domain.model.CreditOfferDecision
 import com.openbank.lending.domain.model.CreditOfferEligibility
 import com.openbank.lending.domain.model.CreditOfferPolicy
 import com.openbank.lending.domain.model.CreditOfferSuppressionCode
+import com.openbank.lending.domain.model.OfferSurface
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.CancellationException
 import java.time.Clock
@@ -34,14 +35,40 @@ class CreditOfferEligibilityService(
     private val clock: Clock,
     private val policy: CreditOfferPolicy = CreditOfferPolicy.V1,
 ) {
-    suspend fun evaluate(partyId: UUID): CreditOfferDecision {
-        val hasConsent = failClosed("consent", null) { consent.hasCreditOffersConsent(partyId) }
-            ?: return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.SIGNALS_UNAVAILABLE)
-        if (!hasConsent) {
-            return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.CONSENT_ABSENT)
+    /**
+     * Evaluate the gate for [partyId].
+     *
+     * [surface] decides whether the consent half applies. It is not a convenience flag: ADR-0269's
+     * whole shape is pull-only, and the two surfaces are exactly the two sides of that rule.
+     *
+     *  - [OfferSurface.PUSH] — the bank is about to say something unprompted (a pre-approved limit,
+     *    a campaign step, an agent nudge). Requires `credit_offers` consent AND passes the distress
+     *    floor.
+     *  - [OfferSurface.PULL] — the customer asked (opened the financing screen, requested a quote).
+     *    Consent is NOT what gates this: requiring an opt-in before answering a question the
+     *    customer just asked would be a dark pattern in the other direction, and the ADR's rule is
+     *    that the bank does not initiate, not that it refuses to answer.
+     *
+     * The distress floor applies to BOTH. A customer in arrears asking "what would this cost" must
+     * not be handed a tailored instalment either; that is the case where the answer itself is the
+     * harm, regardless of who started the conversation.
+     */
+    suspend fun evaluate(partyId: UUID, surface: OfferSurface): CreditOfferDecision {
+        if (surface == OfferSurface.PUSH) {
+            val hasConsent = failClosed("consent", null) { consent.hasCreditOffersConsent(partyId) }
+                ?: return CreditOfferDecision.Suppressed(
+                    policy.version,
+                    CreditOfferSuppressionCode.SIGNALS_UNAVAILABLE,
+                )
+            if (!hasConsent) {
+                return CreditOfferDecision.Suppressed(policy.version, CreditOfferSuppressionCode.CONSENT_ABSENT)
+            }
         }
         val signals = failClosed("distress-signals", UNREADABLE) { distress.signalsFor(partyId) }
-        return CreditOfferEligibility.evaluate(true, signals, Instant.now(clock), policy)
+        // The frequency cap and materiality rules are about the bank speaking unprompted; they must
+        // not silence an answer the customer asked for, so a pull evaluation ignores contact history.
+        val effective = if (surface == OfferSurface.PULL) signals.withoutContactHistory() else signals
+        return CreditOfferEligibility.evaluate(true, effective, Instant.now(clock), policy)
     }
 
     /**

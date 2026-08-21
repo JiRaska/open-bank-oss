@@ -392,16 +392,18 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
   caller, but `operator-lending-write` already grants the same action more broadly; the rule only
   becomes load-bearing if that blanket operator grant is narrowed.
 
-## 9a. Customer credit journey read (ADR-0269) — STRIDE supplement
+## 9a. Customer credit journey read and indicative quotes (ADR-0269) — STRIDE supplement
 
-One new inbound surface on the same customer-edge trust boundary as section 9, and a read path,
-which changes what can go wrong: section 9's risk is a fraudulent WRITE, this one risks a
-DISCLOSURE.
+Two new inbound surfaces on the same customer-edge trust boundary as section 9, and both are read
+paths, which changes what can go wrong: section 9's risk is a fraudulent WRITE, these risk a
+DISCLOSURE and a MIS-DISCLOSURE.
 
 - `CustomerCreditJourneyResource` — `GET /api/v1/lending/intake/applications[/{id}]`. Returns the
   caller's own applications as customer-readable journeys.
+- `CustomerQuoteResource` — `POST /api/v1/lending/intake/quotes`. Returns an indicative,
+  non-binding price. Persists nothing.
 
-It reuses section 9's caller control verbatim: the handler compares `SecurityIdentity.principal.name`
+Both reuse section 9's caller control verbatim: the handler compares `SecurityIdentity.principal.name`
 to `lending.intake.caller-principal` and refuses when it does not match or is unset, and the party id
 comes only from `X-Customer-Party-Id`.
 
@@ -409,15 +411,27 @@ comes only from `X-Customer-Party-Id`.
 |---|---|---|
 | **I**nformation disclosure | An operator, or the edge with a forged header, reads another customer's credit history | Rows are filtered by the header party id; a foreign application id is answered **404, not 403**, so a not-found and a not-yours are indistinguishable and the id space does not leak. Covered by `CustomerCreditJourneyResourceTest`. |
 | **I**nformation disclosure | The journey leaks the bank's internal assessment | The projection exposes canonical states, step codes and the decision engine's machine-readable reason codes only. A human checker's free-text `decisionReason` is deliberately NOT exposed, and a reason code is dropped on any non-refused state. |
+| **T**ampering | A caller prices their own loan by supplying a rate | The quote body carries only amount and term. Rate, currency, bounds and product all come from `CustomerIntakeConfig`; an unconfigured rate refuses the call rather than quoting zero interest. |
+| **R**epudiation / mis-disclosure | The customer is shown an instalment or APRC that the contract later contradicts | The instalment comes from the shared `Amortization` schedule the loan would actually be booked against, and the APRC from `Aprc`, the single implementation permitted to compute it (ADR-0269 rule 4). No client, campaign template or model may compute either. |
+| **I**nformation disclosure | A customer in financial distress is handed a tailored instalment | The ADR-0269 rule-2 distress floor gates pricing as well as offers: a suppressed quote is a **409 with a reason code and no price fields**, never a 200 with empty numbers (which a client renders as "0"). |
+| **D**oS | An app floods the quote endpoint | Pricing is pure computation with no persistence and no upstream call beyond the eligibility read; throttling is customer-edge's `RateLimitFilter`, as in section 9. The same per-party gap noted there applies. |
+| **E**oP | A quote becomes a commitment | Structurally prevented: `CustomerQuote` has no id and no accept path, and the wire DTO carries `binding: false` explicitly. A binding offer is a separate object from the decision engine and does not exist yet (#6214 follow-on). |
+
+**Deliberate asymmetry worth recording:** the quote endpoint does NOT require `credit_offers`
+consent, while the pre-approved read will. ADR-0269's rule is that the bank must not *initiate*;
+refusing to answer a price question the customer just asked would be the same dark pattern pointing
+the other way. The distress floor applies to both, because there the answer itself is the harm.
 
 ## 10. Change log
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
-- **2026-08-21** — Trust-boundary change (ADR-0269 slice 1): a new customer-edge-facing read
-  surface, `GET /api/v1/lending/intake/applications[/{id}]`. See section 9a. Same caller and
-  party-header controls as section 9; the new risk is disclosure of another party's credit history,
-  closed by owner filtering plus a 404-not-403 answer.
+- **2026-08-21** — Trust-boundary change (ADR-0269 slices 1-2): two new customer-edge-facing read
+  surfaces, `GET /api/v1/lending/intake/applications[/{id}]` and `POST /api/v1/lending/intake/quotes`.
+  See section 9a. Same caller and party-header controls as section 9; new risks are disclosure of
+  another party's credit history (closed by owner filtering plus a 404-not-403 answer) and
+  mis-disclosure of price (closed by server-only pricing through `Amortization`/`Aprc` and a
+  reason-coded 409 when the distress floor suppresses).
 
 - **2026-08-20** — Catalog-governed loan origination (#668). Adds the product-catalog OIDC read edge
   described in §2 item 9. The caller may select an offering, never a revision or a rate: the service
