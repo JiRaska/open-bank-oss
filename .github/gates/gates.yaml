@@ -513,6 +513,34 @@ gates:
   # (public repo, GitHub-hosted runners), but 90 s on a required check is 90 s every
   # contributor waits on every PR. The STEP still runs unconditionally and prints whether it
   # loaded or skipped and why — a step that silently no-ops reads exactly like one that passed.
+  # #5736 / PR #6041. `AiCallErrorRateHigh` was loaded, `health=ok` and evaluating correctly
+  # throughout an 8h40m total outage, and never fired: Prometheus's own ALERTS series has 44
+  # points at `pending` and zero at `firing`. Its `rate(...[15m])` window is shorter than its
+  # subject's 30-minute invocation period, so the counter increments once per window and the
+  # ratio decays before `for: 15m` matures — a property of the CALLER, not of the rule, which
+  # is why no threshold tuning could ever have fixed it and why promtool, rule health and a
+  # green ArgoCD all agreed nothing was wrong. The same file also catches a ratio that is
+  # blind in the total-failure case, because a route that never succeeded has no
+  # `outcome="success"` series and the arithmetic then yields nothing rather than 0%.
+  # Scope is every windowed alert rule; the subject cadences are DERIVED from @Scheduled
+  # methods, CronJob manifests and agent charters, never a hand-kept list. ENFORCED.
+  - id: alert-window-vs-subject-period
+    name: "alert window accommodates its subject's period (#5736, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      An alert whose rate window is no wider than its subject's invocation period cannot ever
+      mature its `for:`, and every signal a human would check says the rule is fine — loaded,
+      `health=ok`, promtool-clean, ArgoCD green. `AiCallErrorRateHigh` sat `pending` for the
+      whole 8h40m of #5736 and never once reached `firing`; the fix is a property of the
+      caller, not a threshold, so nothing tuned it back into existence.
+    review_after: "2027-02-19"
+    min_subjects: 90   # 121 alert rules in the gitops PrometheusRules today (2026-08-20)
+    selftest: |
+      python3 .github/scripts/check-alert-window-vs-subject-period.py --self-test
+    run: |
+      python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
