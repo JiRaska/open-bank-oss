@@ -1,0 +1,13 @@
+asyncapi: 2.6.0
+info:
+  title: Referral lifecycle events
+  version: 1.0.0
+channels:
+  referral.qualified.v1:
+    publish: {operationId: referralQualified, message: {$ref: '#/components/messages/Qualified'}}
+  referral.reward.requested.v1:
+    publish: {operationId: referralRewardRequested, message: {$ref: '#/components/messages/RewardRequested'}}
+components:
+  messages:
+    Qualified: {payload: {type: object, required: [eventId, inviteId, qualificationEventId]}}
+    RewardRequested: {payload: {type: object, required: [eventId, inviteId, rewardReference, amount, currency]}}

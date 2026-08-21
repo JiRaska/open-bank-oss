@@ -39,6 +39,7 @@
   "openbank-pid-service": "0.9.1",
   "openbank-product-catalog": "0.18.1",
   "openbank-psd2-service": "0.9.0",
+  "openbank-referral-service": "0.1.0",
   "openbank-release-steward": "0.6.0",
   "openbank-sanctions-service": "0.10.0",
   "openbank-sca-service": "0.14.1",

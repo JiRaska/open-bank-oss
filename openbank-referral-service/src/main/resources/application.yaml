@@ -1,0 +1,60 @@
+quarkus:
+  application:
+    name: openbank-referral-service
+  http:
+    port: 8155
+    cors:
+      ~: true
+      origins: "http://localhost:3000"
+      methods: GET,POST,DELETE,OPTIONS
+      headers: Content-Type,Authorization,Idempotency-Key
+  datasource:
+    db-kind: postgresql
+    username: ${POSTGRES_USER:openbank}
+    password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}
+    reactive:
+      url: ${REACTIVE_URL:postgresql://localhost:5432/openbank_referral}
+    jdbc:
+      url: ${JDBC_URL:jdbc:postgresql://localhost:5432/openbank_referral}
+  hibernate-orm:
+    database:
+      generation: none
+    physical-naming-strategy: org.hibernate.boot.model.naming.CamelCaseToUnderscoresNamingStrategy
+  flyway:
+    migrate-at-start: true
+    validate-on-migrate: false
+    connect-retries: 10
+    connect-retries-interval: 2S
+  oidc:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    tls:
+      verification: none
+  swagger-ui:
+    always-include: true
+    path: /api/docs
+  management:
+    enabled: true
+    port: 8086
+    host: 0.0.0.0
+    root-path: /q
+  shutdown:
+    timeout: 30S
+
+"%test":
+  quarkus:
+    datasource:
+      username: openbank
+      password: openbank_secret
+      reactive:
+        url: vertx-reactive:postgresql://localhost:5432/openbank_referral_it
+      jdbc:
+        url: jdbc:postgresql://localhost:5432/openbank_referral_it
+    devservices:
+      enabled: false
+    management:
+      enabled: false
+    oidc:
+      enabled: false
