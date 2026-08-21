@@ -960,6 +960,26 @@ gates:
     run: |
       bash .github/scripts/test-resolve-can-i-deploy-selector.sh
 
+  # The CO-DEPLOY narrowing of the selector above (#5993). The shared selector's
+  # `--latest main` fallback is correct per service (ADR-0092) and wrong in the atomic
+  # co-deploy matrix, which asks ONE question about a whole set: a moving tag there is a
+  # verdict about a later, unrelated build. The `unknown` branch — broker probe
+  # inconclusive — is the fail-OPEN one: it can answer GREEN about a pair nobody is
+  # deploying, with nothing red anywhere to notice. The self-test's load-bearing cases are
+  # the negative controls: every probe answer that is not an exact version must REFUSE, and
+  # no branch may emit a moving tag. Delegate straight to the shared selector again and
+  # they go red.
+  - id: can-i-deploy-codeploy-selector-unit-test
+    selftest_exempt: "is-a-test-suite — the run: IS the checker's own --self-test"
+    name: "can-i-deploy co-deploy version selector unit test (issue #5993, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "The atomic co-deploy matrix asks ONE broker question about a whole service set, so it is only meaningful when every pacticipant is pinned to the version being deployed; the shared per-service selector's documented `--latest main` fallback silently made it a verdict about whatever build currently carries the moving main tag, which can answer GREEN for a pair nobody is deploying and leaves nothing red anywhere to notice."
+    review_after: "2027-02-21"
+    min_subjects: 21   # 21 assertions across every probe answer the resolver can be handed
+    run: |
+      bash .github/scripts/resolve-codeploy-selector.sh --self-test
+
   # The equivalence proof that lets a reconcile deploy at all (#3432). The selector above decides
   # WHICH version to ask about; on a manual dispatch the honest answer used to be "none, refuse"
   # for every service, because no pact version can exist for a sha services-ci never built. This
