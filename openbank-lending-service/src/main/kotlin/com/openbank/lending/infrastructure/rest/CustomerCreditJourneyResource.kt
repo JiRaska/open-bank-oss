@@ -61,7 +61,8 @@ class CustomerCreditJourneyResource(
     @Authorize(action = "lending.intake", resource = "")
     @Operation(summary = "The caller's own credit applications as customer-readable journeys (edge only)")
     fun list(@HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?): Uni<Response> {
-        val partyId = permittedParty(partyHeader) ?: return refusal()
+        if (!callerIsPermitted()) return refusal()
+        val partyId = scopeOf(partyHeader) ?: return badParty()
         return applications.findByParty(partyId)
             .map { list -> Response.ok(list.map { it.toJourneyDto() }).build() }
     }
@@ -74,7 +75,8 @@ class CustomerCreditJourneyResource(
         @HeaderParam(CustomerIntakeResource.PARTY_HEADER) partyHeader: String?,
         @PathParam("id") id: String,
     ): Uni<Response> {
-        val partyId = permittedParty(partyHeader) ?: return refusal()
+        if (!callerIsPermitted()) return refusal()
+        val partyId = scopeOf(partyHeader) ?: return badParty()
         val applicationId = runCatching { UUID.fromString(id) }.getOrNull()
             ?: return Uni.createFrom().item(notFound())
         return applications.findByParty(partyId).map { list ->
@@ -86,17 +88,43 @@ class CustomerCreditJourneyResource(
         }
     }
 
-    /** The party id this caller may read, or null when the caller or the header is not permitted. */
-    private fun permittedParty(partyHeader: String?): UUID? {
-        if (!config.enabled) return null
+    /**
+     * Whether this CALLER may use the endpoint at all. Deliberately takes no request data: the
+     * decision rests only on the authenticated principal and on configuration.
+     *
+     * Split from [scopeOf] on CodeQL's `java/tainted-permissions-check` finding, and the finding
+     * was fair. The two questions really are different — "may you call this" is about the edge's
+     * M2M identity, "whose rows do you get" is about a header — and answering them in one function
+     * meant request data flowed into an authorization decision. It also read as though a
+     * well-formed header could earn access, which was never the intent and is exactly the kind of
+     * thing a later edit turns true by accident.
+     */
+    private fun callerIsPermitted(): Boolean {
+        if (!config.enabled) return false
         val permitted = config.callerPrincipal.orElse("")
-        if (permitted.isBlank() || identity.principal?.name != permitted) return null
-        val partyId = partyHeader?.let { runCatching { UUID.fromString(it) }.getOrNull() } ?: return null
-        return partyId.takeIf { it != ZERO_UUID }
+        return permitted.isNotBlank() && identity.principal?.name == permitted
     }
+
+    /**
+     * The party whose rows the (already-authorised) caller is asking for. A query SCOPE, never a
+     * permission: by the time this runs, the caller has been admitted or refused on its own merits.
+     */
+    private fun scopeOf(partyHeader: String?): UUID? =
+        partyHeader?.let { runCatching { UUID.fromString(it) }.getOrNull() }?.takeIf { it != ZERO_UUID }
 
     private fun refusal(): Uni<Response> = Uni.createFrom().item(
         Response.status(HTTP_FORBIDDEN).entity(mapOf("error" to "caller is not the customer-edge intake principal"))
+            .build(),
+    )
+
+    /**
+     * A missing or malformed party header from an ALREADY-AUTHORISED caller is a bad request, not a
+     * 403: the caller is permitted, the request is not well-formed. Keeping the two apart also
+     * keeps the 403 meaning exactly one thing — "you are not the edge".
+     */
+    private fun badParty(): Uni<Response> = Uni.createFrom().item(
+        Response.status(HTTP_BAD_REQUEST)
+            .entity(mapOf("error" to "${'$'}{CustomerIntakeResource.PARTY_HEADER} is missing or not a UUID"))
             .build(),
     )
 
@@ -105,6 +133,7 @@ class CustomerCreditJourneyResource(
 
     companion object {
         private val ZERO_UUID = UUID(0, 0)
+        private const val HTTP_BAD_REQUEST = 400
         private const val HTTP_FORBIDDEN = 403
         private const val HTTP_NOT_FOUND = 404
     }
