@@ -3726,3 +3726,25 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-gate-selftest-declaration.py --enforce
+
+  # A rethrow only helps if the connector PARKS the record. SmallRye's default failure-strategy is
+  # `fail`, which STOPS the channel — and before #5745 only 4 of the fleet's 44 incoming channels
+  # configured a DLQ, so most of the #5698 sweep traded silent data loss for a wedged consumer while
+  # the consumers' KDocs asserted the opposite. Three ways to write this config look right and do
+  # nothing: the dotted leaf key `dead-letter-queue.topic:` (SmallRye quotes it, the connector never
+  # reads it, #686), an implicit topic name derived from the channel alone (eight services declare
+  # `party-events-in`, so they would share one DLQ — observed live today between account-service and
+  # card-issuance-service on `delegation-events-in`), and a topic with no KafkaUser Write ACL (the
+  # DLQ send is denied and the consumer wedges on the failure the DLQ was added to park). None of
+  # the three errors at boot, which is why this is a gate and not a review note.
+  - id: incoming-dlq-wiring
+    name: "every incoming channel dead-letters into an explicit topic it may write (#5745, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "The #5698 sweep's rethrows depend on a DLQ that existed on 4 of 44 channels; each of the three ways to mis-wire one is silent at boot and invisible until a consumer wedges in production."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-incoming-dlq-wiring.py --self-test
+    selftest_expect: pass
+    min_subjects: 30   # 45 incoming channels today (2026-08-21, incl. audit-service agent-audit-events-in)
+    run: |
+      python3 .github/scripts/check-incoming-dlq-wiring.py --enforce
