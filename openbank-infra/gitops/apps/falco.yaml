@@ -180,12 +180,54 @@ spec:
                 (k8s.ns.name = "messaging"
                  and k8s.pod.name startswith "strimzi-cluster-operator")
 
+            # (5) Strimzi's ENTITY operator (issue #6033) — the pod that hosts
+            # the user-operator and topic-operator, both fabric8 Kubernetes
+            # clients whose entire job is to reconcile KafkaUser / KafkaTopic
+            # custom resources through the API server. (4) does not cover it:
+            # the pod is named after the Kafka CR
+            # (`components/kafka/kafka.yaml`: `openbank-cluster`), not after the
+            # cluster operator, so the `strimzi-cluster-operator` prefix cannot
+            # match. Measured 2026-08-21 over a 6h window, this one pod is 726
+            # of the rule's 793 remaining events (92%).
+            #
+            # SCOPE: namespace AND pod-name prefix AND container name AND
+            # parent process — one dimension tighter than (4), because a
+            # two-container pod running a JVM is a bigger thing to except than
+            # a single-purpose operator pod. Concretely, all of these still
+            # fire: the Kafka brokers, Apicurio, kafka-ui and the kafka-exporter
+            # in ns `messaging`; a pod with this name prefix in any other
+            # namespace; a third container injected into this pod as a sidecar;
+            # and — the one that matters — any process in these two containers
+            # that is not the operator JVM itself, since an exec'd shell, curl
+            # or kubectl has the JVM (or a shell) as its parent, never `tini`.
+            #
+            # RESIDUAL, stated, and it is the same one macro (3) already
+            # accepts for the admin-ui BFF: code execution INSIDE the operator
+            # JVM would no longer trip THIS rule, because it would inherit the
+            # excepted process identity. It still trips the shell-spawn,
+            # drop-and-execute and sensitive-file rules, and the operator's
+            # RBAC is what caps the damage. Everything else in the pod, the
+            # namespace and the cluster keeps this rule's coverage.
+            #
+            # Not keyed on `proc.name`: those are JVM thread names truncated to
+            # 15 characters (`JdkHttpClientFa`, `HttpClient-1-Se`,
+            # `operator-thread`), which are a property of the JDK's internal
+            # naming and would rot on any Strimzi or JDK bump. `container.name`
+            # is set by the operator that creates the pod and is stable.
+            - macro: openbank_strimzi_entity_operator
+              condition: >
+                (k8s.ns.name = "messaging"
+                 and k8s.pod.name startswith "openbank-cluster-entity-operator"
+                 and container.name in (user-operator, topic-operator)
+                 and proc.pname = "tini")
+
             - macro: user_known_contact_k8s_api_server_activities
               condition: >
                 (openbank_controller_namespaces
                  or openbank_kubectl_cronjob_image
                  or openbank_admin_ui_bff
-                 or openbank_strimzi_operator)
+                 or openbank_strimzi_operator
+                 or openbank_strimzi_entity_operator)
               override:
                 condition: replace
 
