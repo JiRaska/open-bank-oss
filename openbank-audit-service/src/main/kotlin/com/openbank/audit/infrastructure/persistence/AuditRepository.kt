@@ -159,6 +159,12 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
 
     suspend fun save(entry: AuditEntry) {
         chainMutex.withLock {
+            // Kafka delivery is at least once.  The producer's immutable event id is copied to
+            // entry_id, so a retry must be a no-op before it can advance the append-only chain.
+            val alreadyRecorded = Panache.withSession {
+                find("entryId", entry.id).firstResult()
+            }.awaitSuspending()
+            if (alreadyRecorded != null) return
             val prev = Panache.withSession {
                 find("ORDER BY id DESC").page(0, 1).firstResult()
             }.awaitSuspending()

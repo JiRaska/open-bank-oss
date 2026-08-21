@@ -70,7 +70,12 @@ class AuditConsumer {
     suspend fun consume(message: Message<String>) {
         val payload = message.payload
         try {
-            consume(payload, addressOf(message))
+            persist(payload, addressOf(message))
+        } catch (e: Exception) {
+            // This legacy multi-producer channel deliberately retains its historic availability
+            // behaviour. D5 agent events use AgentAuditConsumer instead: it acknowledges only a
+            // successful durable write, so a store failure is retried by Kafka rather than lost.
+            log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         } finally {
             // Switching the signature from `String` to `Message<String>` also switches SmallRye
             // from auto-ack to MANUAL ack, so the ack must be explicit — and in a `finally`, or an
@@ -106,12 +111,26 @@ class AuditConsumer {
 
     suspend fun consume(payload: String, address: EventAddress) {
         try {
-            val node: JsonNode = objectMapper.readTree(payload)
+            persist(payload, address)
+        } catch (e: Exception) {
+            log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
+        }
+    }
+
+    /**
+     * Writes an audit event and propagates a failure to the caller. The dedicated agent-provenance
+     * consumer uses this method before ACKing, while the legacy mixed stream keeps [consume]'s
+     * compatibility behaviour.
+     */
+    suspend fun persist(payload: String, address: EventAddress = EventAddress.NONE) {
+        val node: JsonNode = objectMapper.readTree(payload)
             val eventTime = eventTime(node)
             val resolvedSource = resolveSourceService(node, address)
             val actor = resolveActor(node)
             val entry = AuditEntry(
-                id = UUID.randomUUID(),
+                // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
+                // producers without one retain the previous random entry id behaviour.
+                id = node.textOrNull("eventId")?.let(UUID::fromString) ?: UUID.randomUUID(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
                 // not "eventType" — the only #996-consumed producer that does so.
                 // `ce-type` is the outbox event type, and it is the LAST resort before the
@@ -174,11 +193,8 @@ class AuditConsumer {
                 countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
             }
             repo.save(entry)
-            if (entry.eventType == "PARTY_MERGED" && ::mergeIndex.isInitialized) {
-                recordPartyMergeIndex(mergeIndex, log, node, entry.occurredAt)
-            }
-        } catch (e: Exception) {
-            log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
+        if (entry.eventType == "PARTY_MERGED" && ::mergeIndex.isInitialized) {
+            recordPartyMergeIndex(mergeIndex, log, node, entry.occurredAt)
         }
     }
 

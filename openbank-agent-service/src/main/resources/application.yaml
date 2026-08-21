@@ -402,3 +402,10 @@ mp:
         # map, not a real OS env var, so they don't exercise this failure mode. This properties-file
         # mechanism is the CORRECT choice for a hyphenated channel like `oversight-events`, not
         # merely a stylistic alternative.
+    outgoing:
+      agent-audit-events-out:
+        connector: smallrye-kafka
+        topic: ${AGENT_AUDIT_KAFKA_TOPIC:openbank.agent.audit.events}
+        enabled: ${AGENT_AUDIT_KAFKA_ENABLED:false}
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer

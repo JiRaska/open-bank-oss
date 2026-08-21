@@ -45,3 +45,5 @@ data:
     config_ordinal=500
     mp.messaging.incoming.audit-events-in.group.id=audit-service
     mp.messaging.incoming.audit-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.agent-audit-events-in.group.id=audit-service-agent-provenance
+    mp.messaging.incoming.agent-audit-events-in.auto.offset.reset=earliest
