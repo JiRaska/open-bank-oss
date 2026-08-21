@@ -2612,6 +2612,27 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-alert-metric-emitted.py --enforce
+  # An unaudited money-path topic is indistinguishable from a quiet period: nothing errors, no pod
+  # is unhealthy, lag reads zero, and audit_entries simply has no rows. #5859 found delegation had
+  # never been subscribed; #6035 found five more, all missing from all three places at once — the
+  # signature of a set that was never enumerated. This derives the scope instead: money_path_services
+  # from rules.yaml, their produced topics from their own `mp.messaging.outgoing.*.topic` (never from
+  # a topic-literal grep, which is blind to the serialised-data-class idiom, #3883), and the three
+  # subscription artefacts from audit-service's config, source and KafkaUser.
+  # Ratchet, not zero: today's eight gaps are baselined with their owning issue and the list may only
+  # shrink — a stale entry, in either direction, is itself an error.
+  - id: audit-money-path-subscription
+    min_subjects: 15   # 21 produced money-path topics today (2026-08-20)
+    name: "Every money-path produced topic reaches the audit trail (issue #6035, enforced)"
+    group: data
+    mode: enforced
+    rationale: "A money-path event topic audit-service is not subscribed to, not attributed for, or has no Read ACL on writes nothing to the tamper-evident trail and raises no error anywhere — and audit_entries is append-only with source_service chain-hashed into record_hash, so neither the missing row nor a wrong attribution can be repaired afterwards."
+    review_after: "2027-02-20"
+    selftest: |
+      python3 .github/scripts/check-audit-money-path-subscription.py --root . --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-audit-money-path-subscription.py --root . --enforce
 
   - id: kafka-acl-coverage
     name: "Kafka ACL coverage (issue #2598, enforced)"
