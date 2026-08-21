@@ -7,7 +7,7 @@ supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [onboarding, accounts, aml-sanctions, compliance]
-summary: "The customer relationship becomes an explicit aggregate with its own lifecycle, separate from the durable Party identity: bank-initiated termination runs grounds -> four-eyes -> notice timer -> wind-down -> TERMINATED, and re-onboarding opens a new relationship on the same identity."
+summary: "The customer relationship becomes an explicit aggregate, separate from the durable Party identity: bank-initiated termination runs ground -> four-eyes -> notice timer -> wind-down -> TERMINATED, and re-onboarding opens a new relationship."
 ---
 
 # ADR-0270 — Bank-initiated relationship termination and customer offboarding
