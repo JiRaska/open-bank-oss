@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.2...agent-service-v1.21.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** put the content-safety classifier on the operator plane too ([#6204](https://github.com/JiRaska/open-bank-oss/issues/6204)) ([13a21b5](https://github.com/JiRaska/open-bank-oss/commit/13a21b5835739937a16bcfdbb233381d305f3089)), closes [#5671](https://github.com/JiRaska/open-bank-oss/issues/5671)
+
+
+### Bug Fixes
+
+* **agent:** default the model endpoint to the LiteLLM gateway, not decommissioned Groq ([#6076](https://github.com/JiRaska/open-bank-oss/issues/6076)) ([026e071](https://github.com/JiRaska/open-bank-oss/commit/026e071106f6405b2343ed27a93210a8c800428c)), closes [#5736](https://github.com/JiRaska/open-bank-oss/issues/5736)
+* **agent:** run the oversight sweep off the event loop — enforcement was degrading ([#6223](https://github.com/JiRaska/open-bank-oss/issues/6223)) ([55b538d](https://github.com/JiRaska/open-bank-oss/commit/55b538d95125a7fae0643266ecde8b38068526fc))
+
 ## [1.20.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.1...agent-service-v1.20.2) (2026-08-20)
 
 
