@@ -37,6 +37,8 @@ import re
 import sys
 from dataclasses import dataclass
 
+import gatelib
+
 ANNOTATIONS = ("IfBuildProperty", "UnlessBuildProperty", "IfBuildProfile", "UnlessBuildProfile")
 ANN_RE = re.compile(r"@(" + "|".join(ANNOTATIONS) + r")\s*\(([^)]*)\)")
 INTERP_RE = re.compile(r"\$\{([A-Za-z0-9_.-]+)(?::([^}]*))?\}")
@@ -335,6 +337,10 @@ def report(root: str, verbose: bool) -> int:
     keyed = {f.site.key: f for f in findings}
     print(f"build-time bean selection: {len(sites)} annotation site(s) across "
           f"{len({s.module for s in sites})} module(s)")
+    # Unconditional, including on the failure path (gatelib.subjects' own contract) — a gate
+    # that found its 29 sites and then flagged a contradiction among them must not also read as
+    # having lost its corpus.
+    gatelib.subjects(len(sites), "@IfBuildProperty/@UnlessBuildProperty annotation sites")
     if verbose:
         for site in sorted(sites, key=lambda s: (s.module, s.prop)):
             build_value, _ = build_time_value(
