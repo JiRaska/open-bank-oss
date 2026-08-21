@@ -12,7 +12,10 @@ channels:
     publish: {operationId: referralQualified, message: {$ref: '#/components/messages/Qualified'}}
   referral.reward.requested.v1:
     publish: {operationId: referralRewardRequested, message: {$ref: '#/components/messages/RewardRequested'}}
+  referral.reward.outcome.v1:
+    publish: {operationId: referralRewardOutcome, message: {$ref: '#/components/messages/RewardOutcome'}}
 components:
   messages:
     Qualified: {payload: {type: object, required: [eventId, inviteId, qualificationEventId]}}
     RewardRequested: {payload: {type: object, required: [eventId, inviteId, rewardReference, amount, currency]}}
+    RewardOutcome: {payload: {type: object, required: [eventId, inviteId, rewardReference, outcome]}}
