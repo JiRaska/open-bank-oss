@@ -261,6 +261,13 @@ gates:
     name: "supersede-deploy-prs decides by ancestry, not recency (issue #6231)"
     group: gitops
     mode: enforced
+    rationale: >-
+      A slower build opens a later deploy PR for an OLDER commit. Deciding which PR to close by
+      creation time instead of ancestry closed #6222 in favour of an ancestor PR on 2026-08-21 and
+      stranded newer code with every job green (issue #6231). This gate is the only place that
+      defect's fix can go red before it acts on a real PR — the script itself only runs inside
+      auto-deploy against live PRs, never in ordinary CI.
+    review_after: "2027-02-19"
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
 
