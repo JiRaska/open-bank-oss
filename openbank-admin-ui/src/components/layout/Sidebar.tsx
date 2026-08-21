@@ -91,7 +91,7 @@ const complianceNav: NavItem[] = [
 
 const opsNav: NavItem[] = [
   { nameCs: 'PID',                   nameEn: 'PID',              href: '/pid',               icon: Map,          permission: 'payments:view' },
-  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'system:view' },
+  { nameCs: 'Oznámení',              nameEn: 'Notifications',    href: '/notifications',     icon: Bell,         permission: 'notifications:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
 
