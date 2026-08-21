@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.1...audit-service-v0.18.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** durable AI audit provenance ([#6209](https://github.com/JiRaska/open-bank-oss/issues/6209)) ([8a862f3](https://github.com/JiRaska/open-bank-oss/commit/8a862f387594f934f91bf5befcbc966ccf40abad))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.17.0...audit-service-v0.17.1) (2026-08-20)
 
 
