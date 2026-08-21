@@ -9,6 +9,7 @@ import com.openbank.lending.domain.model.CreditOfferDecision
 import com.openbank.lending.domain.model.CreditOfferEligibility
 import com.openbank.lending.domain.model.CreditOfferPolicy
 import com.openbank.lending.domain.model.CreditOfferSuppressionCode
+import com.openbank.lending.domain.model.OfferSurface
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -35,6 +36,7 @@ class CreditOfferEligibilityTest {
         inHardshipArrangement = false,
         lastAffordabilityFailureAt = null,
         bufferDays = 90,
+        monthsObserved = 12,
         lastCreditContactAt = null,
         inputsChangedSinceLastContact = true,
         complete = true,
@@ -42,6 +44,8 @@ class CreditOfferEligibilityTest {
 
     private fun decide(consent: Boolean = true, signals: BorrowerDistressSignals = healthy, at: Instant = now) =
         CreditOfferEligibility.evaluate(consent, signals, at)
+
+    private fun codeOf(decision: CreditOfferDecision) = (decision as? CreditOfferDecision.Suppressed)?.code
 
     private fun assertSuppressed(decision: CreditOfferDecision, code: CreditOfferSuppressionCode) {
         assertThat(decision).isInstanceOf(CreditOfferDecision.Suppressed::class.java)
@@ -162,8 +166,39 @@ class CreditOfferEligibilityTest {
                 minimumBufferDays = 1,
                 affordabilityCoolingDays = 1,
                 contactFrequencyDays = 1,
+                minimumMonthsObserved = 1,
             )
         val decision = CreditOfferEligibility.evaluate(true, healthy.copy(hasArrears = true), now, custom)
         assertThat(decision.policyVersion).isEqualTo(7)
+    }
+
+    // ── History depth (ADR-0269 #6215) ────────────────────────────────────────
+
+    @Test
+    fun `a push needs enough observed months to be evidence`() {
+        val thin = healthy.copy(monthsObserved = CreditOfferPolicy.V1.minimumMonthsObserved - 1)
+        assertSuppressed(decide(signals = thin), CreditOfferSuppressionCode.HISTORY_TOO_THIN)
+    }
+
+    @Test
+    fun `an unknown history depth is not treated as a long one`() {
+        assertSuppressed(
+            decide(signals = healthy.copy(monthsObserved = null)),
+            CreditOfferSuppressionCode.HISTORY_TOO_THIN,
+        )
+    }
+
+    @Test
+    fun `a thin history does not stop an answer the customer asked for`() {
+        val thin = healthy.copy(monthsObserved = 0)
+        val pull = CreditOfferEligibility.evaluate(true, thin, now, CreditOfferPolicy.V1, OfferSurface.PULL)
+        assertThat(pull).isInstanceOf(CreditOfferDecision.Allowed::class.java)
+    }
+
+    @Test
+    fun `HISTORY_TOO_THIN is distinct from SIGNALS_UNAVAILABLE — a new customer is not an outage`() {
+        val newCustomer = decide(signals = healthy.copy(monthsObserved = 0))
+        val brokenUpstream = decide(signals = healthy.copy(complete = false))
+        assertThat(codeOf(newCustomer)).isNotEqualTo(codeOf(brokenUpstream))
     }
 }
