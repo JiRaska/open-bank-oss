@@ -78,9 +78,7 @@ export async function GET() {
 
   // Live path: query Langfuse bridge metrics
   const agentIds = ['copilot', 'holmes-rca', 'finops-agent', 'fleet-monitor', 'code-review']
-  const agents: AgentCostEntry[] = []
-
-  for (const agentId of agentIds) {
+  const agentResults = await Promise.all(agentIds.map(async (agentId): Promise<AgentCostEntry | null> => {
     const [tokens24h, cost24h, cost7d, cost30d] = await Promise.all([
       fetchFromPrometheus(
         `sum(increase(langfuse_agent_tokens_total{agent_id="${agentId}"}[24h]))`, prometheusUrl
@@ -96,7 +94,7 @@ export async function GET() {
       ),
     ])
 
-    if (tokens24h == null && cost24h == null) continue
+    if (tokens24h == null && cost24h == null) return null
 
     // No monthly USD budget is configured in the current agents.yaml contract. Keep this
     // explicitly unavailable so consumers cannot render a fabricated budget percentage.
@@ -108,7 +106,7 @@ export async function GET() {
       : cost24h > 1  ? 'normal'
       : 'low'
 
-    agents.push({
+    return {
       agentId,
       model: 'mixed',
       tokensLast24h: tokens24h ?? 0,
@@ -119,8 +117,9 @@ export async function GET() {
       budgetUsedPct: budgetMonthlyUsd != null && cost30d != null ? (cost30d / budgetMonthlyUsd) * 100 : null,
       burnRate,
       anomalyZ: null,
-    })
-  }
+    }
+  }))
+  const agents = agentResults.filter((entry): entry is AgentCostEntry => entry !== null)
 
   const totalCost7d = agents.reduce((s, a) => s + a.costLast7dUsd, 0)
 
