@@ -536,8 +536,15 @@ function PaymentsContent() {
                   style={{ width: '100%', paddingLeft: '30px', paddingRight: '12px', height: '32px', borderRadius: '6px',
                     border: '1px solid var(--border)', fontSize: '13px', background: 'var(--surface-2)', color: 'var(--text-primary)', outline: 'none' }} />
               </div>
-              <button aria-label={t('Obnovit SCT platby', 'Refresh SCT payments')} className="btn btn-secondary btn-sm" onClick={loadSct} disabled={sctLoading}>
-                <RefreshCw size={12} style={{ animation: sctLoading ? 'spin 0.8s linear infinite' : 'none' }} />
+              <button
+                aria-label={t('Obnovit SCT platby', 'Refresh SCT payments')}
+                className="btn btn-secondary btn-sm"
+                type="button"
+                onClick={loadSct}
+                disabled={sctLoading}
+                aria-busy={sctLoading}
+              >
+                <RefreshCw size={12} aria-hidden="true" style={{ animation: sctLoading ? 'spin 0.8s linear infinite' : 'none' }} />
               </button>
             </div>
             {sctLoading && !sctPayments.length ? (
