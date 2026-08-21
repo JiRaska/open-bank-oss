@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.1...admin-ui-v0.183.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** align notification route RBAC ([#6131](https://github.com/JiRaska/open-bank-oss/issues/6131)) ([b11a3e1](https://github.com/JiRaska/open-bank-oss/commit/b11a3e137c60321dcef551f55f2b782992ccc830))
+
 ## [0.183.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.0...admin-ui-v0.183.1) (2026-08-21)
 
 
