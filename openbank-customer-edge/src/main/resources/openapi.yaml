@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.42.0
+  version: 1.43.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -887,6 +887,7 @@ paths:
                           - MARKETING_COMMS_INAPP
                           - CREDIT_OFFERS
                           - CREDIT_PROFILE_USE
+                          - CREDIT_AI_AGENT
                     accountIbans: {type: array, items: {type: string}, nullable: true}
                     validFrom: {type: string, format: date-time}
                     validTo: {type: string, format: date-time}

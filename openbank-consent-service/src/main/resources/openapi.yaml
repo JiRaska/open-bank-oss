@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.6.0
+  version: 1.7.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -111,7 +111,7 @@ paths:
                    AGENT_QUERY, AGENT_INITIATE, AGENT_NOTIFY, AGENT_ANALYZE,
                    TELEMETRY_RUM,
                    MARKETING_COMMS_EMAIL, MARKETING_COMMS_PUSH, MARKETING_COMMS_INAPP,
-                   CREDIT_OFFERS, CREDIT_PROFILE_USE]
+                   CREDIT_OFFERS, CREDIT_PROFILE_USE, CREDIT_AI_AGENT]
       responses:
         '200':
           description: Whether the consent exists, is active now, and covers the scope
