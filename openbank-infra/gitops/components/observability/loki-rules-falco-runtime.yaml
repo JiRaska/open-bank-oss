@@ -141,39 +141,19 @@ data:
                 (gitops/apps/falco.yaml sets 500m) under an event storm, or a busy node. Check
                 whether it correlates with a workload burst before raising the limit.
 
-          # DEAD-MAN'S SWITCH — the alert for "Falco stopped talking at all", which is the
-          # failure the two alerts above are structurally unable to report.
+          # FalcoAgentSilent USED TO LIVE HERE, and was removed on 2026-08-21 rather than
+          # retuned. It fired on `absent_over_time({namespace="falco"}[30m])`, resting on a
+          # premise its own comment spelled out: "Falco emits continuously ... so an empty 30m
+          # window means the agent, Alloy, or Loki ingestion is broken". #6075 and #6198
+          # deliberately tuned Falco from ~33,000 events/day to ZERO, which made silence the
+          # healthy resting state and the alert a guaranteed false positive — measured minutes
+          # after the ruler first evaluated it: 13/13 pods Ready, no log line in 60m, alert
+          # `pending`. There is no event rate that separates well-tuned Falco from dead Falco,
+          # so the fix is a different observable, not a threshold: agent liveness now comes from
+          # the DaemonSet's own readiness in prometheus-rules-runtime-security.yaml.
           #
-          # This is written as absent_over_time and NOT as `count_over_time(...) == 0`, and
-          # the difference is the whole rule. An `== 0` comparison needs a SERIES to compare;
-          # when the stream is absent the selector matches nothing, the aggregation produces
-          # no series, and the comparison matches nothing — silent in exactly the case it
-          # exists for. This repo has already measured that trap on
-          # kube_endpointslice_endpoints (loki-rules-endpoint-availability.yaml: the obvious
-          # `sum by (...) == 0` returned zero results live, during the outage it described).
-          # absent_over_time returns 1 precisely WHEN there is nothing, which is the inversion
-          # that makes it work.
-          #
-          # t=0 behaviour, re-derived rather than assumed: the query reads Loki's stored data,
-          # not ruler memory, so a ruler or Falco pod RESTART does not fire it — the previous
-          # 30m of logs are still in Loki. Falco emits continuously (the untuned NOTICE rules
-          # alone are thousands a day, and `Run shell untrusted` is deliberately left noisy),
-          # so an empty 30m window means the agent, Alloy, or Loki ingestion is broken. A
-          # genuinely fresh Loki with no data at all WOULD fire, correctly. `for: 15m` damps
-          # a brief ingestion hiccup.
-          - alert: FalcoAgentSilent
-            expr: |
-              absent_over_time({namespace="falco"} [30m])
-            for: 15m
-            labels:
-              severity: warning
-              team: platform
-            annotations:
-              summary: "Falco has logged nothing for 30m — the runtime-security control is dark"
-              description: >-
-                No log line at all from namespace `falco` in 30 minutes. Falco is a DaemonSet that
-                normally emits continuously, so this means the agent, the Alloy tail, or Loki
-                ingestion has stopped — and while it is true, every Falco alert here is silent and
-                the estate has no runtime detection. Not the same failure as
-                FalcoSyscallEventDrops, which is a partial gap the agent itself reports. Check:
-                kubectl -n falco get ds,pods — then the Alloy DaemonSet and Loki ingester.
+          # What this loses, stated plainly rather than quietly: that rule also happened to
+          # cover "the Alloy tail or Loki ingestion has stopped". Nothing covers that now.
+          # Loki's own `loki_distributor_*` metrics would be the right observable and are not
+          # scraped (`monitoring.selfMonitoring.enabled: false`), so a replacement needs that
+          # turned on first — tracked separately, NOT silently inherited by the rules below.

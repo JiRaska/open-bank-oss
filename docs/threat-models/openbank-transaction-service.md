@@ -53,7 +53,7 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 |---|---|---|
 | **S**poofing | Forged initiate from unknown caller | OIDC; `OPERATOR`/service role required |
 | **T**ampering | Alter amount/counterparty post-initiation | Status state-machine; immutable financial fields; audit |
-| **T**ampering | Settlement posts the customer the **wrong direction** (an outbound payment credits the payer, or an internal transfer fails to debit the source) — silent money creation/loss in the booked balance | `PaymentJournalFactory` branches the same-currency journal on direction: outbound = DEBIT payer deposit-control / CREDIT cash-clearing; incoming = the mirror; internal transfer = DEBIT source / CREDIT target deposit-control (two sub-ledger legs). Ledger `validateBalance` enforces per-currency debits==credits; the credit-positive booked delta the projection derives (`bookedDeltas`) therefore moves each customer the right way. Pinned by `PaymentJournalFactoryTest` + `PaymentSagaLedgerIT` (outbound + internal-transfer journal shape) |
+| **T**ampering | Settlement posts the customer the **wrong direction** (an outbound payment credits the payer, or an internal transfer fails to debit the source) — silent money creation/loss in the booked balance | `PaymentJournalFactory` branches the same-currency journal on direction: outbound = DEBIT payer deposit-control / CREDIT cash-clearing; incoming = the mirror; internal transfer = DEBIT source / CREDIT target deposit-control (two sub-ledger legs). Ledger `validateBalance` enforces per-currency debits==credits; the credit-positive booked delta the projection derives (`bookedDeltas`) therefore moves each customer the right way. Pinned by `PaymentJournalFactoryTest` (outbound, incoming and internal-transfer journal shape, plus the cross-currency four-legged entry). **Corrected 2026-08-20:** this row also credited a `PaymentSagaLedgerIT`, which exists in no source tree here and never has; the coverage it was credited for is genuinely present in `PaymentJournalFactoryTest`, so the claim was over-attributed rather than unfounded |
 | **R**epudiation | Deny initiating a transaction | AuditEvent with `initiatedBy`; idempotency key persisted |
 | **I**nfo disclosure | Unauthenticated search by IBAN/amount | **Fixed**: reads role-gated (§3) |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-transaction inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077 / ADR-0079): the `openbank.outbox.backlog` gauge is tagged **only** by `service="transaction"` — never a transaction id, amount, IBAN, counterparty, party id, or reference. It exposes a single read-only count (PENDING + FAILED outbox rows), sampled off the Prometheus scrape thread from a cached `AtomicLong` refreshed by a scheduled `suspend` tick, so the scrape never runs a per-request DB query. `/q/metrics` is cluster-internal |
@@ -265,7 +265,10 @@ what the catalogue may hold.
   removed:** the saga drops `balanceCoverPort.debit/credit` (and the compensation refund); booked balance
   is the ledger projection's sole mover, the cover hold released by the projection. Risk class =
   **integrity** (money direction + single booked source of truth), mitigated by `PaymentJournalFactoryTest`,
-  `PaymentSagaOrchestratorTest`, and `PaymentSagaLedgerIT`. Coupled balance-service change:
+  `PaymentSagaOrchestratorTest`, and — as written at the time — a `PaymentSagaLedgerIT` that was
+  never committed (noted 2026-08-20; left in place because a change log records what was claimed
+  on the day, and correcting it silently would erase the evidence that it was). Coupled
+  balance-service change:
   `openbank.balance.projection.enabled=true`.
 - **2026-05-30** — K7/ADR-0018: role-gated the previously `@PermitAll` read endpoints; raw-string
   role migrated to `Roles` constant. No DB/flow change. Risk class = **confidentiality**, mitigated

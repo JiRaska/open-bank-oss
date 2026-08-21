@@ -307,6 +307,32 @@ npx eslint .            # lint
   exist. Verifying tracing end-to-end needs a real operator session; the synthetic journey does
   not help either, it only GETs `/`.
 
+- **`instrumentation.ts` is TOO LATE to start an OpenTelemetry SDK that patches `node:http`, and
+  the failure is silent in every direction you would check.** `@opentelemetry/instrumentation-http`
+  works by monkey-patching `node:http` at require time; by the moment Next.js calls `register()`
+  the standalone server has already loaded it and created its listener, so the patch lands on
+  nothing. Measured 2026-08-21 against the standalone build: the SDK **starts** (its `start()`
+  frame is in the `OTEL_LOG_LEVEL=debug` output, resolved out of `node_modules`), the process is
+  healthy, requests are served — and **zero** spans are exported. `NEXT_OTEL_VERBOSE=1` changed
+  nothing, and Next.js's own `BaseServer.handleRequest` span did not appear either. So "the SDK
+  failed to start" is the wrong diagnosis and will send you hunting the wrong thing; the right one
+  is load order. Fix: preload it with `NODE_OPTIONS=--require /app/otel-bootstrap.cjs` (baked in
+  the Dockerfile). Two consequences worth knowing: a `--require` preload is invisible to Next.js
+  file tracing, so the OTel packages reach `.next/standalone/node_modules` only because
+  `src/lib/telemetry/tracing.ts` imports them — delete that seemingly-unused module and the
+  container dies on MODULE_NOT_FOUND; and the preloaded file cannot be TypeScript, which is why
+  the scrub rules live in a plain `otel-scrub.cjs` the tests import directly rather than in a TS
+  copy that would drift.
+- **Scrub PII at the EXPORTER, not in per-instrumentation hooks — Next.js emits spans no hook of
+  yours will ever see.** `applyCustomAttributesOnSpan` / `requestHook` only run for spans that
+  instrumentation created. Next.js calls the OpenTelemetry API directly for
+  `BaseServer.handleRequest`, so with hooks alone a request to `/privacy?token=SECRET123` still
+  put the token on the wire. Also grep the attribute names before believing a scrub works: the
+  first version covered `url.full` and `http.url`, **neither of which the inbound HTTP
+  instrumentation sets** — the leak was in `http.target` and `url.query`, so the scrub ran, found
+  nothing to do, and reported success. Wrap `exporter.export` instead; it is the one place that
+  sees every span whatever created it (`otel-scrub.cjs: scrubSpans`).
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
