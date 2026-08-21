@@ -89,11 +89,14 @@ class ContentSafetyGuard(
                 resourceId = customerId,
                 result = if (blocked) AuditResult.DENIED else AuditResult.SUCCESS,
                 payload = mapOf(
+                    // ADR-0031 D5 names this key `model_id` fleet-wide, and agent-service has a
+                    // test that enforces it on every AI_AGENT event. Same rule, same key here —
+                    // and it is the CLASSIFIER's model, not the chat model.
+                    "model_id" to verdict.model,
                     "decision" to verdict.decision.name.lowercase(),
                     "categories" to verdict.categories.joinToString(","),
                     "reason" to verdict.reason,
                     "role" to role.name.lowercase(),
-                    "model" to verdict.model,
                     "fail_closed" to failClosed.toString(),
                     "action" to if (blocked) "blocked" else "allowed",
                 ),
