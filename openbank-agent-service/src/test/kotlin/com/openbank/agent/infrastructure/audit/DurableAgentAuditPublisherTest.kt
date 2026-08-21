@@ -9,6 +9,7 @@ import io.smallrye.reactive.messaging.kafka.Record
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.reactive.messaging.Emitter
 import org.junit.jupiter.api.Test
@@ -32,13 +33,25 @@ class DurableAgentAuditPublisherTest {
     fun `dispatcher retains outbox row when Kafka rejects it`(): Unit = runBlocking {
         val id = UUID.randomUUID()
         val emitter = mockk<Emitter<Record<String, String>>>()
+        val emitterInstance = mockk<Instance<Emitter<Record<String, String>>>>()
         every { outbox.claim(25) } returns listOf(AgentAuditOutbox.Claimed(id, "{}"))
+        every { emitterInstance.get() } returns emitter
         every { emitter.send(any()) } returns CompletableFuture.failedFuture(IllegalStateException("broker unavailable"))
         every { outbox.failed(any(), any()) } returns 1
 
-        AgentAuditOutboxDispatcher(outbox, emitter, true).dispatch()
+        AgentAuditOutboxDispatcher(outbox, emitterInstance, true).dispatch()
 
         verify { outbox.failed(id, match { it.contains("broker unavailable") }) }
         verify(exactly = 0) { outbox.published(any()) }
+    }
+
+    @Test
+    fun `disabled dispatcher does not resolve an unconfigured outgoing channel`(): Unit = runBlocking {
+        val emitterInstance = mockk<Instance<Emitter<Record<String, String>>>>()
+
+        AgentAuditOutboxDispatcher(outbox, emitterInstance, false).dispatch()
+
+        verify(exactly = 0) { outbox.claim(any()) }
+        verify(exactly = 0) { emitterInstance.get() }
     }
 }

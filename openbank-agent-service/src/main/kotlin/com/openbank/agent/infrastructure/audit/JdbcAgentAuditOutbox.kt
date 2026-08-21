@@ -13,6 +13,7 @@ import io.smallrye.reactive.messaging.kafka.Record
 import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
+import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Channel
@@ -122,7 +123,10 @@ class DurableAgentAuditPublisher @Inject constructor(
 @ApplicationScoped
 class AgentAuditOutboxDispatcher @Inject constructor(
     private val outbox: AgentAuditOutbox,
-    @Channel("agent-audit-events-out") private val emitter: Emitter<Record<String, String>>,
+    // Do not resolve the channel while transport is disabled. A disabled SmallRye outgoing
+    // channel has no connector, and eagerly injecting its Emitter makes every test/runtime
+    // scheduler attempt fail before this class can return at the feature gate.
+    @Channel("agent-audit-events-out") private val emitter: Instance<Emitter<Record<String, String>>>,
     @ConfigProperty(name = "agent.audit.kafka.enabled", defaultValue = "false") private val enabled: Boolean,
 ) {
     @Scheduled(
@@ -134,7 +138,7 @@ class AgentAuditOutboxDispatcher @Inject constructor(
         outbox.claim(BATCH_SIZE).forEach { row ->
             try {
                 Uni.createFrom().completionStage(
-                    emitter.send(Record.of(row.eventId.toString(), row.payload)),
+                    emitter.get().send(Record.of(row.eventId.toString(), row.payload)),
                 ).awaitSuspending()
                 outbox.published(row.eventId)
             } catch (
