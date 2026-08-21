@@ -35,11 +35,26 @@
 #   `const val SERVICE = "fx"` next to their `SOURCE_SERVICE = "fx-service"`, and picking the wrong
 #   one would produce a confident false verdict in either direction.
 #
-# PASS-THROUGH IS NOT A WRITE SITE
+# PASS-THROUGH IS NOT A WRITE SITE — BUT IT IS A WHITELIST, NOT A FALLBACK
 #   `"sourceService" to event.sourceService` (sepa-instant's publisher) and
 #   `node["sourceService"]?.asText()` (the audit/analytics consumers) copy a value someone else
 #   decided. They carry no literal, so they are not this check's subject; flagging them would make
 #   the gate noise and silence is the correct verdict.
+#
+#   The direction of the default is the load-bearing part. `_resolve` used to end in
+#   `return None, None`, so ANY expression it could not parse was reclassified as a pass-through:
+#   the site produced 0 findings AND 0 producers, so the module disappeared from the check
+#   entirely — invisible AND uncounted, which also put it beneath the MIN_PRODUCERS floor that is
+#   supposed to catch exactly this. Two ordinary Kotlin shapes reproduced it, and in both the
+#   module decides the value it emits:
+#       `"sourceService" to configuredSource`   // a @ConfigProperty-injected field
+#       `"sourceService" to sourceServiceName`  // a lowercase, non-`const` val
+#
+#   So the rule is now: a subject this gate cannot parse must never be indistinguishable from a
+#   subject that passed. Recognised pass-throughs (_PASSTHROUGH) are silent; everything else that
+#   cannot be resolved either FAILS, or appears in UNRESOLVED_ALLOWED with a written reason and is
+#   still COUNTED as a measured subject. Both lists are reverse ratchets, so neither can quietly
+#   outlive the code it describes.
 #
 # WHY LENDING IS AN EXCEPTION — A SETTLED DECISION, NOT DEBT
 #   `openbank-lending-service` emits "lending". That is DECIDED and kept (#5902): the boundary it
@@ -63,7 +78,8 @@
 # EXIT CODES
 #   0  every producer's emitted value equals its module directory name (modulo the baseline)
 #   1  a producer emits a value that is not its module name; or a write site whose value cannot be
-#      resolved; or a baseline entry that no longer matches anything (the reverse ratchet)
+#      resolved and is not an acknowledged skip; or a BASELINE / UNRESOLVED_ALLOWED entry that no
+#      longer matches anything (the reverse ratchet)
 #   2  the check could not run: the tree is missing, or fewer than --min-producers producers were
 #      found. Never conflated with 0 — an enumeration that finds nothing is a broken probe, not a
 #      clean fleet, and that is exactly how the original gap stayed invisible.
@@ -111,7 +127,11 @@ _KOTLIN_SITES = (
     # and a pattern without it enumerated 17 of the 21 producers while printing a confident OK —
     # the same "the probe cannot express the case, so it reports clean" failure this whole check
     # exists to close. The MIN_PRODUCERS floor below is what turned that into a visible number.
-    re.compile(r"\bsourceService\s*(?::\s*[A-Za-z_][A-Za-z0-9_.<>?]*\s*)?=\s*([^,)\n]+)"),
+    # `(?<![=!<>])=(?!=)` — an ASSIGNMENT, never a comparison. Without it,
+    # `if (envelope.sourceService == UNKNOWN_SERVICE)` parsed as a write site emitting
+    # "= UNKNOWN_SERVICE": the regex ate the first `=` as the assign and captured the rest.
+    # A comparison is a READ, and reporting one is the noise that gets a gate switched off.
+    re.compile(r"\bsourceService\s*(?::\s*[A-Za-z_][A-Za-z0-9_.<>?]*\s*)?(?<![=!<>])=(?!=)\s*([^,)\n]+)"),
     re.compile(r'"sourceService"\s+to\s+([^,)\n]+)'),
     re.compile(r'\bput\(\s*"sourceService"\s*,\s*([^,)\n]+)\)'),
 )
@@ -122,6 +142,40 @@ _STRING_LITERAL = re.compile(r'^"([^"]*)"$')
 _CONST_REF = re.compile(r"^(?:[A-Za-z_][A-Za-z0-9_]*\.)*([A-Z][A-Z0-9_]*)$")
 _INTERPOLATION = re.compile(r"^\$\{?(?:[A-Za-z_][A-Za-z0-9_]*\.)*([A-Z][A-Z0-9_]*)\}?$")
 _CONST_DECL = re.compile(r'\bconst\s+val\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*String\s*)?=\s*"([^"]*)"')
+
+# A RECOGNISED pass-through: the expression reads a `sourceService` that somebody else already
+# decided — `event.sourceService`, `cmd.payload?.sourceService`, a bare `sourceService` parameter.
+# This is a WHITELIST on purpose, and the direction matters more than the pattern: see _resolve.
+_PASSTHROUGH = re.compile(
+    r"^(?:"
+    # `event.sourceService`, `cmd.payload?.sourceService`, a bare `sourceService` parameter
+    r"(?:[A-Za-z_][A-Za-z0-9_]*\s*[?!]?\s*[.]\s*)*sourceService\s*[?!]*"
+    r"|"
+    # the inbound-envelope read the module header already names as a pass-through:
+    # `node["sourceService"]?.asText(`, `node.textOrNull("sourceService")`
+    r"[A-Za-z_][A-Za-z0-9_]*\s*(?:\[\s*\"sourceService\"\s*\]|\.\s*[A-Za-z_][A-Za-z0-9_]*\s*\(\s*\"sourceService\")"
+    r".*"
+    r")$",
+)
+
+# Write sites whose value this gate genuinely cannot resolve AND which have been looked at.
+# (module, expression) -> why it is knowingly skipped.
+#
+# This exists so an unresolvable site is COUNTED and NAMED rather than silently absent. It is a
+# reverse ratchet like BASELINE: an entry that stops matching is reported STALE, so the list
+# cannot quietly outlive the code it describes. Adding to it is a decision someone has to write
+# down — which is the property the old `return None, None` destroyed.
+UNRESOLVED_ALLOWED = {
+    ("openbank-audit-service", "resolvedSource.first"): (
+        "audit-service is the CONSUMER here, not a producer of its own claim. "
+        "`resolveSourceService(node, address)` (AuditConsumer.kt:218) returns the event's own "
+        "sourceService, else TopicAttribution's topic-derived value, else \"unknown\" — all three "
+        "are somebody else's attribution being copied onto the row. The pair is destructured "
+        "one line later into `sourceServiceSource`, which records WHICH of the three it was. "
+        "Not whitelisted by shape: `<val>.first` is far too generic to be a safe pass-through "
+        "pattern, so it is pinned to this module and this expression instead."
+    ),
+}
 
 
 def module_consts(module: pathlib.Path):
@@ -140,7 +194,27 @@ def module_consts(module: pathlib.Path):
 def _resolve(expr: str, consts):
     """(value, None) when the emitted value is knowable, (None, reason) when it is not.
 
-    (None, None) means "not a write site" — a pass-through of somebody else's value.
+    (None, None) means "not a write site" — a RECOGNISED pass-through of somebody else's value.
+
+    THE DEFAULT IS "REPORT", NOT "SKIP", AND THAT IS THE WHOLE POINT
+      This used to end in `return None, None`, so every expression the resolver could not parse
+      was silently reclassified as a pass-through. That made an unparseable write site produce
+      0 findings AND 0 producers — invisible AND uncounted, indistinguishable from a module that
+      genuinely conforms. Two shapes reproduced it, both of them ordinary Kotlin:
+
+        `"sourceService" to configuredSource`   // a @ConfigProperty-injected field
+        `"sourceService" to sourceServiceName`  // a lowercase, non-`const` val
+
+      Neither is a pass-through — the module decides the value in both — and either could have
+      emitted any spelling at all without this gate noticing. Worse, because the module was never
+      counted as a producer, the MIN_PRODUCERS floor could not see the loss either: the one
+      mechanism that exists here to catch a broken enumeration was itself blind to it.
+
+      So the pass-through set is now a WHITELIST (_PASSTHROUGH: an expression that reads a
+      `sourceService` somebody else set), and anything else that cannot be resolved is REPORTED
+      with the expression quoted. A subject the gate cannot parse must never be indistinguishable
+      from a subject that passed — if it cannot be resolved it fails, or it is counted as an
+      explicit skip with a reason. It is never silently absent.
     """
     expr = expr.strip().rstrip(",")
     lit = _STRING_LITERAL.match(expr)
@@ -157,19 +231,29 @@ def _resolve(expr: str, consts):
                 f"{len(values)} different values ({', '.join(sorted(values))}) — ambiguous"
             )
         return next(iter(values)), None
-    return None, None  # pass-through: event.sourceService, node[...], a parameter, ...
+    if _PASSTHROUGH.match(expr):
+        return None, None  # reads a sourceService someone else decided — not this module's claim
+    return None, (
+        f"value `{expr}` is not a string literal, a `const val` this module declares, or a "
+        f"recognised pass-through of somebody else's sourceService — this gate cannot tell what "
+        f"this producer emits. Emit a literal or a module-level `const val`, or extend "
+        f"_PASSTHROUGH in this script if it really is a pass-through."
+    )
 
 
 def scan(root):
-    """-> (findings, matched_baseline_keys, producers)
+    """-> (findings, matched_baseline_keys, producers, matched_skip_keys)
 
-    producers is the set of modules with at least one resolvable write site, i.e. the check's real
-    subject count. It is returned so the caller can refuse a vacuous run.
+    producers is the set of modules with at least one write site this check actually MEASURED —
+    resolved, or explicitly acknowledged as unresolvable. A site it could not parse and did not
+    acknowledge is a finding, never an absence, so the subject count can no longer shrink
+    silently when an idiom changes.
     """
     root = pathlib.Path(root)
     findings = []
     matched = set()
     producers = set()
+    matched_skips = set()
 
     for module in sorted(root.glob(f"{MODULE_PREFIX}*")):
         if not (module / "src" / "main").is_dir():
@@ -194,6 +278,13 @@ def scan(root):
                     if value is None:
                         if why is None:
                             continue  # pass-through, not a write site
+                        skip_key = (module.name, expr.strip().rstrip(","))
+                        if skip_key in UNRESOLVED_ALLOWED:
+                            # Acknowledged, and still COUNTED — an explicit skip is a measured
+                            # subject, unlike the silent one this replaced.
+                            matched_skips.add(skip_key)
+                            producers.add(module.name)
+                            continue
                         findings.append(f"{module.name}: {where} UNRESOLVED — {why}")
                         producers.add(module.name)
                         continue
@@ -208,7 +299,7 @@ def scan(root):
                         f'{module.name}: {where} emits sourceService="{value}", '
                         f'but the module directory says "{expected}"',
                     )
-    return findings, matched, producers
+    return findings, matched, producers, matched_skips
 
 
 # ---------------------------------------------------------------------------------------------
@@ -256,6 +347,38 @@ SELF_TEST_MODULES = {
         "A.kt": 'private const val SERVICE = "ambiguous-service"\nval m = mapOf("sourceService" to SERVICE)\n',
         "B.kt": 'private const val SERVICE = "something-else"\n',
     },
+    # THE TWO NEGATIVE CONTROLS THAT REPRODUCED THE PASS-THROUGH HOLE.
+    # Before the fix each of these produced 0 findings AND 0 producers: the value was unparseable,
+    # `_resolve` fell through to `return None, None`, and the module vanished from the check
+    # entirely — invisible AND uncounted, so even the MIN_PRODUCERS floor could not see the loss.
+    # Both are ordinary Kotlin, and in both the MODULE decides the value; neither is a pass-through.
+    "openbank-configprop-service": {
+        "E.kt": (
+            '@ConfigProperty(name = "openbank.audit.source-service")\n'
+            "lateinit var configuredSource: String\n"
+            'val m = mapOf("sourceService" to configuredSource)\n'
+        ),
+    },
+    "openbank-lowercaseval-service": {
+        "E.kt": (
+            'private val sourceServiceName = "totally-wrong"\n'
+            'val m = mapOf("sourceService" to sourceServiceName)\n'
+        ),
+    },
+    # Must NOT be flagged: a COMPARISON is a read. `sourceService == UNKNOWN_SERVICE` parsed as a
+    # write site emitting "= UNKNOWN_SERVICE" until the assignment pattern excluded `==`
+    # (live shape: analytics-sink's IngestAttributionMetrics).
+    "openbank-comparison-service": {
+        "E.kt": 'fun f(e: E) = e.sourceService == UNKNOWN_SERVICE\n',
+    },
+    # Must NOT be flagged: reading the field back off an inbound envelope, the shape the module
+    # header has always called a pass-through (analytics-sink / audit-service consumers).
+    "openbank-nodereader-service": {
+        "E.kt": (
+            'val a = node["sourceService"]?.asText() ?: UNKNOWN\n'
+            'val b = node.textOrNull("sourceService") ?: UNKNOWN\n'
+        ),
+    },
 }
 
 # module -> must it appear in the findings?
@@ -272,11 +395,27 @@ SELF_TEST_EXPECT = {
     "openbank-passthrough-service": False,
     "openbank-prose-only-service": False,
     "openbank-ambiguous-service": True,
+    "openbank-configprop-service": True,
+    "openbank-lowercaseval-service": True,
+    "openbank-comparison-service": False,
+    "openbank-nodereader-service": False,
 }
 
 # Modules with a resolvable write site. prose-only and passthrough must NOT be counted, or the
 # vacuity floor could be satisfied by modules the check never actually measured.
-SELF_TEST_PRODUCERS = {m for m in SELF_TEST_MODULES if m not in ("openbank-prose-only-service", "openbank-passthrough-service")}
+SELF_TEST_PRODUCERS = {
+    m
+    for m in SELF_TEST_MODULES
+    if m
+    not in (
+        "openbank-prose-only-service",
+        "openbank-passthrough-service",
+        # A comparison and an inbound read are not write sites, so neither makes its module a
+        # producer. They are here to prove the fix did not buy its strictness with noise.
+        "openbank-comparison-service",
+        "openbank-nodereader-service",
+    )
+}
 
 
 def _build_self_test_tree(root):
@@ -298,7 +437,7 @@ def self_test():
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _build_self_test_tree(root)
-            findings, _, producers = scan(root)
+            findings, _, producers, _ = scan(root)
 
             flagged = {m for m in SELF_TEST_EXPECT if any(f.startswith(m + ":") for f in findings)}
             for module, want in sorted(SELF_TEST_EXPECT.items()):
@@ -314,7 +453,7 @@ def self_test():
 
             # A baseline entry silences its own VALUE only.
             BASELINE = {("openbank-bad-literal-service", "bad-literal"): "self-test"}
-            f2, matched2, _ = scan(root)
+            f2, matched2, _, _ = scan(root)
             cases.append((
                 "baseline silences its own (module, value)",
                 not any(f.startswith("openbank-bad-literal-service:") for f in f2) and matched2 == set(BASELINE),
@@ -327,7 +466,7 @@ def self_test():
             # A baseline pinned to a DIFFERENT value from the same module must not silence it —
             # this is what stops the entry absorbing a future third spelling.
             BASELINE = {("openbank-bad-literal-service", "some-third-spelling"): "self-test"}
-            f3, matched3, _ = scan(root)
+            f3, matched3, _, _ = scan(root)
             cases.append((
                 "baseline pinned to another value does not silence the module",
                 any(f.startswith("openbank-bad-literal-service:") for f in f3),
@@ -337,7 +476,7 @@ def self_test():
             # Vacuity: an emptied tree must refuse, not pass.
             with tempfile.TemporaryDirectory() as empty:
                 BASELINE = {}
-                _, _, no_producers = scan(empty)
+                _, _, no_producers, _ = scan(empty)
                 cases.append(("empty tree yields zero producers", no_producers == set()))
                 cases.append((
                     "run() refuses a vacuous tree with exit 2",
@@ -365,12 +504,12 @@ def run(root, min_producers, quiet=False):
             print(f"::error::root {root} does not exist — the check could not run. This is NOT a pass.")
         return 2
 
-    findings, matched, producers = scan(root)
+    findings, matched, producers, matched_skips = scan(root)
 
     # Unconditional, and BEFORE the floor check: a gate that found its corpus and then failed on it
     # must not also be reported as having lost its corpus (gatelib.subjects' own rule).
     if not quiet:
-        gatelib.subjects(len(producers), "modules with a resolvable sourceService write site")
+        gatelib.subjects(len(producers), "modules with a measured sourceService write site (resolved, or acknowledged-unresolvable)")
 
     if len(producers) < min_producers:
         if not quiet:
@@ -383,8 +522,9 @@ def run(root, min_producers, quiet=False):
         return 2
 
     stale = [k for k in BASELINE if k not in matched]
+    stale_skips = [k for k in UNRESOLVED_ALLOWED if k not in matched_skips]
     if quiet:
-        return 1 if (findings or stale) else 0
+        return 1 if (findings or stale or stale_skips) else 0
 
     for f in findings:
         print(f"FAIL  {f}")
@@ -394,9 +534,17 @@ def run(root, min_producers, quiet=False):
             f"was fixed, renamed or removed.\n"
             f"       Remove it from BASELINE in this script so the list keeps meaning something.",
         )
-    if findings or stale:
+    for module, expr in stale_skips:
         print(
-            f"\n{len(findings)} non-conforming write site(s), {len(stale)} stale baseline entr(ies) "
+            f'STALE  acknowledged-unresolvable entry ({module}, "{expr}") no longer matches any '
+            f"write site — the code was fixed, moved or the resolver learned to read it.\n"
+            f"       Remove it from UNRESOLVED_ALLOWED in this script so the list keeps meaning "
+            f"something.",
+        )
+    if findings or stale or stale_skips:
+        print(
+            f"\n{len(findings)} non-conforming write site(s), {len(stale)} stale baseline "
+            f"entr(ies), {len(stale_skips)} stale acknowledged-unresolvable entr(ies) "
             f"across {len(producers)} producer(s).\n"
             f"The value must be the module directory name without the `{MODULE_PREFIX}` prefix "
             f"(#5256), because that is what audit-service's TopicAttribution fallback uses; a "
@@ -405,6 +553,7 @@ def run(root, min_producers, quiet=False):
         return 1
     print(
         f"sourceService convention: OK — {len(producers)} producer(s) checked, "
+        f"{len(matched_skips)} acknowledged-unresolvable site(s) skipped WITH a reason, "
         f"{len(BASELINE)} declared exception(s). See #5902 and BASELINE above: the exception is a "
         f"settled decision with a documented boundary, not pending work.",
     )
