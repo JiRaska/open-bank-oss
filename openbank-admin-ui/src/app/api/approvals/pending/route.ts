@@ -28,12 +28,11 @@ const NOT_CONFIGURED_SOURCES = {
   consent: 'not-configured',
   notification: 'not-configured',
   party: 'not-configured',
-  'sepa-instant': 'not-configured',
 } as const satisfies Record<string, SourceState>
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -60,6 +59,11 @@ type TransactionApproval = LendingApproval
 // that issue's own ordering). Before this, an `fx.convert` four-eyes decision parked at 202
 // was discoverable only by whoever had been handed its id out of band.
 type FxApproval = LendingApproval
+
+// sepa-instant-service serves the same libs `PendingApproval` shape (issue #5679, money-path
+// first per that issue's own ordering). Before this, an `sctInstPayment.recall` four-eyes
+// decision parked at 202 was discoverable only by whoever had been handed its id out of band.
+type SepaInstantApproval = LendingApproval
 
 // domestic-payment-service serves the same libs `PendingApproval` shape (issue #5679, money-path
 // first per that issue's own ordering). Before this, a `domestic-payment.transitionStatus`
@@ -250,6 +254,24 @@ async function sepaPaymentPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function sepaInstantPending(headers: HeadersInit): Promise<SourceResult> {
+  // k8s workload is `sepa-instant` (no `-service` suffix) — see the same footgun documented in
+  // app/payments/page.tsx (a `sepa-instant-service` key missed and pinned that panel to
+  // `not_deployed`).
+  const res = await fetch(serverSvcUrl('sepa-instant', 'payments', 8127, '/api/v1/sepa-instant/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as SepaInstantApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'sepa-instant' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -277,7 +299,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -287,9 +309,10 @@ export async function GET() {
     ledgerPending(headers).catch(() => unavailable),
     swiftPending(headers).catch(() => unavailable),
     sepaPaymentPending(headers).catch(() => unavailable),
+    sepaInstantPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -304,6 +327,7 @@ export async function GET() {
       ledger: ledger.state,
       swift: swift.state,
       'sepa-payment': sepaPayment.state,
+      'sepa-instant': sepaInstant.state,
       agent: agent.state,
     },
   })
