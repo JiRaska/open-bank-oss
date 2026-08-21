@@ -62,10 +62,6 @@ MIN_SHARED = 2
 # Spec-vs-domain drift that exists today, each with the issue that owns it.
 # Format: "<service>:<sorted spec values>" -> reason
 BASELINE: dict[str, str] = {
-    "openbank-account-service:ACTIVE,CLOSED,FROZEN,PENDING":
-        "#5962 — AccountStatus: spec-only PENDING; undeclared DORMANT/PENDING_ACTIVATION",
-    "openbank-account-service:APPROVED,CANCELLED,PENDING,REJECTED":
-        "#5962 — WithdrawalProposalStatus: undeclared EXPIRED",
     "openbank-campaign-service:BANNER,PUSH":
         "#5962 — Channel: undeclared EMAIL",
     "openbank-campaign-service:DRY_RUN,SENT,SUPPRESSED_CAP,SUPPRESSED_CONSENT,SUPPRESSED_QUIET_HOURS":
