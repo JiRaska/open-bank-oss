@@ -429,8 +429,11 @@ function FinOpsContent() {
             {t('Rozpad nákladů', 'Cost allocation')}
           </Link>
           <button
+            type="button"
             onClick={load}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit FinOps náklady', 'Refresh FinOps costs')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
