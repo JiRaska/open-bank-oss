@@ -39,6 +39,16 @@ THE RULES
       placeholder. A public FQDN is rejected. An env placeholder with NO default is rejected
       too: a residency claim whose target is supplied entirely at runtime cannot be verified
       from the repo, which is the same as unverified.
+  R4  The DEPLOYED value wins. R2's `${VAR:default}` is only what the service falls back to; the
+      value that reaches the pod is whatever `openbank-infra/gitops/**` sets for that env name.
+      This gate used to read `openbank-*/src/main/resources/application.yaml` and nothing else,
+      so a self-hosted entry with an in-cluster DEFAULT passed while gitops overrode the same
+      variable to a hosted US endpoint — measured: the gate printed "no self-hosted model entry
+      points off-cluster" and exited 0 for exactly that construction. The corpus now includes the
+      gitops env, and EVERY committed value of the variable must be in-cluster, not just the
+      default. A `valueFrom:` override (no literal in the repo) is reported for the same reason
+      R2 rejects a default-less placeholder: unverifiable from this repo is unverified.
+
   R3  `agents.yaml: model_gateway_as_built.routing` and the registered tiers must agree, in
       BOTH directions. `routing: none` while a self-hosted entry exists understates a live
       control; anything other than `none` while no self-hosted entry exists is the machine-
@@ -73,6 +83,41 @@ IN_CLUSTER = re.compile(
 ENV_PLACEHOLDER = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)(?::(.*))?\}$")
 
 
+# The deployed half of the corpus. DERIVED by walking every gitops manifest for container env
+# entries, so a new component is in scope the day it is committed — no hand-kept service list.
+GITOPS_ROOT = REPO / "openbank-infra" / "gitops"
+
+
+def _walk_env(node, path, out):
+    """Collect every container env entry anywhere in a manifest tree."""
+    if isinstance(node, dict):
+        env = node.get("env")
+        if isinstance(env, list):
+            for item in env:
+                if isinstance(item, dict) and isinstance(item.get("name"), str):
+                    out.setdefault(item["name"], []).append((path, item))
+        for v in node.values():
+            _walk_env(v, path, out)
+    elif isinstance(node, list):
+        for v in node:
+            _walk_env(v, path, out)
+
+
+def gitops_env_overrides() -> dict:
+    """{ENV_NAME: [(relpath, env_entry_dict), ...]} across every committed gitops manifest."""
+    out = {}
+    if not GITOPS_ROOT.is_dir():
+        return out
+    for src in sorted(GITOPS_ROOT.rglob("*.yaml")):
+        try:
+            docs = list(yaml.safe_load_all(src.read_text(encoding="utf-8")))
+        except yaml.YAMLError:
+            continue  # a Helm-templated or otherwise unparseable manifest sets no literal env
+        for doc in docs:
+            _walk_env(doc, str(src.relative_to(REPO)), out)
+    return out
+
+
 def is_self_hosted(raw) -> bool:
     return isinstance(raw, str) and raw.strip().lower() in SELF_HOSTED_SPELLINGS
 
@@ -87,34 +132,64 @@ def host_of(url: str) -> str | None:
     return authority.rsplit(":", 1)[0].strip("[]").lower() if ":" in authority else authority.lower()
 
 
-def endpoint_findings(entry_id: str, endpoint, where: str) -> list[str]:
-    """R1 + R2 for one entry. Returns one message per distinct problem."""
+def endpoint_findings(entry_id: str, endpoint, where: str, env_index: dict | None = None) -> list[str]:
+    """R1 + R2 + R4 for one entry. Returns one message per distinct problem."""
     if endpoint is None or (isinstance(endpoint, str) and not endpoint.strip()):
         return [f"{where}: model '{entry_id}' declares sensitivity self-hosted but has NO endpoint "
                 f"— the residency claim rests on nothing (R1)."]
     if not isinstance(endpoint, str):
         return [f"{where}: model '{entry_id}' has a non-string endpoint ({endpoint!r}) (R1)."]
 
+    findings: list[str] = []
     target = endpoint.strip()
     placeholder = ENV_PLACEHOLDER.match(target)
     if placeholder:
         var, default = placeholder.group(1), placeholder.group(2)
+        findings.extend(_deployed_findings(entry_id, var, where, env_index or {}))
         if default is None or not default.strip():
-            return [f"{where}: model '{entry_id}' is self-hosted but its endpoint is ${{{var}}} "
-                    f"with no default — the residency target is supplied entirely at runtime and "
-                    f"cannot be verified from this repo (R2)."]
+            findings.append(
+                f"{where}: model '{entry_id}' is self-hosted but its endpoint is ${{{var}}} "
+                f"with no default — the residency target is supplied entirely at runtime and "
+                f"cannot be verified from this repo (R2).")
+            return findings
         target = default.strip()
 
     host = host_of(target)
     if host is None:
-        return [f"{where}: model '{entry_id}' is self-hosted but its endpoint '{target}' is not a "
-                f"URL this gate can resolve to a host (R2)."]
+        findings.append(f"{where}: model '{entry_id}' is self-hosted but its endpoint '{target}' is not a "
+                        f"URL this gate can resolve to a host (R2).")
+        return findings
     if not IN_CLUSTER.match(host):
-        return [f"{where}: model '{entry_id}' declares sensitivity self-hosted but its endpoint "
-                f"resolves to '{host}', which is NOT in-cluster. Sensitive-context prompts routed "
-                f"to it leave the cluster — and every layer above still reports the residency "
-                f"control as working (R2)."]
-    return []
+        findings.append(f"{where}: model '{entry_id}' declares sensitivity self-hosted but its endpoint "
+                        f"resolves to '{host}', which is NOT in-cluster. Sensitive-context prompts routed "
+                        f"to it leave the cluster — and every layer above still reports the residency "
+                        f"control as working (R2).")
+        return findings
+    return findings
+
+
+def _deployed_findings(entry_id: str, var: str, where: str, env_index: dict) -> list[str]:
+    """R4 — every committed gitops value of `var` must also be in-cluster."""
+    out = []
+    for relpath, item in env_index.get(var, []):
+        if "value" in item:
+            value = item["value"]
+            if not isinstance(value, str) or not value.strip():
+                continue
+            host = host_of(value.strip())
+            if host is None or IN_CLUSTER.match(host):
+                continue
+            out.append(
+                f"{where}: model '{entry_id}' is self-hosted and its endpoint falls back to an "
+                f"in-cluster default, but {relpath} sets {var}={value.strip()} — the DEPLOYED "
+                f"target resolves to '{host}', which is NOT in-cluster. The default is not what "
+                f"reaches the pod (R4).")
+        elif "valueFrom" in item:
+            out.append(
+                f"{where}: model '{entry_id}' is self-hosted and {relpath} supplies {var} via "
+                f"valueFrom — the deployed residency target is not committed anywhere in this "
+                f"repo, so it cannot be verified (R4).")
+    return out
 
 
 def walk_model_gateways(node, where: str, path: str = "") -> list[tuple[str, list]]:
@@ -134,14 +209,16 @@ def walk_model_gateways(node, where: str, path: str = "") -> list[tuple[str, lis
     return found
 
 
-def audit_models(models: list, where: str) -> tuple[list[str], int]:
-    """R1+R2 over one models list. Returns (findings, self_hosted_count)."""
+def audit_models(models: list, where: str, env_index: dict | None = None) -> tuple[list[str], int]:
+    """R1+R2+R4 over one models list. Returns (findings, self_hosted_count)."""
     findings, count = [], 0
     for entry in models or []:
         if not isinstance(entry, dict) or not is_self_hosted(entry.get("sensitivity")):
             continue
         count += 1
-        findings.extend(endpoint_findings(str(entry.get("id", "<unnamed>")), entry.get("endpoint"), where))
+        findings.extend(
+            endpoint_findings(str(entry.get("id", "<unnamed>")), entry.get("endpoint"), where, env_index)
+        )
     return findings, count
 
 
@@ -163,6 +240,7 @@ def audit_routing_record(routing, self_hosted_total: int) -> list[str]:
 def audit() -> list[str]:
     findings, self_hosted_total = [], 0
     sources = sorted(REPO.glob("openbank-*/src/main/resources/application.yaml"))
+    env_index = gitops_env_overrides()
     for src in sources:
         try:
             data = yaml.safe_load(src.read_text()) or {}
@@ -170,7 +248,7 @@ def audit() -> list[str]:
             findings.append(f"{src.relative_to(REPO)}: unparseable YAML ({exc.__class__.__name__}).")
             continue
         for where, models in walk_model_gateways(data, str(src.relative_to(REPO))):
-            f, n = audit_models(models, where)
+            f, n = audit_models(models, where, env_index)
             findings.extend(f)
             self_hosted_total += n
 
@@ -220,6 +298,33 @@ def self_test() -> int:
         ("a non-dict entry does not crash the walk", ["nonsense"], 0),
         ("an empty list is clean", [], 0),
     ]
+    # R4 — the deployed value wins over the default. Each case carries its own env index, so the
+    # rule is falsified against a synthetic gitops override rather than against today's tree
+    # (which registers no self-hosted tier at all, and would make every case vacuously green).
+    deployed_cases = [
+        ("an in-cluster default overridden by gitops to a US host is REJECTED",
+         [{"id": "v", "sensitivity": "self-hosted", "endpoint": "${EU_EP:http://vllm.ai-platform.svc:8000}"}],
+         {"EU_EP": [("gitops/x.yaml", {"name": "EU_EP", "value": "https://api.us.example.com/v1"})]}, 1),
+        ("an in-cluster default overridden by gitops to another in-cluster host passes",
+         [{"id": "v", "sensitivity": "self-hosted", "endpoint": "${EU_EP:http://vllm.ai-platform.svc:8000}"}],
+         {"EU_EP": [("gitops/x.yaml", {"name": "EU_EP", "value": "http://vllm.copilot.svc:8000"})]}, 0),
+        ("a gitops valueFrom override is REJECTED — the deployed target is not in this repo",
+         [{"id": "v", "sensitivity": "self-hosted", "endpoint": "${EU_EP:http://vllm.ai-platform.svc:8000}"}],
+         {"EU_EP": [("gitops/x.yaml", {"name": "EU_EP", "valueFrom": {"secretKeyRef": {"name": "s"}}})]}, 1),
+        ("an override of a DIFFERENT variable is not attributed to this entry",
+         [{"id": "v", "sensitivity": "self-hosted", "endpoint": "${EU_EP:http://vllm.ai-platform.svc:8000}"}],
+         {"OTHER_EP": [("gitops/x.yaml", {"name": "OTHER_EP", "value": "https://api.us.example.com/v1"})]}, 0),
+        ("a literal (non-placeholder) endpoint is unaffected by any gitops env",
+         [{"id": "v", "sensitivity": "self-hosted", "endpoint": "http://vllm.ai-platform.svc:8000"}],
+         {"EU_EP": [("gitops/x.yaml", {"name": "EU_EP", "value": "https://api.us.example.com/v1"})]}, 0),
+        ("two overrides, one off-cluster, reports the off-cluster one",
+         [{"id": "v", "sensitivity": "self-hosted", "endpoint": "${EU_EP:http://vllm.ai-platform.svc:8000}"}],
+         {"EU_EP": [("gitops/a.yaml", {"name": "EU_EP", "value": "http://vllm.copilot.svc:8000"}),
+                    ("gitops/b.yaml", {"name": "EU_EP", "value": "https://api.us.example.com/v1"})]}, 1),
+        ("the real gitops walk finds the agent-service endpoint variable at all",
+         None, None, None),
+    ]
+
     routing_cases = [
         ("routing 'none' with no tier is today's honest state", "none", 0, 0),
         ("routing 'none' while a tier IS registered is record drift", "none", 1, 1),
@@ -237,6 +342,20 @@ def self_test() -> int:
     ]
 
     failed = 0
+    for name, models, env_index, expected in deployed_cases:
+        if models is None:
+            # Not a rule case: a floor on the CORPUS itself. A walk that finds no env at all
+            # would make every case above vacuous against the real tree, and print nothing.
+            idx = gitops_env_overrides()
+            got, expected_desc = len(idx), ">0 env names across gitops"
+            ok = got > 0
+            print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {expected_desc}, got {got})")
+        else:
+            got = len(audit_models(models, "test", env_index)[0])
+            ok = got == expected
+            print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {expected}, got {got})")
+        failed += 0 if ok else 1
+
     for name, models, expected in model_cases:
         got = len(audit_models(models, "test")[0])
         ok = got == expected
@@ -253,7 +372,7 @@ def self_test() -> int:
         failed += not ok
         print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {expected}, got {got})")
 
-    total = len(model_cases) + len(routing_cases) + len(walk_cases)
+    total = len(model_cases) + len(routing_cases) + len(walk_cases) + len(deployed_cases)
     print(f"self-test: {total - failed}/{total} passed")
     return 1 if failed else 0
 
