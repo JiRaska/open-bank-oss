@@ -605,12 +605,20 @@ export default function RegulatoryPage() {
 
             {/* Footer: note + export actions */}
             <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}>
-                {!exportReadiness.ok && (() => {
+              <div
+                role="status"
+                data-testid="export-readiness"
+                style={{ fontSize: '11px', color: 'var(--text-tertiary)', maxWidth: '320px' }}
+              >
+                {exportReadiness.ok ? (
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--success)' }}>
+                    <CheckCircle2 size={14} aria-hidden="true" style={{ flexShrink: 0, marginTop: '1px' }} />
+                    <strong>{t('Připraveno pro interní export', 'Ready for internal export')}</strong>
+                  </div>
+                ) : (() => {
                   const copy = blockReasonCopy(exportReadiness.reason, exportReadiness.templateIds, t('cs', 'en') as 'cs' | 'en')
                   return (
                     <div
-                      role="status"
                       data-testid="export-blocked"
                       data-block-reason={exportReadiness.reason}
                       style={{ display: 'flex', gap: '8px', alignItems: 'flex-start', marginBottom: '8px', color: 'var(--danger)' }}

@@ -88,7 +88,7 @@ describe('Regulatory report preview', () => {
 
     const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
     fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
-    await waitFor(() => expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Export blocked.*datové mezery/i))
+    await waitFor(() => expect(screen.getByTestId('export-readiness')).toHaveTextContent(/Export blocked.*incomplete data/i))
     expect(screen.getByRole('button', { name: 'Export JSON' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Export CSV' })).toBeDisabled()
   })
