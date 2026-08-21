@@ -541,6 +541,29 @@ gates:
     run: |
       python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
 
+  # A route prefix moves Alertmanager's WHOLE HTTP surface, /api/v2/alerts included, so a
+  # hand-configured client pointed at the bare service URL posts every notification into a 404
+  # and drops it. ENFORCED.
+  - id: alertmanager-url-route-prefix
+    name: "Alertmanager URL carries the route prefix it serves under (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Measured live 2026-08-21, the first time a Loki rule ever fired in this estate: the ruler
+      reported `state: firing` while Alertmanager held zero such alerts, and
+      loki_prometheus_notifications_errors_total equalled sent_total exactly — 10 of 10 dropped.
+      A firing rule that 404s at delivery is indistinguishable from a rule that never fired on
+      every dashboard here. A comment was not enough: apps/kube-prometheus-stack.yaml already
+      said "routePrefix moves the whole HTTP surface, INCLUDING /api/v2/alerts" eleven lines
+      above the value, and the change adding the ruler's URL still wrote the bare one.
+    review_after: "2027-02-21"
+    min_subjects: 1   # only the Loki ruler is hand-configured today; operator-managed
+                      # Prometheus gets its pathPrefix from alertingEndpoints and is not a subject
+    selftest: |
+      python3 .github/scripts/check-alertmanager-url-route-prefix.py --selftest
+    run: |
+      python3 .github/scripts/check-alertmanager-url-route-prefix.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
