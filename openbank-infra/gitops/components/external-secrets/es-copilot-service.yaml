@@ -3,7 +3,14 @@
 # in-cluster gateway, NOT to the provider — the DeepInfra key now lives only in ai-platform (#1919).
 # Sourced from OpenBao KV path `openbank/litellm`, property `KEY_COPILOT_SERVICE` — copilot's OWN
 # virtual key with its own daily budget, not the shared master key (see the data entry below).
-# (No OIDC secret: copilot validates the customer JWT bearer-only via JWKS — no client secret.)
+#
+# OIDC_CLIENT_SECRET is new here (ADR-0269 slice 4): ConsentQueryClient and CreditProfileReadClient
+# register OidcClientRequestReactiveFilter to mint a client-credentials token for the two calls
+# that do not propagate the customer's own bearer. Same shared-KV convention as every other
+# OIDC_CLIENT_SECRET projection (rules.yaml: oidc_secret_convention, issue #3485) — the fleet has
+# exactly one Keycloak confidential client (`openbank-services`), so this reads the SAME
+# `account-service`/`OIDC_CLIENT_SECRET` KV entry every other projection does, not a copilot-owned
+# secret that does not exist.
 apiVersion: external-secrets.io/v1beta1
 kind: ExternalSecret
 metadata:
@@ -35,3 +42,7 @@ spec:
       remoteRef:
         key: litellm
         property: KEY_COPILOT_SERVICE
+    - secretKey: OIDC_CLIENT_SECRET
+      remoteRef:
+        key: account-service
+        property: OIDC_CLIENT_SECRET

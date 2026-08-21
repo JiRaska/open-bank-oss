@@ -68,6 +68,21 @@ quarkus:
     tls:
       verification: ${OIDC_TLS_VERIFICATION:none}
 
+  # Client-credentials principal for the two calls that do NOT propagate the customer's own
+  # bearer (see the rule-5 comment below): ConsentQueryClient and CreditProfileReadClient both
+  # register OidcClientRequestReactiveFilter, which mints from THIS block, not the resource-server
+  # `oidc:` block above. Same client-id/secret/issuer as the fleet's other internal service callers
+  # (e.g. openbank-agent-service's oidc-client).
+  oidc-client:
+    auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-services
+    credentials:
+      secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
+    tls:
+      verification: ${OIDC_TLS_VERIFICATION:none}
+
   # READ tools call the customer edge (ADR-0065) AS the customer — the inbound bearer is propagated
   # (ADR-0089 D5); the edge is ROLE_CUSTOMER and enforces ownership, so the assistant only ever reaches
   # the caller's own data. (Calling internal domain services directly would 403 — they want SERVICE roles.)
