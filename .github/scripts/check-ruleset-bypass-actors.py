@@ -42,12 +42,23 @@ Two directions are checked, and both matter:
                                                    declaration is how a pinned list quietly
                                                    stops describing anything
 
-WHY THE LIVE RULESET IS THE SUBJECT, AND WHY NO TOKEN IS NEEDED
+WHY THE LIVE RULESET IS THE SUBJECT, AND WHAT THE TOKEN CAN ACTUALLY SEE
 -----------------------------------------------------------------
 Read live, never from a checked-in copy — a hand-kept mirror diffed only when someone
 remembers is this repo's most-repeated defect class. `GET /repos/{owner}/{repo}/rulesets`
-and `GET .../rulesets/{id}` are world-readable on a public repository, and `bypass_actors`
-is included in the detail response. Do NOT add `permissions: administration: read` to the
+and `GET .../rulesets/{id}` are world-readable on a public repository — but `bypass_actors`
+is NOT. An earlier version of this header claimed it was included in the detail response;
+that was wrong, and measuring it is what found the bug. On 2026-08-21, unauthenticated:
+
+    GET /repos/JiRaska/open-bank-oss/rulesets/18325357
+    keys: _links conditions created_at enforcement id name node_id rules source
+          source_type target updated_at          # no `bypass_actors`
+
+while the same call with an admin token returns `RepositoryRole#5 (pull_request)`. The
+field is OMITTED for a non-admin reader, not returned empty — so `detail.get(..., [])`
+silently reports "no bypass actors" to anyone who may not see them, which in CI is every
+run. `live_bypass_actors` therefore treats a MISSING key as unreadable and raises. Do NOT
+add `permissions: administration: read` to the
 job: `administration` is not a valid workflow-permissions key at all, and GitHub cannot
 parse a workflow that declares one — it broke `ci.yml` outright (zero jobs, every push)
 when `check-ruleset-context-parity.py` tried it. That sibling script's header has the full
@@ -125,7 +136,23 @@ def live_bypass_actors(repo: str) -> list[tuple[int, str, str]]:
         include = detail.get("conditions", {}).get("ref_name", {}).get("include", [])
         if TARGET_REF not in include and "~DEFAULT_BRANCH" not in include and "~ALL" not in include:
             continue
-        for actor in detail.get("bypass_actors", []):
+        # A NON-ADMIN read of a ruleset OMITS `bypass_actors` entirely — it does not return an
+        # empty list. Measured 2026-08-21 against this repo: an unauthenticated
+        # `GET /repos/JiRaska/open-bank-oss/rulesets/18325357` returns no `bypass_actors` key at
+        # all, while an admin read returns `RepositoryRole#5 (pull_request)`. Defaulting the
+        # missing key to `[]` therefore reads "I may not see this" as "there are none", which
+        # breaks the gate in BOTH directions: it reports every correct declaration as stale, and
+        # — far worse — a real widening also arrives as zero actors, so the one thing this gate
+        # exists to catch could never make it fire. CI runs with GITHUB_TOKEN, which is not an
+        # admin, so that was every CI run. Fail as unreadable instead.
+        if "bypass_actors" not in detail:
+            raise RuntimeError(
+                f"ruleset {summary['id']} ({summary.get('name')}) returned no `bypass_actors` "
+                f"field — the token cannot see bypass actors (admin scope required), so this "
+                f"gate CANNOT be evaluated. Not a finding: an unreadable subject is UNRESOLVED, "
+                f"never 'zero actors'. Run it with an admin token, or skip it where none exists."
+            )
+        for actor in detail["bypass_actors"]:
             out.append(
                 (
                     int(actor.get("actor_id") or 0),
@@ -180,6 +207,35 @@ def self_test() -> int:
     )
     case("an empty ruleset with an empty declaration is clean", [], [], [], [])
     case("both directions are reported at once", [a_bot], [admin], [a_bot], [admin])
+
+    # An UNREADABLE ruleset must raise, never resolve to "no bypass actors". Without this the
+    # gate is vacuous for its own purpose: a non-admin token sees no `bypass_actors` key, so a
+    # real widening arrives looking exactly like an empty bypass list, and the gate reports the
+    # honest declaration as stale instead of reporting that it could not look.
+    def _fake_detail(payload):
+        def fake(path):
+            if path.endswith("/rulesets"):
+                return [{"id": 1, "enforcement": "active", "target": "branch", "name": "x"}]
+            return payload
+        return fake
+
+    _real = globals()["gh_api"]
+    try:
+        globals()["gh_api"] = _fake_detail(
+            {"conditions": {"ref_name": {"include": [TARGET_REF]}}}  # no bypass_actors key
+        )
+        try:
+            live_bypass_actors("o/r")
+            fails.append("an unreadable ruleset (no bypass_actors key) must RAISE, not return []")
+        except RuntimeError:
+            pass
+        globals()["gh_api"] = _fake_detail(
+            {"conditions": {"ref_name": {"include": [TARGET_REF]}}, "bypass_actors": []}
+        )
+        if live_bypass_actors("o/r") != []:
+            fails.append("a genuinely EMPTY bypass_actors list must resolve to [], not raise")
+    finally:
+        globals()["gh_api"] = _real
 
     # The gate must be able to FAIL on the real declared set — a self-test that only ever
     # exercises the clean case cannot tell a working comparison from `return [], []`.
