@@ -16,7 +16,7 @@
 // the coverage table; an `event` node is a message catch/throw point. This is
 // what the old hardcoded page could not express (it had a single dashed edge and
 // no event nodes), so the heavily event-driven reality (outbox + Kafka,
-// ADR-0050/0073) was invisible.
+// ADR-0003/0050) was invisible.
 // ---------------------------------------------------------------------------
 
 import { useState } from 'react'
