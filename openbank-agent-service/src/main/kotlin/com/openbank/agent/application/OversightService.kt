@@ -12,6 +12,8 @@ import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
@@ -60,7 +62,24 @@ class OversightService {
     @Scheduled(cron = "{agent.oversight.cron}", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     suspend fun scheduledSweep() {
         if (!enabled) return
-        sweep(trigger = "scheduled")
+        // withContext(Dispatchers.IO), and the reason is the opposite of the usual one in this
+        // fleet. A `suspend` @Scheduled method is dispatched on a duplicated VERT.X context — which
+        // is exactly right for reactive Panache, and exactly wrong here: this service has no
+        // reactive datasource (jdbc-postgresql + narayana), and the sweep's collaborators are
+        // BLOCKING REST clients. On the event loop each of them throws
+        // `BlockingNotAllowedException`, so measured on the sandbox 2026-08-21 every scheduled
+        // sweep did this:
+        //   BlockedThreadChecker: event-loop-thread-0 blocked for 19s
+        //   Tool call failed: sanctions_list_pending: BlockingNotAllowedException
+        //   OPA decision query failed ... failing closed: BlockingNotAllowedException
+        //   agent policy BLOCK but PDP errored — falling back to ADVISORY
+        // The last line is the damage: the PDP is unreachable for reasons that have nothing to do
+        // with OPA, so ENFORCEMENT SILENTLY DOWNGRADES on every sweep while the run still reports
+        // "oversight sweep done" and the liveness heartbeat still records success.
+        //
+        // Only the SCHEDULED path needs this. A sweep triggered over HTTP or Kafka already arrives
+        // on a worker thread; wrapping there would add a hop for nothing.
+        withContext(Dispatchers.IO) { sweep(trigger = "scheduled") }
         liveness?.recordSuccess()
     }
 
