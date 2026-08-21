@@ -2234,6 +2234,42 @@ gates:
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
 
+  # openapi enum vs the Kotlin enum behind it (issue #5895 / #5962, enforced).
+  #
+  # The axis the api-contract gate below structurally CANNOT see: oasdiff compares a spec to its
+  # own previous version, never to the implementation. So a spec enum hand-written once and never
+  # re-checked drifts forever and every gate stays green. openbank-kyc-service published
+  # `[IDENTITY, SANCTIONS, PEP, ADVERSE_MEDIA, SOURCE_OF_FUNDS]` against a domain
+  # `CheckType { IDENTITY, ADDRESS, PEP_SCREENING, SANCTIONS_SCREENING, ADVERSE_MEDIA }` from the
+  # day the file was written — three names misspelled, one real check unpublished, and one value
+  # that has never existed in the code. Its own PUT body was fiction in the same way.
+  #
+  # Pairing is by VALUE OVERLAP, not by name: nothing declares which Kotlin enum a spec enum
+  # serves, and matching on names would find almost none of them. An unpaired spec enum is not a
+  # finding (many are free-form vocabularies with no Kotlin type).
+  #
+  # RATCHET: the 27 drifts across 16 services that exist today are a BASELINE constant in the
+  # script (owned by #5962), so this is enforced from day one and number 28 is red at PR time. A
+  # baseline entry that no longer drifts also FAILS, so the list cannot rot into furniture — same
+  # contract as check-pact-provider-replay.py and check-adr-partial-followup.py above.
+  - id: openapi-enum-domain-drift
+    name: "openapi enum matches the domain enum it serves (issue #5962, enforced)"
+    group: api
+    mode: enforced
+    rationale: >
+      oasdiff compares a spec to its own previous version and never to the implementation, so a
+      spec enum hand-written once and never re-checked drifts forever with every gate green.
+      openbank-kyc-service published three misspelled check names, omitted a real check, and
+      advertised a value (SOURCE_OF_FUNDS) that has never existed in the code — from the day the
+      file was written until #5895, and 27 more pairings across 16 services still do (#5962).
+    review_after: '2027-02-20'
+    min_subjects: 100
+    selftest: |
+      python3 .github/scripts/check-openapi-enum-vs-domain.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-openapi-enum-vs-domain.py --enforce
+
   # ADR-0048 D5: api-contract gate — classify the API-contract bump from the
   # OpenAPI diff (oasdiff), independently of the release axis (version.txt):
   #   breaking  => info.version MAJOR (new URL major /api/v{N+1})
