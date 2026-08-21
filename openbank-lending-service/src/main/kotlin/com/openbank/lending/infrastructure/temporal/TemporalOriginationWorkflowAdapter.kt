@@ -5,6 +5,7 @@
 package com.openbank.lending.infrastructure.temporal
 
 import com.openbank.lending.application.port.out.OriginationWorkflowPort
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.application.workflow.OriginationTimersWorkflow
 import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.lending.origination.OriginationState
@@ -25,6 +26,10 @@ import org.jboss.logging.Logger
  * running, which is the normal signal path), then signals every subsequent state.
  * Build-time gated on `openbank.temporal.enabled`; the offline default is the no-op.
  */
+// `@Unremovable` because a test asserts this bean's PRESENCE
+// (OriginationWorkflowAdapterBindingIT, #6085); unused-bean removal is deliberately NOT disabled,
+// so the absence assertion in the inert half has exactly one possible cause: the build-time gate.
+@io.quarkus.arc.Unremovable
 @ApplicationScoped
 @Alternative
 @Priority(1)
@@ -45,7 +50,7 @@ class TemporalOriginationWorkflowAdapter(
         applicationId: LoanApplicationId,
         state: OriginationState,
         reflectionPeriodDays: Int?,
-    ): Uni<Unit> = Uni.createFrom().item {
+    ): Uni<TimerArmingOutcome> = Uni.createFrom().item {
         val stub = client.newWorkflowStub(
             OriginationTimersWorkflow::class.java,
             WorkflowOptions.newBuilder()
@@ -59,6 +64,6 @@ class TemporalOriginationWorkflowAdapter(
             log.debugf("origination timers already running for %s: %s", applicationId.value, duplicate.message)
         }
         stub.stateEntered(state.name, reflectionPeriodDays)
-        Unit
+        TimerArmingOutcome.ARMED
     }
 }

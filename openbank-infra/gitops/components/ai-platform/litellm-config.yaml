@@ -35,27 +35,42 @@ data:
           input_cost_per_token: 0.00000026
           output_cost_per_token: 0.00000038
       # agent-service's admin-UI assistant model (#1919). It sends `model-gateway.models[].id`
-      # verbatim, so the model_name MUST stay `llama-3.3-70b-versatile` — that is what repointing
-      # agent-service at this gateway costs: an endpoint + key change, nothing else. The Groq key
-      # is projected here from the SAME OpenBao path agent-service used to read it from, so the
-      # provider credential moves into this pod rather than being duplicated (ADR-0175).
+      # verbatim, so the model_name MUST stay `llama-3.3-70b-versatile` — the caller-facing id is
+      # part of the contract with agent-service and the admin-UI model picker, and only the
+      # PROVIDER behind it moves.
+      #
+      # PROVIDER IS DEEPINFRA, NOT GROQ, AND THAT WAS MEASURED (#5736). Groq has decommissioned
+      # `llama-3.3-70b-versatile`. Its live catalogue is 13 models and does not contain it; asked
+      # for it anyway, Groq answers 404:
+      #   {"error":{"message":"The model `llama-3.3-70b-versatile` does not exist or you do not
+      #    have access to it.","type":"invalid_request_error","code":"model_not_found"}}
+      # This is the SECOND time a Groq id in this file died under us — the llama-guard route below
+      # went the same way — so read a Groq model id here as a claim about someone else's catalogue
+      # with a shelf life, never as a constant. The discriminator that matters: a dead KEY answers
+      # 401/403 on every model, a dead MODEL answers 404 on one while its siblings still return
+      # 200. Both were probed from inside this pod before this line changed.
+      #
+      # DeepInfra serves the same weights as `meta-llama/Llama-3.3-70B-Instruct-Turbo` (confirmed
+      # present in its 185-model catalogue), on the DeepInfra key already projected here — so this
+      # is a provider move, not a model substitution, and it adds no new secret.
       - model_name: llama-3.3-70b-versatile
         litellm_params:
-          model: groq/llama-3.3-70b-versatile
-          api_key: os.environ/GROQ_API_KEY
+          model: deepinfra/meta-llama/Llama-3.3-70B-Instruct-Turbo
+          api_key: os.environ/DEEPINFRA_API_KEY
           # Lower ceiling: this route serves only agent-service's admin-UI assistant, a single
           # interactive surface, where the ops models serve every scheduled agent. A shared ceiling
           # would let a runaway ops loop starve the interactive one, or vice versa.
           max_budget: 5
           budget_duration: 1d
-          # Declared for the same reason, even though LiteLLM's built-in map DOES currently price
-          # this model correctly (it reported 5.9e-07 / 7.9e-07, matching Groq's published
-          # $0.59 / $0.79 per million tokens). Relying on that is relying on a table inside a
-          # pinned dependency: a version bump that drops or renames the entry silently returns to
-          # costing every call $0 — the same failure as above, and equally silent. In git the
-          # number is auditable and a gate can check it.
-          input_cost_per_token: 0.00000059
-          output_cost_per_token: 0.00000079
+          # Declared, not inherited — the same reasoning as DeepSeek above, and now with a second
+          # reason: the price that used to sit here was GROQ's, and it survived the provider being
+          # dead. A price map keyed by a model id cannot notice that the id no longer resolves, so
+          # it would have kept costing a route that returned nothing but 404s.
+          # DeepInfra's own published price for this model
+          # (api.deepinfra.com/models/meta-llama/Llama-3.3-70B-Instruct-Turbo:
+          # cents_per_input_token 1e-05, cents_per_output_token 3.2e-05), cents -> USD per token.
+          input_cost_per_token: 0.0000001
+          output_cost_per_token: 0.00000032
       # Content-safety classifier (ADR-0031 guardrails). Groq serves Llama Guard 4 on the same key
       # already projected here, so this adds a route and no new provider, no new secret and no GPU.
       # Callers send `meta-llama/llama-guard-4-12b` verbatim (copilot `content-safety.model`).

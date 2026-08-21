@@ -45,6 +45,10 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
+    // Real-HTTP stand-in for balance-service so the reversal adapters' REST calls actually leave
+    // the process in SettlementReversalIT (#6037) — a mocked port cannot prove a money movement
+    // was addressed to anyone. Same use as sepa-payment's simulator resources.
+    testImplementation(libs.wiremock.standalone)
 }
 
 kover {

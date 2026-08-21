@@ -17,6 +17,7 @@ import com.openbank.sepa.application.port.out.SepaPaymentEventPublisher
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.application.workflow.SepaPaymentWorkflow
+import com.openbank.sepa.domain.event.RETURN_EVIDENCE_EVENT_TYPE
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaRejectReason
@@ -132,26 +133,42 @@ class SepaPaymentService(
         return received
     }
 
+    /**
+     * @param evidencePayload when non-null, a non-repudiation record written into the outbox in the
+     * SAME transaction as the transition (issue #6056). Only the `/returns` path supplies one today.
+     */
     private suspend fun persistTransition(
         payment: SepaPayment,
         target: SepaPaymentStatus,
         reason: SepaRejectReason?,
         detail: String?,
         transactionId: UUID? = payment.transactionId,
+        evidencePayload: String? = null,
     ): SepaPayment {
         val now = Instant.now(clock)
         val updated = payment.transitionTo(target, reason, detail, clock).let {
             if (transactionId != null) it.copy(transactionId = transactionId) else it
         }
-        val saved = paymentRepository.update(
-            payment = updated,
-            outboxMessage = SepaPaymentOutboxMessage(
-                aggregateId = updated.id,
-                eventType = PAYMENT_STATUS_CHANGED_EVENT,
-                payload = eventPublisher.statusChangedPayload(payment, updated),
-                createdAt = now,
-            ),
+        val statusMessage = SepaPaymentOutboxMessage(
+            aggregateId = updated.id,
+            eventType = PAYMENT_STATUS_CHANGED_EVENT,
+            payload = eventPublisher.statusChangedPayload(payment, updated),
+            createdAt = now,
         )
+        val saved = if (evidencePayload == null) {
+            paymentRepository.update(payment = updated, outboxMessage = statusMessage)
+        } else {
+            paymentRepository.updateWithEvidence(
+                payment = updated,
+                outboxMessage = statusMessage,
+                evidenceMessage = SepaPaymentOutboxMessage(
+                    aggregateId = updated.id,
+                    eventType = RETURN_EVIDENCE_EVENT_TYPE,
+                    payload = evidencePayload,
+                    createdAt = now,
+                ),
+            )
+        }
 
         val terminalOutcomes = setOf(
             SepaPaymentStatus.COMPLETED,
@@ -234,6 +251,7 @@ class SepaPaymentService(
         if (payment.status == SepaPaymentStatus.RETURNED) return payment
 
         val txId = payment.transactionId
+        var reversalPerformed = false
         if (txId != null) {
             try {
                 reversalPort.reverseTransaction(
@@ -241,6 +259,7 @@ class SepaPaymentService(
                     idempotencyKey = "sepa-reversal-${payment.id}",
                     reason = returnMsg.returnReasonCode ?: "return",
                 )
+                reversalPerformed = true
             } catch (ex: ReversalUnavailableException) {
                 log.warnf(
                     ex,
@@ -260,6 +279,18 @@ class SepaPaymentService(
             SepaPaymentStatus.RETURNED,
             null,
             returnMsg.returnReasonCode,
+            // The evidence record and the transition commit together (issue #6056). `reversalPerformed`
+            // is the measured outcome of the call above, not the intent — an evidence record that
+            // claims a reversal a `ReversalUnavailableException` prevented would be worse than none.
+            evidencePayload = eventPublisher.returnEvidencePayload(
+                payment = payment,
+                originalEndToEndId = endToEndId,
+                returnReasonCode = returnMsg.returnReasonCode,
+                actorId = command.actorId,
+                actorType = command.actorType,
+                correlationId = command.correlationId,
+                reversalPerformed = reversalPerformed,
+            ),
         )
     }
 

@@ -69,7 +69,7 @@ function ClosingsContent() {
       <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span>{t('Účetnictví', 'Accounting')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Závěrky', 'Closings')}</span></div>} icon={<CalendarClock size={20} aria-hidden="true" />} title={t('Závěrky', 'Closings')} subtitle={t('Denní tie-out (EoD) a měsíční uzávěrka výpisů (EoM)', 'Daily tie-out (EoD) and monthly statement close (EoM)')} />
 
       {/* Tab nav — same pattern as /payments */}
-      <div style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
+      <div role="group" aria-label={t('Typ závěrky', 'Closing type')} style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
         {([
           { key: 'eod' as Tab, icon: Scale, labelCs: 'Závěrka dne (EoD)', labelEn: 'Day-end (EoD)' },
           { key: 'eom' as Tab, icon: CalendarCheck2, labelCs: 'Měsíční uzávěrka (EoM)', labelEn: 'Month-end (EoM)' },
@@ -77,14 +77,14 @@ function ClosingsContent() {
           const Icon = item.icon
           const isActive = tab === item.key
           return (
-            <button key={item.key} type="button" onClick={() => changeTab(item.key)}
+            <button key={item.key} type="button" aria-pressed={isActive} aria-label={t(item.labelCs, item.labelEn)} onClick={() => changeTab(item.key)}
               style={{
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 18px', fontSize: '13px',
                 fontWeight: isActive ? 700 : 500, color: isActive ? 'var(--accent)' : 'var(--text-secondary)',
                 border: 'none', borderBottom: isActive ? '2px solid var(--accent)' : '2px solid transparent',
                 background: 'transparent', cursor: 'pointer', marginBottom: '-1px', transition: 'all 0.15s ease',
               }}>
-              <Icon size={14} />
+              <Icon size={14} aria-hidden="true" />
               {t(item.labelCs, item.labelEn)}
             </button>
           )
@@ -195,8 +195,8 @@ function EodPanel() {
               <Clock size={12} /> {lastRefreshed.toLocaleTimeString(locale)}
             </span>
           )}
-          <button className="btn btn-secondary" onClick={() => refresh(true)} disabled={refreshing}>
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
+          <button type="button" className="btn btn-secondary" aria-busy={refreshing} aria-label={t('Obnovit denní závěrku', 'Refresh day-end close')} onClick={() => refresh(true)} disabled={refreshing}>
+            <RefreshCw size={13} aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>
@@ -602,18 +602,21 @@ function EomPanel() {
               <Clock size={12} /> {lastRefreshed.toLocaleTimeString(locale)}
             </span>
           )}
-          <button className="btn btn-secondary" onClick={() => load(true)} disabled={refreshing}>
-            <RefreshCw size={13} className={refreshing ? 'animate-spin' : undefined} />
+          <button type="button" className="btn btn-secondary" aria-busy={refreshing} aria-label={t('Obnovit měsíční závěrku', 'Refresh month-end close')} onClick={() => load(true)} disabled={refreshing}>
+            <RefreshCw size={13} aria-hidden="true" className={refreshing ? 'animate-spin' : undefined} />
             {t('Obnovit', 'Refresh')}
           </button>
           {canTrigger && (
             <button
+              type="button"
+              aria-busy={triggering}
+              aria-label={triggering ? t('Spouštím catch-up uzávěrku', 'Starting catch-up close') : t('Spustit catch-up uzávěrku', 'Run catch-up close')}
               className="btn btn-primary"
               onClick={() => void trigger()}
               disabled={triggering || running || unavailable !== null}
               title={t('Spustit dohánějící uzávěrku nyní (idempotentní)', 'Run a catch-up close now (idempotent)')}
             >
-              <Play size={13} className={triggering ? 'animate-spin' : undefined} />
+              <Play size={13} aria-hidden="true" className={triggering ? 'animate-spin' : undefined} />
               {triggering ? t('Spouštím…', 'Starting…') : t('Spustit catch-up', 'Run catch-up')}
             </button>
           )}

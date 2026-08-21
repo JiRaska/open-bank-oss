@@ -24,6 +24,22 @@ import java.time.LocalDate
  */
 data class TrialBalanceLineDto(val code: String, val accountType: String, val net: BigDecimal, val currency: String)
 
+/**
+ * One ledger trial-balance read: the lines, plus the balance verdict the PRODUCER published with
+ * them (issue #6011).
+ *
+ * [ledgerReportsBalanced] used to be deserialised and dropped on the floor in `LedgerAdapter`. It is
+ * carried now because agreement between it and finrep's own recomputation is a check neither side
+ * can make alone — see [com.openbank.finrep.domain.model.TrialBalanceAssurance] for the three
+ * inputs that make them disagree.
+ *
+ * NULLABLE, and no default: `null` means the response carried no verdict, which is a different fact
+ * from a verdict of `false`. A non-null `Boolean` here would let jackson-module-kotlin coerce an
+ * absent field to `false` and report a contract change as an accounting failure; a default of `true`
+ * would do the opposite and re-publish the producer's assertion without the producer.
+ */
+data class TrialBalanceSnapshot(val lines: List<TrialBalanceLineDto>, val ledgerReportsBalanced: Boolean?)
+
 interface LedgerPort {
-    suspend fun getTrialBalance(asOf: LocalDate): List<TrialBalanceLineDto>
+    suspend fun getTrialBalance(asOf: LocalDate): TrialBalanceSnapshot
 }

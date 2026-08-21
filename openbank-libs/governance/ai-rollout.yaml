@@ -105,10 +105,11 @@ decisions:
       (agent.mcp.tool_exec) and model completion emits an AuditEvent (actorType=AI_AGENT)
       with model_id, prompt_hash, policy_decision. Hash-chain live
       (audit_entries.record_hash/prev_hash, V5) + periodic externally-signed anchors
-      (audit_anchor, V6): GET /api/v1/audit/anchors/verify detects wholesale rewrites;
-      default signer is HMAC-SHA256 with key held outside the audit DB. Remaining:
-      AI-attribution payload fields in the release evidence bundle and the production
-      KMS/cosign-keyed anchor signer (asymmetric, third-party verifiable).
+      (audit_anchor, V6): GET /api/v1/audit/anchors/verify detects wholesale rewrites.
+      The sandbox deployment requests the AWS KMS asymmetric signer, and the implementation
+      records the immutable KMS key identity with each signature. Remaining: independently
+      attested runtime evidence of captured KMS-signed anchors and AI-attribution payload
+      fields in the release evidence bundle.
   - id: D6
     title: Open, model-agnostic stack
     status: partial
@@ -194,9 +195,9 @@ auditTrail:
     - Model completions audited (agent.model.complete)
     - Audit envelope + Kafka pipeline
     - Hash-chain (record_hash/prev_hash, V5)
-    - Externally-signed anchors (V6, HMAC-SHA256 key outside DB)
+    - Externally-signed anchors (V6; AWS KMS signer configured in sandbox)
   planned:
     - By-actor live query endpoint (audit-service)
-    - Production KMS/cosign anchor signer (asymmetric, third-party verifiable)
+    - Independently attested runtime evidence of KMS-signed anchors
     - ai_attribution populated in evidence bundle
     - Approval decisions (human_approver, reason)

@@ -15,6 +15,7 @@ import { useSession } from 'next-auth/react'
 import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 interface Proposal {
   id: string
@@ -119,6 +120,7 @@ export default function ApprovalsPage() {
   )
 
   return (
+    <AuthGuard permission="approvals:view">
     <div>
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
@@ -236,21 +238,23 @@ export default function ApprovalsPage() {
                 {t('Navrhl', 'Proposed by')} <b>{p.proposedBy}</b> · {new Date(p.proposedAt).toLocaleString(dateLocale)}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <input
-                  aria-label={t('Důvod rozhodnutí návrhu', 'Proposal decision reason')}
-                  placeholder={t('Důvod rozhodnutí (volitelné)', 'Decision reason (optional)')}
-                  value={reasons[p.id] || ''}
-                  onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
-                  style={{ flex: 1, minWidth: 180, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
-                />
-                <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId === p.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
-                  <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
-                </button>
-                <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId === p.id}
-                  style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
-                  <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
-                </button>
+                <Can permission="agent:decide" fallback={<span style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Rozhodování vyžaduje oprávnění agenta.', 'Decision access requires agent authorization.')}</span>}>
+                  <input
+                    aria-label={t('Důvod rozhodnutí návrhu', 'Proposal decision reason')}
+                    placeholder={t('Důvod rozhodnutí (volitelné)', 'Decision reason (optional)')}
+                    value={reasons[p.id] || ''}
+                    onChange={e => setReasons(r => ({ ...r, [p.id]: e.target.value }))}
+                    style={{ flex: 1, minWidth: 180, fontSize: 12, padding: '6px 10px', borderRadius: 6, border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}
+                  />
+                  <button type="button" aria-label={t(`Schválit návrh ${p.title}`, `Approve proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, true)} disabled={busyId === p.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #6ee7b7', background: '#ecfdf5', color: '#059669', cursor: 'pointer' }}>
+                    <CheckCircle2 aria-hidden="true" size={14} /> {t('Schválit', 'Approve')}
+                  </button>
+                  <button type="button" aria-label={t(`Zamítnout návrh ${p.title}`, `Reject proposal ${p.title}`)} aria-busy={busyId === p.id} onClick={() => decide(p, false)} disabled={busyId === p.id}
+                    style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, fontWeight: 600, padding: '6px 14px', borderRadius: 6, border: '1px solid #fca5a5', background: '#fef2f2', color: '#dc2626', cursor: 'pointer' }}>
+                    <XCircle aria-hidden="true" size={14} /> {t('Zamítnout', 'Reject')}
+                  </button>
+                </Can>
               </div>
             </div>
           )
@@ -292,5 +296,6 @@ export default function ApprovalsPage() {
         </>
       )}
     </div>
+    </AuthGuard>
   )
 }

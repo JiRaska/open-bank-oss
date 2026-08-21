@@ -88,6 +88,9 @@ const INITIAL_SCHEDULES: ScheduleEntry[] = [
 
 const ECB_CURRENCIES = ['USD', 'GBP', 'JPY', 'CHF', 'PLN', 'HUF', 'RON', 'SEK', 'NOK', 'DKK', 'AUD', 'CAD', 'CNY']
 const DEFAULT_PUBLISHED = ['USD', 'EUR', 'GBP', 'CHF', 'JPY', 'PLN', 'HUF', 'SEK', 'NOK', 'DKK']
+// FX persistence endpoints for bank-sheet configuration are not part of the current
+// service contract. Keep the browser preview honest until a durable backend exists.
+const FX_CONFIGURATION_WRITABLE = false
 
 // fx-service is on the FinOps scaledown allowlist, so "not reachable" usually means
 // "intentionally idle", not "broken". Map the /api/fx/rates status to a calm badge:
@@ -365,8 +368,8 @@ export default function FxPage() {
           <span style={{ marginLeft: 'auto', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>
             <AlertCircle size={11} style={{ verticalAlign: '-1px', marginRight: '4px' }} />
             {t(
-              'Referenční kurzy ČNB/ECB jsou dostupné i bez interních služeb. Bankovní lístek (marže, override, plán) je zatím počítán v prohlížeči — persistence ve fx-service je plánovaná.',
-              'ČNB/ECB reference rates are available without internal services. The bank sheet (margins, overrides, schedule) is still computed in the browser — fx-service persistence is planned.'
+              'Referenční kurzy ČNB/ECB jsou dostupné i bez interních služeb. Bankovní lístek (marže, override, plán) je pouze náhled — uložení zatím není nakonfigurované.',
+              'ČNB/ECB reference rates are available without internal services. The bank sheet (margins, overrides, schedule) is preview-only — persistence is not configured.'
             )}
           </span>
         </div>
@@ -517,7 +520,7 @@ export default function FxPage() {
                           style={{ width: '56px', padding: '3px 6px', fontSize: '12px', background: 'var(--surface-1)', border: '1px solid var(--border)', borderRadius: '4px', color: 'var(--text-primary)', textAlign: 'right' }} />
                         <Percent size={11} style={{ color: 'var(--text-tertiary)' }} />
                       </label>
-                      <button onClick={saveMargin} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600 }}>
+                      <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={saveMargin} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 600 }}>
                         <Save size={11} /> {t('Uložit', 'Save')}
                       </button>
                       <button onClick={() => setEditingMargin(false)} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', fontSize: '11px' }}>
@@ -534,7 +537,7 @@ export default function FxPage() {
                         <span style={{ fontSize: '9px', fontWeight: 700, background: 'var(--danger-bg)', border: '1px solid var(--danger-border)', borderRadius: '3px', padding: '0 4px' }}>SELL</span>
                         +{margin.sellPct}%
                       </span>
-                      <button onClick={() => { setMarginDraft(margin); setEditingMargin(true) }} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                      <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setMarginDraft(margin); setEditingMargin(true) }} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '4px 10px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
                         <Settings size={11} /> {t('Upravit marži', 'Edit margin')}
                       </button>
                     </div>
@@ -562,7 +565,7 @@ export default function FxPage() {
                         onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
                         onMouseLeave={e => (e.currentTarget.style.background = '')}>
                         <td style={{ padding: '8px 16px' }}>
-                          <button onClick={() => togglePublished(r.code)} title={r.published ? t('Skrýt z lístku', 'Hide from rate sheet') : t('Publikovat na lístek', 'Publish to rate sheet')}
+                          <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => togglePublished(r.code)} title={r.published ? t('Skrýt z lístku', 'Hide from rate sheet') : t('Publikovat na lístek', 'Publish to rate sheet')}
                             style={{ background: r.published ? 'var(--success-bg)' : 'var(--surface-3)', border: `1px solid ${r.published ? 'var(--success-border)' : 'var(--border)'}`, borderRadius: '5px', padding: '3px 7px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', color: r.published ? 'var(--success-text)' : 'var(--text-tertiary)', fontSize: '10px', fontWeight: 600 }}>
                             {r.published ? <Eye size={11} /> : <EyeOff size={11} />}
                             {r.published ? t('Ano', 'Yes') : t('Ne', 'No')}
@@ -597,19 +600,19 @@ export default function FxPage() {
                         <td style={{ padding: '8px 16px' }}>
                           {editingOverride === r.code ? (
                             <div style={{ display: 'flex', gap: '5px' }}>
-                              <button onClick={() => saveOverride(r.code)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
+                              <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => saveOverride(r.code)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '3px' }}>
                                 <Save size={10} /> OK
                               </button>
                               <button onClick={() => setEditingOverride(null)} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px' }}>✕</button>
                             </div>
                           ) : (
                             <div style={{ display: 'flex', gap: '5px' }}>
-                              <button onClick={() => { setEditingOverride(r.code); setOverrideDraft({ buyOverride: overrides[r.code]?.buyOverride ?? null, sellOverride: overrides[r.code]?.sellOverride ?? null }) }}
+                              <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setEditingOverride(r.code); setOverrideDraft({ buyOverride: overrides[r.code]?.buyOverride ?? null, sellOverride: overrides[r.code]?.sellOverride ?? null }) }}
                                 style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                 <Edit3 size={10} /> {t('Upravit', 'Fix')}
                               </button>
                               {r.hasOverride && (
-                                <button onClick={() => setOverrides(prev => ({ ...prev, [r.code]: { ...prev[r.code], buyOverride: null, sellOverride: null } }))}
+                                <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => setOverrides(prev => ({ ...prev, [r.code]: { ...prev[r.code], buyOverride: null, sellOverride: null } }))}
                                   title={t('Zrušit override', 'Clear override')}
                                   style={{ background: 'var(--warning-bg)', color: 'var(--warning-text)', border: '1px solid var(--warning-border)', padding: '3px 8px', borderRadius: '4px', cursor: 'pointer', fontSize: '11px', display: 'flex', alignItems: 'center', gap: '3px' }}>
                                   <Unlock size={10} /> {t('Reset', 'Reset')}
@@ -677,7 +680,7 @@ export default function FxPage() {
                       <Play size={11} style={{ animation: isRefreshing(s.source.toLowerCase()) ? 'spin 1s linear infinite' : 'none' }} />
                       {t('Spustit', 'Run')}
                     </button>
-                    <button onClick={() => { setEditingSchedule(editingSchedule === s.id ? null : s.id); setScheduleDraft({ hour: s.hour, minute: s.minute, days: [...s.days] }) }}
+                    <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => { setEditingSchedule(editingSchedule === s.id ? null : s.id); setScheduleDraft({ hour: s.hour, minute: s.minute, days: [...s.days] }) }}
                       style={{ background: editingSchedule === s.id ? 'var(--accent)' : 'var(--surface-3)', color: editingSchedule === s.id ? '#fff' : 'var(--text-secondary)', border: `1px solid ${editingSchedule === s.id ? 'var(--accent)' : 'var(--border)'}`, padding: '4px 8px', borderRadius: '5px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
                       <Edit3 size={11} />
                       {editingSchedule === s.id ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
@@ -713,7 +716,7 @@ export default function FxPage() {
                         {ALL_DAYS.map(day => {
                           const active = (scheduleDraft.days ?? s.days).includes(day)
                           return (
-                            <button key={day}
+                            <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} key={day}
                               onClick={() => setScheduleDraft(p => {
                                 const days = p.days ?? [...s.days]
                                 return { ...p, days: active ? days.filter(d => d !== day) : [...days, day] }
@@ -726,7 +729,7 @@ export default function FxPage() {
                       </div>
                     </div>
                     <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-                      <button onClick={() => saveSchedule(s.id)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '5px 14px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                      <button type="button" disabled={!FX_CONFIGURATION_WRITABLE} onClick={() => saveSchedule(s.id)} style={{ background: 'var(--success-bg)', color: 'var(--success-text)', border: '1px solid var(--success-border)', padding: '5px 14px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
                         <Save size={12} /> {t('Uložit', 'Save')}
                       </button>
                       <button onClick={() => setEditingSchedule(null)} style={{ background: 'var(--surface-3)', color: 'var(--text-secondary)', border: '1px solid var(--border)', padding: '5px 14px', borderRadius: '5px', cursor: 'pointer', fontSize: '12px' }}>

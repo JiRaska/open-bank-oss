@@ -10,6 +10,7 @@ import Link from 'next/link'
 import { ArrowLeft, BellRing, Clock3, Mail, Megaphone, PanelsTopLeft, Send, Sparkles, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui'
+import { AuthGuard } from '@/components/auth/AuthGuard'
 import {
   JourneyEditor,
   MAX_STEPS,
@@ -537,7 +538,7 @@ export default function NewCampaignPage() {
       .finally(() => setSaving(false))
   }
 
-  return (
+  return <AuthGuard permission="campaign:create">
     <div className="campaign-composer">
       <header className="campaign-composer-hero">
         <Link href="/campaigns" className="campaign-composer-back">
@@ -1044,5 +1045,5 @@ export default function NewCampaignPage() {
         </div>
       </footer>
     </div>
-  )
+  </AuthGuard>
 }

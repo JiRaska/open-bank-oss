@@ -91,8 +91,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         "idempotency-key defect from #6037; the key is rewritten by PR #6048",
     "openbank-settlement-service|T1|activityId":
         "idempotency-key defect from #6037; the key is rewritten by PR #6048",
-    "openbank-settlement-service|R2|SELF-REF":
-        "the self-referential compensation claim from #6037; rewritten by PR #6048",
     # (An E1 entry for the compensation stub was here and was DELETED, by this gate's own
     #  stale-exclusion rule, the moment the E1 row was corrected: correcting the row disclaimed
     #  the citation, the exclusion stopped matching anything, and the run went red until the
