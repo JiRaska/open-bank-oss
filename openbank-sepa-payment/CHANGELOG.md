@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.11.0...sepa-payment-v0.11.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **sepa-payment:** record who processed a pacs.004 return, durably ([#6072](https://github.com/JiRaska/open-bank-oss/issues/6072)) ([f953707](https://github.com/JiRaska/open-bank-oss/commit/f9537074d808c833dc7222e10678f31d3122c516)), closes [#6056](https://github.com/JiRaska/open-bank-oss/issues/6056)
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.10.1...sepa-payment-v0.11.0) (2026-08-20)
 
 
