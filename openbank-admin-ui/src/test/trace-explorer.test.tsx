@@ -42,6 +42,6 @@ describe('Trace Explorer', () => {
   it('shows an explicit loading state instead of an empty explorer', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
     render(<SessionProvider><LanguageProvider><TraceExplorerPage /></LanguageProvider></SessionProvider>)
-    expect(screen.getByRole('status')).toHaveTextContent(/Loading recent traces from Tempo/i)
+    expect(screen.getByRole('status')).toHaveTextContent(/Loading traces from Tempo/i)
   })
 })
