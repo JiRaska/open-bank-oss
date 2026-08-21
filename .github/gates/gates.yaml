@@ -541,6 +541,28 @@ gates:
     run: |
       python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
 
+  # Loki logs every query it serves, query text included, so a rule that greps for a literal
+  # over an unpinned namespace matches its own evaluation and fires forever. ENFORCED.
+  - id: loki-rule-self-match
+    name: "no Loki rule matches Loki's own query log (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Measured 2026-08-21, minutes after the ruler evaluated a rule for the first time in this
+      estate: all three unscoped rules in loki-rules-silent-failures.yaml were firing and all
+      three were false positives, every matching line coming from pod=loki-0. Those are the
+      alerts for a dead scheduler, a service that failed to boot, and the Panache assigned-@Id
+      defect — the sharpest detectors here, all guaranteed to cry wolf the moment delivery
+      worked. Excluding the ruler component is not enough: the query frontend logs the same text
+      for any Grafana panel mentioning the literal, so 66 of 78 lines survived that filter.
+    review_after: "2027-02-21"
+    min_subjects: 4   # 5 line-filtered selectors today (2026-08-21); the Falco pair is safe by
+                      # namespace pinning and must stay counted, not skipped
+    selftest: |
+      python3 .github/scripts/check-loki-rule-self-match.py --selftest
+    run: |
+      python3 .github/scripts/check-loki-rule-self-match.py
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
