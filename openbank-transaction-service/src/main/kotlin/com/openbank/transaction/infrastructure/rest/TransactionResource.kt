@@ -179,7 +179,12 @@ class TransactionResource(
     @POST
     @Path("/{transactionId}/reverse")
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "transaction.reverse", resource = "")
+    // `resource = "#transactionId"` binds the four-eyes approval to THIS reversal. `transaction.reverse`
+    // is four_eyes_required (rules.yaml four_eyes.verbs: `reverse`), and the interceptor stamps the
+    // PendingApproval with query.resource?.id — so with an empty resource every approval is created and
+    // matched at resourceId=null, and a checker's approval to reverse transaction A would satisfy a
+    // reversal of transaction B by the same maker. Same defect class as #3521 (sanctions.clear). See #4754.
+    @Authorize(action = "transaction.reverse", resource = "#transactionId")
     @Operation(summary = "Reverse a completed transaction — R-transaction return path (ADR-0111)")
     suspend fun reverseTransaction(
         @PathParam("transactionId") transactionId: UUID,
@@ -220,7 +225,20 @@ class TransactionResource(
     @POST
     @Path("/merge-sweep")
     @RolesAllowed(Roles.OPERATOR, Roles.ADMIN)
-    @Authorize(action = "transaction.sweep", resource = "")
+    // `resource = "#request.idempotencyKey"` is load-bearing for the four-eyes gate, not decoration —
+    // the same reasoning `party.merge` carries, and this endpoint is the OTHER half of the identity-merge
+    // path (#4754, refs #1984). `transaction.sweep` is four_eyes_required (rules.yaml four_eyes.verbs:
+    // `sweep`), and the interceptor stamps the PendingApproval with query.resource?.id — so with an empty
+    // resource every approval is created and matched at resourceId=null, and an approval a checker granted
+    // for one sweep would satisfy a DIFFERENT sweep by the same maker, to different accounts, for a
+    // different amount.
+    //
+    // The idempotency key, not `mergeReference`: a single merge reference covers every account pair swept
+    // in that merge, so binding to it would let an approval for one pocket satisfy the sweep of another.
+    // The key is per-request unique and is what the maker replays on the `X-Approval-Id` retry, so the
+    // approval resolves for the exact request it was granted for and no other. Asserted both ways in
+    // MergeSweepApprovalBindingIT — including the negative, which is the whole control.
+    @Authorize(action = "transaction.sweep", resource = "#request.idempotencyKey")
     @Operation(
         summary = "Sweep a duplicate party's balance to the surviving party during an identity merge (ADR-0179)",
     )
