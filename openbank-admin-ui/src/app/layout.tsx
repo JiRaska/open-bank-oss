@@ -9,6 +9,7 @@ import { Toaster } from 'sonner'
 import { SessionProvider } from '@/components/auth/SessionProvider'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { AgentDock } from '@/components/agent/AgentDock'
+import { RumScreenTracker } from '@/components/telemetry/RumScreenTracker'
 
 export const metadata: Metadata = {
   title: 'OpenBank Admin',
@@ -33,6 +34,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           <LanguageProvider>
             {children}
             <AgentDock />
+            {/* Emits one RUM screen-view span per navigation (issue #5735); renders nothing. */}
+            <RumScreenTracker />
             <Toaster richColors position="top-right" />
           </LanguageProvider>
         </SessionProvider>

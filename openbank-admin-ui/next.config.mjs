@@ -68,6 +68,12 @@ const nextConfig = {
     NEXT_PUBLIC_GLITCHTIP_RELEASE:
       process.env.NEXT_PUBLIC_GLITCHTIP_RELEASE ||
       `openbank-admin-ui@${process.env.BUILD_VERSION || 'dev'}`,
+    // Browser RUM `app.version` (issue #5735). Derived from BUILD_VERSION for the same reason
+    // as the GlitchTip release above: this value must name the BUNDLE the browser is running,
+    // so baking it at build time is correct rather than a limitation. The collector endpoint,
+    // which does have to vary per environment, is NOT here — it is a server-side runtime read
+    // in the /api/telemetry/traces relay (see src/lib/telemetry/rum.ts).
+    NEXT_PUBLIC_BUILD_VERSION: process.env.BUILD_VERSION || 'dev',
   },
   async headers() {
     return [{ source: '/(.*)', headers: securityHeaders }]
