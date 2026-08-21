@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.185.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.185.0...admin-ui-v0.185.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify parties refresh state ([#6329](https://github.com/JiRaska/open-bank-oss/issues/6329)) ([9afd454](https://github.com/JiRaska/open-bank-oss/commit/9afd4540dd059e19e0445f2f0bd52d2193edbb3a))
+* **admin-ui:** clarify SWIFT refresh state ([#6317](https://github.com/JiRaska/open-bank-oss/issues/6317)) ([c7f553d](https://github.com/JiRaska/open-bank-oss/commit/c7f553d4915798abc084a883c200451d4743a5e2))
+
 ## [0.185.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.5...admin-ui-v0.185.0) (2026-08-21)
 
 
