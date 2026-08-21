@@ -14,7 +14,7 @@ import org.jboss.logging.Logger
 import java.util.UUID
 
 /**
- * Event-driven balance initialization (ADR-0073).
+ * Event-driven balance initialization (ADR-0267 §3).
  *
  * Creates a zero balance row when an account is created, by consuming
  * openbank.accounts.account.created. This replaces the synchronous REST init for the
