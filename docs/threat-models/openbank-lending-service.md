@@ -392,7 +392,30 @@ against `lending.intake.caller-principal`, which refuses every call when unset.
   caller, but `operator-lending-write` already grants the same action more broadly; the rule only
   becomes load-bearing if that blanket operator grant is narrowed.
 
+## 9a. Customer credit journey read (ADR-0269) — STRIDE supplement
+
+One new inbound surface on the same customer-edge trust boundary as section 9, and a read path,
+which changes what can go wrong: section 9's risk is a fraudulent WRITE, this one risks a
+DISCLOSURE.
+
+- `CustomerCreditJourneyResource` — `GET /api/v1/lending/intake/applications[/{id}]`. Returns the
+  caller's own applications as customer-readable journeys.
+
+It reuses section 9's caller control verbatim: the handler compares `SecurityIdentity.principal.name`
+to `lending.intake.caller-principal` and refuses when it does not match or is unset, and the party id
+comes only from `X-Customer-Party-Id`.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **I**nformation disclosure | An operator, or the edge with a forged header, reads another customer's credit history | Rows are filtered by the header party id; a foreign application id is answered **404, not 403**, so a not-found and a not-yours are indistinguishable and the id space does not leak. Covered by `CustomerCreditJourneyResourceTest`. |
+| **I**nformation disclosure | The journey leaks the bank's internal assessment | The projection exposes canonical states, step codes and the decision engine's machine-readable reason codes only. A human checker's free-text `decisionReason` is deliberately NOT exposed, and a reason code is dropped on any non-refused state. |
+
 ## 10. Change log
+
+- **2026-08-21** — Trust-boundary change (ADR-0269 slice 1): a new customer-edge-facing read
+  surface, `GET /api/v1/lending/intake/applications[/{id}]`. See section 9a. Same caller and
+  party-header controls as section 9; the new risk is disclosure of another party's credit history,
+  closed by owner filtering plus a 404-not-403 answer.
 
 - **2026-08-20** — Catalog-governed loan origination (#668). Adds the product-catalog OIDC read edge
   described in §2 item 9. The caller may select an offering, never a revision or a rate: the service
