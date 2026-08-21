@@ -76,24 +76,25 @@ spec:
             model: llama-3.3-70b-versatile
             kind: completion
             price_source: provider-rate-card
-        # APPROXIMATE. LiteLLM's price map has no `deepinfra/deepseek-ai/DeepSeek-V3.2` entry — the
-        # newest DeepInfra DeepSeek it knows is V3.1 ($0.27/M input, $1.00/M output), used here as
-        # the nearest published sibling. Every panel and alert built on this carries
-        # price_source="nearest-sibling" so the estimate is never mistaken for a billed figure.
-        # Replace with the real rate card when DeepInfra publishes V3.2, or when the invoice
-        # disagrees — the invoice is the authority, this is a leading indicator.
+        # WAS a nearest-sibling estimate off LiteLLM's map (V3.1, $0.27/M in, $1.00/M out),
+        # because "litellm's map has no V3.2 entry" was taken to mean no published rate existed.
+        # It does — DeepInfra publishes its own, api.deepinfra.com/models/deepseek-ai/DeepSeek-V3.2
+        # returns cents_per_input_token 2.6e-05 / cents_per_output_token 3.8e-05 for the exact id
+        # this gateway routes to, and litellm-config.yaml has carried those very numbers all along.
+        # The sibling estimate overstated COMPLETION by 2.6x. Read the provider's own rate card
+        # before reaching for another vendor's map of it (#6045).
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000027)
+          expr: vector(0.00000026)
           labels:
             model: deepseek-ai/DeepSeek-V3.2
             kind: prompt
-            price_source: nearest-sibling
+            price_source: provider-rate-card
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000100)
+          expr: vector(0.00000038)
           labels:
             model: deepseek-ai/DeepSeek-V3.2
             kind: completion
-            price_source: nearest-sibling
+            price_source: provider-rate-card
         # openai/gpt-oss-120b — the model the gateway ACTUALLY serves traffic on, and it was
         # missing from this file. Measured 2026-08-19: 32660 tokens in 24h on this model and 1306
         # on BAAI/bge-m3, while the only two priced models (llama-3.3-70b-versatile,
@@ -107,22 +108,28 @@ spec:
         # actioned it, which is why the gap survived — the falsifiability check worked and the
         # response to it did not.
         #
-        # Authoritative: BerriAI/litellm model_prices_and_context_window.json, entry
-        # `deepinfra/openai/gpt-oss-120b` — $0.05/M input, $0.45/M output. Exact match for the
-        # provider this gateway routes to (litellm-config: model `deepinfra/openai/gpt-oss-120b`),
-        # not a sibling.
+        # CORRECTED (#6045), and this is the model carrying 100% of live traffic, so it is the
+        # figure that mattered most. It was taken from BerriAI/litellm's map
+        # (`deepinfra/openai/gpt-oss-120b`, $0.05/M in / $0.45/M out) and that map is a THIRD
+        # PARTY'S COPY of DeepInfra's rate card, which had drifted: DeepInfra's own
+        # api.deepinfra.com/models/openai/gpt-oss-120b returns cents_per_input_token 3.7e-06 and
+        # cents_per_output_token 1.7e-05 — $0.037/M in, $0.17/M out. The map OVERSTATED output by
+        # 2.6x and input by 35%, so every spend panel and the 25 USD/day AiFleetDailySpendHigh
+        # ceiling were reading high on the only model with traffic. litellm-config.yaml carried
+        # the correct provider figures the whole time; the two files simply had nothing keeping
+        # them in lockstep. `check-llm-price-book.py` is now that thing.
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000005)
+          expr: vector(0.000000037)
           labels:
             model: openai/gpt-oss-120b
             kind: prompt
-            price_source: litellm-map
+            price_source: provider-rate-card
         - record: openbank:llm_price_usd_per_token
-          expr: vector(0.00000045)
+          expr: vector(0.00000017)
           labels:
             model: openai/gpt-oss-120b
             kind: completion
-            price_source: litellm-map
+            price_source: provider-rate-card
         # meta-llama/llama-guard-4-12b. Authoritative: litellm entry
         # `deepinfra/meta-llama/Llama-Guard-4-12B` — $0.18/M both directions. Zero traffic today,
         # priced anyway: the point of this file is that turning a served model on must not also
@@ -155,12 +162,31 @@ spec:
             model: BAAI/bge-m3
             kind: prompt
             price_source: nearest-sibling
-        # deepseek-ai/DeepSeek-V4-Pro is served by the gateway and is deliberately NOT priced
-        # here: litellm's map has no DeepInfra entry for it and no DeepInfra DeepSeek newer than
-        # V3.1, so there is no same-provider sibling to reason from, and the cross-provider
-        # figures for V4-Pro span 1.74e-06 to 2.4e-06 input — a 38% spread that would be a guess
-        # dressed as a price. It carries no traffic today; if it starts, AiSpendUnpriced fires and
-        # names it, which is the correct behaviour rather than a silently wrong number.
+        # deepseek-ai/DeepSeek-V4-Pro. This entry used to be a deliberate ABSENCE, on the
+        # reasoning that litellm's map has no DeepInfra entry for it and the cross-provider
+        # figures span 1.74e-06 to 2.4e-06 — a 38% spread that would be a guess dressed as a
+        # price. Leaving it out was the right call given that premise; the premise was wrong.
+        # DeepInfra publishes the rate directly: api.deepinfra.com/models/deepseek-ai/DeepSeek-V4-Pro
+        # returns cents_per_input_token 0.00013 / cents_per_output_token 0.00026 — $1.30/M in,
+        # $2.60/M out — and litellm-config.yaml already declares exactly those two numbers on this
+        # route. So the authoritative same-provider figure was one HTTP GET and one sibling file
+        # away, and "no published rate exists" was really "the map I looked in did not have one".
+        #
+        # It carries no traffic today (0 tokens over 7d, measured 2026-08-21). Priced anyway: the
+        # point of this file is that turning a served model on must not also turn the cost figures
+        # into an understatement.
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.0000013)
+          labels:
+            model: deepseek-ai/DeepSeek-V4-Pro
+            kind: prompt
+            price_source: provider-rate-card
+        - record: openbank:llm_price_usd_per_token
+          expr: vector(0.0000026)
+          labels:
+            model: deepseek-ai/DeepSeek-V4-Pro
+            kind: completion
+            price_source: provider-rate-card
 
     # ── Derived spend ─────────────────────────────────────────────────────────
     - name: openbank.ai.spend
@@ -329,6 +355,7 @@ spec:
             severity: warning
             team: platform
           annotations:
+            subject_period: continuous
             summary: "Every LLM call to {{ $labels.model }} is failing — not one has succeeded in 6h"
             description: >-
               The gateway is answering and every answer is an error, so this is not an outage of

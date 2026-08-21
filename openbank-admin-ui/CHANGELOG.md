@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.184.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.2...admin-ui-v0.184.3) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize feedback timestamps ([#6172](https://github.com/JiRaska/open-bank-oss/issues/6172)) ([2f58e37](https://github.com/JiRaska/open-bank-oss/commit/2f58e370e529d225b2741e7c03279a262012529a))
+
 ## [0.184.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.1...admin-ui-v0.184.2) (2026-08-21)
 
 

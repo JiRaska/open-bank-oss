@@ -221,13 +221,35 @@ spec:
                  and container.name in (user-operator, topic-operator)
                  and proc.pname = "tini")
 
+            # (6) CNPG's INSTANCE manager. (1) already excepts ns `cnpg-system`, which holds
+            # the CNPG *operator* — but the instance manager is a different process that runs
+            # inside every database pod, so it lives in `ledger`, `accounts`,
+            # `security-scanner` and every other namespace that owns a Postgres. Those hold the
+            # business data path and must NOT get a blanket namespace exception, which is why
+            # this is scoped to the binary instead.
+            #
+            # It is the container entrypoint (parent=containerd-shim, command=manager) and its
+            # job is to watch its own Cluster CR through the API server. Measured 2026-08-21
+            # AFTER the earlier tuning landed: 71 events in 6h (~284/day) and 5 of the 5
+            # remaining events in the last hour — i.e. 100% of what this rule still reports.
+            #
+            # SCOPE: the exepath AND the process name. `/controller/manager` is a CNPG-specific
+            # path no other workload in this estate has. Still firing: any OTHER process in a
+            # database pod (postgres itself, a debug shell, anything dropped in) reaching the
+            # API server, which is the case this rule exists for.
+            - macro: openbank_cnpg_instance_manager
+              condition: >
+                (proc.exepath = "/controller/manager"
+                 and proc.name = "manager")
+
             - macro: user_known_contact_k8s_api_server_activities
               condition: >
                 (openbank_controller_namespaces
                  or openbank_kubectl_cronjob_image
                  or openbank_admin_ui_bff
                  or openbank_strimzi_operator
-                 or openbank_strimzi_entity_operator)
+                 or openbank_strimzi_entity_operator
+                 or openbank_cnpg_instance_manager)
               override:
                 condition: replace
 
