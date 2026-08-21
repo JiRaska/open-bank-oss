@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.9...admin-ui-v0.183.0) (2026-08-21)
+
+
+### Features
+
+* **admin-ui:** resolve accounts by party ([#6123](https://github.com/JiRaska/open-bank-oss/issues/6123)) ([18a3451](https://github.com/JiRaska/open-bank-oss/commit/18a3451b59455b45a0b22ae47a22715f4215c8fd))
+
 ## [0.182.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.8...admin-ui-v0.182.9) (2026-08-21)
 
 
