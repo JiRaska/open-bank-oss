@@ -74,6 +74,18 @@ quarkus:
   rest-client:
     customer-edge:
       url: ${CUSTOMER_EDGE_URL:http://localhost:8128}
+    # ADR-0269 rule 5. These two are NOT called with the propagated customer bearer, unlike the edge
+    # above: "did this customer grant this scope" is not a question their own token may answer about
+    # itself, and analytics-sink's profile route is an internal operator surface. The customer's
+    # protection is the consent check that must pass before the profile is read at all.
+    consent-service:
+      url: ${CONSENT_SERVICE_URL:http://localhost:8107}
+      connect-timeout: 2000
+      read-timeout: 3000
+    analytics-sink:
+      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      connect-timeout: 2000
+      read-timeout: 3000
 
 # Customer copilot configuration (ADR-0089).
 copilot:
