@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.25.0...notification-service-v0.25.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **notification:** wire the DLQ the [#5698](https://github.com/JiRaska/open-bank-oss/issues/5698) sweep assumes, and enumerate every consumer ([#5737](https://github.com/JiRaska/open-bank-oss/issues/5737)) ([0121c10](https://github.com/JiRaska/open-bank-oss/commit/0121c10a71577ddd550c8421b7d19666a61e92a9))
+
 ## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.24.0...notification-service-v0.25.0) (2026-08-19)
 
 

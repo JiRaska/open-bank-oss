@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.21.0...agent-service-v1.22.0) (2026-08-21)
+
+
+### Features
+
+* **agent:** durable AI audit provenance ([#6209](https://github.com/JiRaska/open-bank-oss/issues/6209)) ([8a862f3](https://github.com/JiRaska/open-bank-oss/commit/8a862f387594f934f91bf5befcbc966ccf40abad))
+
 ## [1.21.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.20.2...agent-service-v1.21.0) (2026-08-21)
 
 

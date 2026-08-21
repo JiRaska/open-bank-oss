@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.10.0...statement-service-v0.10.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **statement-service:** add sourceService and occurredAt to the restated event ([#5898](https://github.com/JiRaska/open-bank-oss/issues/5898)) ([7143162](https://github.com/JiRaska/open-bank-oss/commit/7143162b16121899e0b25fd671fb7287691e2339)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.9.0...statement-service-v0.10.0) (2026-08-20)
 
 
