@@ -184,6 +184,10 @@ export const PERMISSIONS = {
   // expose compliance's authorized read/execute path instead.
   "agent:view":               [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
+  // demo/system-view users must not see an actionable approval queue that the backend rejects.
+  "approvals:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "agent:decide":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // DevOps findings are readable by system:view, but the devops-agent POST approval/rejection
   // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
   "devops:decide":             [ROLES.ADMIN],
@@ -241,8 +245,9 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['campaign:view', ['/campaigns']],
   ['campaign:create', ['/campaigns/new']],
   ['lending:compliance:view', ['/lending/compliance-packs']],
+  ['approvals:view', ['/approvals']],
   ['system:view', [
-    '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
+    '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/notifications', '/system',
   ]],
   ['agent:view', ['/system/agent']],
