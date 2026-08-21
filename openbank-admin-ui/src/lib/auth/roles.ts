@@ -14,6 +14,8 @@ export const ROLES = {
   AUDITOR:    "ROLE_AUDITOR",
   API:        "ROLE_API",
   SUPERVISOR: "ROLE_SUPERVISOR",
+  LENDING_OFFICER: "ROLE_LENDING_OFFICER",
+  CREDIT_RISK: "ROLE_CREDIT_RISK",
   KYC:        "ROLE_KYC",
   KYC_OPENER: "ROLE_KYC_OPENER",
   KYC_REVIEWER: "ROLE_KYC_REVIEWER",
@@ -49,6 +51,17 @@ export const PERMISSIONS = {
   "payments:view":        [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.PAYMENTS, ROLES.SUPERVISOR],
   "payments:create":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.PAYMENTS],
   "payments:approve":     [ROLES.ADMIN, ROLES.PAYMENTS, ROLES.SUPERVISOR],
+  // Lending compliance-pack reads include the operational lending roles accepted by
+  // CompliancePackResource.listActive; maker/checker writes remain compliance/admin only.
+  "lending:compliance:view":    [ROLES.ADMIN, ROLES.COMPLIANCE, ROLES.CREDIT_RISK, ROLES.LENDING_OFFICER],
+  "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
+  "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
+  // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
+  // creation and lifecycle transitions are restricted to HUMAN operators/admins.
+  "campaign:view":          [ROLES.ADMIN, ROLES.OPERATOR, ROLES.AUDITOR],
+  "campaign:create":        [ROLES.ADMIN, ROLES.OPERATOR],
+  "campaign:submit":        [ROLES.ADMIN, ROLES.OPERATOR],
+  "campaign:activate":      [ROLES.ADMIN, ROLES.OPERATOR],
   // Card-issuance deliberately has a narrower read role than the wider payments
   // workspace: its GET endpoints accept only VIEWER/OPERATOR/ADMIN, and every
   // lifecycle writes except block/cancel accept only OPERATOR/ADMIN. Compliance
@@ -85,6 +98,10 @@ export const PERMISSIONS = {
   // further; do not add ROLES.DEMO to another line here without first confirming its
   // backend accepts VIEWER-tier reads.
   "onboarding:view":      [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.DEMO],
+  // PID identity cases expose PII and four-eyes decisions only to the roles accepted by
+  // VerificationCaseResource; KYC split roles and demo must not see a 403 cockpit.
+  "identity-cases:view":  [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "identity-cases:decide":[ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // Delegated access (ADR-0232 / ADR-0230). Mirrors delegation-service's own class-level
   // @RolesAllowed(ROLE_API, ROLE_OPERATOR, ROLE_ADMIN) minus ROLE_API, which is the M2M
   // identity and never a console session — listing it here would render a section for a
@@ -163,6 +180,14 @@ export const PERMISSIONS = {
   // @RolesAllowed/rego to have verified against, because these pages proxy telemetry
   // (Prometheus, Holmes, k8s) rather than calling a service with its own RBAC.
   "system:view":              [ROLES.ADMIN, ROLES.OPERATOR, ROLES.DEMO],
+  // MCP agent-service accepts only these human roles; keep demo out of the tool cockpit and
+  // expose compliance's authorized read/execute path instead.
+  "agent:view":               [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "agent:execute":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
+  // demo/system-view users must not see an actionable approval queue that the backend rejects.
+  "approvals:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  "agent:decide":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // DevOps findings are readable by system:view, but the devops-agent POST approval/rejection
   // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
   "devops:decide":             [ROLES.ADMIN],
@@ -198,7 +223,8 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['regulatory:view', ['/regulatory']],
   ['audit:view', ['/audit']],
   ['kyc:view', ['/kyc']],
-  ['onboarding:view', ['/onboarding', '/identity-cases']],
+  ['onboarding:view', ['/onboarding']],
+  ['identity-cases:view', ['/identity-cases']],
   ['parties:create', ['/parties/new']],
   ['parties:view', ['/parties']],
   ['transactions:view', ['/transactions']],
@@ -211,13 +237,21 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ]],
   ['sanctions:view', ['/sanctions']],
   ['compliance:view', [
-    '/aml', '/fraud', '/disputes', '/consents', '/customer-360', '/campaigns',
-    '/segments', '/lending/compliance-packs', '/docs/compliance', '/docs/bcp',
+    '/aml', '/fraud', '/disputes', '/consents', '/customer-360',
+    '/docs/compliance', '/docs/bcp',
   ]],
+  ['campaign:view', ['/segments']],
+  ['campaign:create', ['/segments/new']],
+  ['campaign:view', ['/campaigns']],
+  ['campaign:create', ['/campaigns/new']],
+  ['lending:compliance:view', ['/lending/compliance-packs']],
+  ['approvals:view', ['/approvals']],
   ['system:view', [
-    '/approvals', '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
-    '/security', '/notifications', '/system',
+    '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
+    '/security', '/system',
   ]],
+  ['notifications:view', ['/notifications']],
+  ['agent:view', ['/system/agent']],
   ['docs:view', ['/docs', '/services']],
   ['settings:view', ['/settings']],
 ]

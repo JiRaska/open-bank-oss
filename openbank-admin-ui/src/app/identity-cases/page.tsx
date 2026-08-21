@@ -9,6 +9,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check } from 'lucide-react'
 
 const SVC = 'pid-service'
@@ -243,7 +244,7 @@ export default function IdentityCasesPage() {
     load()
   }, [load])
 
-  return (
+  return <AuthGuard permission="identity-cases:view">
     <div>
       <PageHeader
         icon={<Fingerprint size={20} aria-hidden="true" />}
@@ -327,11 +328,13 @@ export default function IdentityCasesPage() {
                 ))}
               </div>
 
-              <DecisionForm c={c} onDecided={load} />
+              <Can permission="identity-cases:decide" fallback={<div style={{ marginTop: '12px', color: 'var(--text-secondary)', fontSize: '12px' }}>{t('Rozhodnutí může provést pouze oprávněný schvalovatel.', 'Only an authorized approver can decide this case.')}</div>}>
+                <DecisionForm c={c} onDecided={load} />
+              </Can>
             </div>
           ))}
         </div>
       )}
     </div>
-  )
+  </AuthGuard>
 }

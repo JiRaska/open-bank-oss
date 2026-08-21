@@ -5,8 +5,11 @@
 package com.openbank.finrep.domain.mapper
 
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
+import com.openbank.finrep.domain.model.BalanceVerdict
 import com.openbank.finrep.domain.model.FinrepCell
 import com.openbank.finrep.domain.model.FinrepTemplate
+import com.openbank.finrep.domain.model.TrialBalanceAssurance
 import com.openbank.finrep.domain.model.TrialBalanceIdentity
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -44,7 +47,8 @@ import java.time.LocalDate
  */
 object F0101Mapper {
 
-    fun map(lines: List<TrialBalanceLineDto>, asOf: LocalDate): FinrepTemplate {
+    fun map(snapshot: TrialBalanceSnapshot, asOf: LocalDate): FinrepTemplate {
+        val lines = snapshot.lines
         val assets = sumNet(lines, "ASSET")
         // Credit-normal, so the reporting magnitude is the negated ledger net.
         val liabilities = sumNet(lines, "LIABILITY").negate()
@@ -56,11 +60,13 @@ object F0101Mapper {
             FinrepCell(rowRef = "r490", colRef = "c010", value = equity),
         )
 
+        val assessment = TrialBalanceAssurance.assess(snapshot)
         return FinrepTemplate(
             templateId = "F01.01",
             period = asOf,
             cells = cells,
-            isBalanced = TrialBalanceIdentity.holds(lines),
+            isBalanced = assessment.verdict == BalanceVerdict.AGREED_BALANCED,
+            balanceVerdict = assessment.verdict,
         )
     }
 

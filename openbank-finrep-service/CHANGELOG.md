@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.8.1...finrep-service-v0.8.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **finrep:** require the ledger's own balance verdict to agree ([#6163](https://github.com/JiRaska/open-bank-oss/issues/6163)) ([49f45e9](https://github.com/JiRaska/open-bank-oss/commit/49f45e93c586f8e40565066571d7909231cc6030)), closes [#6011](https://github.com/JiRaska/open-bank-oss/issues/6011)
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.8.0...finrep-service-v0.8.1) (2026-08-20)
 
 

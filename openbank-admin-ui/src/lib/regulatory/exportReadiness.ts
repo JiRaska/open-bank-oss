@@ -25,19 +25,30 @@
  *                   zero balance". This is the reason that actually fires today: the ledger's
  *                   chart of accounts has no capital-structure GL accounts, so every C 01.00
  *                   capital row is a flagged zero.
- *   - UNBALANCED  — `FinrepTemplate.isBalanced === false`.
+ *   - UNBALANCED  — `FinrepTemplate.isBalanced === false`, refined by the optional
+ *                   `balanceVerdict` into the three distinct defects below.
  *
- * ⚠ KNOWN GAP, deliberately not papered over — tracked as #5987:
- * `isBalanced` is contract-required and serialised, but BOTH producers hardcode it —
- * `F0101Mapper.kt:44` and `F0200Mapper.kt:44` both pass the literal `isBalanced = true`, and
- * `FinrepTemplate.kt:17` defaults it to `true`. F01.01 additionally DERIVES equity as
- * `assets − liabilities`, so its accounting identity holds algebraically and cannot be observed
- * to fail. `FinrepService`'s own KDoc calls the value "computed ... and never looked at again";
- * the first half of that is not true today. So the `unbalanced` branch below is a real check
- * against the published contract that the current producer can never trigger. It is kept
- * because the contract permits `false` and a UI that ignored it would silently export an
- * unbalanced return the day the producer starts computing the field — but it must NOT be
- * counted as live coverage. The gate's falsifiable, fires-today reason is `data_gaps`.
+ * `isBalanced` is no longer hardcoded by its producers. #6010 (issue #5987) made it a real
+ * computation: `F0101Mapper` and `F0200Mapper` both pass `TrialBalanceIdentity.holds(lines)`,
+ * and F01.01 stopped deriving equity as `assets - liabilities` (it now sources EQUITY/INCOME/
+ * EXPENSE), so the identity can be observed to fail instead of holding algebraically. #6163
+ * (issue #6011) then added `balanceVerdict`, which says WHICH of two independent verdicts
+ * objected - finrep's own identity check, and the balance flag the ledger sealed onto the
+ * trial balance it served:
+ *
+ *   - `AGREED_BALANCED`    - both agree it balances. The only value for which `isBalanced` is true.
+ *   - `AGREED_IMBALANCED`  - both agree it does not: a genuine accounting defect.
+ *   - `SOURCES_DISAGREE`   - the trial-balance lines finrep received are not the lines the ledger
+ *                            sealed (a truncated or filtered response, e.g. an unread page). An
+ *                            EVIDENCE defect: the numbers cannot be attributed to the ledger at
+ *                            all, so nothing can be concluded about whether they balance.
+ *   - `LEDGER_FLAG_ABSENT` - the ledger response carried no verdict at all. A CONTRACT change,
+ *                            kept separate so that "the contract moved" never reads as "the books
+ *                            do not balance".
+ *
+ * The field is optional here on purpose: it is required by finrep's contract but this UI must
+ * stay readable against a deployment that predates #6163. A `false` `isBalanced` with no verdict
+ * blocks under the plain unbalanced reason.
  */
 
 export type PreviewLike =
@@ -51,10 +62,17 @@ export interface CellLike {
   gapReason?: string | null
 }
 
+/**
+ * Which of the two independent balance verdicts objected (finrep openapi.yaml, issue #6011).
+ * Optional: a deployment predating #6163 serves `isBalanced` alone.
+ */
+export type BalanceVerdict = 'AGREED_BALANCED' | 'AGREED_IMBALANCED' | 'SOURCES_DISAGREE' | 'LEDGER_FLAG_ABSENT'
+
 export interface TemplateLike {
   templateId: string
   cells: ReadonlyArray<CellLike>
   isBalanced?: boolean
+  balanceVerdict?: BalanceVerdict
   hasDataGaps?: boolean
 }
 
@@ -69,8 +87,12 @@ export type ExportBlockReason =
   | 'missing_cells'
   /** At least one cell is a flagged data gap (`isDataGap`). */
   | 'data_gaps'
-  /** A FINREP template reports its accounting identity does not hold. */
+  /** A FINREP template reports its accounting identity does not hold, and the ledger agrees. */
   | 'unbalanced'
+  /** finrep and the ledger disagree about the balance - the lines received are not the lines sealed. */
+  | 'balance_sources_disagree'
+  /** The ledger's trial-balance response carried no balance verdict at all. */
+  | 'ledger_verdict_absent'
 
 export type ExportReadiness =
   | { ok: true }
@@ -105,9 +127,26 @@ export function evaluateExportReadiness(data: PreviewLike): ExportReadiness {
   }
 
   // Unbalanced outranks data gaps: a return that does not balance is a supervisory defect on
-  // its own, independent of how completely it was populated.
+  // its own, independent of how completely it was populated. All three non-balanced verdicts
+  // block; they differ only in what the operator is being told to go and fix.
   const unbalanced = data.templates.filter(template => template.isBalanced === false)
   if (unbalanced.length > 0) {
+    // Ordered by how fundamental the defect is, on the same principle as the checks above: a
+    // missing verdict means the contract moved, and disagreeing sources mean the figures cannot
+    // be attributed to the ledger at all - neither says anything about whether the books
+    // balance, so neither may be reported to an operator as an accounting failure.
+    const idsFor = (verdict: BalanceVerdict) =>
+      unbalanced.filter(template => template.balanceVerdict === verdict).map(template => template.templateId)
+
+    const absent = idsFor('LEDGER_FLAG_ABSENT')
+    if (absent.length > 0) {
+      return { ok: false, reason: 'ledger_verdict_absent', templateIds: absent }
+    }
+    const disagree = idsFor('SOURCES_DISAGREE')
+    if (disagree.length > 0) {
+      return { ok: false, reason: 'balance_sources_disagree', templateIds: disagree }
+    }
+    // AGREED_IMBALANCED, plus a template from a deployment that serves no verdict at all.
     return { ok: false, reason: 'unbalanced', templateIds: unbalanced.map(template => template.templateId) }
   }
 
@@ -152,7 +191,15 @@ export function blockReasonCopy(
         : { title: 'Export blocked: incomplete data', detail: `Template ${list} contains cells flagged as data gaps (isDataGap) — reported zeros the platform cannot substantiate. They must not be filed as attested balances.` }
     case 'unbalanced':
       return cs
-        ? { title: 'Export je zablokován: výkaz nevychází', detail: `Šablona ${list} hlásí, že její účetní identita neplatí (isBalanced=false).` }
-        : { title: 'Export blocked: return does not balance', detail: `Template ${list} reports that its accounting identity does not hold (isBalanced=false).` }
+        ? { title: 'Export je zablokován: výkaz nevychází', detail: `Šablona ${list} hlásí, že její účetní identita neplatí, a ledger se s tím shoduje (balanceVerdict=AGREED_IMBALANCED). Jde o účetní vadu — rozdíl je nutné dohledat v hlavní knize.` }
+        : { title: 'Export blocked: return does not balance', detail: `Template ${list} reports that its accounting identity does not hold, and the ledger agrees (balanceVerdict=AGREED_IMBALANCED). This is an accounting defect — the difference has to be traced in the general ledger.` }
+    case 'balance_sources_disagree':
+      return cs
+        ? { title: 'Export je zablokován: zdroje se o vyváženosti neshodují', detail: `U šablony ${list} se rozchází vlastní kontrola finrepu s příznakem, který zapečetil ledger (balanceVerdict=SOURCES_DISAGREE). Řádky obratové předvahy, které finrep dostal, tedy nejsou ty, které ledger zapečetil — zkrácená nebo filtrovaná odpověď (např. nepřečtená stránka). Jde o vadu doložitelnosti, ne o účetní rozdíl: o vyváženosti výkazu zatím nelze říct nic.` }
+        : { title: 'Export blocked: the two balance sources disagree', detail: `For template ${list}, finrep's own identity check and the flag the ledger sealed do not agree (balanceVerdict=SOURCES_DISAGREE). The trial-balance lines finrep received are therefore not the lines the ledger sealed — a truncated or filtered response, e.g. an unread page. This is an evidence defect, not an accounting one: nothing can yet be concluded about whether the return balances.` }
+    case 'ledger_verdict_absent':
+      return cs
+        ? { title: 'Export je zablokován: ledger nevrátil verdikt o vyváženosti', detail: `Odpověď ledgeru pro šablonu ${list} neobsahovala žádný příznak vyváženosti (balanceVerdict=LEDGER_FLAG_ABSENT). Nezávislá kontrola tak chybí — jde o změnu kontraktu, kterou je nutné vyřešit v ledgeru, ne o nevycházející výkaz.` }
+        : { title: 'Export blocked: the ledger returned no balance verdict', detail: `The ledger response for template ${list} carried no balance flag at all (balanceVerdict=LEDGER_FLAG_ABSENT). The independent check is therefore missing — this is a contract change to resolve in the ledger, not a return that fails to balance.` }
   }
 }

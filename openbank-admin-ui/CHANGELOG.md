@@ -1,5 +1,149 @@
 # Changelog
 
+## [0.184.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.2...admin-ui-v0.184.3) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize feedback timestamps ([#6172](https://github.com/JiRaska/open-bank-oss/issues/6172)) ([2f58e37](https://github.com/JiRaska/open-bank-oss/commit/2f58e370e529d225b2741e7c03279a262012529a))
+
+## [0.184.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.1...admin-ui-v0.184.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** externalise the OTel packages or the tracing emits nothing ([#6164](https://github.com/JiRaska/open-bank-oss/issues/6164)) ([abb58a2](https://github.com/JiRaska/open-bank-oss/commit/abb58a27ae4b12ede50308edc05bc4e750819dc8)), closes [#5735](https://github.com/JiRaska/open-bank-oss/issues/5735)
+* **admin-ui:** give each balance verdict its own export-block message ([#6167](https://github.com/JiRaska/open-bank-oss/issues/6167)) ([88936e5](https://github.com/JiRaska/open-bank-oss/commit/88936e596d20da8f672d8201f53e1efe1b9dbac5)), closes [#6011](https://github.com/JiRaska/open-bank-oss/issues/6011) [#6163](https://github.com/JiRaska/open-bank-oss/issues/6163)
+
+## [0.184.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.184.0...admin-ui-v0.184.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize delegation timestamps ([#6159](https://github.com/JiRaska/open-bank-oss/issues/6159)) ([c3b3f12](https://github.com/JiRaska/open-bank-oss/commit/c3b3f120ed30bca18bcdf12c9e348c80750d4bb4))
+
+## [0.184.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.6...admin-ui-v0.184.0) (2026-08-21)
+
+
+### Features
+
+* **admin-ui:** trace the BFF, the one service in the fleet with no spans ([#6153](https://github.com/JiRaska/open-bank-oss/issues/6153)) ([e4c1c5b](https://github.com/JiRaska/open-bank-oss/commit/e4c1c5b06c47b37928f8f4d5602225b1c740e18d))
+
+## [0.183.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.5...admin-ui-v0.183.6) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** mark fx config preview-only ([#6152](https://github.com/JiRaska/open-bank-oss/issues/6152)) ([d7a62b3](https://github.com/JiRaska/open-bank-oss/commit/d7a62b31869536b43a1b8bac530e55baaac1c702))
+
+## [0.183.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.4...admin-ui-v0.183.5) (2026-08-21)
+
+
+### Performance
+
+* **admin-ui:** parallelize finops agents ([#6143](https://github.com/JiRaska/open-bank-oss/issues/6143)) ([caa15fa](https://github.com/JiRaska/open-bank-oss/commit/caa15faa3334132f15c89fb0c1bbb82baaebf2bf))
+
+## [0.183.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.3...admin-ui-v0.183.4) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** localize dora incident timestamps ([#6139](https://github.com/JiRaska/open-bank-oss/issues/6139)) ([daa660c](https://github.com/JiRaska/open-bank-oss/commit/daa660c4bb0a2d339334265330449880ee76ac53))
+
+## [0.183.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.2...admin-ui-v0.183.3) (2026-08-21)
+
+
+### Performance
+
+* **admin-ui:** bound finops cost refresh ([#6135](https://github.com/JiRaska/open-bank-oss/issues/6135)) ([65bca51](https://github.com/JiRaska/open-bank-oss/commit/65bca5182774ff036b2358674d4e588b52ba0de0))
+
+## [0.183.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.1...admin-ui-v0.183.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** align notification route RBAC ([#6131](https://github.com/JiRaska/open-bank-oss/issues/6131)) ([b11a3e1](https://github.com/JiRaska/open-bank-oss/commit/b11a3e137c60321dcef551f55f2b782992ccc830))
+
+## [0.183.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.0...admin-ui-v0.183.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify finops budget state ([#6127](https://github.com/JiRaska/open-bank-oss/issues/6127)) ([7dccef6](https://github.com/JiRaska/open-bank-oss/commit/7dccef65feab5ce25a75674fa0f9e51a3aba770c))
+
+## [0.183.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.9...admin-ui-v0.183.0) (2026-08-21)
+
+
+### Features
+
+* **admin-ui:** resolve accounts by party ([#6123](https://github.com/JiRaska/open-bank-oss/issues/6123)) ([18a3451](https://github.com/JiRaska/open-bank-oss/commit/18a3451b59455b45a0b22ae47a22715f4215c8fd))
+
+## [0.182.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.8...admin-ui-v0.182.9) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** gate lending advance action ([#6118](https://github.com/JiRaska/open-bank-oss/issues/6118)) ([cdce9e7](https://github.com/JiRaska/open-bank-oss/commit/cdce9e75f8230da8cf4b1913441da632bac01d3d))
+
+## [0.182.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.7...admin-ui-v0.182.8) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** align approval inbox rbac ([#6114](https://github.com/JiRaska/open-bank-oss/issues/6114)) ([0c6e5a7](https://github.com/JiRaska/open-bank-oss/commit/0c6e5a7e235f8a97248a5d0a550479960e4122eb))
+
+## [0.182.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.6...admin-ui-v0.182.7) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align agent workflow rbac ([#6110](https://github.com/JiRaska/open-bank-oss/issues/6110)) ([c090762](https://github.com/JiRaska/open-bank-oss/commit/c090762ded58b386d6a47239a0d548839c0669cb))
+
+## [0.182.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.5...admin-ui-v0.182.6) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align identity case rbac ([#6106](https://github.com/JiRaska/open-bank-oss/issues/6106)) ([eb51a40](https://github.com/JiRaska/open-bank-oss/commit/eb51a40e46753e14d9186259933ce2d1f359f3db))
+
+## [0.182.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.4...admin-ui-v0.182.5) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align campaign workflow rbac ([#6102](https://github.com/JiRaska/open-bank-oss/issues/6102)) ([5dfc00b](https://github.com/JiRaska/open-bank-oss/commit/5dfc00b6c5d09307ed1d806d530170769092f65f))
+
+## [0.182.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.3...admin-ui-v0.182.4) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align audience workflow rbac ([#6097](https://github.com/JiRaska/open-bank-oss/issues/6097)) ([10f617a](https://github.com/JiRaska/open-bank-oss/commit/10f617a1ffae9694accdc1c275ba199a1f219033))
+
+## [0.182.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.2...admin-ui-v0.182.3) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align lending compliance rbac ([#6093](https://github.com/JiRaska/open-bank-oss/issues/6093)) ([3829353](https://github.com/JiRaska/open-bank-oss/commit/38293539624d87ebf38445965fa24905211dde8e))
+
+## [0.182.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.1...admin-ui-v0.182.2) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** remove fake AML scan action ([#6079](https://github.com/JiRaska/open-bank-oss/issues/6079)) ([3924b65](https://github.com/JiRaska/open-bank-oss/commit/3924b6555b44f313fdc03227be53b850ed849ad1))
+
+## [0.182.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.182.0...admin-ui-v0.182.1) (2026-08-20)
+
+
+### Bug Fixes
+
+* **admin-ui:** align account lifecycle permissions ([#6064](https://github.com/JiRaska/open-bank-oss/issues/6064)) ([15dd727](https://github.com/JiRaska/open-bank-oss/commit/15dd7273d9d87b39dd21ef77355c8adf89744304))
+* **admin-ui:** align sanctions action permissions ([#6065](https://github.com/JiRaska/open-bank-oss/issues/6065)) ([bd889cc](https://github.com/JiRaska/open-bank-oss/commit/bd889cccb52767e65df38cb4c5458ab801df6e21))
+* **admin-ui:** clarify closing controls ([#6060](https://github.com/JiRaska/open-bank-oss/issues/6060)) ([a494a4c](https://github.com/JiRaska/open-bank-oss/commit/a494a4c1d01ade9eb346d56e2488b14eebff0803))
+* **admin-ui:** gate devops hitl decisions ([#6074](https://github.com/JiRaska/open-bank-oss/issues/6074)) ([79288f7](https://github.com/JiRaska/open-bank-oss/commit/79288f755dd08a38c5e74f507df56fb6c0f75dce))
+
 ## [0.182.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.181.0...admin-ui-v0.182.0) (2026-08-20)
 
 

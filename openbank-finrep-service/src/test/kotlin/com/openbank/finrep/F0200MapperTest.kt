@@ -5,6 +5,7 @@
 package com.openbank.finrep
 
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
+import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
 import com.openbank.finrep.domain.mapper.F0200Mapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -25,7 +26,7 @@ class F0200MapperTest {
 
     @Test
     fun `F02_00 reports income and expense as positive magnitudes and derives net profit`() {
-        val template = F0200Mapper.map(balancedTrialBalance(), asOf)
+        val template = F0200Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf)
 
         assertThat(template.templateId).isEqualTo("F02.00")
         assertThat(cell(template, "r010")).isEqualByComparingTo("120000")
@@ -35,7 +36,7 @@ class F0200MapperTest {
 
     @Test
     fun `a P&L drawn off a trial balance that ties out is reported as balanced`() {
-        assertThat(F0200Mapper.map(balancedTrialBalance(), asOf).isBalanced).isTrue()
+        assertThat(F0200Mapper.map(tb(balancedTrialBalance(), ledgerSays = true), asOf).isBalanced).isTrue()
     }
 
     @Test
@@ -45,7 +46,7 @@ class F0200MapperTest {
         // A P&L is not submittable off a GL that does not balance, however self-consistent it looks.
         val lines = balancedTrialBalance() + line("1001", "ASSET", "25000")
 
-        assertThat(F0200Mapper.map(lines, asOf).isBalanced).isFalse()
+        assertThat(F0200Mapper.map(tb(lines, ledgerSays = false), asOf).isBalanced).isFalse()
     }
 
     @Test
@@ -54,10 +55,14 @@ class F0200MapperTest {
         // computed, so asserting it would always hold. This test states that r450 tracks the inputs
         // exactly, WITHOUT that identity being what `isBalanced` reports.
         val lines = balancedTrialBalance()
-        val template = F0200Mapper.map(lines, asOf)
+        val template = F0200Mapper.map(tb(lines, ledgerSays = true), asOf)
 
         assertThat(cell(template, "r450")).isEqualByComparingTo(cell(template, "r010").subtract(cell(template, "r030")))
     }
+
+    /** Ledger's verdict is explicit per call site, never derived from `lines` (issue #6011). */
+    private fun tb(lines: List<TrialBalanceLineDto>, ledgerSays: Boolean?) =
+        TrialBalanceSnapshot(lines = lines, ledgerReportsBalanced = ledgerSays)
 
     private fun line(code: String, accountType: String, net: String, currency: String = "CZK") =
         TrialBalanceLineDto(code = code, accountType = accountType, net = BigDecimal(net), currency = currency)
