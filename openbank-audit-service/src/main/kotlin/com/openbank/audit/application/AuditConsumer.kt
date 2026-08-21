@@ -12,6 +12,7 @@ import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.audit.infrastructure.persistence.PartyMergeIndexRepository
+import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.MeterRegistry
 import io.smallrye.mutiny.Uni
@@ -130,7 +131,7 @@ class AuditConsumer {
             val entry = AuditEntry(
                 // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
                 // producers without one retain the previous random entry id behaviour.
-                id = node.textOrNull("eventId")?.let(UUID::fromString) ?: UUID.randomUUID(),
+                id = node.textOrNull("eventId")?.let(UUID::fromString) ?: Ids.newId(),
                 // sepa.instant.events (KafkaSctInstEventPublisher) names its discriminator "type",
                 // not "eventType" — the only #996-consumed producer that does so.
                 // `ce-type` is the outbox event type, and it is the LAST resort before the
@@ -286,58 +287,59 @@ class AuditConsumer {
         }
     }
 
-    // Ordered (field name -> aggregate type) fallback chain, first match wins. One shared table
-    // backs both inferAggregateId/inferAggregateType instead of two parallel chains that drift —
-    // add a new topic's identifying field here rather than duplicating a branch in both functions
-    // (kept the two in sync by hand across #996 rounds 1-3 until this got too complex; also fixes
-    // a latent inconsistency where kycCaseId had a type but no matching id-extraction branch).
-    // "incident" (security.ict.incident) is the one exception: its id is nested, not a top-level
-    // field, so it is handled separately before this table.
-    private val aggregateFields = listOf(
-        "accountId" to "ACCOUNT",
-        "partyId" to "PARTY",
-        "transactionId" to "TRANSACTION",
-        "consentId" to "CONSENT",
-        "kycCaseId" to "KYC_CASE",
-        "batchId" to "CLEARING_BATCH",
-        "itemId" to "CLEARING_ITEM",
-        "cardId" to "CARD",
-        "disputeId" to "DISPUTE",
-        "paymentId" to "PAYMENT",
-        "loanApplicationId" to "LOAN_APPLICATION",
-        "loanId" to "LOAN",
-        "documentId" to "DOCUMENT",
-        "ceremonyId" to "SIGNATURE_CEREMONY",
-        "conversionId" to "FX_CONVERSION",
-        "swiftMessageId" to "SWIFT_MESSAGE",
-        "id" to "SANCTIONS_CHECK",
-    )
-
-    // Both halves test the SAME predicate ([textOrNull], not `has`) on purpose. `has` is true for a
-    // field explicitly set to JSON null, so the old pair disagreed on exactly that input: the type
-    // side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
-    // string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
-    // predicate identical is what makes the two sides answer about the same field (#3994).
-    private fun inferAggregateId(node: JsonNode): String {
-        node["incident"]?.textOrNull("id")?.let { return it }
-        for ((field, _) in aggregateFields) {
-            node.textOrNull(field)?.let { return it }
-        }
-        return "unknown"
-    }
-
-    private fun inferAggregateType(node: JsonNode): String {
-        if (node["incident"]?.textOrNull("id") != null) return "ICT_INCIDENT"
-        for ((field, type) in aggregateFields) {
-            if (node.textOrNull(field) != null) return type
-        }
-        return "UNKNOWN"
-    }
-
     private companion object {
         /** Cap on the producer-supplied value echoed into the warning — it is untrusted input. */
         const val MAX_LOGGED_RAW_TIME_CHARS = 64
     }
+}
+
+// Ordered (field name -> aggregate type) fallback chain, first match wins. One shared table backs
+// both inferAggregateId/inferAggregateType instead of two parallel chains that drift — add a new
+// topic's identifying field here rather than duplicating a branch in both functions (kept the two
+// in sync by hand across #996 rounds 1-3 until this got too complex; also fixes a latent
+// inconsistency where kycCaseId had a type but no matching id-extraction branch). "incident"
+// (security.ict.incident) is the one exception: its id is nested, not a top-level field, so it is
+// handled separately before this table. Top-level, not a class member: it needs no instance
+// state, and `AuditConsumer` was already at detekt's TooManyFunctions threshold.
+private val aggregateFields = listOf(
+    "accountId" to "ACCOUNT",
+    "partyId" to "PARTY",
+    "transactionId" to "TRANSACTION",
+    "consentId" to "CONSENT",
+    "kycCaseId" to "KYC_CASE",
+    "batchId" to "CLEARING_BATCH",
+    "itemId" to "CLEARING_ITEM",
+    "cardId" to "CARD",
+    "disputeId" to "DISPUTE",
+    "paymentId" to "PAYMENT",
+    "loanApplicationId" to "LOAN_APPLICATION",
+    "loanId" to "LOAN",
+    "documentId" to "DOCUMENT",
+    "ceremonyId" to "SIGNATURE_CEREMONY",
+    "conversionId" to "FX_CONVERSION",
+    "swiftMessageId" to "SWIFT_MESSAGE",
+    "id" to "SANCTIONS_CHECK",
+)
+
+// Both halves test the SAME predicate ([textOrNull], not `has`) on purpose. `has` is true for a
+// field explicitly set to JSON null, so the old pair disagreed on exactly that input: the type
+// side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
+// string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
+// predicate identical is what makes the two sides answer about the same field (#3994).
+private fun inferAggregateId(node: JsonNode): String {
+    node["incident"]?.textOrNull("id")?.let { return it }
+    for ((field, _) in aggregateFields) {
+        node.textOrNull(field)?.let { return it }
+    }
+    return "unknown"
+}
+
+private fun inferAggregateType(node: JsonNode): String {
+    if (node["incident"]?.textOrNull("id") != null) return "ICT_INCIDENT"
+    for ((field, type) in aggregateFields) {
+        if (node.textOrNull(field) != null) return type
+    }
+    return "UNKNOWN"
 }
 
 /** Matches AuditRepository's `@Column(name = "channel", length = 32)` (V14, issue #4660). */
