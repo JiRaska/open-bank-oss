@@ -544,6 +544,34 @@ gates:
   # (public repo, GitHub-hosted runners), but 90 s on a required check is 90 s every
   # contributor waits on every PR. The STEP still runs unconditionally and prints whether it
   # loaded or skipped and why — a step that silently no-ops reads exactly like one that passed.
+  # #5736 / PR #6041. `AiCallErrorRateHigh` was loaded, `health=ok` and evaluating correctly
+  # throughout an 8h40m total outage, and never fired: Prometheus's own ALERTS series has 44
+  # points at `pending` and zero at `firing`. Its `rate(...[15m])` window is shorter than its
+  # subject's 30-minute invocation period, so the counter increments once per window and the
+  # ratio decays before `for: 15m` matures — a property of the CALLER, not of the rule, which
+  # is why no threshold tuning could ever have fixed it and why promtool, rule health and a
+  # green ArgoCD all agreed nothing was wrong. The same file also catches a ratio that is
+  # blind in the total-failure case, because a route that never succeeded has no
+  # `outcome="success"` series and the arithmetic then yields nothing rather than 0%.
+  # Scope is every windowed alert rule; the subject cadences are DERIVED from @Scheduled
+  # methods, CronJob manifests and agent charters, never a hand-kept list. ENFORCED.
+  - id: alert-window-vs-subject-period
+    name: "alert window accommodates its subject's period (#5736, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      An alert whose rate window is no wider than its subject's invocation period cannot ever
+      mature its `for:`, and every signal a human would check says the rule is fine — loaded,
+      `health=ok`, promtool-clean, ArgoCD green. `AiCallErrorRateHigh` sat `pending` for the
+      whole 8h40m of #5736 and never once reached `firing`; the fix is a property of the
+      caller, not a threshold, so nothing tuned it back into existence.
+    review_after: "2027-02-19"
+    min_subjects: 90   # 121 alert rules in the gitops PrometheusRules today (2026-08-20)
+    selftest: |
+      python3 .github/scripts/check-alert-window-vs-subject-period.py --self-test
+    run: |
+      python3 .github/scripts/check-alert-window-vs-subject-period.py --enforce
+
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
     group: gitops
@@ -990,6 +1018,26 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/test-resolve-can-i-deploy-selector.sh
+
+  # The CO-DEPLOY narrowing of the selector above (#5993). The shared selector's
+  # `--latest main` fallback is correct per service (ADR-0092) and wrong in the atomic
+  # co-deploy matrix, which asks ONE question about a whole set: a moving tag there is a
+  # verdict about a later, unrelated build. The `unknown` branch — broker probe
+  # inconclusive — is the fail-OPEN one: it can answer GREEN about a pair nobody is
+  # deploying, with nothing red anywhere to notice. The self-test's load-bearing cases are
+  # the negative controls: every probe answer that is not an exact version must REFUSE, and
+  # no branch may emit a moving tag. Delegate straight to the shared selector again and
+  # they go red.
+  - id: can-i-deploy-codeploy-selector-unit-test
+    selftest_exempt: "is-a-test-suite — the run: IS the checker's own --self-test"
+    name: "can-i-deploy co-deploy version selector unit test (issue #5993, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "The atomic co-deploy matrix asks ONE broker question about a whole service set, so it is only meaningful when every pacticipant is pinned to the version being deployed; the shared per-service selector's documented `--latest main` fallback silently made it a verdict about whatever build currently carries the moving main tag, which can answer GREEN for a pair nobody is deploying and leaves nothing red anywhere to notice."
+    review_after: "2027-02-21"
+    min_subjects: 21   # 21 assertions across every probe answer the resolver can be handed
+    run: |
+      bash .github/scripts/resolve-codeploy-selector.sh --self-test
 
   # The equivalence proof that lets a reconcile deploy at all (#3432). The selector above decides
   # WHICH version to ask about; on a manual dispatch the honest answer used to be "none, refuse"
@@ -2437,6 +2485,23 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-dashboard-metric-emitted.py --enforce
+
+  # Scope is DERIVED from litellm-config.yaml's `model_name` keys, never a list in the script.
+  # A gate whose subject set is a hand-kept list of the thing it checks reads as PASSING when the
+  # list is short, never as UNCHECKED — so adding a model to the gateway is what grows this gate,
+  # and forgetting the price book is what reddens it.
+  - id: llm-price-book
+    name: "every gateway-routable LLM model is priced, and the price agrees with litellm-config (issue #6045, enforced)"
+    group: data
+    mode: enforced
+    min_subjects: 6   # 6 model_name routes in litellm-config.yaml today (2026-08-21)
+    rationale: "An unpriced model is costed at $0, so the spend dashboards and the 25 USD/day AiFleetDailySpendHigh ceiling understate real cost with no error anywhere; and a price book that disagrees with the gateway's own declared cost means the control that meters and the control that alerts are enforcing two different numbers. AiSpendUnpriced detects the first at runtime, but only once the model carries traffic and only if somebody actions it — it fired for openai/gpt-oss-120b and nobody did."
+    review_after: "2027-02-21"
+    selftest: |
+      python3 .github/scripts/check-llm-price-book.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-llm-price-book.py --enforce
 
   - id: alert-metric-emitted
     name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
