@@ -27,6 +27,7 @@ import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.application.port.out.PostingKind
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.application.port.out.RiskParameterSource
+import com.openbank.lending.application.port.out.TimerArmingOutcome
 import com.openbank.lending.domain.model.AccrualOutcome
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
@@ -65,6 +66,7 @@ import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -113,6 +115,8 @@ class LendingService @Inject constructor(
     CollateralUseCase,
     ProvisioningUseCase,
     RunProvisioningCycleUseCase {
+
+    private val log = Logger.getLogger(LendingService::class.java)
 
     private val machine = OriginationStateMachine()
 
@@ -192,7 +196,37 @@ class LendingService @Inject constructor(
         }
 
     private fun Uni<LoanApplication>.signalWorkflow(): Uni<LoanApplication> =
-        call { app -> workflowPort.stateEntered(app.id, app.status, reflectionDaysFor(app)) }
+        call { app -> armTimers(app.id, app.status, reflectionDaysFor(app)) }
+
+    /**
+     * Reports a state entry to the durable-timer backend and **reads the answer** (#6085).
+     *
+     * The port used to return `Uni<Unit>` from both implementations, so the offline no-op's
+     * discard was indistinguishable from the Temporal adapter's success and no call site could
+     * have noticed. [TimerArmingOutcome] gives the two outcomes different values; this is the
+     * consumer that acts on the difference. A field nothing reads is a latent trap, not a control.
+     *
+     * It deliberately does not fail the chain: arming a timer accompanies the transition, it is
+     * not the transition, and refusing here would take the whole origination path down in an
+     * offline build (ADR-0028 D3). Making a *shipped* image reach this branch is what
+     * `LendingAdapterBindingVerifier` prevents, at boot, before any application exists.
+     */
+    private fun armTimers(
+        applicationId: LoanApplicationId,
+        state: OriginationState,
+        reflectionPeriodDays: Int?,
+    ): Uni<TimerArmingOutcome> =
+        workflowPort.stateEntered(applicationId, state, reflectionPeriodDays).invoke { outcome ->
+            if (outcome != TimerArmingOutcome.ARMED) {
+                log.warnf(
+                    "application %s entered %s with NO durable timer armed (%s): the document-SLA, " +
+                        "offer-expiry and reflection-period waits are unenforced for it.",
+                    applicationId.value,
+                    state,
+                    outcome,
+                )
+            }
+        }
 
     private fun Uni<LoanApplication>.emitEvidence(
         from: String,
@@ -305,7 +339,7 @@ class LendingService @Inject constructor(
         )
         return applications.save(application).call { saved ->
             val state = if (originationConfig.autoApprove) straightThrough(saved).status else saved.status
-            workflowPort.stateEntered(saved.id, state, reflectionDaysFor(saved))
+            armTimers(saved.id, state, reflectionDaysFor(saved))
         }.map { saved ->
             if (originationConfig.autoApprove) straightThrough(saved) else saved
         }.call { saved ->
