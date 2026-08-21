@@ -482,6 +482,31 @@ class AuditAttributionTest {
     }
 
     @Test
+    fun `sca-service's own sourceService wins, no longer falling to the topic table`(): Unit = runBlocking {
+        // Issue #3994/#5256: sca-service's DEVICE_ENROLLED payload (ScaService.kt, a hand-built map
+        // serialised onto the outbox) carries "sourceService" — but it was the ONE producer of the
+        // 21 audited topics with no wire-payload test, so nothing held the claim. The topic is live:
+        // #5369 added openbank.sca.events to this service's consumed-topics list, closing #5338,
+        // where SCA device enrollment had never been audited at all. sca-service is money-path.
+        //
+        // This test is what the sweep's own closure criterion asks for and is the last of the 21
+        // producers to get it. The payload shape below is ScaService.kt's verbatim.
+        val entry = capturingSave()
+
+        consumer.consume(
+            """{"eventType":"DEVICE_ENROLLED","deviceId":"${UUID.randomUUID()}",""" +
+                """"partyId":"${UUID.randomUUID()}","credentialId":"cred-1","algorithm":"ES256",""" +
+                """"occurredAt":"2026-08-09T11:00:00Z","sourceService":"sca-service"}""",
+            EventAddress(topic = "openbank.sca.events"),
+        )
+
+        assertThat(entry.captured.sourceService).isEqualTo("sca-service")
+        assertThat(entry.captured.sourceServiceSource).isEqualTo(AttributionSource.EVENT)
+        assertThat(entry.captured.occurredAt).isEqualTo(Instant.parse("2026-08-09T11:00:00Z"))
+        assertThat(entry.captured.occurredAtSource).isEqualTo(OccurredAtSource.EVENT)
+    }
+
+    @Test
     fun `the topic names the producing service when the producer does not`(): Unit = runBlocking {
         // 1353 of 1774 live rows are here: every producer except customer-edge omits sourceService.
         // RED against the old code, which stored "unknown" with ABSENT-equivalent silence.
