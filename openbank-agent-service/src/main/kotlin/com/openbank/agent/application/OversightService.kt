@@ -12,12 +12,12 @@ import com.openbank.agent.domain.policy.AgentIdentity
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.runtime.StartupEvent
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
