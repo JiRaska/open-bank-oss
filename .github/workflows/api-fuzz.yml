@@ -258,11 +258,29 @@ jobs:
             # Services with a warm build cache passed; the ones without did not, which is why the
             # same service flips between runs. Doing the compile as its own step makes the wait
             # measure what it claims to measure, and a slow BUILD now shows up as a slow build.
+            # The compile status is READ, not discarded. `|| true` here would reproduce exactly
+            # the misattribution this PR exists to remove: a compile failure leaves no classes to
+            # run, quarkusDev exits immediately, the readiness loop below then spends its full
+            # 180s budget on a service that was never going to answer, and the job reports
+            # "failed to boot" about a COMPILE error. Fail fast instead, and name the real cause.
+            #
+            # The build log is its own file: quarkusDev opens `${svc}-boot.log` with `>` a few
+            # lines below, so appending the compile output there would have it truncated away
+            # before anyone could read it — the evidence destroyed by the next command.
             echo "==> [${svc}] compiling (outside the readiness budget)"
             BUILD_START=$SECONDS
+            BUILD_LOG="fuzz-reports/${svc}-build.log"
             ./gradlew ":${svc}:quarkusGenerateCode" ":${svc}:classes" \
-              --console=plain --quiet >> "fuzz-reports/${svc}-boot.log" 2>&1 || true
-            echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s"
+              --console=plain --quiet > "${BUILD_LOG}" 2>&1
+            BUILD_RC=$?
+            echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s (gradle exit ${BUILD_RC})"
+            if [ "$BUILD_RC" != "0" ]; then
+              echo "::error::[${svc}] COMPILE FAILED (gradle exit ${BUILD_RC}) — this is a build error, NOT a boot failure; see ${svc}-build.log artifact"
+              tail -50 "${BUILD_LOG}" || true
+              OVERALL=1
+              docker rm -f fuzz-pg >/dev/null 2>&1 || true
+              continue
+            fi
 
             echo "==> [${svc}] starting quarkusDev"
             # FORCE the credentials this job actually created the container with, rather than
