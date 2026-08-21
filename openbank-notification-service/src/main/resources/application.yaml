@@ -155,6 +155,20 @@ mp:
         # set via the gitops ConfigMap instead (issue #686).
         topic: openbank.party.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        # #5698: PartyErasureConsumer now RETHROWS a failed GDPR Art. 17 erasure instead of
+        # acking it. That is only an improvement if the connector parks the record — SmallRye's
+        # DEFAULT failure-strategy is `fail`, which STOPS the channel, so a rethrow without this
+        # line trades silent data loss for a wedged consumer. `dead-letter-queue` is what makes
+        # the consumer's KDoc true by effect rather than by assertion.
+        #
+        # The DLQ TOPIC NAME is set in the gitops msg-override ConfigMap, not here: the key is
+        # `dead-letter-queue.topic`, a dotted leaf key, and SmallRye's YAML source would register
+        # it quoted and never read it (issue #686 — the same footgun as group.id above). Left
+        # implicit it would default to `dead-letter-topic-party-events-in`, which account-service
+        # ALREADY owns for its own channel of the same name — two services' dead letters in one
+        # topic, misattributed by the existing AccountPartyEventDeadLettered alert. Hence the
+        # explicit per-service name, mirroring fraud-service's `transaction-signal` channel.
+        failure-strategy: dead-letter-queue
       # ADR-0232 delegated-access lifecycle notifications (DelegationNotificationConsumer) — a
       # second consumer of the topic account-service (enforcement projection) and audit-service
       # (onBehalfOf trail) already read.
