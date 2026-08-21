@@ -104,13 +104,19 @@ class CreditOfferEligibilityServiceTest {
 
     @Test
     fun `incomplete signals fail closed even when every flag reads healthy`() = runBlocking<Unit> {
-        val decision = service(consent = true, signals = healthy.copy(complete = false)).evaluate(partyId, OfferSurface.PUSH)
+        val decision = service(
+            consent = true,
+            signals = healthy.copy(complete = false),
+        ).evaluate(partyId, OfferSurface.PUSH)
         assertThat(codeOf(decision)).isEqualTo(CreditOfferSuppressionCode.SIGNALS_UNAVAILABLE)
     }
 
     @Test
     fun `distress suppresses a consenting customer`() = runBlocking<Unit> {
-        val decision = service(consent = true, signals = healthy.copy(hasArrears = true)).evaluate(partyId, OfferSurface.PUSH)
+        val decision = service(
+            consent = true,
+            signals = healthy.copy(hasArrears = true),
+        ).evaluate(partyId, OfferSurface.PUSH)
         assertThat(codeOf(decision)).isEqualTo(CreditOfferSuppressionCode.ARREARS)
     }
 
@@ -130,12 +136,11 @@ class CreditOfferEligibilityServiceTest {
     }
 
     @Test
-    fun `a pull ignores contact frequency — a cap must not silence an answer that was asked for`() =
-        runBlocking<Unit> {
-            val recentlyContacted = healthy.copy(lastCreditContactAt = clock.instant().minusSeconds(3600))
-            val push = service(consent = true, signals = recentlyContacted).evaluate(partyId, OfferSurface.PUSH)
-            val pull = service(consent = true, signals = recentlyContacted).evaluate(partyId, OfferSurface.PULL)
-            assertThat(codeOf(push)).isEqualTo(CreditOfferSuppressionCode.FREQUENCY_CAP)
-            assertThat(pull).isInstanceOf(CreditOfferDecision.Allowed::class.java)
-        }
+    fun `a pull ignores contact frequency — a cap must not silence an answer that was asked for`() = runBlocking<Unit> {
+        val recentlyContacted = healthy.copy(lastCreditContactAt = clock.instant().minusSeconds(3600))
+        val push = service(consent = true, signals = recentlyContacted).evaluate(partyId, OfferSurface.PUSH)
+        val pull = service(consent = true, signals = recentlyContacted).evaluate(partyId, OfferSurface.PULL)
+        assertThat(codeOf(push)).isEqualTo(CreditOfferSuppressionCode.FREQUENCY_CAP)
+        assertThat(pull).isInstanceOf(CreditOfferDecision.Allowed::class.java)
+    }
 }
