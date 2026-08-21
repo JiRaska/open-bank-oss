@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.183.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.2...admin-ui-v0.183.3) (2026-08-21)
+
+
+### Performance
+
+* **admin-ui:** bound finops cost refresh ([#6135](https://github.com/JiRaska/open-bank-oss/issues/6135)) ([65bca51](https://github.com/JiRaska/open-bank-oss/commit/65bca5182774ff036b2358674d4e588b52ba0de0))
+
 ## [0.183.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.183.1...admin-ui-v0.183.2) (2026-08-21)
 
 
