@@ -248,6 +248,29 @@ gates:
   # comparison itself escalates via deploy-drift-watch.yml and never gates a merge.
   # Without this half, a hand-set tag (`latest`, `sandbox-sec1`) would make the
   # scheduled watch blind for that service while the repo reports green.
+  # issue #6231: the supersede script decides which deploy PRs to CLOSE, and it used to decide by
+  # PR creation time. A slower build opens a later PR for an OLDER commit, so on 2026-08-21 it closed
+  # #6222 (`579dda8e`) in favour of #6225 (`a9e9d082`, an ancestor of it) and stranded the newer code
+  # with every job green. It now decides by ancestry and FAILS the step when the surviving PR is the
+  # ancestor. Nothing in CI executes that script — it only runs inside auto-deploy against live PRs —
+  # so its own self-test is the only place its RED is reachable before it acts on real PRs. Case 1 is
+  # the #6231 interleaving and must exit non-zero; case 2 is the ordinary supersede and must still
+  # close the older PR, so a fail-everything script does not satisfy it either.
+  - id: supersede-deploy-prs-ancestry
+    selftest_exempt: "is-a-test-suite — the run: IS supersede-deploy-prs.sh --self-test"
+    name: "supersede-deploy-prs decides by ancestry, not recency (issue #6231)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A slower build opens a later deploy PR for an OLDER commit. Deciding which PR to close by
+      creation time instead of ancestry closed #6222 in favour of an ancestor PR on 2026-08-21 and
+      stranded newer code with every job green (issue #6231). This gate is the only place that
+      defect's fix can go red before it acts on a real PR — the script itself only runs inside
+      auto-deploy against live PRs, never in ordinary CI.
+    review_after: "2027-02-19"
+    run: |
+      bash .github/scripts/supersede-deploy-prs.sh --self-test
+
   - id: deploy-drift-declaration
     name: "deployed image pins name a commit (issue #3344, enforced)"
     group: gitops
