@@ -355,6 +355,7 @@ spec:
             severity: warning
             team: platform
           annotations:
+            subject_period: continuous
             summary: "Every LLM call to {{ $labels.model }} is failing — not one has succeeded in 6h"
             description: >-
               The gateway is answering and every answer is an error, so this is not an outage of
