@@ -68,17 +68,12 @@ class OpenAiCompatibleLlmGatewayClient(
         .connectTimeout(Duration.ofSeconds(CONNECT_TIMEOUT_S))
         .build()
 
-    @Suppress("TooGenericExceptionCaught") // IOException + parse errors have no common base worth splitting
-    override suspend fun chat(systemPrompt: String, userPrompt: String): String? {
-        if (apiKey.isBlank()) {
-            log.warn("LLM api-key not seeded — skipping call (degraded to deterministic fallback)")
-            // Recorded, not silent: an agent that has never had a key looks identical to one that
-            // is simply idle unless this series exists, and "the AI features were never switched
-            // on" is exactly the state this repo keeps discovering months late.
-            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0, provider)
-            return null
-        }
-        val url = "${baseUrl.trimEnd('/')}/chat/completions"
+    /**
+     * Builds the chat request body. Extracted from [chat] purely so that method stays inside the
+     * detekt `LongMethod` budget — it crossed it at 61 lines when the trace-id correlation landed
+     * (#5959), which reddened the full-fleet lint gate (#6023).
+     */
+    private fun buildRequest(systemPrompt: String, userPrompt: String): ChatRequest {
         // LiteLLM forwards `metadata` verbatim to its logging callbacks, so `trace_id` is what the
         // gateway hands Langfuse instead of minting one — that is the whole join between the two
         // evidence trails. Omitted entirely when there is no valid trace: an absent key leaves
@@ -90,13 +85,27 @@ class OpenAiCompatibleLlmGatewayClient(
         // otherwise propagate out of chat() and cost a completion for want of a correlation id. This
         // read sits OUTSIDE the request try/catch, so nothing else would have caught it.
         val traceId = runCatching { traceIds.currentTraceId() }.getOrNull()?.takeIf { isValidTraceId(it) }
-        val body = ChatRequest(
+        return ChatRequest(
             model = model,
             messages = listOf(ChatMessage("system", systemPrompt), ChatMessage("user", userPrompt)),
             temperature = temperature,
             maxTokens = maxTokens,
             metadata = traceId?.let { ChatMetadata(traceId = it) },
         )
+    }
+
+    @Suppress("TooGenericExceptionCaught") // IOException + parse errors have no common base worth splitting
+    override suspend fun chat(systemPrompt: String, userPrompt: String): String? {
+        if (apiKey.isBlank()) {
+            log.warn("LLM api-key not seeded — skipping call (degraded to deterministic fallback)")
+            // Recorded, not silent: an agent that has never had a key looks identical to one that
+            // is simply idle unless this series exists, and "the AI features were never switched
+            // on" is exactly the state this repo keeps discovering months late.
+            metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_NOT_CONFIGURED, 0, 0, 0, provider)
+            return null
+        }
+        val url = "${baseUrl.trimEnd('/')}/chat/completions"
+        val body = buildRequest(systemPrompt, userPrompt)
         // Nanos, not a Timer.Sample: the metrics port is a pure-domain interface and may not carry a
         // Micrometer type. Measured around the whole attempt, so a timeout — the slowest and most
         // interesting case — is timed too rather than being dropped with the exception.
