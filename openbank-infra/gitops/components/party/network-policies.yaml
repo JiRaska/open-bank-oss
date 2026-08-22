@@ -50,6 +50,9 @@ spec:
               kubernetes.io/metadata.name: documents
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: kyc
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: onboarding
         - namespaceSelector:
             matchLabels:
