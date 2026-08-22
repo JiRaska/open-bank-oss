@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.1...admin-ui-v0.187.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce account loading ([#6445](https://github.com/JiRaska/open-bank-oss/issues/6445)) ([5b0168d](https://github.com/JiRaska/open-bank-oss/commit/5b0168d00f81380eb149d5ba98db52477f94d27c))
+
 ## [0.187.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.0...admin-ui-v0.187.1) (2026-08-22)
 
 
