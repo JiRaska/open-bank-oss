@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.5...admin-ui-v0.186.6) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce clearing loading ([#6385](https://github.com/JiRaska/open-bank-oss/issues/6385)) ([5cb876a](https://github.com/JiRaska/open-bank-oss/commit/5cb876a89cc47824691c07018c9f85df8bdf9f80))
+
 ## [0.186.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.4...admin-ui-v0.186.5) (2026-08-22)
 
 
