@@ -137,7 +137,15 @@ class LedgerResource(
             entryDate = LocalDate.parse(request.entryDate),
             valueDate = LocalDate.parse(request.valueDate),
             description = request.description,
-            lines = request.lines.map { it.toCommand() },
+            lines = request.lines.mapIndexed { index, line ->
+                // `lines` is declared with a NULLABLE element type on purpose. Kotlin's null-safety is
+                // compile-time only and erases at the collection level, so Jackson happily puts a null
+                // into a `List<PostJournalLineRequest>` for a body like `{"lines":[null]}` — and
+                // `it.toCommand()` then threw NPE, which GenericExceptionMapper reports as a 500. Same
+                // rule as the non-null `@QueryParam` in CLAUDE.md: declare the type that can actually
+                // arrive, then reject it. `requireNotNull` maps to 400 via libs-runtime.
+                requireNotNull(line) { "lines[$index] must not be null" }.toCommand()
+            },
             postedBy = request.createdBy,
         )
         val entry = ledgerUseCase.postJournal(command)
@@ -209,7 +217,7 @@ data class PostJournalRequest(
     val valueDate: String,
     val description: String? = null,
     val createdBy: UUID,
-    val lines: List<PostJournalLineRequest>,
+    val lines: List<PostJournalLineRequest?>,
 )
 
 data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
