@@ -88,7 +88,9 @@ sequenceDiagram
   end
 ```
 
-V **produkci** je decision endpoint jedinou cestou do terminálního `CLEARED`/`BLOCKED` — odpovědnost ve čtyřech očích přes `decidedBy`/`assignedAnalyst`. **Sandbox** flag `openbank.aml.auto-clear` (výchozí `false`) toto obchází jen pro neprodukční onboarding toky.
+V **produkci** je decision endpoint jedinou cestou do terminálního `CLEARED`/`BLOCKED`. **Sandbox** flag `openbank.aml.auto-clear` (výchozí `false`) jej pro neprodukční onboarding toky přeskakuje a rozhodnutí připisuje sentinelu `decidedBy = SANDBOX_SYSTEM` — tento řetězec mimo sandbox je compliance incident (ADR-0268 §3).
+
+> ⚠️ **Dnes to nejsou čtyři oči.** Tento odstavec dříve tvrdil „odpovědnost ve čtyřech očích přes `decidedBy`/`assignedAnalyst“. Neplatí to: `decidedBy` přichází v **těle requestu**, ne z autentizovaného security kontextu, a kontroluje se jen na neprázdnost — jeden operátor tedy může případ uzavřít a atribuci si sám vyplnit. Neexistuje ani oddělení maker-checker (`OPEN → CLEARED` je povolený přechod), `openbank-aml-service` není v `rules.yaml: money_path_services`, takže OPA nikdy neodvodí scope `aml` pro `four_eyes_required`, a `AUTHZ_ENFORCE` je zde `false`, takže `@Authorize` je pouze poradní. ADR-0268 §4 to zaznamenává a §5 vyjmenovává, co je třeba doplnit před jiným než sandbox prostředím. Srovnej ADR-0116 §3, která pro KYC dvojče vyžaduje identitu revizora ze security kontextu.
 
 ## Audit trail
 
