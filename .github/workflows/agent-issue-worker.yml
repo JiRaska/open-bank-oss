@@ -1,0 +1,186 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Autonomous issue worker — one open issue per run, one draft PR, on OUR runners.
+#
+# WHY THIS EXISTS, AND WHY IT IS NOT THE CLOUD ROUTINE IT REPLACES
+#   The first version of this worker ran as a Claude Code cloud routine. It worked, in the
+#   sense that it picked an issue, wrote a test, proved the negative case and refused to open
+#   an unverified PR. It could not do the job, for one measured reason: that sandbox cannot
+#   run Testcontainers. `dockerd` starts, but every container registry except
+#   mcr.microsoft.com is refused at its egress proxy (403 to CONNECT — a policy denial, not a
+#   network fault), and MCR carries no Postgres. Measured 2026-08-22 across ghcr.io, quay.io,
+#   public.ecr.aws and registry.k8s.io. So every issue whose proof needs a real database was
+#   unreachable, and on a 93-issue backlog the worker correctly opened nothing.
+#
+#   This repo already owns the right substrate. `openbank-batch` exists precisely for this:
+#   rules.yaml `ci_runners.pools.batch` justifies it as "a separate low-capped pool so a
+#   scan/cron burst cannot starve the merge-required build lane". A scheduled agent IS a cron
+#   burst, and putting it on `openbank-build` would do exactly the starving that pool split
+#   was created to prevent.
+#
+# WHAT IT MAY NOT DO
+#   Never merges, never approves, never closes an issue, never touches main. Its branch is
+#   `agent/...`, which puts every PR it opens under the enforced `agent-pr-guard` gate — so a
+#   change reaching money-path services, CI definitions, governance sources or authorization
+#   policy goes red and waits for a human. The agent cannot clear that red, and this workflow
+#   file is itself one of the protected paths, so the worker cannot widen its own mandate.
+#
+# THE PROBE IS NOT DECORATION
+#   `agent-review.yml` learned this the hard way twice: a driver can be dead while the job is
+#   green, and a probe whose output nobody asserts on is worthless. So the probe here ASSERTS
+#   (no continue-on-error on the assert), and it asserts on the model's REPLY TEXT — an exit
+#   code proves nothing, because the CLI exits 0 on its own recorded failure. A missing
+#   transcript is NOT ALIVE.
+#
+#   It also measures the runner itself, because the whole point of moving here is a set of
+#   capabilities the previous host lacked. On a pull_request touching this file, ONLY the
+#   probe runs: that is how the capability claim gets checked before anyone merges the thing
+#   that depends on it.
+#
+# COST
+#   `ci_runners.model: ephemeral-scale-to-zero` on Karpenter spot, so this bills only for the
+#   minutes it runs — there is no idle capacity to pay for. At one ~30 min run every 6h that
+#   is ~2 node-hours/day. What is NOT known and must not be asserted: which instance type
+#   Karpenter picks, and what share of the account's ~$70/mo cross-AZ transfer any extra image
+#   pulls would add — Cost Explorer cannot attribute image pulls from pod-to-pod traffic. The
+#   probe prints the runner and the wall time so the first real numbers replace this estimate.
+# ─────────────────────────────────────────────────────────────────────────────
+name: Agent issue worker
+
+on:
+  schedule:
+    # Every 6h at :17 — off the hour, to avoid the cron congestion every other job piles into.
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "probe = measure the runner and the credential only; work = also do an issue"
+        type: choice
+        options: [probe, work]
+        default: probe
+  pull_request:
+    # Self-scoped: a PR editing this file runs the PROBE, so the capability claim in the
+    # header is checked against the real runner before the schedule is ever trusted.
+    paths:
+      - .github/workflows/agent-issue-worker.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never two workers at once: two runs would pick the same issue, because the claim (a
+  # pushed `agent/` branch) does not exist until one of them is well underway.
+  group: agent-issue-worker
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    name: Pick one issue, open one draft PR
+    runs-on: openbank-batch
+    timeout-minutes: 45
+    permissions:
+      contents: write        # push an agent/ branch — never main, enforced by branch rules
+      pull-requests: write   # open a draft PR
+      issues: write          # comment on the issue it worked
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Decide mode
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            mode=probe
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            mode="${{ inputs.mode }}"
+          else
+            mode=work
+          fi
+          echo "mode=${mode}" >> "$GITHUB_OUTPUT"
+          echo "mode: ${mode} (event: ${{ github.event_name }})"
+
+      # ---- capability measurement -------------------------------------------------------
+      # Every line here answers a question the cloud sandbox answered WRONGLY, which is the
+      # entire justification for this workflow existing. Advisory: a missing capability must
+      # be REPORTED, not silently turn into a worker that quietly cannot verify its own work.
+      - name: Measure this runner
+        continue-on-error: true
+        run: |
+          echo "runner: ${RUNNER_NAME:-?}  os=${RUNNER_OS:-?} arch=${RUNNER_ARCH:-?}"
+          echo "locale: LANG=${LANG:-unset} LC_ALL=${LC_ALL:-unset}"
+          echo "--- JDKs (build-logic pins jvmToolchain(25); a few modules use 21) ---"
+          ls /usr/lib/jvm 2>/dev/null || echo "no /usr/lib/jvm"
+          echo "--- docker ---"
+          if docker info >/dev/null 2>&1; then
+            echo "docker daemon: UP"
+            echo "--- the question the cloud sandbox failed: can we pull a real database image? ---"
+            if timeout 180 docker pull postgres:16.3-alpine >/dev/null 2>&1; then
+              echo "TESTCONTAINERS-CAPABLE: yes (postgres:16.3-alpine pulled)"
+            else
+              echo "::warning::postgres image pull FAILED on this runner — Testcontainers-backed issues are out of scope here too"
+            fi
+          else
+            echo "::warning::no docker daemon on this runner — Testcontainers unavailable"
+          fi
+
+      # ---- credential liveness, ASSERTED --------------------------------------------------
+      # NO continue-on-error, deliberately. This repo has shipped a dead CLAUDE_CODE_OAUTH_TOKEN
+      # for over a month without noticing, because two independent copies of it exist (the repo
+      # secret and a local launchd env file) and they rotate separately. A worker that runs on a
+      # dead credential burns a runner and reports nothing; that must be a red, immediately.
+      - name: Assert the Claude credential is alive
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set -uo pipefail
+          if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::CLAUDE_CODE_OAUTH_TOKEN is not set for this job. Re-mint with \`claude setup-token\` and update BOTH copies."
+            exit 1
+          fi
+          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          probe=$(claude -p "Reply with exactly the word ALIVE and nothing else." \
+                    --max-turns 3 \
+                    --disallowed-tools Bash Read Write Edit Glob Grep WebFetch WebSearch Task TodoWrite NotebookEdit BashOutput KillShell ReportFindings 2>&1 | tail -3)
+          echo "control-probe: ${probe}"
+          # Assert on the REPLY, never on the exit code: the CLI exits 0 on its own recorded
+          # failure, so an exit-code check is green about a dead driver. Absence of a
+          # transcript is NOT ALIVE.
+          case "${probe}" in
+            *ALIVE*) echo "credential: alive" ;;
+            *) echo "::error::control probe did not answer ALIVE — the credential or the invocation is broken, not this run's task."; exit 1 ;;
+          esac
+
+      - name: Stop here when probing
+        if: steps.mode.outputs.mode == 'probe'
+        run: |
+          echo "probe mode: runner measured and credential asserted; not touching any issue."
+          echo "Merge this workflow, then run it with mode=work (or wait for the schedule)."
+
+      # ---- the actual work ----------------------------------------------------------------
+      - name: Work one issue
+        if: steps.mode.outputs.mode == 'work'
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          git config user.name  "openbank-issue-worker"
+          git config user.email "openbank-issue-worker@users.noreply.github.com"
+          claude -p "$(cat .github/agent-prompts/issue-worker.md)" \
+            --max-turns 120 \
+            --permission-mode acceptEdits \
+          | tee /tmp/worker-output.txt
+          echo "--- worker output above ---"
+
+      - name: Summarise
+        if: always() && steps.mode.outputs.mode == 'work'
+        run: |
+          {
+            echo "### Agent issue worker"
+            echo
+            if [ -s /tmp/worker-output.txt ]; then
+              tail -40 /tmp/worker-output.txt
+            else
+              echo "No output produced — treat as NOT having run, not as 'nothing to do'."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
