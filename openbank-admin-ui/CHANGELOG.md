@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.4...admin-ui-v0.186.5) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce standing orders loading ([#6375](https://github.com/JiRaska/open-bank-oss/issues/6375)) ([90e622f](https://github.com/JiRaska/open-bank-oss/commit/90e622fc20a321dd89c79ee69b9a2bc41c6dc712))
+
 ## [0.186.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.3...admin-ui-v0.186.4) (2026-08-22)
 
 
