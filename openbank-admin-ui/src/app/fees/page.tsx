@@ -113,7 +113,7 @@ export default function FeesPage() {
           title={t('Ceník poplatků', 'Fee Schedule')}
           subtitle={t('Ceník poplatků ze service product-catalog', 'Fee schedule served by the product-catalog service')}
           actions={<div className="flex gap-2">
-            <button className="btn btn-secondary" onClick={() => void load()} disabled={loading}>
+            <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading} aria-busy={loading} aria-label={t('Obnovit ceník poplatků', 'Refresh fee schedule')}>
               <RefreshCw size={14} aria-hidden="true" style={loading ? { animation: 'spin 1s linear infinite' } : undefined} />
               {t('Obnovit', 'Refresh')}
             </button>

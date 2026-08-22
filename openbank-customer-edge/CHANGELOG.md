@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.66.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.0...customer-edge-v0.66.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.66.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.1...customer-edge-v0.66.0) (2026-08-21)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 0 — credit-offer consent and the distress suppression floor ([#6226](https://github.com/JiRaska/open-bank-oss/issues/6226)) ([bf87d31](https://github.com/JiRaska/open-bank-oss/commit/bf87d314745d72eae965a256e6f68f34e8bf01b2))
+
 ## [0.65.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.65.0...customer-edge-v0.65.1) (2026-08-19)
 
 

@@ -58,6 +58,11 @@ dependencies {
     compileOnly("jakarta.persistence:jakarta.persistence-api:3.2.0")
     compileOnly("org.eclipse.microprofile.rest.client:microprofile-rest-client-api:4.0")
     compileOnly("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
+    // Test-only, and deliberately not `implementation`: the persistence exception mappers reference
+    // Hibernate types, but a service without an ORM must not inherit one from libs-runtime just to
+    // get the shared error handling. compileOnly keeps it off every consumer's runtime classpath;
+    // this line only lets libs-runtime's OWN tests construct a DataException to assert against.
+    testImplementation("io.quarkus:quarkus-hibernate-reactive-panache-kotlin:3.33.2")
     compileOnly("io.quarkus:quarkus-scheduler:3.33.2")
     compileOnly("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")
     // 1.14.5 -> 1.17.0: GHSA-g3pr-3p32-fp23 / CVE-2026-40984 (HIGH, DoS in Micrometer's HTTP
