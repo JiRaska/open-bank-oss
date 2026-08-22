@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.7...admin-ui-v0.187.8) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify BCP refresh state ([#6553](https://github.com/JiRaska/open-bank-oss/issues/6553)) ([78b66ca](https://github.com/JiRaska/open-bank-oss/commit/78b66ca3c96b8a434fda5c350b68c0f51b13dd33))
+
 ## [0.187.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.6...admin-ui-v0.187.7) (2026-08-22)
 
 
