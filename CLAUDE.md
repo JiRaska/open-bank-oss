@@ -755,6 +755,12 @@ touch `.github/`. What stays here is what fires from OUTSIDE that tree: editing
   `openbank-admin-ui/ai-governance-snapshot.json` (`gen-ai-governance-snapshot.py`; also stale
   after a `prompts/registry.yaml` change). #3771 regenerated none and red-gated main; #4002 is the
   regeneration template.
+- **Don't regenerate by hand — `bash .github/scripts/regen-derived.sh`** runs every generator, in
+  dependency order (derived data before the bundles that embed it), for the sources your branch
+  actually changed; `--all` does the lot unconditionally. It deliberately runs **no checker**, so
+  the regenerate → commit → check order above is structural rather than something you have to
+  remember. Its inventory is held to the generators that exist by the `regen-derived-inventory`
+  gate, in both directions, so a generator added later cannot be silently left out of it.
 
 ### gh CLI
 - **Always write a PR/issue body to a file and pass `--body-file`. Never `--body` with an
