@@ -94,6 +94,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Restores fleet-lint's home and re-downloads only the runtime-only artifacts "
         "`assemble` needs beyond it.",
     ),
+    "evals-copilot-proposal.yml::copilot-proposal-pack": (
+        "read-only",
+        "Scoped to one service's eval test classes (pure-JVM, no infra); resolves a small subset "
+        "of what fleet-lint already restores fleet-wide. Same reasoning as its sibling "
+        "evals-fraud-review.yml below.",
+    ),
     "evals-fraud-review.yml::fraud-review-pack": (
         "read-only",
         "Scoped to one service's test classes; resolves a small subset of what fleet-lint "
