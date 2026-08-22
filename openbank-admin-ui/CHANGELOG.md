@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.3...admin-ui-v0.186.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify inventory refresh state ([#6372](https://github.com/JiRaska/open-bank-oss/issues/6372)) ([f15574d](https://github.com/JiRaska/open-bank-oss/commit/f15574da6530efde7107e59d033701151a2f57b4))
+
 ## [0.186.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.2...admin-ui-v0.186.3) (2026-08-22)
 
 
