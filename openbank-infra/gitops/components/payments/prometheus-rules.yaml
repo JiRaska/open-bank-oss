@@ -396,13 +396,12 @@ spec:
               queue `openbank-settlement` is polling and whether a run exists for `settlement-<id>`.
         - alert: SettlementStuckAfterCompensation
           # The *_REVERSED states mean the saga already unwound: money was moved and moved back.
-          # A row parked in one has a workflow that died between the compensation and the terminal
-          # write, so funds are safe and only the record is wrong.
-          #
-          # LEDGER_REVERSAL_UNSUPPORTED was in this regex until #6410 removed the status: the
-          # activity that wrote it could never run, because bookToLedger is the last forward step
-          # and nothing can fail after it. Matching a status nothing writes reads as coverage and
-          # is not.
+          # LEDGER_REVERSAL_UNSUPPORTED joins them (#6037): the two balance reversals succeeded and
+          # only the general-ledger posting was left standing, so no customer money is in limbo —
+          # the GL needs a manual correcting entry, which is the same class of record-vs-ledger
+          # disagreement. SettlementWorkflowImpl always calls rejectSettlement after compensating,
+          # so these states are transient by construction and a row parked in one has a workflow
+          # that died between the compensation and the terminal write.
           #
           # REVERSAL_FAILED is deliberately NOT in this rule — there the money did not come back,
           # so it is critical, not warning. See SettlementReversalFailed below.
@@ -415,7 +414,7 @@ spec:
             max by (status) (
               openbank_settlement_non_terminal_oldest_age_seconds{
                 service="settlement",
-                status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED"
+                status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED|LEDGER_REVERSAL_UNSUPPORTED"
               }
             ) > 28800
           for: 30m
