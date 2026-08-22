@@ -40,7 +40,7 @@ jobs:
         # gatelib.py (imported for its subjects() helper) does not itself need PyYAML, but
         # importing it must not become the first thing in this job that requires it either —
         # match ci.yml's own install step so this workflow behaves the same off that runner.
-        run: python3 -c "import yaml" 2>/dev/null || pip install --quiet pyyaml
+        run: python3 -c "import yaml" 2>/dev/null || bash .github/scripts/install-pyyaml-hash-pinned.sh
 
       - name: Compute coverage and write the job summary
         run: |

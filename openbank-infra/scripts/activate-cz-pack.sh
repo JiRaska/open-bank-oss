@@ -26,14 +26,19 @@ echo "${proposal}" | python3 -m json.tool
 proposal_id=$(echo "${proposal}" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
 
 echo "==> 2/3 checker approves (must differ from maker — server enforces four-eyes)"
-curl -fsS -X POST "${BASE_URL}/api/v1/lending/compliance-packs/proposals/${proposal_id}/decide" \
+# Captured, then pretty-printed separately rather than `curl | python3` (OpenSSF Scorecard
+# Pinned-Dependencies: downloadThenRun flags any curl-into-interpreter pipe, code or not —
+# this is a JSON response, not a downloaded script, but the check can't tell the two apart).
+decision="$(curl -fsS -X POST "${BASE_URL}/api/v1/lending/compliance-packs/proposals/${proposal_id}/decide" \
   -H "Authorization: Bearer ${CHECKER_TOKEN}" \
   -H "Content-Type: application/json" \
-  -d '{"approve": true, "reason": "reviewed against 257/2016 Sb. and CCD2"}' | python3 -m json.tool
+  -d '{"approve": true, "reason": "reviewed against 257/2016 Sb. and CCD2"}')"
+echo "${decision}" | python3 -m json.tool
 
 echo "==> 3/3 verify the pack is active"
-curl -fsS "${BASE_URL}/api/v1/lending/compliance-packs/active" \
-  -H "Authorization: Bearer ${CHECKER_TOKEN}" | python3 -m json.tool
+active="$(curl -fsS "${BASE_URL}/api/v1/lending/compliance-packs/active" \
+  -H "Authorization: Bearer ${CHECKER_TOKEN}")"
+echo "${active}" | python3 -m json.tool
 
 echo ""
 echo "NEXT (manual): flip LENDING_ENFORCE_PACK=true in openbank-infra/gitops/components/lending/lending-service.yaml"

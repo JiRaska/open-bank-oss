@@ -73,6 +73,14 @@ async function ghJson(pathname) {
 // the caller must treat that run as shard-only, not crash the whole collector over one gap.
 async function downloadArtifactJson(artifact, workdir) {
   try {
+    // CodeQL js/http-to-file-access: the GitHub Actions API is a trusted, authenticated source
+    // (not a "download from evil.com" backdoor pattern) and the zip is only ever unzipped and
+    // read back as JSON, never executed — but the path built from `artifact.id` below is worth
+    // hardening on its own terms (CWE-434): reject anything that isn't the safe integer the
+    // API contract promises before it reaches path.join, rather than trusting the shape.
+    if (!Number.isInteger(artifact.id) || artifact.id < 0) {
+      throw new Error(`unexpected artifact id shape: ${JSON.stringify(artifact.id)}`)
+    }
     const res = await gh(`/repos/${REPO}/actions/artifacts/${artifact.id}/zip`, {
       redirect: 'follow',
     })
