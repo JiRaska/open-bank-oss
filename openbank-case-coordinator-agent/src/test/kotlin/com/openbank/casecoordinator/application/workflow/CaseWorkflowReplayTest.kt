@@ -68,7 +68,7 @@ class CaseWorkflowReplayTest {
         stub.contribute(ContributeSignal("rca-investigator", "legacy finding", emptyList(), false))
         stub.requestSynthesis(SynthesisRequest("case-coordinator"))
         WorkflowStub.fromTyped(stub).getResult(CaseOutcome::class.java)
-        val history = environment.getWorkflowExecutionHistory(execution)
+        val history = environment.workflowClient.fetchHistory(execution.workflowId, execution.runId)
 
         replayEnvironment().use { replay ->
             WorkflowReplayer.replayWorkflowExecution(history, replay, CaseWorkflowImpl::class.java)
