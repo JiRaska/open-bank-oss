@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.28.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.27.0...lending-service-v0.28.0) (2026-08-22)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 1 — one credit journey, three product shapes, customer-readable projection ([#6230](https://github.com/JiRaska/open-bank-oss/issues/6230)) ([a969810](https://github.com/JiRaska/open-bank-oss/commit/a969810df5541832f63580dfa828efaec81a3ba4))
+
 ## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.26.1...lending-service-v0.27.0) (2026-08-21)
 
 

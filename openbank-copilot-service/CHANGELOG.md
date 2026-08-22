@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.14.1...copilot-service-v0.14.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.14.0...copilot-service-v0.14.1) (2026-08-22)
 
 
