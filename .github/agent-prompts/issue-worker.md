@@ -37,6 +37,24 @@ Check this BEFORE writing code, not after: run
 and read `openbank-libs/governance/rules.yaml` key `autonomous_agent_prs` for the exact
 protected set. Picking a protected issue wastes the entire run.
 
+## You are ONE non-interactive invocation — never background a command
+
+This is `claude -p`, a single shot. There is **no loop to deliver a background-task
+notification**, and no user to wake you. If you start a command in the background and end your
+turn saying "waiting for the run to complete", the session simply ends there: the work is
+abandoned mid-flight, and if you had already pushed a claim branch it stays on the remote and
+hides that issue from every future run.
+
+That is not hypothetical — it is exactly how the run of 2026-08-22 15:14 died, having claimed an
+issue and produced nothing. It ended with the line *"Waiting for the background test run to
+complete — will proceed once notified."*
+
+So: **run every command in the FOREGROUND**, with an explicit `timeout` so a hang cannot eat the
+job. A Gradle module build here takes minutes, not hours; wrap it in `timeout 900 ./gradlew ...`
+and read the output when it returns. Do not use background execution, do not poll for a file to
+appear, do not wait for a notification. If a command genuinely cannot finish inside the job's
+45-minute budget, the issue is too big for one run — abandon it and say so.
+
 ## Step 1 — pick one issue you can actually finish and verify
 
 List open issues with `gh issue list`. Discard, in this order:
@@ -56,14 +74,39 @@ run that test on this runner?** Check rather than assume — the job step before
 whether a real database image can be pulled here, and its output is in the run log. If the proof
 needs something this runner does not have, the issue is out of scope; say so and pick another.
 
-Prefer the OLDEST issue that is concretely specified. If nothing qualifies, open no PR, list
-what you considered and why each was rejected, and stop. That is a successful run.
+Prefer the OLDEST issue that is concretely specified.
+
+**If nothing qualifies, do not just stop — triage instead.** An empty run is honest but it is
+also free capacity, and this backlog goes stale faster than anyone re-reads it: two issues were
+found already-fixed on `main` on 2026-08-22 alone, one of them by this worker. So take the FIVE
+oldest open issues you did not pick and, for each, check against current `origin/main` whether
+the defect it describes is still real. Read the code it names; do not judge from the title.
+
+For any issue that is demonstrably already fixed, leave ONE comment quoting the evidence — the
+file and line that now does the right thing, and the PR or commit that did it — and say it looks
+closeable. **Do not close it**; that is a human's call, and the hard limits above still apply.
+
+Say in your report how many you triaged and what you found. Then end with `NOTHING QUALIFIED`,
+which is what this run was: a successful run that opened no PR.
 
 ## Step 2 — claim it
 
 Create and push `agent/<type>-<slug>-<issue-number>` before writing code. Runs are serialized by
 the workflow's concurrency group, but a human may be working the same issue, and the pushed
 branch is what makes your claim visible.
+
+**A claim you abandon is worse than no claim.** Step 1 discards any issue that already has an
+`agent/` branch naming it, so an orphaned claim hides that issue from every future run —
+permanently, and with nothing to explain why it is never picked. If you abandon the issue for
+any reason after claiming it, **delete the branch before you finish**:
+
+```
+git push origin --delete agent/<the-branch-you-pushed>
+```
+
+That works on this runner (it did not in the cloud sandbox this worker used to run in, which is
+why older instructions said to leave it). If the delete fails, name the branch in your report so
+a human removes it — never leave it unmentioned.
 
 ## Step 3 — understand before you edit
 

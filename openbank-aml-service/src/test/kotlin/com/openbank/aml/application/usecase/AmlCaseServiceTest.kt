@@ -13,9 +13,11 @@ import com.openbank.aml.domain.model.AmlCase
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
+import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -109,6 +111,49 @@ class AmlCaseServiceTest {
             .hasMessageContaining("decisionReason is required")
 
         coVerify(exactly = 0) { amlCaseRepository.update(any(), any()) }
+    }
+
+    /**
+     * #5837 regression. `AmlCase.transitionTo` carries `now: Instant = Instant.EPOCH`, and
+     * `AmlCaseService.updateDecision` never passed a value — so every terminal AML decision
+     * (an analyst's four-eyes decision AND the sandbox auto-clear) recorded
+     * `decidedAt`/`updatedAt` as 1970-01-01, in the DB column and on the wire. The service
+     * already holds an injected `Clock`; nothing read it on this path.
+     *
+     * Assert RECENCY against the fixed clock, never `isNotNull()` — a non-null assertion
+     * passes happily against `Instant.EPOCH`, which is why the existing suite (fixed clock
+     * and all) never saw this.
+     */
+    @Test
+    fun `decision stamps decidedAt and updatedAt from the clock, not Instant EPOCH`(): Unit = runBlocking {
+        val existing = amlCase(status = AmlCaseStatus.UNDER_REVIEW)
+        coEvery { amlCaseRepository.findById(existing.id) } returns existing
+        coEvery { amlCaseRepository.update(any(), any()) } answers { firstArg() }
+
+        val result = service.updateDecision(
+            UpdateAmlDecisionCommand(
+                caseId = existing.id,
+                targetStatus = AmlCaseStatus.CLEARED,
+                decisionReason = "No adverse match",
+                assignedAnalyst = "analyst-1",
+                decidedBy = "reviewer-1",
+            ),
+        )
+
+        val expected = Instant.now(clock)
+        assertThat(result.decidedAt).isEqualTo(expected)
+        assertThat(result.updatedAt).isEqualTo(expected)
+        assertThat(result.decidedAt).isNotEqualTo(Instant.EPOCH)
+
+        // The status-changed event reads `current.updatedAt` for its `occurredAt`, so an EPOCH
+        // aggregate silently puts 1970 on the wire for every downstream consumer too.
+        val event = slot<OutboxMessage>()
+        coVerify { amlCaseRepository.update(any(), capture(event)) }
+        val payload = objectMapper.readTree(event.captured.payload)
+        // Read it back through the same mapper that wrote it — this one serialises Instant as a
+        // numeric epoch, so `Instant.parse(asText())` would fail on the shape, not the value.
+        val occurredAt = objectMapper.treeToValue(payload.path("occurredAt"), Instant::class.java)
+        assertThat(occurredAt).isEqualTo(expected)
     }
 
     private fun createCommand(idempotencyKey: String = "aml-idem-1", riskLevel: AmlRiskLevel = AmlRiskLevel.HIGH) =

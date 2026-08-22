@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Customer Edge API
-  version: 1.40.0
+  version: 1.41.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1091,6 +1091,49 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Loan'}
+
+  /credit-applications:
+    get:
+      tags: [Lending]
+      summary: The caller's own credit applications as customer-readable journeys
+      description: >-
+        ADR-0269 rule 3. The read half of the intake pair: POST /loan-applications files an
+        application, this says where it got to. Carries no rate, instalment or APRC — price is
+        ADR-0269 rule 4 and arrives as a separate quote object. Fails soft to an empty array on
+        upstream failure, because an unfetchable journey must not be invented.
+      operationId: listCreditApplications
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The caller's credit applications (possibly empty)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/CreditJourney'}
+
+  /credit-applications/{applicationId}:
+    get:
+      tags: [Lending]
+      summary: One of the caller's own credit applications
+      description: >-
+        Ownership is enforced upstream by party header: lending-service filters by owner and answers
+        404 for a foreign id, so a not-found and a not-yours are indistinguishable. Not fail-soft —
+        there is no honest empty value for a single journey.
+      operationId: getCreditApplication
+      security:
+        - customerOidc: [accounts:read]
+      parameters:
+        - {name: applicationId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The credit application journey
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditJourney'}
+        '404':
+          description: No such application for this caller
 
   /loans/{loanId}/schedule:
     get:
@@ -3143,6 +3186,62 @@ components:
 
     # Edge's projected view of lending-service's Loan (internal fields dropped — see
     # CustomerEdgeResource.projectLoan).
+    CreditJourney:
+      type: object
+      description: >-
+        A credit application as the customer sees it (ADR-0269 rule 3). The client RENDERS this and
+        derives nothing from it — no local step advancement, no inferred approval. Deliberately
+        carries no price of any kind.
+      required: [id, productKind, state, steps, requirements, awaitingCustomer, submittedAt]
+      properties:
+        id: {type: string, format: uuid}
+        productKind:
+          type: string
+          description: Which of the three shapes this is, and therefore which steps the customer walks.
+          enum: [UNSECURED, SECURED, REVOLVING]
+        state:
+          type: string
+          description: Canonical ADR-0211 origination state.
+        steps:
+          type: array
+          description: The product's own step sequence with each step's position. Codes, not display text.
+          items:
+            type: object
+            required: [code, status]
+            properties:
+              code:
+                type: string
+                enum: [APPLY, ASSESS, OFFER, COLLATERAL, SIGN, DISBURSE, DRAWDOWN, ACTIVATE_LIMIT]
+              status: {type: string, enum: [DONE, CURRENT, UPCOMING]}
+        requirements:
+          type: array
+          description: Outstanding paperwork. Empty until the collecting steps exist.
+          items:
+            type: object
+            required: [code, status, completedByCustomer]
+            properties:
+              code: {type: string}
+              status: {type: string, enum: [TODO, IN_REVIEW, SATISFIED, REJECTED]}
+              completedByCustomer:
+                type: boolean
+                description: >-
+                  False for work the bank does (a valuation). Rendering those as customer tasks
+                  leaves someone staring at a step they cannot action.
+              reason: {type: string, nullable: true}
+        awaitingCustomer:
+          type: array
+          description: >-
+            Requirement codes the customer must act on now. Empty is a real answer — nothing to do
+            but wait.
+          items: {type: string}
+        outcomeReasonCode:
+          type: string
+          nullable: true
+          description: >-
+            Decision-engine reason code, present only on a refused application. Never a human
+            checker's free-text note.
+        submittedAt: {type: string, format: date-time}
+
     Loan:
       type: object
       properties:

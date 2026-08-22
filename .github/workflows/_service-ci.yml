@@ -115,35 +115,6 @@ jobs:
       - name: Resolve GRADLE_USER_HOME
         run: echo "GRADLE_USER_HOME=${HOME}/.gradle" >> "$GITHUB_ENV"
 
-      # Warm this service's Gradle dependency cache BEFORE "Build + test" runs, so an
-      # interrupted-download-corrupted module cache entry is caught and healed HERE, not
-      # inside "Build + test" (which must run exactly once — see the ADVISORY note below).
-      - name: Warm Gradle dependency cache (self-heal corrupted entries)
-        continue-on-error: true
-        run: |
-          set +e
-          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
-          warmup_status=$?
-          if [ $warmup_status -eq 124 ]; then
-            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
-            cat /tmp/gradle-warmup.log
-          elif [ $warmup_status -ne 0 ]; then
-            cat /tmp/gradle-warmup.log
-            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
-              echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
-              retry_status=$?
-              if [ $retry_status -eq 124 ]; then
-                echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
-              fi
-            else
-              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
-            fi
-          fi
-
-      # Normalize the Testcontainers Docker endpoint. GitHub-hosted runners already ship
-      # Docker at the standard unix socket, but this keeps the same normalization as the
-      # self-hosted `contract` job (#873) in case DOCKER_HOST is ever set ambiently.
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
         run: |
           if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
@@ -194,6 +165,46 @@ jobs:
           # per-service home caches on PR branches would churn the Actions cache quota.
           cache-read-only: true
           gradle-home-cache-strict-match: false
+
+      # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
+      #
+      # setup-gradle refuses to touch a Gradle User Home that already exists ("Gradle User
+      # Home already exists: will not restore from cache" / "Caching was skipped"). This step
+      # invokes ./gradlew, which CREATES that home -- so while it ran first it silently
+      # disabled the very restore the default-home choice above exists to enable, and then
+      # did the same work by hand, slower. Measured 2026-08-22 on 3 of 3 sampled PR builds:
+      # the warm step took 120s and setup-gradle took 2s doing nothing, against 9s for the
+      # identical restore in fleet-lint on the same runner class (nine entries, including an
+      # 832 MB gradle-dependencies-v2 written from main). Build-cache hit rate in those
+      # builds was ~2%: "52 actionable tasks: 45 executed, 1 from cache, 6 up-to-date".
+      #
+      # Nothing about the heal contract changes by moving it. The corrupted entry it guards
+      # against can arrive in the RESTORED cache just as easily as in a persistent home, and
+      # healing it here still keeps the retry out of "Build + test" -- which must run exactly
+      # once, because it re-runs `test` differently depending on PUBLISH_RESULTS (the #1009
+      # Pact-publish hazard). It is now healing a warm cache instead of populating a cold one.
+      - name: Warm Gradle dependency cache (self-heal corrupted entries)
+        continue-on-error: true
+        run: |
+          set +e
+          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          warmup_status=$?
+          if [ $warmup_status -eq 124 ]; then
+            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
+            cat /tmp/gradle-warmup.log
+          elif [ $warmup_status -ne 0 ]; then
+            cat /tmp/gradle-warmup.log
+            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
+              echo "retrying dependency warm-up after healing corrupted cache entries"
+              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              retry_status=$?
+              if [ $retry_status -eq 124 ]; then
+                echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
+              fi
+            else
+              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
+            fi
+          fi
 
       # No `-Dpactbroker.*` flags here at all (unlike the pre-split single job): this job
       # never has a broker URL to forward, so the @PactBroker-gated provider-verification
@@ -413,29 +424,6 @@ jobs:
             echo "GRADLE_USER_HOME=${{ github.workspace }}/../../.gradle-svc/${{ inputs.service }}" >> "$GITHUB_ENV"
           fi
 
-      - name: Warm Gradle dependency cache (self-heal corrupted entries)
-        continue-on-error: true
-        run: |
-          set +e
-          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
-          warmup_status=$?
-          if [ $warmup_status -eq 124 ]; then
-            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory step"
-            cat /tmp/gradle-warmup.log
-          elif [ $warmup_status -ne 0 ]; then
-            cat /tmp/gradle-warmup.log
-            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
-              echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
-              retry_status=$?
-              if [ $retry_status -eq 124 ]; then
-                echo "::warning::dependency warm-up retry timed out after 120s; continuing"
-              fi
-            else
-              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real step to report"
-            fi
-          fi
-
       - name: Normalize DOCKER_HOST for Testcontainers (#873)
         run: |
           if [ -z "${DOCKER_HOST:-}" ] || [ "${DOCKER_HOST:-}" = "tcp://localhost:2375" ]; then
@@ -567,6 +555,46 @@ jobs:
           # in-cluster remote build cache (GRADLE_REMOTE_CACHE_URL, arc-runners.tf) instead.
           cache-disabled: true
           gradle-home-cache-strict-match: false
+
+      # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
+      #
+      # setup-gradle refuses to touch a Gradle User Home that already exists ("Gradle User
+      # Home already exists: will not restore from cache" / "Caching was skipped"). This step
+      # invokes ./gradlew, which CREATES that home -- so while it ran first it silently
+      # disabled the very restore the default-home choice above exists to enable, and then
+      # did the same work by hand, slower. Measured 2026-08-22 on 3 of 3 sampled PR builds:
+      # the warm step took 120s and setup-gradle took 2s doing nothing, against 9s for the
+      # identical restore in fleet-lint on the same runner class (nine entries, including an
+      # 832 MB gradle-dependencies-v2 written from main). Build-cache hit rate in those
+      # builds was ~2%: "52 actionable tasks: 45 executed, 1 from cache, 6 up-to-date".
+      #
+      # Nothing about the heal contract changes by moving it. The corrupted entry it guards
+      # against can arrive in the RESTORED cache just as easily as in a persistent home, and
+      # healing it here still keeps the retry out of "Build + test" -- which must run exactly
+      # once, because it re-runs `test` differently depending on PUBLISH_RESULTS (the #1009
+      # Pact-publish hazard). It is now healing a warm cache instead of populating a cold one.
+      - name: Warm Gradle dependency cache (self-heal corrupted entries)
+        continue-on-error: true
+        run: |
+          set +e
+          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          warmup_status=$?
+          if [ $warmup_status -eq 124 ]; then
+            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory step"
+            cat /tmp/gradle-warmup.log
+          elif [ $warmup_status -ne 0 ]; then
+            cat /tmp/gradle-warmup.log
+            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
+              echo "retrying dependency warm-up after healing corrupted cache entries"
+              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              retry_status=$?
+              if [ $retry_status -eq 124 ]; then
+                echo "::warning::dependency warm-up retry timed out after 120s; continuing"
+              fi
+            else
+              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real step to report"
+            fi
+          fi
 
       # Artifact hand-off from `build` MUST fail loud (issue #4414 acceptance criterion): a
       # missing or failed download means either `build` failed before uploading (in which case

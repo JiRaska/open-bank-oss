@@ -129,7 +129,7 @@ export default function CustomerAppDossierPage() {
         icon={<Smartphone aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
 
-      {loading && <div className="card" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Načítám…', 'Loading…')}</div>}
+      {loading && <div role="status" aria-live="polite" className="card" style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Načítám…', 'Loading…')}</div>}
 
       {!loading && data?.available === false && (
         <div className="card" style={{ padding: 24, borderTop: '3px solid #d97706' }}>

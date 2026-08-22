@@ -79,6 +79,29 @@ class EventRetryTest {
     }
 
     @Test
+    fun `a failure the caller calls non-retryable is rethrown on the FIRST attempt`(): Unit = runBlocking {
+        var calls = 0
+
+        assertThrows<IllegalStateException> {
+            runBlocking {
+                EventRetry.withRetry(
+                    log,
+                    "TEST_EVENT",
+                    "key-1",
+                    backoffMs = 1,
+                    isRetryable = { it !is IllegalStateException },
+                ) {
+                    calls++
+                    error("no published template for this product")
+                }
+            }
+        }
+
+        // Deterministic: it fails identically every time, so retrying only delays the ack.
+        assertThat(calls).isEqualTo(1)
+    }
+
+    @Test
     fun `maxAttempts below 1 is rejected rather than silently running zero times`(): Unit = runBlocking {
         assertThrows<IllegalArgumentException> {
             runBlocking {

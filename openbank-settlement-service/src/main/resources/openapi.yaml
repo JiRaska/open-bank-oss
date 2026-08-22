@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.3.0"
+  version: "1.4.0"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -57,10 +57,11 @@ components:
             Settlement saga state. The compensation outcomes are distinct values on purpose
             (issue #6037): REVERSED and CREDITED_REVERSED mean balance-service accepted the
             counter-movement and the money is back; REVERSAL_FAILED means a reversal was attempted
-            and refused (typically the payee has spent the funds) and the money is still moved;
-            LEDGER_REVERSAL_UNSUPPORTED means the general-ledger posting was not reversed and needs
-            a manual correcting entry. LEDGER_REVERSED is deprecated and is no longer produced —
-            the code path that wrote it updated this column without reversing anything.
+            and refused (typically the payee has spent the funds) and the money is still moved.
+            The general-ledger posting has no reversal state because it is never reversed: booking
+            to the ledger is the last step of the saga, so nothing can fail after it (issue #6410).
+            LEDGER_REVERSED is deprecated and is no longer produced — the code path that wrote it
+            updated this column without reversing anything.
             REJECTED means the saga unwound COMPLETELY: it is written only when every compensation
             succeeded (issue #6286). A settlement whose compensation was refused stays in
             REVERSAL_FAILED and is never rejected, so REJECTED never has to be read as "possibly
@@ -74,7 +75,6 @@ components:
             - REVERSED
             - CREDITED_REVERSED
             - REVERSAL_FAILED
-            - LEDGER_REVERSAL_UNSUPPORTED
             - LEDGER_REVERSED
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

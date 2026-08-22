@@ -35,7 +35,7 @@ Pure Kotlin, no framework imports:
 
 - `TppEntry` — the aggregate (id, tppId, name, countryCode, nca, roles, status, QWAC/QSeal Subject DN + expiry, timestamps, blacklist fields).
 - `TppRole` enum — `AISP`, `PISP`, `PIISP`, `ASPSP`.
-- `TppStatus` enum — `ACTIVE`, `SUSPENDED`, `REVOKED`, `BLACKLISTED`.
+- `TppStatus` enum — `ACTIVE`, `SUSPENDED`, `REVOKED`, `BLACKLISTED`. Only `ACTIVE` (register) and `BLACKLISTED` (blacklist API) are written; the other two have no writer today (#6489). `checkAuthorization` denies every status that is not `ACTIVE`, so the check is already correct for all four.
 - `TppAuthorizationResult` — the read model returned by the authorization check.
 - `EbaRegisterSyncState` — sync bookkeeping value object.
 

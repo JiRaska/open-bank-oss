@@ -11,7 +11,7 @@
 | **GDPR** | Registr drží data právnických osob (TPP), ne zákaznické PII | `dataClassification: internal`; žádné party-id/IBAN/data fyzické osoby |
 | **DORA** (Reg. (EU) 2022/2554) | Provozní odolnost control-plane služby | health probes, fault tolerance, OTel, runbooky, BuildInfo |
 | **NIS2** | Síťová a informační bezpečnost | mTLS v clusteru, bezpečnostní hlavičky, OPA authz, audit přes outbox (čeká) |
-| **AMLD** (nepřímo) | Screening onboardingu TPP / blacklist jako kontrola | blacklist API; lifecycle stavu ACTIVE→REVOKED/BLACKLISTED |
+| **AMLD** (nepřímo) | Screening onboardingu TPP / blacklist jako kontrola | blacklist API (`ACTIVE→BLACKLISTED`); `checkAuthorization` odmítá jakýkoli stav jiný než ACTIVE |
 | **Autorizační registr CNB** | Pohled národního příslušného orgánu | `nca` + `tpp_id` klíčovány na identifikátor CNB/EBA |
 
 ## PSD2 — autorizační brána
@@ -52,7 +52,7 @@ Obecně **nepoužitelná** na firemní data registru. Jediné pole, které by mo
 Žádná data neopouštějí region EU/EHP.
 
 ### Retence (čl. 5(1)(e))
-`governance.yaml: retentionPolicy: 5 years`. Záznamy registrace a blacklistu uchovávány 5 let; deautorizace je přechod stavu (`REVOKED`/`BLACKLISTED`), ne tvrdé smazání, čímž zachovává autorizační auditní stopu.
+`governance.yaml: retentionPolicy: 5 years`. Záznamy registrace a blacklistu uchovávány 5 let; deautorizace je přechod stavu (`BLACKLISTED`), ne tvrdé smazání, čímž zachovává autorizační auditní stopu. `REVOKED` a `SUSPENDED` v enumu existují, ale dnes je nic nezapisuje (#6489), takže odejmutá autorizace se zaznamenává jako blacklisting.
 
 ## Mapování DORA (Reg. (EU) 2022/2554)
 

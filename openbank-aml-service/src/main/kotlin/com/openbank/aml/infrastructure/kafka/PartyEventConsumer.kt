@@ -12,6 +12,7 @@ import com.openbank.aml.application.port.out.AmlCaseRepository
 import com.openbank.aml.domain.model.AmlCaseStatus
 import com.openbank.aml.domain.model.AmlRiskLevel
 import com.openbank.aml.domain.model.ScreeningType
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -31,7 +32,11 @@ import java.util.UUID
  * The case row itself is retained for audit/SAR obligations; only the personal data fields are
  * nulled and customerReference is replaced with "ERASED-<partyId>".
  *
- * Poison-pill safe: failures are logged and acked.
+ * Failure handling (#5698): an UNPARSEABLE payload is logged and acked — a genuine poison pill,
+ * since replaying it fails identically forever. A failure of aml-db is the opposite case: the event
+ * is fine, the screening must still happen, so it is retried and then RETHROWN for the connector to
+ * dead-letter. Acking it would leave an onboarding party with no AML screening at all and nothing
+ * anywhere saying so.
  *
  * Auto-clear is sandbox-only (openbank.aml.auto-clear, default false). Production keeps the
  * four-eyes decision endpoint as the only path to CLEARED/BLOCKED.
@@ -70,7 +75,7 @@ class PartyEventConsumer(
             log.warnf("[party-events-in] PARTY_CREATED without a valid partyId, skipping: %.200s", payload)
             return
         }
-        try {
+        EventRetry.withRetry(log, "PARTY_CREATED AML screening", partyId) {
             val case = amlUseCase.createCase(
                 CreateAmlCaseCommand(
                     idempotencyKey = "$partyId:CUSTOMER_ONBOARDING",
@@ -99,8 +104,6 @@ class PartyEventConsumer(
                 )
                 log.infof("[party-events-in] Auto-cleared AML case %s for party %s", case.id, partyId)
             }
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to handle PARTY_CREATED for party %s", partyId)
         }
     }
 
@@ -109,15 +112,15 @@ class PartyEventConsumer(
             log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
             return
         }
-        try {
+        // An acked-but-failed erasure is worse than a stalled workflow: the PII stays, and the log
+        // line says it went. anonymizeByPartyId is idempotent, so retry and redelivery are safe.
+        EventRetry.withRetry(log, "PARTY_ERASED AML anonymisation", partyId) {
             val count = amlCaseRepository.anonymizeByPartyId(partyId)
             log.infof(
                 "[party-events-in] GDPR Art. 17: anonymised PII in %d AML case(s) for erased party %s",
                 count,
                 partyId,
             )
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to anonymise AML PII for party %s", partyId)
         }
     }
 }
