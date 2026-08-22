@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.4.0
+  version: 1.5.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -155,7 +155,9 @@ paths:
       operationId: signalCase
       description: >-
         Signal ingress for swarm participants: join, contribute, supersede (deterministic
-        pre-emption, D5) or request-synthesis. Each type is capability-gated (D2).
+        pre-emption, D5) or request-synthesis. Join and contribute require the dedicated OPA
+        collaboration decision plus the local charter gate. Authorization, Temporal invocation,
+        workflow consumption and contribution persistence remain separate evidence stages.
       parameters:
         - name: caseId
           in: path
@@ -170,7 +172,9 @@ paths:
               $ref: '#/components/schemas/SignalRequest'
       responses:
         '202':
-          description: Signal accepted by the workflow
+          description: >-
+            Temporal client accepted the signal invocation. This does not assert that the workflow
+            consumed the signal or persisted a contribution.
         '400':
           description: Missing or invalid request field
           content:
@@ -180,7 +184,7 @@ paths:
         '403':
           description: >-
             The authenticated caller may not act as the requested `agentId`, or the signal type is
-            denied for that agent by the capability gate.
+            denied by the OPA collaboration policy or the fail-safe local charter gate.
           content:
             application/json:
               schema:
@@ -192,7 +196,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorBody'
         '503':
-          description: Temporal case workflows disabled
+          description: Temporal case workflows disabled or the OPA collaboration policy unavailable
           content:
             application/json:
               schema:
@@ -319,7 +323,15 @@ components:
       properties:
         type:
           type: string
-          enum: [CASE_OPENED, CONTRIBUTION, PROPOSAL_EMITTED, SHADOW_RECORDED]
+          enum:
+            - CASE_OPENED
+            - CONTRIBUTION
+            - PROPOSAL_EMITTED
+            - SHADOW_RECORDED
+            - POLICY_DECISION
+            - SIGNAL_INVOKED
+            - SIGNAL_CONSUMED
+            - CONTRIBUTION_PERSISTED
         atEpochMs:
           type: integer
           format: int64
@@ -348,6 +360,14 @@ components:
         tokensUsed:
           type: integer
           minimum: 0
+        signalId:
+          type: string
+          format: uuid
+        capability:
+          type: string
+          enum: [case.join, case.contribute]
+        rolloutId:
+          type: string
         runtimeEvidence:
           $ref: '#/components/schemas/RuntimeEvidence'
 
@@ -360,10 +380,23 @@ components:
           type: string
         source:
           type: string
-          enum: [case-coordinator-postgres-read-model, case-coordinator-transactional-outbox]
+          enum:
+            - case-coordinator-postgres-read-model
+            - case-coordinator-transactional-outbox
+            - case-coordinator-signal-evidence
         stage:
           type: string
-          enum: [RECORDED, PERSISTED, EMITTED, PUBLISHED_TO_BROKER, PUBLISH_FAILED, SHADOW_RECORDED]
+          enum:
+            - AUTHORIZED
+            - DENIED
+            - INVOKED
+            - CONSUMED
+            - RECORDED
+            - PERSISTED
+            - EMITTED
+            - PUBLISHED_TO_BROKER
+            - PUBLISH_FAILED
+            - SHADOW_RECORDED
         observedAtEpochMs:
           type: integer
           format: int64

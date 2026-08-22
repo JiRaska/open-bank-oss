@@ -1769,6 +1769,33 @@ incluster_hostnames:
   original_target_enforce_date: "2026-10-31"   # ADR-0144 — met early
   ci_producer: .github/scripts/check-incluster-hostnames.py
 
+noop_outcomes:
+  # ADR-0252 phase 0 (#4348). `PushResult.skipped()` — returned whenever the APNs adapter is
+  # disabled — carried `success = true`, and the fan-out asked `count { success }`. Every push in
+  # an environment without APNs credentials was therefore counted as delivered: the row committed
+  # SENT with `sentAt` set, and the outcome event announced a delivery that never left the process.
+  #
+  # It was unrecoverable from telemetry for three reasons that generalise to every adapter of this
+  # shape: the disabled path is the QUIET one so there is no error to find; the channel emitted no
+  # metric of its own so nothing disagreed with the row; and a 200 from APNs means *accepted*, not
+  # delivered — the provider issues no receipt, so delivery is not observable server-side at all.
+  #
+  # THE RULE: a skipped / disabled / dry-run / no-op outcome gets its OWN enum value and must never
+  # share a boolean with a real success. Name the metric for what can actually be established —
+  # `accepted`, never `delivered` — and alert on the success state ("adapter skipping and accepting
+  # nothing"), because at 100% skip there is no error rate to alert on.
+  distinct_enum_value_required: true
+  aggregation_must_not_fold_noop_into_success: true
+  sanctioned_shape: "PushSendOutcome { ACCEPTED, SKIPPED, FAILED }"
+  #
+  # The baseline in the script is EMPTY: the fleet measured clean on 2026-08-22 (notification was
+  # fixed by #4348; billing's BillingAssessment.skipped never had a success boolean beside it). So
+  # this gate carries no remediation debt and exists purely to keep the class from recurring — an
+  # empty baseline is the stronger claim, and --self-test is what makes it evidence rather than an
+  # assertion, since a gate that has never gone red proves nothing by being green.
+  baseline_is_empty_by_measurement: true
+  ci_producer: .github/scripts/check-noop-not-success.py
+
 kafka_dotted_keys:
   # SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
   # `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property
@@ -2997,6 +3024,15 @@ pr_file_overlap:
     - ".github/workflows/ci.yml"
     - ".github/workflows/auto-deploy.yml"
     - "openbank-infra/gitops/"
+
+# ---------------------------------------------------------------------------
+# AGENT CASE COLLABORATION (ADR-0271 proposal; no live grants)
+#
+# This matrix is an independent authorization boundary, intersected with each
+# principal's agents.yaml case_capabilities by the case-coordinator-only OPA bundle.
+# Empty is intentional: the policy and PEP may be reviewed without silently creating
+# a production grant. Every entry requires a separate authorization review.
+agent_case_capability_matrix: []
 
 # ---------------------------------------------------------------------------
 # AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)

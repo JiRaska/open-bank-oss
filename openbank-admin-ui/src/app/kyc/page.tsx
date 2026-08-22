@@ -11,7 +11,6 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { ShieldCheck, Search, RefreshCw, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { PageHeader, StatusBadge } from '@/components/ui'
-import { PartyLookup } from '@/components/kyc/PartyLookup'
 import { Can } from '@/components/auth/AuthGuard'
 
 const KYC_SERVICE = '/api/svc/kyc-service'

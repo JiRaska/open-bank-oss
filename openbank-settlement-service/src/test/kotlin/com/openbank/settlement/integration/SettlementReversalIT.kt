@@ -9,7 +9,6 @@ import com.openbank.settlement.it.BalanceServiceWireMockResource
 import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
-import io.temporal.failure.ApplicationFailure
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -208,30 +207,5 @@ class SettlementReversalIT {
         assertThat(readStatus(id))
             .`as`("money is still with the payee, so the row must not say CREDITED_REVERSED")
             .isEqualTo("REVERSAL_FAILED")
-    }
-
-    @Test
-    fun `reverseBookToLedger fails loudly and marks the GL entry as needing manual correction`() {
-        val (id, _, _) = seedSettlement("BOOKED")
-
-        // The failure reaches the caller unwrapped through the Vert.x-context bridge, so Temporal
-        // sees the ApplicationFailure itself and honours its non-retryable flag.
-        assertThatThrownBy { activities.reverseBookToLedger(id) }
-            .isInstanceOfSatisfying(ApplicationFailure::class.java) { failure ->
-                assertThat(failure.isNonRetryable).isTrue()
-                assertThat(failure.type).isEqualTo("LedgerReversalUnsupported")
-            }
-
-        assertThat(readStatus(id)).isEqualTo("LEDGER_REVERSAL_UNSUPPORTED")
-        // It must not silently pretend to have reversed anything, and it must not call balance.
-        assertThat(
-            BalanceServiceWireMockResource.server.findAll(
-                com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor(
-                    com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching(
-                        "/api/v1/balances/.*",
-                    ),
-                ),
-            ),
-        ).isEmpty()
     }
 }

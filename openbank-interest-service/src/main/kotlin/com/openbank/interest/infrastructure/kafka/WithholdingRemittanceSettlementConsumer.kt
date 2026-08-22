@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.interest.application.port.`in`.RemitWithholdingUseCase
 import com.openbank.interest.infrastructure.client.InitiateTransactionRequest
 import com.openbank.interest.infrastructure.client.TransactionServiceClient
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -78,32 +79,57 @@ class WithholdingRemittanceSettlementConsumer(
     private val log = Logger.getLogger(WithholdingRemittanceSettlementConsumer::class.java)
 
     @Incoming("interest-withholding-remitted-in")
-    // Poison-pill safety: this boundary must swallow ANY failure (parse, rail call) and ack, so
-    // one bad event cannot wedge the consumer group.
+    // Poison-pill safety applies to the PAYLOAD only: an unparseable body, a bad remittanceId or an
+    // undecodable amount is acked, because a redelivery fails identically forever. BOOKING the cash
+    // leg is not in that class — it debits this bank's operating account to pay the finanční úřad —
+    // so a failing booking is retried and rethrown for the connector to dead-letter (#5698).
+    //
+    // The previous comment claimed this boundary "must swallow ANY failure (parse, rail call) and
+    // ack". Under it, a transient transaction-service or DB outage acked a remittance that was never
+    // booked: the batch stays PENDING with no re-drive endpoint (the class KDoc says "only SQL out"),
+    // the tax is not paid, and the only trace is an ERROR line nothing pages on. This is the third
+    // money-path site behind the gate blind spots this PR closes — `settle(`/`initiate(` were not in
+    // the verb list, and the state change sits one private helper deep (`bookAndSettle`).
     @Suppress("TooGenericExceptionCaught")
     suspend fun consume(record: ConsumerRecord<String, String>) {
-        try {
-            // ADR-0050 N3: the event type travels ONLY as the ce-type header — the payload has no
-            // eventType field (see KafkaInterestOutboxEventPublisher), so filter on the header.
-            val eventType = record.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
-                ?.let { String(it.value(), StandardCharsets.UTF_8) }
-            if (eventType != EVENT_WITHHOLDING_REMITTED) return
+        // ADR-0050 N3: the event type travels ONLY as the ce-type header — the payload has no
+        // eventType field (see KafkaInterestOutboxEventPublisher), so filter on the header.
+        val eventType = record.headers().lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)
+            ?.let { String(it.value(), StandardCharsets.UTF_8) }
+        if (eventType != EVENT_WITHHOLDING_REMITTED) return
 
+        val decoded = try {
             val node = objectMapper.readTree(record.value())
-            val remittanceId = UUID.fromString(node.path("remittanceId").asText())
-            val totalTaxAmount = decimalOf(node.path("totalTaxAmount"))
-            val itemCount = node.path("itemCount").asInt()
-
-            if (totalTaxAmount.signum() <= 0) {
-                settleNilOrRefuse(remittanceId, totalTaxAmount, itemCount)
-                return
-            }
-
-            bookAndSettle(remittanceId, debitRequestFor(node, remittanceId, totalTaxAmount))
+            Decoded(
+                node = node,
+                remittanceId = UUID.fromString(node.path("remittanceId").asText()),
+                totalTaxAmount = decimalOf(node.path("totalTaxAmount")),
+                itemCount = node.path("itemCount").asInt(),
+            )
         } catch (e: Exception) {
-            log.errorf(e, "[withholding-remittance] failed to handle remitted event: %.300s", record.value())
+            log.errorf(e, "[withholding-remittance] undecodable remitted event, acking: %.300s", record.value())
+            return
+        }
+
+        EventRetry.withRetry(log, "withholding remittance settlement", decoded.remittanceId) {
+            if (decoded.totalTaxAmount.signum() <= 0) {
+                settleNilOrRefuse(decoded.remittanceId, decoded.totalTaxAmount, decoded.itemCount)
+            } else {
+                bookAndSettle(
+                    decoded.remittanceId,
+                    debitRequestFor(decoded.node, decoded.remittanceId, decoded.totalTaxAmount),
+                )
+            }
         }
     }
+
+    /** The four values decoded from the event body; a failure to produce any of them is a poison pill. */
+    private data class Decoded(
+        val node: JsonNode,
+        val remittanceId: UUID,
+        val totalTaxAmount: BigDecimal,
+        val itemCount: Int,
+    )
 
     /**
      * Handles a batch whose decoded tax amount is not positive.
@@ -173,12 +199,15 @@ class WithholdingRemittanceSettlementConsumer(
                 )
             }
             else -> {
-                log.errorf(
-                    "[withholding-remittance] batch %s FAILED to book (HTTP %d) — a due tax remittance " +
-                        "did not move money. This requires manual investigation; the batch stays PENDING " +
-                        "for retry (a redelivery of this event, or an operator re-driving it).",
-                    remittanceId,
-                    response.status,
+                // This branch used to log and RETURN, and its own message promised "the batch stays
+                // PENDING for retry (a redelivery of this event...)" — which could not happen,
+                // because returning normally ACKS the event. There is no redelivery and no re-drive
+                // endpoint, so a refused booking meant the tax was never paid and the only trace was
+                // an ERROR line nothing pages on. Throwing is what makes that sentence true: the
+                // retry above gets its attempts, and the connector then dead-letters (#5698).
+                throw WithholdingRemittanceBookingFailedException(
+                    "[withholding-remittance] batch $remittanceId FAILED to book (HTTP ${response.status}) — " +
+                        "a due tax remittance did not move money",
                 )
             }
         }
@@ -198,3 +227,11 @@ class WithholdingRemittanceSettlementConsumer(
         const val HTTP_CONFLICT = 409
     }
 }
+
+/**
+ * transaction-service refused the remittance debit. Rethrown so the connector dead-letters it
+ * rather than acking a tax payment that never happened (#5698). A RuntimeException, deliberately
+ * not IllegalState/IllegalArgument: [EventRetry.RETRY_UNLESS_DETERMINISTIC] treats those two as
+ * non-retryable, and a refused rail call is exactly the transient case worth another attempt.
+ */
+class WithholdingRemittanceBookingFailedException(message: String) : RuntimeException(message)

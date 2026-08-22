@@ -6,8 +6,10 @@
 package com.openbank.casecoordinator.application
 
 import com.openbank.casecoordinator.domain.model.CaseRow
+import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceRow
 import com.openbank.casecoordinator.domain.model.ContributionRow
 import com.openbank.casecoordinator.domain.model.ProposalEventRow
+import com.openbank.casecoordinator.domain.model.RuntimeEvidenceStage
 import com.openbank.casecoordinator.domain.model.ThreadEntryType
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -139,6 +141,52 @@ class CaseThreadProjectionTest {
         assertThat(thread.dataToEpochMs).isEqualTo(T0 + LATER_MS)
         assertThat(thread.lastSuccessfulLoadEpochMs).isEqualTo(LOADED_AT)
         assertThat(thread.budgetTokens).isEqualTo(200_000)
+    }
+
+    @Test
+    fun `OPA authorization and Temporal stages retain one signal correlation`() {
+        val evidence = listOf(
+            CaseSignalEvidenceRow(
+                signalId = "11111111-1111-1111-1111-111111111111",
+                agentId = "rca-investigator",
+                capability = "case.contribute",
+                stage = "AUTHORIZED",
+                observedAtEpochMs = T0 + LATER_MS,
+                rolloutId = "shadow-rca-1",
+                policyDecisionId = "opa-decision-7",
+                policyReason = "allowed by charter and rules matrix",
+            ),
+            CaseSignalEvidenceRow(
+                signalId = "11111111-1111-1111-1111-111111111111",
+                agentId = "rca-investigator",
+                capability = "case.contribute",
+                stage = "CONSUMED",
+                observedAtEpochMs = T0 + 2 * LATER_MS,
+                rolloutId = "shadow-rca-1",
+                policyDecisionId = null,
+                policyReason = null,
+            ),
+        )
+
+        val thread = CaseThreadProjection.project(
+            caseRow,
+            emptyList(),
+            emptyList(),
+            LOADED_AT,
+            evidence,
+        )
+
+        val signalEntries = thread.entries.filter { it.signalId != null }
+        assertThat(signalEntries.map { it.type }).containsExactly(
+            ThreadEntryType.POLICY_DECISION,
+            ThreadEntryType.SIGNAL_CONSUMED,
+        )
+        assertThat(signalEntries.map { it.runtimeEvidence.stage }).containsExactly(
+            RuntimeEvidenceStage.AUTHORIZED,
+            RuntimeEvidenceStage.CONSUMED,
+        )
+        assertThat(signalEntries.map { it.runtimeEvidence.correlationId }).containsOnly(caseRow.workflowId)
+        assertThat(signalEntries.first().runtimeEvidence.evidenceId).isEqualTo("opa-decision-7")
     }
 
     private companion object {

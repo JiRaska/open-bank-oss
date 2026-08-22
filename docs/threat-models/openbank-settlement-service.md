@@ -80,7 +80,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 | ID | Threat | Mitigation |
 |----|--------|------------|
 | R1 | Settlement denied by payer ("I never authorised this") | Temporal workflow execution ID links to the initiating payment ID in `sepa-payment-service` / `domestic-payment-service`; full chain queryable from admin UI |
-| R2 | Compensation claimed to have run when it did not | **This threat was realised, not mitigated, from ADR-0101 P3 until #6037.** The cited mitigation — "compensation activities update status to `REVERSED`/`CREDITED_REVERSED`/`LEDGER_REVERSED` atomically" — *was* the defect: updating the status column was the **only** thing `reverseDebit`/`reverseCredit`/`reverseBookToLedger` did. They logged `"stub: wire reversal to balance-service"` and returned success, so the status row asserted an unwind that had moved no money. Now: the two balance reversals issue real counter-movements to balance-service before writing a status, a refused reversal is recorded as `REVERSAL_FAILED` (not as success), and the unimplemented ledger reversal throws a non-retryable `ApplicationFailure` and records `LEDGER_REVERSAL_UNSUPPORTED`. Verified by `SettlementReversalIT`, which asserts the outbound HTTP request over real HTTP and the resulting row over plain JDBC — a mocked port cannot tell a counterparty call from a no-op. |
+| R2 | Compensation claimed to have run when it did not | **This threat was realised, not mitigated, from ADR-0101 P3 until #6037.** The cited mitigation — "compensation activities update status to `REVERSED`/`CREDITED_REVERSED`/`LEDGER_REVERSED` atomically" — *was* the defect: updating the status column was the **only** thing `reverseDebit`/`reverseCredit`/`reverseBookToLedger` did. They logged `"stub: wire reversal to balance-service"` and returned success, so the status row asserted an unwind that had moved no money. Now: the two balance reversals issue real counter-movements to balance-service before writing a status, a refused reversal is recorded as `REVERSAL_FAILED` (not as success), and the ledger reversal — which could never run, since nothing follows `bookToLedger` — was removed rather than left as code describing a recovery that cannot occur (#6410). Verified by `SettlementReversalIT`, which asserts the outbound HTTP request over real HTTP and the resulting row over plain JDBC — a mocked port cannot tell a counterparty call from a no-op. |
 
 ### I — Information disclosure
 
@@ -100,7 +100,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 | ID | Threat | Mitigation |
 |----|--------|------------|
-| E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no such gate is implemented.** The activity policy file exists in the service's resources but is bundled by no ConfigMap and loaded by nothing, so it is evaluated never; and it does not say what this row said it said — its allow rule is a single membership test over a fixed activity set, with no `compensation` term anywhere in the file, and the reversal activity is an unconditional member. The effective control on this boundary is the Temporal namespace ACL in E2 alone |
+| E1 | Attacker injects a workflow that calls a compensation activity (`reverseCredit`, `reverseDebit`) on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no such gate is implemented.** The activity policy file exists in the service's resources but is bundled by no ConfigMap and loaded by nothing, so it is evaluated never; and it does not say what this row said it said — its allow rule is a single membership test over a fixed activity set, with no `compensation` term anywhere in the file, and the reversal activity is an unconditional member. The effective control on this boundary is the Temporal namespace ACL in E2 alone |
 | E2 | Service account token used to submit arbitrary workflows | Temporal namespace ACL restricts task queue submission to settlement-service service account (SPIFFE `spiffe://openbank/ns/openbank-settlement/sa/settlement-service`) |
 
 ---
@@ -140,11 +140,13 @@ replacing the former in-memory stub), so settlement state is durable across rest
    `openbank.temporal.enabled` dispatch gate is removed and the in-process legacy saga
    (`legacySettle`) is deleted. This closes a compensation gap: the legacy path flipped a mid-flight
    failure straight to `REJECTED` **without reversing an already-moved debit/credit**, whereas
-   `SettlementWorkflow` runs `reverseBookToLedger → reverseCredit → reverseDebit` before rejecting.
+   `SettlementWorkflow` runs `reverseCredit → reverseDebit` before rejecting (it ran
+   `reverseBookToLedger` first until #6410 removed that unreachable activity).
    **Correction (#6037):** that last sentence was true only of the ordering. Until #6037 all three
    compensation activities were stubs, so the Temporal path unwound exactly as much money as the
    legacy path it replaced — none — while recording that it had. The gap is closed for the two
-   balance movements as of #6037; the ledger half remains open, as risk 5 below.
+   balance movements as of #6037; the ledger half is not a gap but a shape — nothing runs after
+   `bookToLedger`, as risk 5 below now states.
    Flip pre-conditions are verified: Temporal server healthy, `openbank-settlement` namespace
    registered, `settlement_activity.rego` present (risk 2). Worker registration is gated on
    `openbank.settlement.worker.enabled` (default true; false in `%test`). **Cutover risk:** with no
@@ -152,10 +154,16 @@ replacing the former in-memory stub), so settlement state is durable across rest
    frontend is unreachable — a sandbox canary must confirm the worker registers and a real settlement
    drives `PENDING → BOOKED` before merge, and the deterministic simulation (ADR-0100/0115) stays green.
 
-5. **A settlement that fails after `bookToLedger` leaves the GL entry standing (issue #6037).**
-   `reverseBookToLedger` is deliberately NOT implemented and fails loudly
-   (`LEDGER_REVERSAL_UNSUPPORTED` + a non-retryable `ApplicationFailure`) rather than reporting a
-   reversal it did not perform. ledger-service does expose `POST /api/v1/journals/{journalId}/reverse`,
+5. **Nothing can fail after `bookToLedger`, so the GL posting has no compensation — and the code
+   that pretended otherwise is gone (issues #6037, #6410).**
+   `bookToLedger` is the last forward step of the saga and writes the terminal `BOOKED` status
+   itself, so no failure can occur afterwards to trigger an unwind of it. `reverseBookToLedger`,
+   its `LEDGER_REVERSAL_UNSUPPORTED` status and that status's alert coverage were therefore
+   unreachable from the day they were written; #6410 removed them, because a status nothing writes
+   and an alert regex matching it read as coverage without being any. `SettlementWorkflowImplTest`
+   pins the shape, so the day a step is added after the ledger booking the assertion goes red.
+   **This is a constraint on future work, not a closed risk:** such a step must answer the GL
+   question before it is added. ledger-service does expose `POST /api/v1/journals/{journalId}/reverse`,
    but three things must be decided before settlement-service may call it: (a) `ledger.reverse` is
    maker-checker gated, so a service-account call queues for approval instead of posting, and granting
    a machine that action is a `rules.yaml: shared_m2m_matrix_write_grants` decision — an automatic GL
@@ -163,10 +171,10 @@ replacing the former in-memory stub), so settlement state is durable across rest
    does not retain the journal id (`bookToLedger` discards the response), so it must be persisted or
    re-resolved via `GET /api/v1/journals/transaction/{transactionId}`; (c) the endpoint answers 409
    when the entry's fiscal period is ATTESTED, and the accounting convention there is to correct
-   forward in the open period, which is a different posting. **Operational consequence:** such a
-   settlement unwinds both balance movements and needs a manual correcting entry in the general
-   ledger. It is visible as a `LEDGER_REVERSAL_UNSUPPORTED` row and an ERROR log line, and is
-   announced at boot by `SettlementCompensationCapabilities`.
+   forward in the open period, which is a different posting. **Operational consequence today:**
+   none — no path reaches it. `SettlementCompensationCapabilities` announces at boot that the GL
+   posting has no compensation and why, so the constraint is visible in a pod log rather than only
+   in this document.
 
 6. **A reversal can be legitimately refused and the money stays moved (issue #6037).**
    balance-service enforces `booked - amount >= overdraftFloor` on every debit, so if the payee has
@@ -177,13 +185,12 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
    Recording it is not the same as seeing it, and for a time it was only recorded:
    `SettlementStrandedGauge` published a **hand-kept** list of non-terminal statuses written before
-   #6037, so `REVERSAL_FAILED` and `LEDGER_REVERSAL_UNSUPPORTED` had no age series at all and
-   neither `SettlementStrandedMidSaga` nor `SettlementStuckAfterCompensation` could fire for them —
-   the two states meaning *the money did not come back* were the two nothing could observe. The
-   list is now derived from `SettlementStatus`, `LEDGER_REVERSAL_UNSUPPORTED` joins the
-   `SettlementStuckAfterCompensation` warning, and `REVERSAL_FAILED` has its own **critical**
-   `SettlementReversalFailed` rule — separated because the other rule's premise ("funds are safe,
-   only the record is wrong") is false here.
+   #6037, so `REVERSAL_FAILED` had no age series at all and neither `SettlementStrandedMidSaga` nor
+   `SettlementStuckAfterCompensation` could fire for it — the one state meaning *the money did not
+   come back* was the one nothing could observe. The list is now derived from `SettlementStatus`,
+   and `REVERSAL_FAILED` has its own **critical** `SettlementReversalFailed` rule — separated from
+   `SettlementStuckAfterCompensation` because that rule's premise ("funds are safe, only the record
+   is wrong") is false here.
 
    Nor was it enough to publish the state: `SettlementWorkflowImpl` called `rejectSettlement`
    unconditionally after the compensation loop, so the row was overwritten to `REJECTED` within

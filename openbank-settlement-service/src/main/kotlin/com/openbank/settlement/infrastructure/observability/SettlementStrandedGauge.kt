@@ -61,16 +61,16 @@ import java.util.concurrent.atomic.AtomicLong
  * ### Which states are published
  *
  * Terminal states ([SettlementStatus.BOOKED], [SettlementStatus.REJECTED]) are not published:
- * their age only grows and would alert forever. Everything else is published, including all five
- * compensation outcomes — `SettlementWorkflowImpl` always calls `rejectSettlement` after
- * compensating, so a row parked in `REVERSED` / `CREDITED_REVERSED` / `LEDGER_REVERSED` /
- * `REVERSAL_FAILED` / `LEDGER_REVERSAL_UNSUPPORTED` means the unwinding ran (or refused) and the
- * record never reached its terminal state.
+ * their age only grows and would alert forever. Everything else is published, including every
+ * compensation outcome — `SettlementWorkflowImpl` calls `rejectSettlement` only when the unwind
+ * completed, so a row parked in `REVERSED` / `CREDITED_REVERSED` / `LEDGER_REVERSED` means the
+ * unwinding ran and the record never reached its terminal state, and one parked in
+ * `REVERSAL_FAILED` means a reversal was refused and the money is still moved (#6286).
  *
  * The set is DERIVED from [SettlementStatus] rather than listed, because it was listed once and
- * went stale: #6037 split the compensation outcomes into their own values and `REVERSAL_FAILED` /
- * `LEDGER_REVERSAL_UNSUPPORTED` were left unpublished, so the two states that mean *the money did
- * not come back* were the only two the stranded-settlement rules could never see.
+ * went stale: #6037 split the compensation outcomes into their own values and `REVERSAL_FAILED`
+ * was left unpublished, so the one state that means *the money did not come back* was the one the
+ * stranded-settlement rules could never see.
  *
  * ### t=0 on a cold pod
  *

@@ -21,8 +21,11 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
 import java.math.BigDecimal
 import java.util.UUID
+
+private class TransientDownstreamFailure : RuntimeException("transaction-service down")
 
 class PartyEventConsumerTest {
 
@@ -161,18 +164,32 @@ class PartyEventConsumerTest {
         coVerify(exactly = 0) { notificationRequestPort.notifyIncomingCredit(any(), any(), any()) }
     }
 
+    /**
+     * Replaces `a failing welcome bonus does not propagate out of the consumer or notify`, which
+     * asserted that a failed grant is swallowed because "the grant is best-effort". It is not: the
+     * party goes ACTIVE exactly once, so there is no later event to retry on, and the customer
+     * simply never receives the money — with an ERROR line as the only trace (#5698). The bonus now
+     * retries — through consume()'s existing withBoundedRetry, not a second nested one — and then
+     * propagates, so the record dead-letters and the grant can be re-driven.
+     *
+     * The notification that follows the grant IS best-effort and stays swallowed: by then the money
+     * is booked, so the event is complete without it.
+     */
     @Test
-    fun `a failing welcome bonus does not propagate out of the consumer or notify`(): Unit = runBlocking {
+    fun `a failing welcome bonus propagates after retries so the record is dead-lettered`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         val accountId = UUID.randomUUID()
         coEvery { accountRepository.findByPartyId(partyId, any(), any()) } returns listOf(pendingAccount(accountId))
         coEvery { welcomeBonusPort.grantWelcomeBonus(any(), any(), any()) } throws
-            RuntimeException("transaction-service down")
+            TransientDownstreamFailure()
 
-        // Must not throw — activation already succeeded; the grant is best-effort.
-        consumer(bonusEnabled = true).consume(activeEvent(partyId))
+        assertThrows<TransientDownstreamFailure> {
+            runBlocking { consumer(bonusEnabled = true).consume(activeEvent(partyId)) }
+        }
 
         coVerify { accountUseCase.activateAccount(accountId) }
+        // MAX_PROJECTION_ATTEMPTS: consume()'s own retry loop is the only one on this path.
+        coVerify(exactly = 4) { welcomeBonusPort.grantWelcomeBonus(any(), any(), any()) }
         // No bonus → no "you received money" notification.
         coVerify(exactly = 0) { notificationRequestPort.notifyIncomingCredit(any(), any(), any()) }
     }

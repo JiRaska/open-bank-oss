@@ -19,7 +19,7 @@
  * them back together.
  */
 
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import TraceExplorerPage from '@/app/observability/traces/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
