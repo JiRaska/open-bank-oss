@@ -10,6 +10,8 @@ import com.openbank.casecoordinator.domain.model.CaseSummary
 import com.openbank.casecoordinator.domain.model.CaseThread
 import com.openbank.casecoordinator.domain.model.ContributionRow
 import com.openbank.casecoordinator.domain.model.ProposalEventRow
+import com.openbank.casecoordinator.domain.model.RuntimeEvidence
+import com.openbank.casecoordinator.domain.model.RuntimeEvidenceStage
 import com.openbank.casecoordinator.domain.model.ThreadEntry
 import com.openbank.casecoordinator.domain.model.ThreadEntryType
 
@@ -33,42 +35,9 @@ object CaseThreadProjection {
 
     fun project(case: CaseRow, contributions: List<ContributionRow>, proposals: List<ProposalEventRow>): CaseThread {
         val entries = buildList {
-            add(
-                ThreadEntry(
-                    type = ThreadEntryType.CASE_OPENED,
-                    atEpochMs = case.openedAtEpochMs,
-                    summary = case.dispositionTarget,
-                ),
-            )
-            contributions.forEach { c ->
-                add(
-                    ThreadEntry(
-                        type = ThreadEntryType.CONTRIBUTION,
-                        atEpochMs = c.contributedAtEpochMs,
-                        actor = c.agentId,
-                        summary = c.summary,
-                        evidenceRefs = c.evidenceRefs,
-                        draftVersion = c.draftVersion,
-                        superseded = c.superseded,
-                        contested = c.contested,
-                    ),
-                )
-            }
-            proposals.forEach { p ->
-                add(
-                    ThreadEntry(
-                        type = if (p.status == "SHADOW") {
-                            ThreadEntryType.SHADOW_RECORDED
-                        } else {
-                            ThreadEntryType.PROPOSAL_EMITTED
-                        },
-                        atEpochMs = p.emittedAtEpochMs,
-                        proposalId = p.proposalId,
-                        proposalType = p.proposalType,
-                        shadow = p.status == "SHADOW",
-                    ),
-                )
-            }
+            add(case.openedEntry())
+            contributions.forEach { add(it.threadEntry(case.workflowId)) }
+            proposals.forEach { add(it.threadEntry(case.workflowId)) }
         }.sortedBy { it.atEpochMs }
 
         return CaseThread(
@@ -79,7 +48,73 @@ object CaseThreadProjection {
             openedAtEpochMs = case.openedAtEpochMs,
             deadlineAtEpochMs = case.deadlineAtEpochMs,
             contestedRate = case.contestedRate,
+            budgetTokens = case.budgetTokens,
+            budgetContributions = case.budgetContributions,
+            observedAtEpochMs = entries.maxOfOrNull { it.atEpochMs } ?: case.openedAtEpochMs,
+            historySource = HISTORY_SOURCE,
+            retentionPolicy = RETENTION_POLICY,
             entries = entries,
         )
     }
+
+    private fun CaseRow.openedEntry(): ThreadEntry = ThreadEntry(
+        type = ThreadEntryType.CASE_OPENED,
+        atEpochMs = openedAtEpochMs,
+        summary = dispositionTarget,
+        runtimeEvidence = RuntimeEvidence(
+            evidenceId = workflowId,
+            source = HISTORY_SOURCE,
+            stage = RuntimeEvidenceStage.RECORDED,
+            observedAtEpochMs = openedAtEpochMs,
+            correlationId = workflowId,
+            detail = "Persisted case workflow record",
+        ),
+    )
+
+    private fun ContributionRow.threadEntry(workflowId: String): ThreadEntry = ThreadEntry(
+        type = ThreadEntryType.CONTRIBUTION,
+        atEpochMs = contributedAtEpochMs,
+        actor = agentId,
+        summary = summary,
+        evidenceRefs = evidenceRefs,
+        draftVersion = draftVersion,
+        superseded = superseded,
+        contested = contested,
+        tokensUsed = tokensUsed,
+        runtimeEvidence = RuntimeEvidence(
+            evidenceId = contributionId,
+            source = HISTORY_SOURCE,
+            stage = RuntimeEvidenceStage.CONSUMED,
+            observedAtEpochMs = contributedAtEpochMs,
+            correlationId = workflowId,
+            detail = "Contribution consumed into the durable case read model",
+        ),
+    )
+
+    private fun ProposalEventRow.threadEntry(workflowId: String): ThreadEntry = ThreadEntry(
+        type = if (status == "SHADOW") ThreadEntryType.SHADOW_RECORDED else ThreadEntryType.PROPOSAL_EMITTED,
+        atEpochMs = emittedAtEpochMs,
+        proposalId = proposalId,
+        proposalType = proposalType,
+        shadow = status == "SHADOW",
+        runtimeEvidence = RuntimeEvidence(
+            evidenceId = proposalId,
+            source = OUTBOX_SOURCE,
+            stage = status.toEvidenceStage(),
+            observedAtEpochMs = emittedAtEpochMs,
+            correlationId = workflowId,
+            detail = "Proposal outbox status: $status",
+        ),
+    )
+
+    private fun String.toEvidenceStage(): RuntimeEvidenceStage = when (this) {
+        "SENT" -> RuntimeEvidenceStage.PUBLISHED_TO_BROKER
+        "FAILED", "DEAD" -> RuntimeEvidenceStage.PUBLISH_FAILED
+        "SHADOW" -> RuntimeEvidenceStage.SHADOW_RECORDED
+        else -> RuntimeEvidenceStage.EMITTED
+    }
+
+    private const val HISTORY_SOURCE = "case-coordinator-postgres-read-model"
+    private const val OUTBOX_SOURCE = "case-coordinator-transactional-outbox"
+    private const val RETENTION_POLICY = "not-configured"
 }

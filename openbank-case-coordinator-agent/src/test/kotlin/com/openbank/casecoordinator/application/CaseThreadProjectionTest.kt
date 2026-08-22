@@ -23,6 +23,8 @@ class CaseThreadProjectionTest {
         deadlineAtEpochMs = T0 + DEADLINE_MS,
         contestedRate = CONTESTED_RATE,
         contributionCount = 2,
+        budgetTokens = 200_000,
+        budgetContributions = 40,
     )
 
     @Test
@@ -46,6 +48,7 @@ class CaseThreadProjectionTest {
     @Test
     fun `entries are ordered oldest first across all entry kinds`() {
         val contribution = ContributionRow(
+            contributionId = "00000000-0000-0000-0000-000000000001",
             agentId = "fraud-agent",
             contributedAtEpochMs = T0 + LATER_MS,
             summary = "velocity spike",
@@ -53,6 +56,7 @@ class CaseThreadProjectionTest {
             draftVersion = 1,
             superseded = false,
             contested = false,
+            tokensUsed = 1200,
         )
         val proposal = ProposalEventRow(
             proposalId = "prop-1",
@@ -90,6 +94,7 @@ class CaseThreadProjectionTest {
     @Test
     fun `superseded and contested flags survive the projection`() {
         val forked = ContributionRow(
+            contributionId = "00000000-0000-0000-0000-000000000002",
             agentId = "kyc-agent",
             contributedAtEpochMs = T0 + LATER_MS,
             summary = "stale draft",
@@ -97,6 +102,7 @@ class CaseThreadProjectionTest {
             draftVersion = 0,
             superseded = true,
             contested = true,
+            tokensUsed = 800,
         )
 
         val thread = CaseThreadProjection.project(caseRow, listOf(forked), emptyList())
@@ -105,6 +111,30 @@ class CaseThreadProjectionTest {
         assertThat(entry.superseded).isTrue()
         assertThat(entry.contested).isTrue()
         assertThat(entry.draftVersion).isZero()
+    }
+
+    @Test
+    fun `runtime evidence is derived only from persisted rows`() {
+        val contribution = ContributionRow(
+            contributionId = "00000000-0000-0000-0000-000000000003",
+            agentId = "governance-auditor",
+            contributedAtEpochMs = T0 + LATER_MS,
+            summary = "policy evidence",
+            evidenceRefs = listOf("audit-9"),
+            draftVersion = 1,
+            superseded = false,
+            contested = false,
+            tokensUsed = 600,
+        )
+
+        val thread = CaseThreadProjection.project(caseRow, listOf(contribution), emptyList())
+        val entry = thread.entries.single { it.type == ThreadEntryType.CONTRIBUTION }
+
+        assertThat(entry.runtimeEvidence.evidenceId).isEqualTo(contribution.contributionId)
+        assertThat(entry.runtimeEvidence.stage.name).isEqualTo("CONSUMED")
+        assertThat(entry.runtimeEvidence.correlationId).isEqualTo(caseRow.workflowId)
+        assertThat(thread.retentionPolicy).isEqualTo("not-configured")
+        assertThat(thread.budgetTokens).isEqualTo(200_000)
     }
 
     private companion object {
