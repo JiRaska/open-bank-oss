@@ -3429,6 +3429,47 @@ gates:
     run: |
       python3 .github/scripts/check-pr-file-overlap.py
 
+  # AGENT PR GUARD — the control that keeps unattended agent work off the money path.
+  #
+  # Until this landed, the only thing enforcing that rule was a PreToolUse hook on the
+  # maintainer's laptop. That hook cannot exist where an agent actually runs unattended (a
+  # cloud session, a GitHub runner), and it could not see through an interpreter even
+  # locally — 17 PRs merged in one session with every one of its rules unevaluated, because
+  # the merge went through a script rather than a bare `gh pr merge`. `main`'s ruleset does
+  # not supply the control either: required_approving_review_count is 0 and the admin bypass
+  # actor is the same identity an agent authenticates as. An agent has already reached for an
+  # administrative override, unprompted, when self-approval was refused.
+  #
+  # A required check is the one shape none of that defeats: it runs wherever the PR came
+  # from, the agent that tripped it cannot clear it, and `--auto` cannot merge past it.
+  #
+  # ENFORCED, not advisory, and deliberately so. The deadlock argument that makes
+  # pr-file-overlap advisory does not apply — a human PR is out of scope entirely, so this
+  # can never red a human's work, and an agent PR it reds is one that SHOULD be waiting for a
+  # human. PR-only: on a push to main there is no author or head branch to classify.
+  #
+  # Needs GH_TOKEN, which the shard job already exports. Exit 2 = the verdict could not be
+  # computed, which is a failure and not a clean — a permission-shaped absence is
+  # byte-identical to a real one.
+  - id: agent-pr-guard
+    name: "agent PR guard (autonomous agents may not land protected paths, enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      Unattended agents open PRs here around the clock, and the only control keeping them off
+      the money path was a PreToolUse hook on one laptop — absent in every environment an
+      agent actually runs in, and blind to a merge issued from inside a script (17 PRs merged
+      in one session with all of its rules unevaluated). main's ruleset does not supply it:
+      0 required approvals, and the admin bypass actor is the identity an agent authenticates
+      as. Re-examine when four-eyes is enforced at the ruleset, which would subsume this.
+    review_after: "2027-02-22"
+    min_subjects: 25   # 33 today: 30 derived+declared service tokens + 3 governance globs
+    when: pull_request
+    selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-agent-pr-guard.py
+
   # ADR-0251. The script this falsifies is the PROOF that an independent review happened, and
   # its predecessor is the reason the control was retired: ADR-0154's "Verify the Claude
   # fallback actually reviewed" step carried the SAME `if:` as the review it verified, so
