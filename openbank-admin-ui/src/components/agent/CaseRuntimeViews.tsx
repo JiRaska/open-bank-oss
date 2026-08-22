@@ -4,6 +4,7 @@
 'use client'
 
 import { ArrowRight, CheckCircle2, CircleDot, Database, ShieldCheck, TriangleAlert } from 'lucide-react'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 export type RuntimeStage = 'RECORDED' | 'CONSUMED' | 'EMITTED' | 'PUBLISHED_TO_BROKER' | 'PUBLISH_FAILED' | 'SHADOW_RECORDED'
 
@@ -39,6 +40,7 @@ function stageTone(stage: RuntimeStage): { color: string; bg: string; Icon: type
 }
 
 function EvidenceDetails({ evidence, locale }: { evidence: RuntimeEvidenceView; locale: string }) {
+  const { t } = useLanguage()
   const tone = stageTone(evidence.stage)
   return (
     <details style={{ marginTop: '8px' }}>
@@ -46,18 +48,19 @@ function EvidenceDetails({ evidence, locale }: { evidence: RuntimeEvidenceView; 
         {evidence.stage} · {evidence.evidenceId}
       </summary>
       <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 10px', margin: '8px 0 0', fontSize: '10px' }}>
-        <dt style={{ color: 'var(--text-tertiary)' }}>source</dt><dd style={{ margin: 0, fontFamily: 'var(--font-mono)' }}>{evidence.source}</dd>
-        <dt style={{ color: 'var(--text-tertiary)' }}>observed</dt><dd style={{ margin: 0 }}>{new Date(evidence.observedAtEpochMs).toLocaleString(locale)}</dd>
-        <dt style={{ color: 'var(--text-tertiary)' }}>correlation</dt><dd style={{ margin: 0, fontFamily: 'var(--font-mono)' }}>{evidence.correlationId}</dd>
-        <dt style={{ color: 'var(--text-tertiary)' }}>meaning</dt><dd style={{ margin: 0 }}>{evidence.detail}</dd>
+        <dt style={{ color: 'var(--text-tertiary)' }}>{t('Zdroj', 'Source')}</dt><dd style={{ margin: 0, fontFamily: 'var(--font-mono)' }}>{evidence.source}</dd>
+        <dt style={{ color: 'var(--text-tertiary)' }}>{t('Pozorováno', 'Observed')}</dt><dd style={{ margin: 0 }}>{new Date(evidence.observedAtEpochMs).toLocaleString(locale)}</dd>
+        <dt style={{ color: 'var(--text-tertiary)' }}>{t('Korelace', 'Correlation')}</dt><dd style={{ margin: 0, fontFamily: 'var(--font-mono)' }}>{evidence.correlationId}</dd>
+        <dt style={{ color: 'var(--text-tertiary)' }}>{t('Význam', 'Meaning')}</dt><dd style={{ margin: 0 }}>{evidence.detail}</dd>
       </dl>
     </details>
   )
 }
 
 export function CaseRuntimeTimeline({ thread, locale }: { thread: RuntimeCaseView; locale: string }) {
+  const { t } = useLanguage()
   return (
-    <section aria-label="Runtime evidence timeline" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+    <section aria-label={t('Časová osa runtime důkazů', 'Runtime evidence timeline')} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
       {thread.entries.map((entry, index) => {
         const tone = stageTone(entry.runtimeEvidence.stage)
         const Icon = tone.Icon
@@ -93,16 +96,20 @@ function runtimeEdges(thread: RuntimeCaseView): Edge[] {
 }
 
 export function CaseRuntimeTopology({ thread, locale }: { thread: RuntimeCaseView; locale: string }) {
+  const { t } = useLanguage()
   const edges = runtimeEdges(thread)
   return (
-    <section aria-label="Evidence-backed runtime topology">
+    <section aria-label={t('Topologie podložená runtime důkazy', 'Evidence-backed runtime topology')}>
       <div style={{ padding: '10px 12px', marginBottom: '12px', borderRadius: '10px', background: 'var(--info-bg)', border: '1px solid var(--border)', fontSize: '11px', color: 'var(--text-secondary)' }}>
         <ShieldCheck size={13} style={{ verticalAlign: '-2px', marginRight: '6px', color: 'var(--blue)' }} />
-        Solid edges below exist only because a durable runtime observation is present. Charter declarations alone never create a solid edge.
+        {t(
+          'Plné hrany níže existují pouze díky trvalému runtime pozorování. Samotná deklarace v charteru plnou hranu nikdy nevytvoří.',
+          'Solid edges below exist only because a durable runtime observation is present. Charter declarations alone never create a solid edge.',
+        )}
       </div>
       {edges.length === 0 ? (
         <div style={{ padding: '24px', textAlign: 'center', border: '1px dashed var(--border)', borderRadius: '12px', color: 'var(--text-tertiary)', fontSize: '12px' }}>
-          No observed collaboration edges in this case yet.
+          {t('V tomto případu zatím nejsou žádné pozorované hrany spolupráce.', 'No observed collaboration edges in this case yet.')}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -121,7 +128,7 @@ export function CaseRuntimeTopology({ thread, locale }: { thread: RuntimeCaseVie
         </div>
       )}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '12px', fontSize: '10px', color: 'var(--text-tertiary)' }}>
-        <Database size={11} /> {thread.historySource} · retention: {thread.retentionPolicy} · last observed {new Date(thread.observedAtEpochMs).toLocaleString(locale)}
+        <Database size={11} /> {thread.historySource} · {t('retence', 'retention')}: {thread.retentionPolicy} · {t('naposledy pozorováno', 'last observed')} {new Date(thread.observedAtEpochMs).toLocaleString(locale)}
       </div>
     </section>
   )
