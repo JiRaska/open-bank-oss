@@ -92,10 +92,10 @@ export default function Customer360Page() {
           reads engagement-service, not ClickHouse, so a silver layer that is down or a party with no
           projected events must not hide an active fraud hold. Those are independent sources and the
           page now degrades independently for each. */}
-      {selected && <AdverseStatePanel key={selected.id} partyId={selected.id} />}
-      {selected && <CustomerPortfolioPanel key={selected.id} partyId={selected.id} />}
-      {selected && <DevicesPanel key={selected.id} partyId={selected.id} />}
-      {selected && <DocumentsPanel key={selected.id} partyId={selected.id} />}
+      {selected && <AdverseStatePanel key={`adverse:${selected.id}`} partyId={selected.id} />}
+      {selected && <CustomerPortfolioPanel key={`portfolio:${selected.id}`} partyId={selected.id} />}
+      {selected && <DevicesPanel key={`devices:${selected.id}`} partyId={selected.id} />}
+      {selected && <DocumentsPanel key={`documents:${selected.id}`} partyId={selected.id} />}
 
       {loading && (
         <div style={{ color: 'var(--text-secondary)', padding: '40px', textAlign: 'center' }}>
