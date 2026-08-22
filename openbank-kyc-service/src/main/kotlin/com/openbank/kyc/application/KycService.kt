@@ -83,7 +83,7 @@ class KycService {
     // the series is still collected; revisit once the case gains an individual|business field.
     private val caseType = "unknown"
 
-    // Sandbox-only straight-through processing (ADR-0073): when true, a case opened from a
+    // Sandbox-only straight-through processing (ADR-0116 §4): when true, a case opened from a
     // PARTY_CREATED event is auto-evaluated (all checks PASSED) and approved, so onboarding
     // activates without an operator. MUST stay false in production (four-eyes, ADR-0068).
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "openbank.kyc.auto-approve", defaultValue = "false")
