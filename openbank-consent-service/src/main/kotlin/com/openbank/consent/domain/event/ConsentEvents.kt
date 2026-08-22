@@ -62,6 +62,28 @@ data class ConsentRevoked(
     override val version = 1L
 }
 
+/**
+ * A consent was replaced by a newer one for the same grantee and the same scopes (#6487).
+ *
+ * Carries `supersededBy` so a consumer can tell this apart from a withdrawal: access continues
+ * under the named consent, and a journey keyed to the old id should follow it rather than stop.
+ * That is the opposite of [ConsentRevoked], which means access ended.
+ */
+data class ConsentSuperseded(
+    override val aggregateId: UUID,
+    val partyId: UUID,
+    val granteeId: String,
+    val scopes: Set<ConsentScope>,
+    val supersededBy: UUID,
+    override val occurredAt: Instant,
+    /** See [ConsentGranted.sourceService] (#3994/#5256). */
+    val sourceService: String = "consent-service",
+) : DomainEvent(occurredAt) {
+    override val aggregateType = "Consent"
+    override val eventType = "ConsentSuperseded"
+    override val version = 1L
+}
+
 data class ConsentExpired(
     override val aggregateId: UUID,
     val partyId: UUID,

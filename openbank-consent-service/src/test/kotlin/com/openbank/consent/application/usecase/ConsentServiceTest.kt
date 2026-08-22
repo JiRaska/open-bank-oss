@@ -14,6 +14,7 @@ import com.openbank.consent.application.port.out.ScaChallengeSnapshot
 import com.openbank.consent.domain.event.ConsentGranted
 import com.openbank.consent.domain.event.ConsentRejected
 import com.openbank.consent.domain.event.ConsentRevoked
+import com.openbank.consent.domain.event.ConsentSuperseded
 import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
@@ -82,7 +83,11 @@ class ConsentServiceTest {
     fun `createConsent auto-activates and emits ConsentGranted for a GDPR-only scope, no SCA`(): Unit = runBlocking {
         val savedConsent = slot<Consent>()
         val savedEvent = slot<ConsentGranted>()
-        coEvery { consentRepository.save(capture(savedConsent), capture(savedEvent)) } answers { firstArg() }
+        // GDPR-only consents are born ACTIVE, so they now take the superseding write path (#6487).
+        coEvery { consentRepository.findActiveByGranteeAndParty(any(), any()) } returns emptyList()
+        coEvery {
+            consentRepository.saveSuperseding(capture(savedConsent), capture(savedEvent), any())
+        } answers { firstArg() }
 
         val command = CreateConsentCommand(
             partyId = partyId,
@@ -112,7 +117,11 @@ class ConsentServiceTest {
     fun `createConsent stays PENDING_SCA for a single GDPR-only scope too`(): Unit = runBlocking {
         val savedConsent = slot<Consent>()
         val savedEvent = slot<ConsentGranted>()
-        coEvery { consentRepository.save(capture(savedConsent), capture(savedEvent)) } answers { firstArg() }
+        // GDPR-only consents are born ACTIVE, so they now take the superseding write path (#6487).
+        coEvery { consentRepository.findActiveByGranteeAndParty(any(), any()) } returns emptyList()
+        coEvery {
+            consentRepository.saveSuperseding(capture(savedConsent), capture(savedEvent), any())
+        } answers { firstArg() }
 
         val command = CreateConsentCommand(
             partyId = partyId,
@@ -492,16 +501,18 @@ class ConsentServiceTest {
         coEvery { consentRepository.findById(consentId) } returns consent(status = ConsentStatus.PENDING_SCA)
         coEvery { scaChallengeClient.getChallenge(scaSessionId) } returns
             ScaChallengeSnapshot(scaSessionId, partyId, "CONSENT_GRANT", "COMPLETED")
-        coEvery { consentRepository.save(capture(saved), any()) } answers { firstArg() }
+        coEvery { consentRepository.findActiveByGranteeAndParty(granteeId, partyId) } returns emptyList()
+        coEvery { consentRepository.saveSuperseding(capture(saved), any(), any()) } answers { firstArg() }
 
         val result = service.activateConsent(consentId, scaSessionId)
 
         assertThat(result.status).isEqualTo(ConsentStatus.ACTIVE)
         assertThat(saved.captured.scaSessionId).isEqualTo(scaSessionId)
         coVerify(exactly = 1) {
-            consentRepository.save(
+            consentRepository.saveSuperseding(
                 match<Consent> { it.status == ConsentStatus.ACTIVE },
                 match<ConsentGranted> { it.aggregateId == consentId && it.partyId == partyId },
+                match<List<Pair<Consent, ConsentSuperseded>>> { it.isEmpty() },
             )
         }
     }
@@ -596,8 +607,9 @@ class ConsentServiceTest {
         granteeId: String = this.granteeId,
         status: ConsentStatus = ConsentStatus.ACTIVE,
         scopes: Set<ConsentScope> = setOf(ConsentScope.ACCOUNTS_READ),
+        id: UUID = this.consentId,
     ): Consent = Consent(
-        id = consentId,
+        id = id,
         partyId = partyId,
         granteeId = granteeId,
         granteeType = GranteeType.TPP,
