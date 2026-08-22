@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.9...admin-ui-v0.187.10) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** hide day-end clock icons ([#6570](https://github.com/JiRaska/open-bank-oss/issues/6570)) ([9a3d6fd](https://github.com/JiRaska/open-bank-oss/commit/9a3d6fdfd34bb5dbc3cad76713d87b615d866cf7))
+
 ## [0.187.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.8...admin-ui-v0.187.9) (2026-08-22)
 
 
