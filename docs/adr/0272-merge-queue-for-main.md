@@ -1,16 +1,42 @@
 ---
 date: 2026-08-22
-decision-status: proposed
-delivery-status: planned
+decision-status: rejected
+delivery-status: n-a
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [ci, governance, release-versioning]
-summary: "Adopt a GitHub merge queue for main: 19 of 20 main CI failures come from PRs that were themselves green. Enabling it before every required context handles merge_group would stall the queue permanently."
+summary: "REJECTED on availability, not on merit: merge queue requires an organization-owned repository and this one is user-owned. The measurement stands — 19 of 20 main failures came from PRs that were themselves green."
 ---
 
 # ADR-0272 — Merge queue for main
+
+> **REJECTED 2026-08-22 — the remedy is unavailable, the problem is not.**
+>
+> A GitHub merge queue requires a repository owned by an **organization**. `JiRaska/open-bank-oss`
+> has `owner.type = "User"`, so the feature does not exist here on any branch or plan, and no
+> canary can work around it. Measured while attempting rollout step 3:
+>
+> ```
+> POST /repos/JiRaska/open-bank-oss/rulesets   rules: [{"type":"merge_queue"}]
+> -> 422 {"errors":["Invalid rule 'merge_queue': "]}
+> ```
+>
+> The reason string is **empty**, and it is identical with full parameters and with none — so the
+> instinctive next step, tuning the parameters, spends time on a schema that was never the problem.
+> One call discriminates: `gh api repos/<owner>/<repo> --jq '.owner.type'`. Ask it before building
+> anything queue-shaped.
+>
+> **Everything in Context below still holds.** 197 merges/day, `main` red on 10.2% of them, and 19
+> of 20 breakages from pull requests that were themselves fully green, failing in `gates (data)` /
+> `gates (supplychain)` only once merged. This ADR is rejected on availability, not on merit, and
+> the problem it measures is still unaddressed.
+>
+> `decision-status: rejected` rather than `superseded`: the schema binds `superseded` to a
+> non-empty `superseded-by`, and no ADR replaces this one yet. Whoever takes the problem up next
+> chooses between the three routes in **Where this leaves the problem** below, and supersedes this
+> ADR when they do.
 
 ## Context
 
@@ -96,7 +122,22 @@ names — a PR whose last CI run predates a competing spec merge — which no ba
 `issue-hygiene` has no such payload: there is no PR in a merge group. It reports success as an
 explicit no-op job, because the property it asserts was already established on the PR.
 
-### Rollout
+### Rollout — not executed
+
+Step 1 shipped and remains useful on its own: `check-ruleset-context-parity.py` reports, per
+required context, whether a `merge_group`-triggered job could satisfy it. It is advisory, it
+currently reports five gaps, and if this repository ever moves to an organization that report is
+the precondition already measured rather than re-derived.
+
+Step 2 was written (five workflows taught to report on `merge_group`) and **closed unmerged**:
+without a queue the event never fires, so it would have been configuration claiming a capability
+the repository does not have. The branch is `ci/merge-group-triggers` if the ownership question is
+ever revisited.
+
+Steps 3 and 4 were not reachable. What follows is the plan as written, kept because it is the
+work any future attempt inherits.
+
+### Rollout (as planned)
 
 1. Extend `check-ruleset-context-parity.py` to also assert `merge_group` coverage for every
    required context, **advisory** while the queue is off. The precondition becomes machine-checked
@@ -117,6 +158,19 @@ and forces a bisect-and-requeue.
 **Cost.** Zero. The PR lane runs on `ubuntu-latest`, which is free and unlimited for a public
 repository. The queue re-runs CI on the merge path, so CI *volume* roughly doubles; the invoice
 does not change.
+
+## Where this leaves the problem
+
+The 10.2% red-main rate is unaddressed. Three routes, none of them free:
+
+1. **Transfer the repository to an organization.** The only route to the decision as written. It
+   is not a CI change — it moves the URL, the access model, and the Actions configuration, so it
+   is a decision about the project, not about merge hygiene.
+2. **Require branches to be up to date before merging.** Already weighed and rejected below, and
+   that rejection is unchanged: at ~197 merges/day it moves the serialization onto humans and
+   agents rather than removing it.
+3. **Stay with detection.** The status quo. Its cost is now measured rather than assumed: about
+   twenty red-main events a day, each one a state in which the next merge's CI is also red.
 
 ## Alternatives considered
 
