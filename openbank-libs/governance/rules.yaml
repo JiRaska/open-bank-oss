@@ -2999,6 +2999,15 @@ pr_file_overlap:
     - "openbank-infra/gitops/"
 
 # ---------------------------------------------------------------------------
+# AGENT CASE COLLABORATION (ADR-0271 proposal; no live grants)
+#
+# This matrix is an independent authorization boundary, intersected with each
+# principal's agents.yaml case_capabilities by the case-coordinator-only OPA bundle.
+# Empty is intentional: the policy and PEP may be reviewed without silently creating
+# a production grant. Every entry requires a separate authorization review.
+agent_case_capability_matrix: []
+
+# ---------------------------------------------------------------------------
 # AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)
 #
 # The repo runs scheduled, unattended agents that open PRs around the clock. Until now the
