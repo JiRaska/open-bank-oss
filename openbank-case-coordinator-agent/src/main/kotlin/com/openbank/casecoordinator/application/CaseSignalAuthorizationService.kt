@@ -16,11 +16,11 @@ import com.openbank.libs.audit.AuditChannel
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.runBlocking
 import java.time.Clock
 import java.time.Instant
-import java.util.UUID
 
 sealed interface CaseSignalAuthorizationResult {
     data class Authorized(val signalId: String, val rolloutId: String) : CaseSignalAuthorizationResult
@@ -41,7 +41,7 @@ class CaseSignalAuthorizationService(
     fun authorize(caseId: String, agentId: String, capability: String): CaseSignalAuthorizationResult {
         val context = evidenceRepository.findContext(caseId)
             ?: return CaseSignalAuthorizationResult.UnknownCase
-        val signalId = UUID.randomUUID().toString()
+        val signalId = Ids.randomId().toString()
         val decision = try {
             policy.decide(
                 CaseCollaborationPolicyQuery(

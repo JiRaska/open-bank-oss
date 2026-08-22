@@ -32,7 +32,7 @@ class CaseSignalAuthorizationServiceTest {
     private val service = CaseSignalAuthorizationService(policy, localGate, repository, audit)
 
     @Test
-    fun `allow requires policy local charter and remaining quota and emits correlated audit`() = runBlocking {
+    fun `allow requires policy local charter and remaining quota and emits correlated audit`(): Unit = runBlocking {
         every { repository.findContext("case-1") } returns CaseAuthorizationContext("INCIDENT_RESPONSE", "SHADOW")
         every { repository.tryRecordAuthorized(any(), 8) } returns true
         every { localGate.canContribute("rca-investigator") } returns true
@@ -65,7 +65,7 @@ class CaseSignalAuthorizationServiceTest {
     }
 
     @Test
-    fun `policy allow still denies when local charter gate disagrees`() = runBlocking {
+    fun `policy allow still denies when local charter gate disagrees`(): Unit = runBlocking {
         every { repository.findContext(any()) } returns CaseAuthorizationContext("INCIDENT_RESPONSE", "SHADOW")
         every { localGate.canJoinCase(any()) } returns false
         every { policy.decide(any()) } returns CaseCollaborationPolicyDecision(
