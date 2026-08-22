@@ -3,7 +3,7 @@ sequenceDiagram
   participant ACC as account-service
   participant TXN as transaction-service
   participant BAL as balance-service
-  participant PAR as party-service
+  participant PTY as party-service
   participant KYC as kyc-service
   participant CON as consent-service
   participant K as Kafka<br/>(multiple topics)
@@ -14,7 +14,7 @@ sequenceDiagram
   ACC->>K: account.created / account.frozen / …
   TXN->>K: transaction.initiated / …
   BAL->>K: balance.events
-  PAR->>K: party.events
+  PTY->>K: party.events
   KYC->>K: kyc.events
   CON->>K: consent.events
 
