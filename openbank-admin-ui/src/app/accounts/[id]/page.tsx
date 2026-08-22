@@ -82,8 +82,8 @@ export default function AccountDetailPage() {
   }
 
   if (loading) return (
-    <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <RefreshCw size={14} className="animate-spin" /> {t('Načítám účet…', 'Loading account…')}
+    <div role="status" aria-live="polite" style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <RefreshCw size={14} aria-hidden="true" className="animate-spin" /> {t('Načítám účet…', 'Loading account…')}
     </div>
   )
 
