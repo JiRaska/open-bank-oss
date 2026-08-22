@@ -33,7 +33,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fraud-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-69b8b64c
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-a57b0cf0
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8133}
