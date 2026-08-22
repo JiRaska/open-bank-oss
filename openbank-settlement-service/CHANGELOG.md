@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.2...settlement-service-v0.7.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **settlement:** remove the ledger compensation that could never run ([#6484](https://github.com/JiRaska/open-bank-oss/issues/6484)) ([2da87cf](https://github.com/JiRaska/open-bank-oss/commit/2da87cf6f35ef52572629e6f081b330cb8f74fd3)), closes [#6410](https://github.com/JiRaska/open-bank-oss/issues/6410)
+
 ## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.1...settlement-service-v0.7.2) (2026-08-22)
 
 

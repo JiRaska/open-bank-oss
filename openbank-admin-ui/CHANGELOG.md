@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.187.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.2...admin-ui-v0.187.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce customer app loading ([#6501](https://github.com/JiRaska/open-bank-oss/issues/6501)) ([4813ffe](https://github.com/JiRaska/open-bank-oss/commit/4813ffeb8f10cbb1f7e1409fb6bc7f728a732250))
+* **admin-ui:** clarify agent loading state ([#6514](https://github.com/JiRaska/open-bank-oss/issues/6514)) ([5659ecd](https://github.com/JiRaska/open-bank-oss/commit/5659ecd7a986eec5010e4fd7f6399c07bea6380d))
+* **admin-ui:** clarify lending refresh state ([#6454](https://github.com/JiRaska/open-bank-oss/issues/6454)) ([9708073](https://github.com/JiRaska/open-bank-oss/commit/9708073f326488a2637dbd017d5f3966d12490d9))
+* **admin-ui:** clarify regulatory preview loading ([#6482](https://github.com/JiRaska/open-bank-oss/issues/6482)) ([551e776](https://github.com/JiRaska/open-bank-oss/commit/551e776aec5236f58cf2b9fe0d49e635d90b4384))
+
+
+### Security
+
+* **fleet:** resolve 46 open code-scanning findings ([#5302](https://github.com/JiRaska/open-bank-oss/issues/5302)) ([e10a90d](https://github.com/JiRaska/open-bank-oss/commit/e10a90d8a1b518663f5dc86199f18fd41fda9a29))
+
 ## [0.187.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.1...admin-ui-v0.187.2) (2026-08-22)
 
 
