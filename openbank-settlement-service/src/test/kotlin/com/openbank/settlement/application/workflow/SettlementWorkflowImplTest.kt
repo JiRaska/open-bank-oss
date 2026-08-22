@@ -139,10 +139,79 @@ class SettlementWorkflowImplTest {
 
         val result = newWorkflow().settle(UUID.randomUUID())
 
-        // reverseCredit throws, but the workflow still runs reverseDebit and rejects.
-        assertThat(result).isEqualTo(SettlementStatus.REJECTED)
+        // reverseCredit throws, but the workflow still runs reverseDebit.
         assertThat(calls.reverseCredit.get()).isEqualTo(1)
         assertThat(calls.reverseDebit.get()).isEqualTo(1)
+        // It must NOT reject: see the REVERSAL_FAILED test below for why.
+        assertThat(result).isEqualTo(SettlementStatus.REVERSAL_FAILED)
+        assertThat(calls.rejectSettlement.get()).isZero()
+    }
+
+    /**
+     * The money-path assertion of issue #6286.
+     *
+     * `reverseCredit` refused means the payee's credit could not be taken back — customer funds
+     * have moved and have not returned. `SettlementActivitiesImpl.compensate` records
+     * REVERSAL_FAILED for exactly that. Until #6286 the workflow then called `rejectSettlement`
+     * unconditionally, overwriting it with REJECTED: the settlements table said the settlement was
+     * cleanly rejected while the money was still out, and the age gauge behind
+     * `SettlementReversalFailed` never saw a row to alert on, because the row left the state
+     * within seconds.
+     *
+     * Asserting `rejectSettlement` was NOT called is the whole point — the previous version of
+     * this test asserted the opposite and passed.
+     */
+    @Test
+    fun `a refused money reversal leaves the settlement non-terminal and never rejects`() {
+        val calls = RecordingActivities(failBookToLedger = true, failReverseCredit = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(result)
+            .describedAs("REJECTED here would erase the record that funds are still outstanding")
+            .isEqualTo(SettlementStatus.REVERSAL_FAILED)
+        assertThat(calls.rejectSettlement.get()).isZero()
+        assertThat(calls.order).doesNotContain("rejectSettlement")
+    }
+
+    /**
+     * `reverseBookToLedger` is currently UNREACHABLE, and this test exists to say so out loud.
+     *
+     * Its compensation is registered only after `bookToLedger` returns, and `bookToLedger` is the
+     * last forward step — so nothing can fail afterwards to trigger the unwind. The activity, its
+     * LEDGER_REVERSAL_UNSUPPORTED status, and the `SettlementStuckAfterCompensation` coverage of
+     * that status are all dead until the saga gains a step after the ledger booking.
+     *
+     * The workflow still pairs that compensation with its status (see `Compensation`), so the day
+     * a step IS added the reporting is already correct rather than silently reporting the wrong
+     * half. If this test ever fails, the saga grew a step and the pairing became live — which is
+     * the moment to add the reachable-path assertions.
+     */
+    @Test
+    fun `the ledger compensation is unreachable in the current saga shape`() {
+        val calls = RecordingActivities(failBookToLedger = true, failReverseBookToLedger = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(calls.reverseBookToLedger.get())
+            .describedAs("bookToLedger is the last forward step, so its compensation can never run")
+            .isZero()
+    }
+
+    /** A clean unwind still reaches its terminal state — REJECTED must stay reachable. */
+    @Test
+    fun `a fully successful unwind still rejects`() {
+        val calls = RecordingActivities(failBookToLedger = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(result).isEqualTo(SettlementStatus.REJECTED)
         assertThat(calls.rejectSettlement.get()).isEqualTo(1)
     }
 
@@ -152,6 +221,7 @@ class SettlementWorkflowImplTest {
         private val failCreditPayee: Boolean = false,
         private val failBookToLedger: Boolean = false,
         private val failReverseCredit: Boolean = false,
+        private val failReverseBookToLedger: Boolean = false,
     ) : SettlementActivities {
         val debitPayer = AtomicInteger(0)
         val creditPayee = AtomicInteger(0)
@@ -194,6 +264,12 @@ class SettlementWorkflowImplTest {
         override fun reverseBookToLedger(settlementId: UUID) {
             order += "reverseBookToLedger"
             reverseBookToLedger.incrementAndGet()
+            if (failReverseBookToLedger) {
+                throw ApplicationFailure.newNonRetryableFailure(
+                    "ledger reversal unsupported",
+                    "LedgerReversalUnsupported",
+                )
+            }
         }
 
         override fun rejectSettlement(settlementId: UUID) {

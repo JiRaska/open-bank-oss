@@ -61,6 +61,10 @@ components:
             LEDGER_REVERSAL_UNSUPPORTED means the general-ledger posting was not reversed and needs
             a manual correcting entry. LEDGER_REVERSED is deprecated and is no longer produced —
             the code path that wrote it updated this column without reversing anything.
+            REJECTED means the saga unwound COMPLETELY: it is written only when every compensation
+            succeeded (issue #6286). A settlement whose compensation was refused stays in
+            REVERSAL_FAILED and is never rejected, so REJECTED never has to be read as "possibly
+            still owed".
           enum:
             - PENDING
             - DEBITED
