@@ -162,7 +162,350 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Fuzz services
-        run: .github/scripts/fuzz-services.sh
+        run: |
+          set -uo pipefail
+          mkdir -p fuzz-reports
+          OVERALL=0
+
+          for svc in $SERVICES; do
+            APP_YAML="${svc}/src/main/resources/application.yaml"
+            SPEC="${svc}/src/main/resources/openapi.yaml"
+            if [ ! -f "$APP_YAML" ] || [ ! -f "$SPEC" ]; then
+              echo "::error::[${svc}] missing application.yaml or openapi.yaml — skip"
+              OVERALL=1; continue
+            fi
+
+            # Derive the HTTP port and database name from the service's own
+            # config — no per-service table to rot.
+            PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
+            DB="$(grep -m1 -E 'postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
+            DBUSER="$(grep -m1 '^    username:' "$APP_YAML" | awk '{print $2}')"
+            # The username is often a Quarkus config EXPRESSION, not a literal:
+            # `${POSTGRES_USER:openbank}` (vop) or `"${QUARKUS_DATASOURCE_USERNAME:openbank_settlement}"`
+            # (settlement). Taken verbatim, that string was handed to `docker run -e POSTGRES_USER=`
+            # and then to `pg_isready -U`, which can never succeed — so both services died on
+            # "postgres never became ready" and had NEVER been fuzzed, silently, while the job list
+            # showed them as covered. Resolve the expression to its default, which is exactly what
+            # the %dev profile resolves it to here (none of these vars are set in this job).
+            DBUSER="$(printf '%s' "$DBUSER" | tr -d "\"'" | sed -E 's/^\$\{[A-Za-z_][A-Za-z0-9_]*:?-?([^}]*)\}$/\1/')"
+            if [ -z "$DBUSER" ] || printf '%s' "$DBUSER" | grep -q '[^A-Za-z0-9_]'; then
+              echo "::error::[${svc}] could not resolve a usable datasource username from ${APP_YAML} (got '${DBUSER}') — skip"
+              OVERALL=1; continue
+            fi
+            echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
+
+            # Job-local postgres on the localhost:5432 the %dev profile
+            # expects. NB: the batch pool's chart-managed dind has no
+            # registry-mirror (unlike the build pool) — this pull hits Docker
+            # Hub directly; weekly cadence keeps it under the anon rate limit.
+            docker rm -f fuzz-pg >/dev/null 2>&1 || true
+            docker run -d --name fuzz-pg -p 5432:5432 \
+              -e POSTGRES_USER="${DBUSER}" \
+              -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+              -e POSTGRES_DB="${DB}" \
+              postgres:16.3-alpine >/dev/null
+            PG_UP=0
+            for i in $(seq 1 30); do
+              docker exec fuzz-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && { PG_UP=1; break; }
+              sleep 2
+            done
+
+            # Redis, DERIVED from the service's own config rather than a list kept here. 31 of the
+            # ~50 services reference it (idempotency store, rate-limit counters), and the auth-on
+            # pass never needed it: a 403 fires before the handler touches any dependency, so the
+            # lane has been accidentally immune to missing infrastructure for its whole life.
+            #
+            # The auth-off pass below is NOT immune, and that is the single thing that decides
+            # whether it can be trusted. Measured while prototyping it: with Redis absent,
+            # `PATCH /api/v1/consents/approvals/{id}` answers 500 —
+            # `AnnotatedConnectException: Connection refused: localhost/127.0.0.1:6379` — which is
+            # indistinguishable from a real finding at the schemathesis layer. With Redis up the
+            # same request answers 404, correctly. A missing dependency must never be able to
+            # masquerade as a server-error finding on the control that exists to surface real ones.
+            if grep -qi "redis" "$APP_YAML"; then
+              echo "==> [${svc}] config references redis — starting one"
+              docker rm -f fuzz-redis >/dev/null 2>&1 || true
+              docker run -d --name fuzz-redis -p 6379:6379 redis:7-alpine >/dev/null
+              for i in $(seq 1 30); do
+                docker exec fuzz-redis redis-cli ping >/dev/null 2>&1 && break
+                sleep 1
+              done
+            fi
+            if [ "$PG_UP" != "1" ]; then
+              echo "::error::[${svc}] postgres never became ready — skip"
+              OVERALL=1
+              docker rm -f fuzz-pg >/dev/null 2>&1 || true
+              continue
+            fi
+
+            # Quarkus dev mode: %dev disables OIDC; Flyway migrates at start.
+            # Kafka producers are lazy — no broker needed for the HTTP surface
+            # (the transactional outbox keeps brokers out of the request path).
+            # Temporal worker OFF for the fuzz run. Six services register a Temporal worker at
+            # StartupEvent and there is no Temporal here, so the gRPC channel to
+            # temporal-frontend:7233 is refused: transaction-service failed outright
+            # ("Failed to start quarkus", Caused by StatusRuntimeException UNAVAILABLE) while
+            # lending, sepa-payment and domestic-payment retried past the boot deadline. Four
+            # money-path services were reported as fuzz failures for an absent dependency, which
+            # is not a finding about their HTTP surface — and it drowned the ONE real finding in
+            # the same run (consent-service, #5711).
+            #
+            # Every registrar already has the switch, because @QuarkusTest needs it too. What they
+            # do NOT have is a shared name for it: openbank.transaction.worker.enabled,
+            # openbank.domestic.worker.enabled, openbank.sepa.worker.enabled,
+            # openbank.campaign.worker.enabled, openbank.settlement.worker.enabled — and
+            # lending's is `lending.origination.worker.enabled`, not even under `openbank.`. So the
+            # property is DERIVED from the registrar's own @ConfigProperty rather than listed here;
+            # a hand-kept table of six names is the thing this repo keeps finding rotted.
+            # An ARRAY, not a string: an unquoted string here would rely on word splitting to
+            # become separate flags, which is the one shell behaviour that silently does the wrong
+            # thing the day a property name gains a space or the variable is empty.
+            # An ARRAY, not a string: an unquoted string at the use site would rely on word
+            # splitting to become separate flags, which is the one shell behaviour that silently
+            # does the wrong thing the day the variable is empty.
+            WORKER_FLAGS=()
+            WORKER_PROPS="$(grep -rhoE '"[A-Za-z0-9._-]*worker\.enabled"' "${svc}/src/main" 2>/dev/null | tr -d '"' | sort -u || true)"
+            for prop in ${WORKER_PROPS}; do
+              WORKER_FLAGS+=("-D${prop}=false")
+              echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
+            done
+
+            # Compile BEFORE the readiness clock starts. The 180s budget below was being spent
+            # on the Gradle build, not on the Quarkus boot: measured on run 32288156614,
+            # `starting quarkusDev` was echoed at 18:43:10 and quarkusDev's first log line landed
+            # at 18:45:38 — 148 of the 180 seconds gone to configuration and compilation, leaving
+            # the application ~32s before teardown killed it. It never had a chance, and the job
+            # reported "failed to boot" about a service that had not finished starting.
+            #
+            # Services with a warm build cache passed; the ones without did not, which is why the
+            # same service flips between runs. Doing the compile as its own step makes the wait
+            # measure what it claims to measure, and a slow BUILD now shows up as a slow build.
+            echo "==> [${svc}] compiling (outside the readiness budget)"
+            BUILD_START=$SECONDS
+            ./gradlew ":${svc}:quarkusGenerateCode" ":${svc}:classes" \
+              --console=plain --quiet >> "fuzz-reports/${svc}-boot.log" 2>&1 || true
+            echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s"
+
+            # ── Two passes, both must pass ────────────────────────────────────────────
+            #
+            # Pass 1 (auth ON) is what this lane has always done, and it proves something real:
+            # every endpoint behind @RolesAllowed answers 401/403, so an endpoint that LOSES its
+            # annotation starts answering 2xx to anonymous traffic and shows up here.
+            #
+            # Pass 2 (auth OFF) exists because pass 1 barely tests anything. Measured across the
+            # full fleet on run 32348238171 — 26/26 green — by counting each job's own
+            # `Selected: N/M` against its `Authentication failed: N operations`:
+            #
+            #     operations selected total:  306
+            #     auth-blocked (401/403):     302
+            #     ACTUALLY exercised:           4   (1.3%)
+            #     services with zero unauthenticated surface: 24 of 26
+            #
+            # ledger 28/28 blocked, lending 37/37, account 20/20, party 24/24. Both real 5xx this
+            # lane has ever found came from the 3 non-blocked operations on consent-service, so
+            # its entire yield to date comes from 1.3% of the surface it reports on. A green was
+            # being read as "fuzzed" when it meant "authenticated" (#5769).
+            #
+            # `quarkus.security.auth.enabled-in-dev-mode` is a built-in dev-mode switch: no
+            # dependency, no service edit, no realm import. The alternative — basic auth with
+            # embedded users — was tried and is worse than useless: the config is accepted while
+            # no IdentityProvider is on the classpath, so EVERY request answers 500
+            # (`BasicAuthenticationMechanism requires one or more IdentityProviders`). Making that
+            # work needs an elytron extension on ~26 money-path classpaths, which is a
+            # security-surface change rather than a harness one.
+            #
+            # Measured yield on consent-service: 3 operations tested -> 13, 1738 generated cases,
+            # all passing. That is a meaningful green; the 3-operation one was not.
+            #
+            # What pass 2 does NOT test is authorization — it is switched off. That property is
+            # pass 1's job, which is why both run and both must pass rather than one replacing
+            # the other.
+            run_pass () {
+              local label="$1"; shift
+              local logsuffix="$1"; shift
+
+              echo "==> [${svc}] starting quarkusDev (${label})"
+              # FORCE the credentials this job actually created the container with, rather than
+              # trusting the service to pick them up from an env var. The fleet convention is
+              # `password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}`, and the job env supplies
+              # POSTGRES_PASSWORD — but openbank-settlement-service names its expressions
+              # QUARKUS_DATASOURCE_USERNAME/PASSWORD instead, so POSTGRES_PASSWORD never reached it
+              # and Flyway died on `FATAL: password authentication failed for user
+              # "openbank_settlement"` after a 237s compile (run 32289597634). Only 3 of ~50
+              # services use that spelling, which is exactly why an assumption about it is worth
+              # nothing: this is the third naming convention this lane assumed and did not have
+              # (#5714 was the username expression and the six differently-named worker properties).
+              #
+              # System properties sit above application.yaml in SmallRye's ordinal chain, so they
+              # win over any `${...:default}` expression whatever it is spelled. username/password
+              # live on `quarkus.datasource`, above both `reactive:` and `jdbc:`, so one pair of
+              # overrides covers the reactive datasource and the Flyway/Agroal one together.
+              ./gradlew ":${svc}:quarkusDev" \
+                -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+                -Dquarkus.datasource.username="${DBUSER}" \
+                -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
+                "${WORKER_FLAGS[@]}" "$@" \
+                -Dquarkus.console.basic=true \
+                --console=plain --quiet \
+                > "fuzz-reports/${svc}-boot${logsuffix}.log" 2>&1 &
+              DEV_PID=$!
+
+              # Readiness = the main HTTP socket answers anything (000 = conn refused). /q/* may
+              # live on the management port in prod profiles; here only socket-open matters.
+              #
+              # The wait deliberately does NOT use $DEV_PID as a liveness proxy. `./gradlew` is a
+              # launcher: it hands the build to the Gradle daemon and the client can exit while
+              # quarkusDev keeps running under it. `kill -0 $DEV_PID || break` therefore aborted
+              # the wait on a service that was booting perfectly well — a race, which is why the
+              # same service passed one run and "failed to boot" the next. Measured on run
+              # 32284304038: openbank-domestic-payment logged `Listening on: http://localhost:8116`
+              # ~34s into a 180s budget and the job still reported a boot failure; its artifact
+              # contains no error of any kind.
+              local UP=0 WAITED=0
+              for i in $(seq 1 90); do
+                code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
+                if [ "$code" != "000" ]; then UP=1; break; fi
+                WAITED=$((WAITED + 2))
+                sleep 2
+              done
+
+              if [ "$UP" != "1" ]; then
+                echo "::error::[${svc}] failed to boot (${label}) — see ${svc}-boot${logsuffix}.log artifact"
+                tail -50 "fuzz-reports/${svc}-boot${logsuffix}.log" || true
+                OVERALL=1
+              else
+                echo "==> [${svc}] answered after ${WAITED}s (${label}); fuzzing http://localhost:${PORT}"
+                # schemathesis 4.x CLI (bumped from 3.39.16 to close 6 Dependabot alerts on
+                # transitive starlette/pytest — schemathesis 3.x hard-caps pytest<9 and
+                # starlette<1, so the vulnerable pins couldn't be bumped without this jump):
+                #   --base-url        -> --url (same semantics)
+                #   --hypothesis-max-examples -> --max-examples (dropped hypothesis- prefix)
+                #   --hypothesis-deadline     -> removed; no CLI equivalent in 4.x
+                #   --request-timeout unit changed ms -> seconds (5000ms was the old value)
+                #   --experimental=openapi-3.1 -> removed; OpenAPI 3.1 support is now default
+                #   --junit-xml       -> --report junit --report-junit-path
+                schemathesis run "$SPEC" \
+                  --url "http://localhost:${PORT}" \
+                  --checks not_a_server_error \
+                  --max-examples "${MAX_EXAMPLES}" \
+                  --request-timeout 5 \
+                  --report junit --report-junit-path "fuzz-reports/${svc}-junit${logsuffix}.xml" \
+                  | tee "fuzz-reports/${svc}-fuzz${logsuffix}.log" || OVERALL=1
+
+                # The number that says what the green is WORTH, printed rather than left to be
+                # reconstructed from an artifact by whoever next wonders. `Selected` is how many
+                # operations schemathesis drove; `Authentication failed` is how many of them only
+                # ever answered 401/403 and so tested no handler logic at all.
+                local sel blocked
+                sel="$(grep -aoE 'Selected: [0-9]+/[0-9]+' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | head -1 || true)"
+                blocked="$(grep -aoE 'Authentication failed: [0-9]+ operation' "fuzz-reports/${svc}-fuzz${logsuffix}.log" | grep -oE '[0-9]+' | head -1 || true)"
+                echo "==> [${svc}] ${label}: ${sel:-Selected: ?} auth-blocked=${blocked:-0}"
+
+                # A CENSUS OF CAUSES, printed next to the count. schemathesis reports "Server
+                # error: N" and the response body is a generic INTERNAL_ERROR, so the count alone
+                # cannot distinguish a defect from a dependency this job does not run — and this
+                # lane has now produced three different dependencies that masquerade as findings
+                # (Redis, OPA, and an OIDC client fetching a token from a Keycloak that is absent).
+                #
+                # Two of those I first reported as defects and had to withdraw. The triage that
+                # corrected them was exactly this: read the exception classes out of the boot log.
+                # Doing it in the job means the next person reads it in the failure output instead
+                # of downloading artifacts and correlating by hand.
+                #
+                # Deliberately NOT filtered or suppressed. An OidcClientException here does not
+                # prove the finding beside it is environmental — measured on run 32364265056,
+                # balance-service logged 2 of those AND 4 genuine DataExceptions, and ledger-service
+                # 2 alongside a real NullPointerException. The census informs triage; it does not
+                # perform it, and it must never be turned into an exclusion rule that quietly drops
+                # a real finding sharing a service with an absent dependency.
+                # Every ERROR-logged exception class, not only the ones nobody handled.
+                #
+                # The first version grepped the literal phrase "Unhandled exception", which is what
+                # GenericExceptionMapper prints. That made it blind the moment an exception GAINED a
+                # mapper: run 32501086843 showed dispute/interest/sdd with an empty census while 78
+                # exceptions had in fact been thrown, mapped and ERROR-logged by the new persistence
+                # mappers (#6240). An empty census read as "nothing happened" when the truth was
+                # "everything was handled" — the same silence, two opposite meanings, which is the
+                # one thing a triage aid must never do.
+                #
+                # Ordering matters and cost a wrong answer once: strip ANSI colour FIRST, then filter
+                # on the level. The runner's log has escape codes interleaved, so ` ERROR ` does not
+                # match literally before stripping, and the census came back empty for logs full of
+                # errors.
+                #
+                # The trailing `:` in the pattern is what separates a real `FQCN: message` from a
+                # LOGGER NAME — `[co.op.li.ap.er.GenericExceptionMapper]` otherwise matches as
+                # `GenericException`, and the bracketed field is dropped as well for good measure.
+                #
+                # Verified against both runs: this reproduces the pre-mapper counts (32368751763)
+                # and the post-mapper ones (32501086843) exactly as measured by hand.
+                # Built into a VARIABLE, then tested — not `if <pipeline>; then <same pipeline>`.
+                #
+                # That earlier shape did not work, and failed SILENTLY, which is worse. This step
+                # runs under `set -uo pipefail` (line 166), the boot log is tens of megabytes, and
+                # `grep -q` exits on its FIRST match: it closes the pipe, `sed` takes SIGPIPE and
+                # dies 141, pipefail makes 141 the status of the whole pipeline, and the `if`
+                # therefore reads "no errors" for a log full of them. Run 32503175988 printed
+                # `Selected: 19/19` for dispute-service and no census at all, while its artifact
+                # holds 53 ERROR lines.
+                #
+                # It passed local testing because I ran the pipeline without pipefail. The defect
+                # lives in the INTERACTION between an early-exiting consumer and the shell options
+                # this step actually sets, so only the real options could show it — verified since
+                # against the 71 MB artifact, where the old shape suppresses and this one prints.
+                #
+                # `grep -oE` consumes its whole input, so nothing signals upstream; `|| true` covers
+                # the legitimate no-match exit under pipefail.
+                local census
+                census="$(sed 's/\x1b\[[0-9;]*m//g' "fuzz-reports/${svc}-boot${logsuffix}.log" 2>/dev/null \
+                  | grep -a " ERROR " \
+                  | sed 's/\[[a-z][a-z.]*\.[A-Za-z]*\]//g' \
+                  | grep -oE '[a-zA-Z_]+(\.[a-zA-Z_]+)+\.[A-Za-z]+(Exception|Error):' \
+                  | sed 's/.*\.//;s/:$//' \
+                  | sort | uniq -c | sort -rn | sed 's/^/      /' || true)"
+                if [ -n "${census}" ]; then
+                  echo "==> [${svc}] ${label}: exception classes seen (triage aid, NOT a verdict):"
+                  echo "${census}"
+                fi
+              fi
+
+              # Stop this pass's JVM before the next one re-binds the dev port.
+              kill "$DEV_PID" 2>/dev/null || true
+              pkill -f "quarkusDev" 2>/dev/null || true
+              sleep 3
+            }
+
+            run_pass "authz ON" ""
+            # `authz.enforce` goes off with authentication, and it has to: the two are one
+            # decision, not two. AuthorizeInterceptor fails CLOSED when the PDP is unreachable
+            # (ADR-0034), and no OPA sidecar runs in this job — so pass 2 without it produced
+            # 66 of 83 "server errors" that were nothing of the kind:
+            #
+            #   [503] {"code":"POLICY_DECISION_POINT_UNAVAILABLE",
+            #          "message":"policy decision point unavailable: OPA call failed: null"}
+            #
+            # Correct behaviour, wrongly counted. Pass 1 never saw it because a 401/403 fires
+            # before the interceptor is reached — the same accidental immunity that hid the Redis
+            # dependency, in a second dependency I did not anticipate and had to be shown by a
+            # full-fleet run (32360573944).
+            #
+            # `%test` already makes exactly this override for exactly this reason ("OPA is not
+            # present in a test JVM"); %dev keeps the deployed default of AUTHZ_ENFORCE:true, which
+            # is why the fuzz JVM needs it explicitly.
+            #
+            # So pass 2 tests neither authentication nor authorization, by design. Both are pass
+            # 1's job. What is left is the only thing pass 2 claims: does a handler answer 5xx to
+            # input it should reject with a 4xx.
+            run_pass "authz OFF" "-authz-off" \
+              -Dquarkus.security.auth.enabled-in-dev-mode=false \
+              -Dauthz.enforce=false
+
+            # Containers only — run_pass already stopped each pass's JVM.
+            docker rm -f fuzz-pg >/dev/null 2>&1 || true
+            docker rm -f fuzz-redis >/dev/null 2>&1 || true
+          done
+
+          exit "$OVERALL"
 
       - name: Upload fuzz reports
         if: always()
