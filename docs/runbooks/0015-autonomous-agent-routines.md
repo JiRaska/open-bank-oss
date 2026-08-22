@@ -15,18 +15,39 @@ that work this repository unattended.
 
 ## What runs, and where
 
-Two routines run in Anthropic's cloud — **not** on anybody's laptop, and not in GitHub Actions.
-Each fires on a cron, clones this repository into a fresh sandbox, does one bounded job, and exits.
+| routine | where | cadence | mandate |
+|---|---|---|---|
+| **issue worker** | GitHub Actions, `.github/workflows/agent-issue-worker.yml` | every 6 h | take ONE open issue, implement it, open ONE draft PR |
+| silent-death watchdog | Claude Code cloud routine | hourly | report whether the things that should run actually ran **and succeeded** |
 
-| routine | cadence | mandate |
-|---|---|---|
-| issue worker | every 2 h | take ONE open issue, implement it, open ONE draft PR |
-| silent-death watchdog | hourly | report whether the things that should run actually ran |
+Neither may merge, approve, or close an issue.
 
-Neither may merge, approve, or close an issue. Both are managed from a Claude Code session
-(`/schedule`), and their run logs live at `claude.ai/code/routines`.
+**The issue worker moved out of the cloud, and the reason is a capability, not a preference.**
+It began as a cloud routine and behaved well there — wrote a failing test first, proved the
+negative case by reverting the implementation, noticed that Gradle stops at the first failing task
+and re-ran lint separately, and refused to open a PR it could not verify. It still could not do
+the job: that sandbox **cannot run Testcontainers** (see the table below), so every issue whose
+proof needs a real database was unreachable, and on a 93-issue backlog it correctly opened
+nothing.
 
-**The minimum cloud cron interval is 1 hour**; anything shorter is rejected at creation.
+It now runs on `ubuntu-latest`, which is what the fleet already uses for per-service build+test.
+GitHub-hosted runners ship Docker and reach Docker Hub, so Testcontainers work; the repository is
+public, so those runners are free. **Cost delta: zero** — no ARC runner, no Karpenter node, no
+image pull over fck-nat, no cross-AZ byte.
+
+Two runners it deliberately does **not** use:
+
+- **`openbank-batch` does not exist.** `rules.yaml: ci_runners.pools.batch` declares it with a
+  convincing rationale and seven workflows mention it in comments, but no Terraform defines it and
+  no workflow carries `runs-on: openbank-batch`. The first version of this workflow did, and its
+  job sat queued with no runner ever assigned. Tracked as #6458 — do not "fix" anything by
+  pointing a job there.
+- **`openbank-build`** is the merge-required lane. A 30-minute agent job every 6h would occupy a
+  runner that PR builds are waiting on.
+
+The watchdog stays a cloud routine because it only reads. Cloud routines are managed with
+`/schedule`, their logs live at `claude.ai/code/routines`, and **their minimum cron interval is 1
+hour** — anything shorter is rejected at creation.
 
 ## The control that makes this safe
 
@@ -45,10 +66,50 @@ Two properties matter more than the rule itself:
 The protected service set is DERIVED from `rules.yaml: money_path_services`, so onboarding a
 money-path service extends the guard with no edit to the checker.
 
+## Two things about the worker's harness that are easy to get wrong
+
+Both were shipped wrong once and cost a live run each.
+
+**`--permission-mode acceptEdits` auto-accepts file EDITS only.** Every Bash command still asks
+for permission, and a non-interactive run has nobody to ask, so the tool is denied the instant it
+is called. The first `mode=work` run spent its whole session discovering that `gh`, `python3` and
+`curl` were all refused: it could not list the backlog, run the guard's self-test, or open a PR.
+The mode must be `bypassPermissions`, which is right here and is not a shortcut — the container is
+ephemeral, the credential is a job-scoped `GITHUB_TOKEN` with three narrow permissions, and
+anything the agent lands is still gated by `agent-pr-guard` and branch protection. **The blast
+radius is bounded by the token, not by the permission prompt**; a prompt nobody can answer is not
+a control, it is a hang.
+
+**`claude -p` exits 0 when it finishes talking, whatever it accomplished.** So that same run —
+which achieved literally nothing and said so clearly — reported **success**. "The session produced
+prose" and "the session did the job" were the same green, inside the workflow whose whole purpose
+is to supervise an unattended agent.
+
+The fix is a verdict contract. The agent must end with exactly one of:
+
+```
+WORKER-VERDICT: OPENED <pr-url>
+WORKER-VERDICT: NOTHING QUALIFIED
+WORKER-VERDICT: BLOCKED <one-line reason>
+```
+
+and the job fails when no verdict line is present. `BLOCKED` fails loudly on purpose: it means the
+runner or the credential cannot do what the task needs, which is a defect in the workflow rather
+than in the backlog. `NOTHING QUALIFIED` is a quiet success — an honest empty run is a good run,
+and the first healthy run was exactly that: it picked #6319, found it already fixed on `main`,
+re-verified by running the **full** suite against a real Testcontainers Postgres (172 tests, 0
+failures) rather than trusting the commit message, declined to open a no-op PR, and left the issue
+for a human to close.
+
+Assert on what the model **said**, never on the exit code of the process that said it. This is the
+`REVIEW-VERDICT` pattern `agent-review.yml` already uses, for the same reason.
+
 ## Sandbox facts you will otherwise rediscover the hard way
 
-All measured on the first live issue-worker run, 2026-08-22. The sandbox is **not** ready for this
-repository out of the box, and each of these presents as a confusing failure rather than a clear one.
+All measured on the first live issue-worker runs, 2026-08-22, **inside the Claude Code cloud
+sandbox**. They no longer constrain the issue worker, which moved to `ubuntu-latest`; they still
+apply to the watchdog and to any future cloud routine, and each presents as a confusing failure
+rather than a clear one.
 
 | symptom | cause | fix |
 |---|---|---|
@@ -57,7 +118,8 @@ repository out of the box, and each of these presents as a confusing failure rat
 | `@QuarkusTest` integration tests fail; `docker pull` hangs then errors | `dockerd` starts fine, but image pulls are blocked at the egress proxy (`production.cloudfront.docker.com`) | none — **Testcontainers cannot work in this sandbox** |
 | `gh: command not found` | the GitHub CLI is not installed | use the GitHub MCP tools (`mcp__github__*`); `git` IS available |
 
-The last two are not inconveniences, they are **scope limits**. An issue whose proof needs a real
+The last two were not inconveniences but **scope limits**, and they are the whole reason the issue
+worker no longer runs there. An issue whose proof needs a real
 database cannot be verified here, and an unverifiable fix must not become a pull request — a PR that
 merely looks finished costs a reviewer more than no PR at all. The worker therefore filters
 candidate issues by *"what test would prove this, and can I run that test here?"* **before** reading
@@ -68,13 +130,18 @@ python/bash checks, static analysis.
 
 ## Overlapping runs, and how an issue is claimed
 
-The first run took **20+ minutes** — most of it environment setup and Gradle. With a 2-hour cadence
-that is not yet an overlap, but the margin is thinner than it looks, and a claim that only exists at
-the *end* of a run is no claim at all.
+The workflow carries `concurrency: agent-issue-worker` with `cancel-in-progress: false`, so two
+workers never run at once — which matters, because a claim that only exists at the *end* of a
+20-minute run is no claim at all.
 
-So the worker pushes an empty `agent/<type>-<slug>-<issue>` branch **immediately after picking**,
-before writing any code. An open PR referencing the issue and an `agent/` branch naming it both
-count as claims; a run that abandons its issue deletes its claim branch before exiting.
+The worker still pushes an `agent/<type>-<slug>-<issue>` branch before writing code, because a
+human may be working the same issue. An open PR referencing the issue and an `agent/` branch naming
+it both count as claims.
+
+**In the cloud sandbox a branch could be created and never deleted** (`git push` worked, `git push
+--delete` was refused with HTTP 403), so an abandoned claim there was permanent. That asymmetry is
+a property of that sandbox, not of GitHub Actions — but a run that abandons an issue should still
+name the branch it left behind rather than assume it can clean up.
 
 ## Debugging a run
 
