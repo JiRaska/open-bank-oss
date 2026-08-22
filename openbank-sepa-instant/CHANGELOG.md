@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.8.1...sepa-instant-v0.9.0) (2026-08-21)
+
+
+### Features
+
+* **sepa-instant:** expose pending four-eyes approvals via approval inbox ([#5694](https://github.com/JiRaska/open-bank-oss/issues/5694)) ([89c5631](https://github.com/JiRaska/open-bank-oss/commit/89c5631f9b07a4ea63383979e5ad950e1a337deb))
+
 ## [0.8.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.8.0...sepa-instant-v0.8.1) (2026-08-18)
 
 

@@ -11,6 +11,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { ShieldCheck, Search, RefreshCw, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { PartyLookup } from '@/components/kyc/PartyLookup'
 import { Can } from '@/components/auth/AuthGuard'
 
 const KYC_SERVICE = '/api/svc/kyc-service'
@@ -86,7 +87,7 @@ export default function KycPage() {
         <div style={{ position: 'relative', flex: 1, maxWidth: '300px' }}>
           <Search aria-hidden="true" size={14} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
           <label className="sr-only" htmlFor="kyc-search">{t('Hledat KYC případy', 'Search KYC cases')}</label>
-          <input id="kyc-search" className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Hledat podle ID nebo stavu…', 'Search by ID or status…')} value={search} onChange={e => setSearch(e.target.value)} />
+          <input id="kyc-search" className="input" style={{ paddingLeft: '32px', width: '100%' }} placeholder={t('Filtrovat načtené případy (ID / stav)…', 'Filter loaded cases (ID / status)…')} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <label className="sr-only" htmlFor="kyc-party-id">{t('Filtrovat podle Party ID', 'Filter by Party ID')}</label>
         <input id="kyc-party-id" className="input" style={{ width: '280px', fontFamily: 'var(--font-mono)', fontSize: '12px' }} placeholder={t('Filtrovat podle Party ID (UUID)…', 'Filter by Party ID (UUID)…')} value={partyId} onChange={e => setPartyId(e.target.value)} />
