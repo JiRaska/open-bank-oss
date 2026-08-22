@@ -4,7 +4,7 @@
 #   Produces: openbank.accounts.account.created (two channels: account-events-out + account-outbox-out)
 #             openbank.notification.requests (notification-requests-out)
 #             dead-letter-topic-party-events-in (SmallRye DLQ for party-events-in, failure-strategy)
-#   Consumes: openbank.party.events (group: openbank-account-service, ADR-0073 party lifecycle)
+#   Consumes: openbank.party.events (group: openbank-account-service, ADR-0267 §1 party lifecycle)
 ---
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaUser

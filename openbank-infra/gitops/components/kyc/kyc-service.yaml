@@ -120,7 +120,7 @@ spec:
             # (never a silent PASSED), but every new case would need an operator's attention.
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
-            # Sandbox straight-through KYC (ADR-0073): auto-approve cases opened from
+            # Sandbox straight-through KYC (ADR-0116 §4): auto-approve cases opened from
             # PARTY_CREATED so onboarding activates without an operator. MUST be false in prod.
             - name: OPENBANK_KYC_AUTO_APPROVE
               value: "true"
