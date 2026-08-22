@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.3...settlement-service-v0.8.0) (2026-08-22)
+
+
+### Features
+
+* **settlement:** emit domain metrics and alert on them ([#5705](https://github.com/JiRaska/open-bank-oss/issues/5705)) ([#5723](https://github.com/JiRaska/open-bank-oss/issues/5723)) ([c84cdd9](https://github.com/JiRaska/open-bank-oss/commit/c84cdd965c4a1dde8e129fd446c27cba22615eac))
+
 ## [0.7.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.2...settlement-service-v0.7.3) (2026-08-22)
 
 
