@@ -19,7 +19,7 @@ REGO=../../../opa/policies/agents.rego
 DATA=../../../../openbank-libs/governance/agents-opa-data.yaml
 CASE_REGO=../../../opa/policies/case_collaboration.rego
 CASE_DATA=../../../../openbank-libs/governance/case-collaboration-opa-data.yaml
-MANIFEST=../../../opa/bundle.manifest
+MANIFEST=bundle.manifest
 OUT=case-coordinator-opa-bundle.yaml
 
 # Portable SHA-256: prefer sha256sum (Linux), fall back to shasum -a 256 (macOS).
@@ -55,7 +55,6 @@ CHECKSUM=$(cat "$REGO" "$DATA" "$CASE_REGO" "$CASE_DATA" "$MANIFEST" | \
   sed 's/^/    /' "$CASE_DATA" | sed 's/[[:space:]]*$//'
   echo "  manifest.json: |"
   sed 's/^/    /' "$MANIFEST" | sed 's/[[:space:]]*$//'
-  printf '\n'
 } > "$OUT"
 
 echo "wrote $OUT (checksum $CHECKSUM, $(wc -c < "$OUT") bytes)"
