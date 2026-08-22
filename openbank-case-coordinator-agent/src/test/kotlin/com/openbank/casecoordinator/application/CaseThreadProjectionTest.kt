@@ -38,7 +38,7 @@ class CaseThreadProjectionTest {
 
     @Test
     fun `a case with no contributions projects only the opened entry`() {
-        val thread = CaseThreadProjection.project(caseRow, emptyList(), emptyList())
+        val thread = CaseThreadProjection.project(caseRow, emptyList(), emptyList(), LOADED_AT)
 
         assertThat(thread.entries).hasSize(1)
         assertThat(thread.entries[0].type).isEqualTo(ThreadEntryType.CASE_OPENED)
@@ -65,7 +65,7 @@ class CaseThreadProjectionTest {
             emittedAtEpochMs = T0 + 2 * LATER_MS,
         )
 
-        val thread = CaseThreadProjection.project(caseRow, listOf(contribution), listOf(proposal))
+        val thread = CaseThreadProjection.project(caseRow, listOf(contribution), listOf(proposal), LOADED_AT)
 
         assertThat(thread.entries.map { it.type }).containsExactly(
             ThreadEntryType.CASE_OPENED,
@@ -84,7 +84,7 @@ class CaseThreadProjectionTest {
             emittedAtEpochMs = T0 + LATER_MS,
         )
 
-        val thread = CaseThreadProjection.project(caseRow, emptyList(), listOf(shadow))
+        val thread = CaseThreadProjection.project(caseRow, emptyList(), listOf(shadow), LOADED_AT)
 
         val entry = thread.entries.single { it.type == ThreadEntryType.SHADOW_RECORDED }
         assertThat(entry.shadow).isTrue()
@@ -105,7 +105,7 @@ class CaseThreadProjectionTest {
             tokensUsed = 800,
         )
 
-        val thread = CaseThreadProjection.project(caseRow, listOf(forked), emptyList())
+        val thread = CaseThreadProjection.project(caseRow, listOf(forked), emptyList(), LOADED_AT)
 
         val entry = thread.entries.single { it.type == ThreadEntryType.CONTRIBUTION }
         assertThat(entry.superseded).isTrue()
@@ -127,13 +127,17 @@ class CaseThreadProjectionTest {
             tokensUsed = 600,
         )
 
-        val thread = CaseThreadProjection.project(caseRow, listOf(contribution), emptyList())
+        val thread = CaseThreadProjection.project(caseRow, listOf(contribution), emptyList(), LOADED_AT)
         val entry = thread.entries.single { it.type == ThreadEntryType.CONTRIBUTION }
 
         assertThat(entry.runtimeEvidence.evidenceId).isEqualTo(contribution.contributionId)
-        assertThat(entry.runtimeEvidence.stage.name).isEqualTo("CONSUMED")
+        assertThat(entry.runtimeEvidence.stage.name).isEqualTo("PERSISTED")
         assertThat(entry.runtimeEvidence.correlationId).isEqualTo(caseRow.workflowId)
         assertThat(thread.retentionPolicy).isEqualTo("not-configured")
+        assertThat(thread.coverageStatus).isEqualTo("UNKNOWN_RETENTION")
+        assertThat(thread.dataFromEpochMs).isEqualTo(T0)
+        assertThat(thread.dataToEpochMs).isEqualTo(T0 + LATER_MS)
+        assertThat(thread.lastSuccessfulLoadEpochMs).isEqualTo(LOADED_AT)
         assertThat(thread.budgetTokens).isEqualTo(200_000)
     }
 
@@ -141,6 +145,7 @@ class CaseThreadProjectionTest {
         const val T0 = 1_760_000_000_000L
         const val DEADLINE_MS = 1_200_000L
         const val LATER_MS = 60_000L
+        const val LOADED_AT = T0 + 3 * LATER_MS
         const val CONTESTED_RATE = 0.5
     }
 }

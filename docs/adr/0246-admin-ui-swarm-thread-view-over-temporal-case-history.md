@@ -17,10 +17,11 @@ summary: "The admin-ui swarm thread view is a read-only projection of Temporal c
 
 **Delivery clarification (2026-08-22).** `agents.yaml` is a charter registry, not
 runtime proof. A solid topology edge may be rendered only from an observed durable
-record: a consumed contribution, an event published by the transactional outbox,
+record: a persisted contribution, an event published by the transactional outbox,
 a Temporal-history observation, or an OPA allow decision. The current projection
 exposes the first two with source, evidence id, correlation id, observation time
-and precise stage. An outbox `SENT` status proves publication to the broker, not
+and precise stage. Persistence is not mislabeled as a separately observed Temporal
+consumption event. An outbox `SENT` status proves publication to the broker, not
 consumption by the HITL inbox. Declared-only relationships remain non-runtime
 claims and never become solid edges.
 

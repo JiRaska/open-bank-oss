@@ -363,7 +363,7 @@ components:
           enum: [case-coordinator-postgres-read-model, case-coordinator-transactional-outbox]
         stage:
           type: string
-          enum: [RECORDED, CONSUMED, EMITTED, PUBLISHED_TO_BROKER, PUBLISH_FAILED, SHADOW_RECORDED]
+          enum: [RECORDED, PERSISTED, EMITTED, PUBLISHED_TO_BROKER, PUBLISH_FAILED, SHADOW_RECORDED]
         observedAtEpochMs:
           type: integer
           format: int64
@@ -385,6 +385,10 @@ components:
         - budgetTokens
         - budgetContributions
         - observedAtEpochMs
+        - dataFromEpochMs
+        - dataToEpochMs
+        - lastSuccessfulLoadEpochMs
+        - coverageStatus
         - historySource
         - retentionPolicy
         - entries
@@ -412,6 +416,23 @@ components:
         observedAtEpochMs:
           type: integer
           format: int64
+          description: Timestamp of the newest observed durable evidence, not the load time.
+        dataFromEpochMs:
+          type: integer
+          format: int64
+          description: Oldest timestamp present in this returned case timeline.
+        dataToEpochMs:
+          type: integer
+          format: int64
+          description: Newest timestamp present in this returned case timeline.
+        lastSuccessfulLoadEpochMs:
+          type: integer
+          format: int64
+          description: Server time at which all read-model queries for this response completed successfully.
+        coverageStatus:
+          type: string
+          enum: [UNKNOWN_RETENTION]
+          description: Coverage cannot be claimed complete or partial while the durable read-model retention duration is not configured.
         historySource:
           type: string
           enum: [case-coordinator-postgres-read-model]

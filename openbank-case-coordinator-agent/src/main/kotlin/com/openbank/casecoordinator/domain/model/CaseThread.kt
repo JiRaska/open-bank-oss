@@ -47,7 +47,7 @@ data class ProposalEventRow(
 
 enum class RuntimeEvidenceStage {
     RECORDED,
-    CONSUMED,
+    PERSISTED,
     EMITTED,
     PUBLISHED_TO_BROKER,
     PUBLISH_FAILED,
@@ -112,6 +112,10 @@ data class CaseThread(
     val budgetTokens: Int,
     val budgetContributions: Int,
     val observedAtEpochMs: Long,
+    val dataFromEpochMs: Long,
+    val dataToEpochMs: Long,
+    val lastSuccessfulLoadEpochMs: Long,
+    val coverageStatus: String,
     val historySource: String,
     val retentionPolicy: String,
     val entries: List<ThreadEntry>,

@@ -6,7 +6,7 @@
 import { ArrowRight, CheckCircle2, CircleDot, Database, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
-export type RuntimeStage = 'RECORDED' | 'CONSUMED' | 'EMITTED' | 'PUBLISHED_TO_BROKER' | 'PUBLISH_FAILED' | 'SHADOW_RECORDED'
+export type RuntimeStage = 'RECORDED' | 'PERSISTED' | 'EMITTED' | 'PUBLISHED_TO_BROKER' | 'PUBLISH_FAILED' | 'SHADOW_RECORDED'
 
 export interface RuntimeEvidenceView {
   evidenceId: string
@@ -30,6 +30,10 @@ export interface RuntimeCaseView {
   historySource: string
   retentionPolicy: string
   observedAtEpochMs: number
+  dataFromEpochMs: number
+  dataToEpochMs: number
+  lastSuccessfulLoadEpochMs: number
+  coverageStatus: string
   entries: RuntimeEntryView[]
 }
 
@@ -128,7 +132,7 @@ export function CaseRuntimeTopology({ thread, locale }: { thread: RuntimeCaseVie
         </div>
       )}
       <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '12px', fontSize: '10px', color: 'var(--text-tertiary)' }}>
-        <Database size={11} /> {thread.historySource} · {t('retence', 'retention')}: {thread.retentionPolicy} · {t('naposledy pozorováno', 'last observed')} {new Date(thread.observedAtEpochMs).toLocaleString(locale)}
+        <Database size={11} /> {thread.historySource} · {t('retence', 'retention')}: {thread.retentionPolicy} · {t('coverage', 'coverage')}: {thread.coverageStatus.toLowerCase().replaceAll('_', ' ')} · {new Date(thread.dataFromEpochMs).toLocaleString(locale)} → {new Date(thread.dataToEpochMs).toLocaleString(locale)} · {t('poslední úspěšné načtení', 'last successful load')} {new Date(thread.lastSuccessfulLoadEpochMs).toLocaleString(locale)}
       </div>
     </section>
   )

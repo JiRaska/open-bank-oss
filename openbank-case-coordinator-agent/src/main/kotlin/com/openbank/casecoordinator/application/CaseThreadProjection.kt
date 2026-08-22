@@ -33,7 +33,12 @@ object CaseThreadProjection {
         contributionCount = row.contributionCount,
     )
 
-    fun project(case: CaseRow, contributions: List<ContributionRow>, proposals: List<ProposalEventRow>): CaseThread {
+    fun project(
+        case: CaseRow,
+        contributions: List<ContributionRow>,
+        proposals: List<ProposalEventRow>,
+        loadedAtEpochMs: Long,
+    ): CaseThread {
         val entries = buildList {
             add(case.openedEntry())
             contributions.forEach { add(it.threadEntry(case.workflowId)) }
@@ -51,6 +56,10 @@ object CaseThreadProjection {
             budgetTokens = case.budgetTokens,
             budgetContributions = case.budgetContributions,
             observedAtEpochMs = entries.maxOfOrNull { it.atEpochMs } ?: case.openedAtEpochMs,
+            dataFromEpochMs = entries.minOfOrNull { it.atEpochMs } ?: case.openedAtEpochMs,
+            dataToEpochMs = entries.maxOfOrNull { it.atEpochMs } ?: case.openedAtEpochMs,
+            lastSuccessfulLoadEpochMs = loadedAtEpochMs,
+            coverageStatus = COVERAGE_STATUS,
             historySource = HISTORY_SOURCE,
             retentionPolicy = RETENTION_POLICY,
             entries = entries,
@@ -84,10 +93,10 @@ object CaseThreadProjection {
         runtimeEvidence = RuntimeEvidence(
             evidenceId = contributionId,
             source = HISTORY_SOURCE,
-            stage = RuntimeEvidenceStage.CONSUMED,
+            stage = RuntimeEvidenceStage.PERSISTED,
             observedAtEpochMs = contributedAtEpochMs,
             correlationId = workflowId,
-            detail = "Contribution consumed into the durable case read model",
+            detail = "Contribution persisted in the durable case read model",
         ),
     )
 
@@ -117,4 +126,5 @@ object CaseThreadProjection {
     private const val HISTORY_SOURCE = "case-coordinator-postgres-read-model"
     private const val OUTBOX_SOURCE = "case-coordinator-transactional-outbox"
     private const val RETENTION_POLICY = "not-configured"
+    private const val COVERAGE_STATUS = "UNKNOWN_RETENTION"
 }

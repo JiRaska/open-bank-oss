@@ -23,11 +23,15 @@ const THREAD = {
   budgetTokens: 200000,
   budgetContributions: 40,
   observedAtEpochMs: 1_700_000_200_000,
+  dataFromEpochMs: 1_700_000_000_000,
+  dataToEpochMs: 1_700_000_200_000,
+  lastSuccessfulLoadEpochMs: 1_700_000_300_000,
+  coverageStatus: 'UNKNOWN_RETENTION',
   historySource: 'case-coordinator-postgres-read-model',
   retentionPolicy: 'not-configured',
   entries: [
     { type: 'CASE_OPENED', atEpochMs: 1_700_000_000_000, actor: 'case-coordinator', runtimeEvidence: { evidenceId: 'case-17', source: 'case-coordinator-postgres-read-model', stage: 'RECORDED', observedAtEpochMs: 1_700_000_000_000, correlationId: 'case-17', detail: 'Persisted case workflow record' } },
-    { type: 'CONTRIBUTION', atEpochMs: 1_700_000_100_000, actor: 'aml-agent', evidenceRefs: ['alert-17'], runtimeEvidence: { evidenceId: 'contribution-17', source: 'case-coordinator-postgres-read-model', stage: 'CONSUMED', observedAtEpochMs: 1_700_000_100_000, correlationId: 'case-17', detail: 'Contribution consumed into the durable case read model' } },
+    { type: 'CONTRIBUTION', atEpochMs: 1_700_000_100_000, actor: 'aml-agent', evidenceRefs: ['alert-17'], runtimeEvidence: { evidenceId: 'contribution-17', source: 'case-coordinator-postgres-read-model', stage: 'PERSISTED', observedAtEpochMs: 1_700_000_100_000, correlationId: 'case-17', detail: 'Contribution persisted in the durable case read model' } },
     { type: 'PROPOSAL_EMITTED', atEpochMs: 1_700_000_200_000, proposalType: 'REVIEW', runtimeEvidence: { evidenceId: 'proposal-17', source: 'case-coordinator-transactional-outbox', stage: 'PUBLISHED_TO_BROKER', observedAtEpochMs: 1_700_000_200_000, correlationId: 'case-17', detail: 'Proposal outbox status: SENT' } },
   ],
 }
@@ -58,6 +62,7 @@ describe('AIOps case thread proposal event', () => {
     expect(screen.getByText('aml-agent')).toBeInTheDocument()
     expect(screen.getByText('proposal event broker')).toBeInTheDocument()
     expect(screen.getByText(/Charter declarations alone never create a solid edge/)).toBeInTheDocument()
-    expect(screen.getAllByText(/CONSUMED|PUBLISHED_TO_BROKER/).length).toBeGreaterThan(0)
+    expect(screen.getAllByText(/PERSISTED|PUBLISHED_TO_BROKER/).length).toBeGreaterThan(0)
+    expect(screen.getByText(/unknown retention/)).toBeInTheDocument()
   })
 })

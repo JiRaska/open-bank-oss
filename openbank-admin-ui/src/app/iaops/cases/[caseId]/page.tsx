@@ -47,6 +47,10 @@ interface CaseThread {
   budgetTokens: number
   budgetContributions: number
   observedAtEpochMs: number
+  dataFromEpochMs: number
+  dataToEpochMs: number
+  lastSuccessfulLoadEpochMs: number
+  coverageStatus: string
   historySource: string
   retentionPolicy: string
   entries: ThreadEntry[]
