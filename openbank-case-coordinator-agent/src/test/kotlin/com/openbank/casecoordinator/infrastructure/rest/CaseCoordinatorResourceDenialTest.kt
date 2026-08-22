@@ -7,11 +7,14 @@ package com.openbank.casecoordinator.infrastructure.rest
 
 import com.openbank.casecoordinator.application.CaseCapabilityGate
 import com.openbank.casecoordinator.application.CaseOpenService
+import com.openbank.casecoordinator.application.CaseSignalAuthorizationResult
+import com.openbank.casecoordinator.application.CaseSignalAuthorizationService
 import com.openbank.casecoordinator.application.CaseThreadService
 import com.openbank.libs.temporal.TemporalConfig
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.security.identity.SecurityIdentity
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
@@ -30,6 +33,7 @@ class CaseCoordinatorResourceDenialTest {
     private val gate = mockk<CaseCapabilityGate>()
     private val temporalConfig = mockk<TemporalConfig>()
     private val identity = mockk<SecurityIdentity>(relaxed = true)
+    private val signalAuthorization = mockk<CaseSignalAuthorizationService>()
 
     private val resource = CaseCoordinatorResource(
         openService,
@@ -38,6 +42,7 @@ class CaseCoordinatorResourceDenialTest {
         mockk(relaxed = true),
         temporalConfig,
         identity,
+        signalAuthorization,
     )
 
     @Test
@@ -48,12 +53,16 @@ class CaseCoordinatorResourceDenialTest {
         // first (#4834) and carries its own, differently-worded body.
         every { gate.permitsAssertedIdentity(any(), any()) } returns true
         every { gate.canContribute(any()) } returns false
+        io.mockk.coEvery { signalAuthorization.authorize(any(), any(), any()) } returns
+            CaseSignalAuthorizationResult.Denied
 
         val marker = "spoofed-agent-DEADBEEF"
-        val response = resource.signal(
-            "case-incident-response-acct-1",
-            CaseCoordinatorResource.SignalRequest(type = "contribute", agentId = marker, summary = "x"),
-        )
+        val response = runBlocking {
+            resource.signal(
+                "case-incident-response-acct-1",
+                CaseCoordinatorResource.SignalRequest(type = "contribute", agentId = marker, summary = "x"),
+            )
+        }
 
         assertThat(response.status).isEqualTo(403)
         val body = response.entity.toString()

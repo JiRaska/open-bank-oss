@@ -48,6 +48,7 @@ class CaseThreadServiceTest {
         every { repository.findCase(WORKFLOW_ID) } returns caseRow()
         every { repository.listContributions(WORKFLOW_ID) } returns emptyList()
         every { repository.listProposalEvents(WORKFLOW_ID) } returns emptyList()
+        every { repository.listSignalEvidence(WORKFLOW_ID) } returns emptyList()
 
         val thread = service.caseThread(WORKFLOW_ID)
 
