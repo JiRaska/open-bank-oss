@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.23.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.22.0...agent-service-v1.23.0) (2026-08-22)
+
+
+### Features
+
+* **agent:** time the oversight sweep with its own run-duration metric ([#6208](https://github.com/JiRaska/open-bank-oss/issues/6208)) ([ca7eb98](https://github.com/JiRaska/open-bank-oss/commit/ca7eb98b01c679cb8f8dd90c6ba0b33ca5ba42e3)), closes [#6169](https://github.com/JiRaska/open-bank-oss/issues/6169)
+
 ## [1.22.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.21.0...agent-service-v1.22.0) (2026-08-21)
 
 

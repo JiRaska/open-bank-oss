@@ -252,7 +252,8 @@ function IAOpsContent() {
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">IAOps</span></div>}
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{lastRefresh.toLocaleTimeString(dateLocale)}</span>}
-          <button onClick={load} disabled={loading}
+          <button onClick={load} disabled={loading} type="button" aria-busy={loading}
+            aria-label={t('Obnovit IAOPS', 'Refresh IAOPS')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px',
               border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-secondary)',
               fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}>

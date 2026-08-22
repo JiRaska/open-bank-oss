@@ -68,6 +68,7 @@ class DomainMetricsTest {
         dm.paymentSubmitted("sepa", "EUR")
         dm.outboxDead("ledger")
         dm.registerWorkflowLiveness("standing-order-execution", Duration.ofDays(1)).recordSuccess()
+        dm.registerWorkflowRun("standing-order-execution", Duration.ofMinutes(5)).record(Duration.ofSeconds(3))
         dm.recordReconciliationDrift("balance_deposit_control", "CZK", BigDecimal("200.00"))
     }
 
@@ -174,5 +175,57 @@ class DomainMetricsTest {
         val interval = reg.find("openbank.workflow.expected_interval_seconds")
             .tag("workflow", "balance-reconciliation").gauge()
         assertThat(interval!!.value()).isEqualTo(Duration.ofHours(25).toSeconds().toDouble())
+    }
+
+    // ── Workflow run duration (#6169) ─────────────────────────────────────────
+
+    @Test
+    fun `a cold pod reports zero runs and its declared budget, and never a duration`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+
+        // Registration only — no run has happened yet. This is the t=0 state the alert rule is
+        // designed against, and re-deriving it is the step WorkflowLivenessStale skipped: it
+        // shipped asserting a seed it did not have and fired 15 minutes after every deploy (#2239,
+        // fixed by #4208). A timer with no observations is a FOURTH state beside healthy /
+        // degraded / absent, and it must read as neither "instant" nor "breached".
+        dm.registerWorkflowRun("agent-oversight-sweep", Duration.ofMinutes(5))
+
+        val budget = reg.find(WorkflowRunMetrics.RUN_BUDGET_SECONDS)
+            .tag(WorkflowRunMetrics.WORKFLOW_TAG, "agent-oversight-sweep").gauge()
+        assertThat(budget).isNotNull
+        assertThat(budget!!.value()).isEqualTo(Duration.ofMinutes(5).toSeconds().toDouble())
+
+        val timers = reg.find(WorkflowRunMetrics.RUN_DURATION)
+            .tag(WorkflowRunMetrics.WORKFLOW_TAG, "agent-oversight-sweep").timers()
+        // Both outcomes exist from pod start, so an ABSENT series means "not instrumented" rather
+        // than "has never run" — the distinction registerFeedFetch documents for its counters.
+        assertThat(timers.map { it.id.getTag(WorkflowRunMetrics.OUTCOME_TAG) })
+            .containsExactlyInAnyOrder(WorkflowRunMetrics.OUTCOME_SUCCESS, WorkflowRunMetrics.OUTCOME_FAILURE)
+        assertThat(timers.sumOf { it.count() })
+            .describedAs("count = 0 is what makes the alert's denominator vanish and the rule silent")
+            .isEqualTo(0L)
+        assertThat(timers.sumOf { it.totalTime(java.util.concurrent.TimeUnit.SECONDS) }).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a failing run is still timed, under its own outcome tag`() {
+        val reg = SimpleMeterRegistry()
+        val recorder = withRegistry(reg).registerWorkflowRun("agent-oversight-sweep", Duration.ofMinutes(5))
+
+        recorder.record(Duration.ofSeconds(9), succeeded = true)
+        recorder.record(Duration.ofSeconds(1), succeeded = false)
+
+        fun timer(outcome: String) = reg.find(WorkflowRunMetrics.RUN_DURATION)
+            .tags(WorkflowRunMetrics.WORKFLOW_TAG, "agent-oversight-sweep", WorkflowRunMetrics.OUTCOME_TAG, outcome)
+            .timer()!!
+        assertThat(timer(WorkflowRunMetrics.OUTCOME_SUCCESS).count()).isEqualTo(1L)
+        assertThat(timer(WorkflowRunMetrics.OUTCOME_SUCCESS).totalTime(java.util.concurrent.TimeUnit.SECONDS))
+            .isEqualTo(9.0)
+        // A fail-fast run must not silently pull the mean down without being separable: the alert
+        // sums over outcome (wall-clock spent failing is still wall-clock spent), triage splits.
+        assertThat(timer(WorkflowRunMetrics.OUTCOME_FAILURE).count()).isEqualTo(1L)
+        assertThat(timer(WorkflowRunMetrics.OUTCOME_FAILURE).totalTime(java.util.concurrent.TimeUnit.SECONDS))
+            .isEqualTo(1.0)
     }
 }
