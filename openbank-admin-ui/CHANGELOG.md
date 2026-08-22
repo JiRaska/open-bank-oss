@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.1...admin-ui-v0.186.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** name identity cases refresh ([#6359](https://github.com/JiRaska/open-bank-oss/issues/6359)) ([13756dd](https://github.com/JiRaska/open-bank-oss/commit/13756dd2273f3ea55507971983aa6971523ffaa4))
+
 ## [0.186.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.0...admin-ui-v0.186.1) (2026-08-22)
 
 
