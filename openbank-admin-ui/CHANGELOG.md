@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.0...admin-ui-v0.187.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify card detail loading ([#6439](https://github.com/JiRaska/open-bank-oss/issues/6439)) ([307b5a9](https://github.com/JiRaska/open-bank-oss/commit/307b5a9287acf826d47bc69927c27b510302b080))
+
 ## [0.187.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.13...admin-ui-v0.187.0) (2026-08-22)
 
 
