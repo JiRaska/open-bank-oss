@@ -160,8 +160,8 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
             <Link href="/lending" className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
               <ArrowLeft size={14} /> {t('Zpět na konzoli', 'Back to console')}
             </Link>
-            <button onClick={() => void load()} disabled={loading} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-              <RefreshCw size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
+            <button type="button" onClick={() => void load()} disabled={loading} aria-busy={loading} aria-label={t('Obnovit žádost o úvěr', 'Refresh lending application')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+              <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
             </button>
           </div>
         }
