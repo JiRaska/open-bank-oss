@@ -527,6 +527,59 @@ class CustomerEdgeResource(
     }
 
     /**
+     * The caller's OWN credit applications, as customer-readable journeys (ADR-0269 rule 3).
+     *
+     * The read half of the intake pair: `applyForLoan` above files an application, this says where
+     * it got to. Before this route the app's flow ended at submission — a form into a void.
+     *
+     * Fail-soft to `[]`, like `listLoans` and for the same reason: an empty list is an honest answer
+     * for an unavailable READ, and a journey the app cannot fetch is one it must not invent. The
+     * write path stays fail-hard.
+     *
+     * The upstream projection is already customer-safe (no rate, no instalment, no APRC — that is
+     * ADR-0269 rule 4 and arrives as a quote object), so the body passes through unprojected rather
+     * than being re-shaped here into a second, drifting copy of the same contract.
+     */
+    @GET
+    @Path("/credit-applications")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun listCreditApplications(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/intake/applications",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        return Response.ok(resp.entity ?: "[]").type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * One of the caller's OWN credit applications. Ownership is enforced UPSTREAM by party header —
+     * lending-service filters by owner and answers 404 for a foreign id, so a not-found and a
+     * not-yours are indistinguishable here too. This route must not "helpfully" convert that 404
+     * into anything else.
+     *
+     * Not fail-soft: unlike the list, there is no honest empty value for "this one application" —
+     * a synthesised body would be a fabricated journey state.
+     */
+    @GET
+    @Path("/credit-applications/{applicationId}")
+    @Authorize(action = "customer.profile.read", resource = "#applicationId")
+    @Blocking
+    fun getCreditApplication(@PathParam("applicationId") applicationId: UUID): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/intake/applications/$applicationId",
+            customer.partyId.toString(),
+        )
+        return Response.status(resp.status)
+            .entity(resp.entity ?: "{}")
+            .type(MediaType.APPLICATION_JSON)
+            .build()
+    }
+
+    /**
      * The repayment schedule for one of the caller's OWN loans. Ownership enforced HERE: the loan is
      * fetched and its partyId compared to the caller (403 otherwise) — lending-service scopes by loan
      * id only. Projects each installment to {number, dueDate, payment, principal, interest, paid}.
