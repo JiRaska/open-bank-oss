@@ -58,9 +58,24 @@ import java.util.UUID
  * is unreachable in a test and its failure would be swallowed, leaving the gate untested. What the
  * deployed policy actually answers for this action is measured separately with `opa eval` against
  * the bundle ConfigMap (see the PR description).
+ *
+ * [LedgerWireMockResource] is required, not optional wiring. Step 4 is the one step that clears the
+ * gate and reaches [com.openbank.transaction.application.usecase.TransactionService.initiateTransaction],
+ * which blocks the HTTP request on a real (in-JVM) Temporal workflow that calls out over HTTP to place
+ * a balance-service cover hold (`PaymentWorkflowImpl` -> `PaymentActivitiesImpl.placeHold`). Without this
+ * resource that call targets the unstubbed default `balance-service` URL: on some runners that connects
+ * (rather than failing fast with ECONNREFUSED) and then sits without a response, so the client-side read
+ * eventually throws `SocketTimeoutException` — and because `stub.execute()` pins an IO-dispatcher thread
+ * and a Temporal workflow task for up to the activity's `scheduleToCloseTimeout` per retry attempt, a
+ * timed-out step 4 can leave that workflow retrying in the background well after the test method itself
+ * has failed, stalling whatever later test next contends for the same pinned resources. Stubbing the
+ * hold (and the journal) — same as [PaymentWorkflowTerminalWriteIT] — makes step 4 resolve in-process
+ * with no real network call at all, which is what the other ordered steps already get for free by never
+ * reaching the workflow.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresRedpandaTestResource::class)
+@QuarkusTestResource(LedgerWireMockResource::class)
 @TestProfile(MergeSweepApprovalBindingIT.FourEyesProfile::class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class MergeSweepApprovalBindingIT {
