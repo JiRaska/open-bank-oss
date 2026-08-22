@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.7.0
+  version: 1.8.0
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault, product-catalog entitlements, and additional-cardholder cards issued
     under a delegation grant (ADR-0249 D1/D2).
@@ -542,6 +542,40 @@ paths:
         '200':
           description: Card resumed
 
+  # Operator recovery for the transactional outbox (#4005). Not part of the card API a client
+  # consumes — it exists because DEAD is terminal by design (ADR-0050 N5) and a service whose
+  # rows all went DEAD has no self-healing path. Replay is manual because openbank-audit-service
+  # is not idempotent: see CardOutboxAdminResource's KDoc for the evidence.
+  /api/v1/cards/outbox/requeue:
+    post:
+      tags: [Card outbox operations]
+      summary: Requeue dead-lettered card outbox rows (DEAD -> PENDING)
+      operationId: requeueDeadCardOutbox
+      parameters:
+        - name: eventId
+          in: query
+          required: false
+          description: Requeue exactly this outbox row. Omit to requeue every DEAD row.
+          schema:
+            type: string
+            format: uuid
+        - name: X-Operator-Id
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rows requeued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OutboxRequeueResponse'
+        '400':
+          description: X-Operator-Id missing/blank, or eventId is not a UUID
+        '403':
+          description: Caller does not hold ROLE_ADMIN
+
 components:
   securitySchemes:
     bearerAuth:
@@ -567,6 +601,17 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    OutboxRequeueResponse:
+      type: object
+      properties:
+        requeued:
+          type: integer
+          description: Rows moved DEAD -> PENDING by this call.
+        deadRemaining:
+          type: integer
+          format: int64
+          description: DEAD rows still parked after this call (0 after a full requeue).
+      required: [requeued, deadRemaining]
     CategoryLimits:
       type: object
       properties:
