@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.kyc.application.KycService
 import com.openbank.kyc.application.PepScreeningService
 import com.openbank.kyc.application.port.out.KycCaseRepository
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.eclipse.microprofile.reactive.messaging.Incoming
@@ -24,9 +25,24 @@ import java.util.UUID
  * Quarkus dispatches suspend handlers on the Vert.x event loop with a duplicated context, so the
  * downstream reactive persistence inside [KycService] runs correctly.
  *
- * Poison-pill protection: any parse or domain failure is caught, logged and the message is acked
- * (the method returns normally). A single malformed event must not wedge the consumer group; the
- * canonical party stream can be replayed, and [KycService.openCaseForParty] is idempotent.
+ * Failure handling distinguishes two things the original version conflated (#5698).
+ *
+ * A **malformed event** is unretryable — replaying it produces the same parse failure forever — so
+ * it is logged and acked. That is the poison-pill case, and it is the only one.
+ *
+ * A **transient failure of a dependency** is the opposite: the event is fine, the infrastructure is
+ * not, and the work must happen once it recovers. Acking there loses the event silently. That is
+ * what happened on 2026-08-19: kyc-db was down for a few seconds, a PARTY_CREATED arrived, the
+ * catch-all logged `Failed to auto-open/screen KYC case` and acked. No case was ever opened, so the
+ * party stayed PENDING_KYC forever; its two accounts stayed PENDING_ACTIVATION; and the welcome
+ * bonus, which fires only on activation, never ran. The pooled sequence proves no insert was ever
+ * retried (`kyc_cases_seq.last_value` did not advance past the block in use). One confirmed party,
+ * not the ten first reported: the other nine case-less parties are six that predate this consumer
+ * and three account-less e2e fixtures.
+ *
+ * So domain and infrastructure failures now go through [EventRetry.withRetry] and, if they still
+ * fail, are RETHROWN — the connector then retries and ultimately dead-letters, which is a signal
+ * someone can see.
  */
 @ApplicationScoped
 class PartyEventConsumer {
@@ -71,7 +87,7 @@ class PartyEventConsumer {
             log.warnf("[party-events-in] PARTY_CREATED without a valid partyId, skipping: %.200s", payload)
             return
         }
-        try {
+        EventRetry.withRetry(log, "PARTY_CREATED KYC case", partyId) {
             val (case, created) = kycService.openCaseForParty(partyId)
             if (created) {
                 log.infof("[party-events-in] Auto-opened KYC case %s for party %s", case.id, partyId)
@@ -92,8 +108,6 @@ class PartyEventConsumer {
                 pepScreeningService.screenCase(case.id, legalName)
                 log.infof("[party-events-in] PEP-screened KYC case %s for party %s", case.id, partyId)
             }
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to auto-open/screen KYC case for party %s", partyId)
         }
     }
 
@@ -102,11 +116,12 @@ class PartyEventConsumer {
             log.warnf("[party-events-in] PARTY_ERASED without valid partyId, skipping: %.200s", payload)
             return
         }
-        try {
+        // Same rule, and here the cost of swallowing is a compliance breach rather than a stalled
+        // funnel: an acked-but-failed erasure leaves PII in place while the log claims otherwise.
+        // anonymizeByPartyId is idempotent, so a retry or a replay re-runs safely.
+        EventRetry.withRetry(log, "PARTY_ERASED KYC anonymisation", partyId) {
             kycCaseRepository.anonymizeByPartyId(partyId, clock.instant())
             log.infof("[party-events-in] GDPR Art. 17: anonymised KYC PII for erased party %s", partyId)
-        } catch (e: Exception) {
-            log.errorf(e, "[party-events-in] Failed to anonymise KYC PII for party %s", partyId)
         }
     }
 }

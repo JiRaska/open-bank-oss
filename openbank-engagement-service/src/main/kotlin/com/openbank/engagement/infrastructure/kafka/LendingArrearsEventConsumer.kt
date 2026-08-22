@@ -7,6 +7,7 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -43,7 +44,7 @@ class LendingArrearsEventConsumer(
     @Incoming("lending-events-in")
     suspend fun consume(payload: String) {
         val signal = parse(payload) ?: return
-        withBoundedRetry(log, "arrears exclusion for party ${signal.partyId} (dpd=${signal.daysPastDue})") {
+        EventRetry.withRetry(log, "arrears exclusion for party ${signal.partyId} (dpd=${signal.daysPastDue})", null) {
             if (signal.daysPastDue > 0) {
                 adverseState.setActive(signal.partyId, AdverseState.ARREARS, Instant.now())
             } else {

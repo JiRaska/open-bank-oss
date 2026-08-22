@@ -3694,6 +3694,29 @@ gates:
   # the manifest's — #3629's check-dockerfile-no-build-stage.py could not run on a
   # Dockerfile-only PR because it sat in `ui-build`. Green with no baseline: the one remaining
   # instance (check-manifest-types-only.sh) is registered above as a gate in this PR.
+  # An @Incoming handler that returns normally ACKS its message; a @Scheduled tick that catches its
+  # own failure completes. Neither has a caller to see the error, so a catch-and-log tells the
+  # platform the work is done — and an acked message that did nothing is indistinguishable from a
+  # successful one in lag, in the (empty) DLQ, and on every dashboard built on either. #5698: a few
+  # seconds of kyc-db downtime acked one PARTY_CREATED, and a customer ended up with two
+  # PENDING_ACTIVATION accounts and no welcome bonus; the audit found the same shape in 15 places
+  # across 10 services, four of them GDPR Art. 17 erasure handlers logging "anonymised" over PII that
+  # stayed put. (One confirmed stranded party, not the ten first reported — the other nine either
+  # predate the auto-open consumer or are account-less e2e fixtures.) Hexagonal architecture is the reason this is a rule and not a review note: a
+  # dependency being down is a NORMAL event for an adapter, and the port contract is "the work
+  # happens or somebody finds out".
+  - id: event-handler-swallows
+    name: "no event handler acks work it did not do (#5698, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A consumer or scheduler that logs its failure and returns discards the work with no signal anywhere — the failure mode that stranded 10 of 73 onboarding parties before anyone noticed."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-event-handler-swallows.py --self-test
+    selftest_expect: pass
+    min_subjects: 100   # 170 files carrying @Incoming/@Scheduled today (2026-08-19)
+    run: |
+      python3 .github/scripts/check-event-handler-swallows.py --enforce
+
   - id: gate-invocation-reachability
     name: "no gate hides behind a conditional job in ci.yml (#3629/#4339, enforced)"
     group: lint
