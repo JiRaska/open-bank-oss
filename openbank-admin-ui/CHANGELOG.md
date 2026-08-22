@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.186.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.185.1...admin-ui-v0.186.0) (2026-08-22)
+
+
+### Features
+
+* **admin-ui:** resolve KYC parties and charter-back approval identity ([#6009](https://github.com/JiRaska/open-bank-oss/issues/6009)) ([e7155f4](https://github.com/JiRaska/open-bank-oss/commit/e7155f4b94f83458f8595a2fbbde893cd4fd385f))
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify IAOPS refresh state ([#6340](https://github.com/JiRaska/open-bank-oss/issues/6340)) ([3782857](https://github.com/JiRaska/open-bank-oss/commit/37828576788fbf8a5fd9e7c4de3a4a5a1134ac23))
+* **admin-ui:** clarify lending refresh state ([#6342](https://github.com/JiRaska/open-bank-oss/issues/6342)) ([0ca2c29](https://github.com/JiRaska/open-bank-oss/commit/0ca2c290ebee1e9cca4bf9c5d64f920e48ee0e17))
+
 ## [0.185.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.185.0...admin-ui-v0.185.1) (2026-08-21)
 
 
