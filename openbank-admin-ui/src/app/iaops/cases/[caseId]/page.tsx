@@ -15,6 +15,8 @@ import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
 import { caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
 import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { CaseRuntimeTimeline, CaseRuntimeTopology } from '@/components/agent/CaseRuntimeViews'
+import type { RuntimeEvidenceView } from '@/components/agent/CaseRuntimeViews'
 
 type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED'
 
@@ -30,6 +32,8 @@ interface ThreadEntry {
   proposalId?: string
   proposalType?: string
   shadow?: boolean
+  tokensUsed?: number
+  runtimeEvidence: RuntimeEvidenceView
 }
 
 interface CaseThread {
@@ -40,6 +44,11 @@ interface CaseThread {
   openedAtEpochMs: number
   deadlineAtEpochMs: number
   contestedRate: number
+  budgetTokens: number
+  budgetContributions: number
+  observedAtEpochMs: number
+  historySource: string
+  retentionPolicy: string
   entries: ThreadEntry[]
 }
 
@@ -69,6 +78,7 @@ export default function IaopsCaseThreadPage() {
   const [thread, setThread] = useState<CaseThread | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [view, setView] = useState<'thread' | 'timeline' | 'topology'>('thread')
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = useCallback(
@@ -154,7 +164,16 @@ export default function IaopsCaseThreadPage() {
             <span>{t('Otevřeno', 'Opened')}: <strong style={{ color: 'var(--text-secondary)' }}>{fmt(thread.openedAtEpochMs)}</strong></span>
             <span>{t('Deadline', 'Deadline')}: <strong style={{ color: 'var(--text-secondary)' }}>{fmt(thread.deadlineAtEpochMs)}</strong></span>
             <span>{t('Míra sporu', 'Contested rate')}: <strong style={{ color: 'var(--text-secondary)' }}>{Math.round(thread.contestedRate * 100)} %</strong></span>
+            <span>{t('Rozpočet', 'Budget')}: <strong style={{ color: 'var(--text-secondary)' }}>{thread.budgetTokens.toLocaleString(locale)} tokens / {thread.budgetContributions} contributions</strong></span>
           </div>
+
+          <nav aria-label={t('Pohled na case', 'Case view')} style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
+            {(['thread', 'timeline', 'topology'] as const).map(candidate => (
+              <button key={candidate} type="button" onClick={() => setView(candidate)} aria-pressed={view === candidate} style={{ padding: '6px 11px', borderRadius: '9px', border: `1px solid ${view === candidate ? 'var(--accent-border)' : 'var(--border)'}`, background: view === candidate ? 'var(--accent-bg)' : 'var(--surface)', color: view === candidate ? 'var(--accent-text)' : 'var(--text-secondary)', fontSize: '11px', fontWeight: 750, cursor: 'pointer', textTransform: 'capitalize' }}>
+                {candidate}
+              </button>
+            ))}
+          </nav>
 
           {(() => {
             const brief = deriveCaseDecisionBrief(thread)
@@ -234,7 +253,9 @@ export default function IaopsCaseThreadPage() {
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {view === 'timeline' && <CaseRuntimeTimeline thread={thread} locale={locale} />}
+          {view === 'topology' && <CaseRuntimeTopology thread={thread} locale={locale} />}
+          {view === 'thread' && <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {thread.entries.map((entry, index) => {
               if (entry.type === 'CASE_OPENED') {
                 return (
@@ -321,7 +342,7 @@ export default function IaopsCaseThreadPage() {
                 </div>
               )
             })}
-          </div>
+          </div>}
         </>
       ) : null}
     </div>

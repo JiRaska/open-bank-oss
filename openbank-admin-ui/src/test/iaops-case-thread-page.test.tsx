@@ -2,7 +2,7 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import IaopsCaseThreadPage from '@/app/iaops/cases/[caseId]/page'
 
@@ -20,10 +20,15 @@ const THREAD = {
   openedAtEpochMs: 1_700_000_000_000,
   deadlineAtEpochMs: 1_700_000_600_000,
   contestedRate: 0,
+  budgetTokens: 200000,
+  budgetContributions: 40,
+  observedAtEpochMs: 1_700_000_200_000,
+  historySource: 'case-coordinator-postgres-read-model',
+  retentionPolicy: 'not-configured',
   entries: [
-    { type: 'CASE_OPENED', atEpochMs: 1_700_000_000_000, actor: 'case-coordinator' },
-    { type: 'CONTRIBUTION', atEpochMs: 1_700_000_100_000, actor: 'aml-agent', evidenceRefs: ['alert-17'] },
-    { type: 'PROPOSAL_EMITTED', atEpochMs: 1_700_000_200_000, proposalType: 'REVIEW' },
+    { type: 'CASE_OPENED', atEpochMs: 1_700_000_000_000, actor: 'case-coordinator', runtimeEvidence: { evidenceId: 'case-17', source: 'case-coordinator-postgres-read-model', stage: 'RECORDED', observedAtEpochMs: 1_700_000_000_000, correlationId: 'case-17', detail: 'Persisted case workflow record' } },
+    { type: 'CONTRIBUTION', atEpochMs: 1_700_000_100_000, actor: 'aml-agent', evidenceRefs: ['alert-17'], runtimeEvidence: { evidenceId: 'contribution-17', source: 'case-coordinator-postgres-read-model', stage: 'CONSUMED', observedAtEpochMs: 1_700_000_100_000, correlationId: 'case-17', detail: 'Contribution consumed into the durable case read model' } },
+    { type: 'PROPOSAL_EMITTED', atEpochMs: 1_700_000_200_000, proposalType: 'REVIEW', runtimeEvidence: { evidenceId: 'proposal-17', source: 'case-coordinator-transactional-outbox', stage: 'PUBLISHED_TO_BROKER', observedAtEpochMs: 1_700_000_200_000, correlationId: 'case-17', detail: 'Proposal outbox status: SENT' } },
   ],
 }
 
@@ -40,5 +45,19 @@ describe('AIOps case thread proposal event', () => {
     expect(screen.getByText('The coordinator created a proposal event. This page does not track delivery or the human decision.')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'Browse the HITL queue' })).toHaveAttribute('href', '/approvals')
     expect(screen.queryByText('Open the HITL queue for approval')).not.toBeInTheDocument()
+  })
+
+  it('renders only observed runtime edges as solid topology with expandable provenance', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ available: true, thread: THREAD }) }))
+
+    render(<IaopsCaseThreadPage />)
+    await screen.findByRole('heading', { name: 'Proposal recorded in the thread' })
+    fireEvent.click(screen.getByRole('button', { name: 'topology' }))
+
+    expect(await screen.findByRole('region', { name: 'Evidence-backed runtime topology' })).toBeInTheDocument()
+    expect(screen.getByText('aml-agent')).toBeInTheDocument()
+    expect(screen.getByText('proposal event broker')).toBeInTheDocument()
+    expect(screen.getByText(/Charter declarations alone never create a solid edge/)).toBeInTheDocument()
+    expect(screen.getAllByText(/CONSUMED|PUBLISHED_TO_BROKER/).length).toBeGreaterThan(0)
   })
 })
