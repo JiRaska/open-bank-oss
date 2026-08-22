@@ -158,9 +158,6 @@ export default function SecurityPage() {
               disabled={loading}
               aria-busy={loading}
               aria-label={t('Obnovit bezpečnostní nálezy', 'Refresh security findings')}
-              type="button"
-              aria-busy={loading}
-              aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}
               className="btn btn-secondary btn-sm"
             >
               <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
