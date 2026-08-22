@@ -3093,3 +3093,13 @@ autonomous_agent_prs:
     - openbank-libs/governance/*
     - .github/gates/*
     - .github/scripts/*
+    # An agent's PROMPT is its program. `.github/agent-prompts/` holds the instructions the
+    # scheduled issue worker and PR steward actually execute — "never merge", "never close an
+    # issue", "run the guard's self-test before picking". An agent able to edit these could
+    # delete its own restraints in a diff that looks like a docs tweak.
+    #
+    # This was MISSING and asserted to be present: #6453 and runbook 0015 both claimed the
+    # prompts were protected "so the worker cannot edit its own mandate". Nobody had run the
+    # guard against those paths, and it tripped no clause at all (measured 2026-08-22 on #6512,
+    # a PR touching only this directory, which the guard waved through).
+    - .github/agent-prompts/*

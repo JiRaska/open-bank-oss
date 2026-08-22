@@ -125,6 +125,10 @@
     "openbank-campaign-service": {
       "release-type": "simple"
     },
+    "openbank-referral-service": {
+      "component": "referral-service",
+      "exclude-paths": ["openbank-referral-service/src/test"]
+    },
     "openbank-case-coordinator-agent": {
       "component": "case-coordinator-agent",
       "exclude-paths": [

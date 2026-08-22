@@ -1,0 +1,29 @@
+openapi: 3.0.3
+info:
+  title: OpenBank Referral Service
+  version: 1.0.0
+paths:
+  /api/v1/referrals/programs:
+    post:
+      summary: Create a draft referral program
+      responses: {"201": {description: Created}}
+  /api/v1/referrals/programs/{id}/publish:
+    post:
+      summary: Publish after independent checker approval
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {"200": {description: Published}, "409": {description: Conflict}}
+  /api/v1/referrals/programs/{id}/invites:
+    post:
+      summary: Issue an opaque invite token
+      parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
+      responses: {"201": {description: Issued}}
+  /api/v1/referrals/invites/{token}/attribute:
+    post:
+      summary: Attribute an invite, rejecting self and replay
+      parameters: [{name: token, in: path, required: true, schema: {type: string}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
+      responses: {"200": {description: Attributed}, "409": {description: Conflict}}
+  /api/v1/referrals/invites/{token}/qualify:
+    post:
+      summary: Qualify one event and request a fixed reward
+      parameters: [{name: token, in: path, required: true, schema: {type: string}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
+      responses: {"202": {description: Reward requested}}
