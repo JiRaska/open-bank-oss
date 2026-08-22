@@ -25,6 +25,7 @@ class CaseThreadService(private val readRepository: CaseThreadReadRepository) {
             contributions = readRepository.listContributions(caseId),
             proposals = readRepository.listProposalEvents(caseId),
             loadedAtEpochMs = System.currentTimeMillis(),
+            signalEvidence = readRepository.listSignalEvidence(caseId),
         )
     }
 }
