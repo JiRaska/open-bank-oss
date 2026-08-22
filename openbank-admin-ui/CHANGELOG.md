@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.9...admin-ui-v0.186.10) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce disputes loading ([#6401](https://github.com/JiRaska/open-bank-oss/issues/6401)) ([bc1877a](https://github.com/JiRaska/open-bank-oss/commit/bc1877a421bd3acff5296ff579b90b5cadddc0a1))
+
 ## [0.186.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.8...admin-ui-v0.186.9) (2026-08-22)
 
 
