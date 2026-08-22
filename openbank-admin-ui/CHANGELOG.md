@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.2...admin-ui-v0.186.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify onboarding refresh state ([#6362](https://github.com/JiRaska/open-bank-oss/issues/6362)) ([21b10d6](https://github.com/JiRaska/open-bank-oss/commit/21b10d67155caea392c92093cff08f3eb346b4ce))
+
 ## [0.186.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.1...admin-ui-v0.186.2) (2026-08-22)
 
 
