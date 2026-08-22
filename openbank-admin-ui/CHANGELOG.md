@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.11...admin-ui-v0.186.12) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify transaction search state ([#6422](https://github.com/JiRaska/open-bank-oss/issues/6422)) ([29a9ef0](https://github.com/JiRaska/open-bank-oss/commit/29a9ef02b3b27263c55843dc50a39836e5b5c0a6))
+
 ## [0.186.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.10...admin-ui-v0.186.11) (2026-08-22)
 
 
