@@ -67,7 +67,11 @@ class LlmDiagnosisAdapter : LlmDiagnosisPort {
 
     override suspend fun proposeFixDiff(finding: FlakyTestFinding, diagnosis: String): String? = if (
         finding.checkType == com.openbank.flakytest.domain.model.FlakyTestCheckType.RUNBLOCKING_UNIT_MISSING &&
-        finding.filePath.startsWith("openbank-flaky-test-hunter/src/test/kotlin/")
+        // The bound is asserted in ONE place. This used to repeat the prefix as its own string
+        // literal, which is the hand-kept-copy shape a widening edit could silently desynchronise:
+        // relaxing it here while BoundedTestPath stayed strict (or the reverse) would leave the
+        // two halves of the same rule disagreeing, with nothing red.
+        BoundedTestPath.isSafe(finding.filePath)
     ) {
         ADD_EXPLICIT_UNIT_RETURN_TYPE
     } else {
