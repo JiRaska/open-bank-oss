@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.6...admin-ui-v0.186.7) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify incident refresh state ([#6389](https://github.com/JiRaska/open-bank-oss/issues/6389)) ([c35b70f](https://github.com/JiRaska/open-bank-oss/commit/c35b70f81cfe9ae388b4e3770dc293a4e00a708c))
+
 ## [0.186.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.5...admin-ui-v0.186.6) (2026-08-22)
 
 
