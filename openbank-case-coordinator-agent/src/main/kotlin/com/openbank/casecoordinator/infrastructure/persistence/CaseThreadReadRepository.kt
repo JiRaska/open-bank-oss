@@ -45,8 +45,8 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
 
     fun listContributions(workflowId: String): List<ContributionRow> = query(
         """
-        SELECT c.agent_id, c.contributed_at, c.summary, c.evidence_refs,
-               c.draft_version, c.preemption_vote, c.contested
+        SELECT c.id, c.agent_id, c.contributed_at, c.summary, c.evidence_refs,
+               c.draft_version, c.preemption_vote, c.contested, c.tokens_used
         FROM case_contribution c
         JOIN case_workflow w ON w.id = c.case_id
         WHERE w.workflow_id = ?
@@ -98,11 +98,14 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
         deadlineAtEpochMs = getTimestamp("deadline_at").toInstant().toEpochMilli(),
         contestedRate = getBigDecimal("contested_rate").toDouble(),
         contributionCount = getInt("contribution_count"),
+        budgetTokens = getInt("budget_tokens"),
+        budgetContributions = getInt("budget_contributions"),
     )
 
     private fun ResultSet.toContributionRow(): ContributionRow {
         val refsJson = getString("evidence_refs")
         return ContributionRow(
+            contributionId = getObject("id", UUID::class.java).toString(),
             agentId = getString("agent_id"),
             contributedAtEpochMs = getTimestamp("contributed_at").toInstant().toEpochMilli(),
             summary = getString("summary"),
@@ -110,6 +113,7 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
             draftVersion = getObject("draft_version") as? Int,
             superseded = getString("preemption_vote") == SUPERSEDED_VOTE,
             contested = getBoolean("contested"),
+            tokensUsed = getInt("tokens_used"),
         )
     }
 
@@ -119,6 +123,7 @@ class CaseThreadReadRepository(private val dataSource: DataSource, private val o
         const val CASE_SELECT = """
             SELECT w.workflow_id, w.case_class, w.disposition_target, w.status,
                    w.opened_at, w.deadline_at, w.contested_rate,
+                   w.budget_tokens, w.budget_contributions,
                    (SELECT COUNT(*) FROM case_contribution c WHERE c.case_id = w.id) AS contribution_count
             FROM case_workflow w
         """

@@ -20,10 +20,13 @@ data class CaseRow(
     val deadlineAtEpochMs: Long,
     val contestedRate: Double,
     val contributionCount: Int,
+    val budgetTokens: Int,
+    val budgetContributions: Int,
 )
 
 /** Raw `case_contribution` row (V1 + V3 columns). */
 data class ContributionRow(
+    val contributionId: String,
     val agentId: String,
     val contributedAtEpochMs: Long,
     val summary: String?,
@@ -31,6 +34,7 @@ data class ContributionRow(
     val draftVersion: Int?,
     val superseded: Boolean,
     val contested: Boolean,
+    val tokensUsed: Int,
 )
 
 /** Raw terminal proposal row projected from `case_outbox` (ADR-0244 D7). */
@@ -39,6 +43,25 @@ data class ProposalEventRow(
     val proposalType: String,
     val status: String,
     val emittedAtEpochMs: Long,
+)
+
+enum class RuntimeEvidenceStage {
+    RECORDED,
+    PERSISTED,
+    EMITTED,
+    PUBLISHED_TO_BROKER,
+    PUBLISH_FAILED,
+    SHADOW_RECORDED,
+}
+
+/** Runtime observation backing one rendered case edge. A charter never creates this object. */
+data class RuntimeEvidence(
+    val evidenceId: String,
+    val source: String,
+    val stage: RuntimeEvidenceStage,
+    val observedAtEpochMs: Long,
+    val correlationId: String,
+    val detail: String,
 )
 
 enum class ThreadEntryType {
@@ -61,6 +84,8 @@ data class ThreadEntry(
     val proposalId: String? = null,
     val proposalType: String? = null,
     val shadow: Boolean = false,
+    val runtimeEvidence: RuntimeEvidence,
+    val tokensUsed: Int? = null,
 )
 
 /** Case list item — `GET /api/v1/case-coordinator/cases`. */
@@ -84,5 +109,14 @@ data class CaseThread(
     val openedAtEpochMs: Long,
     val deadlineAtEpochMs: Long,
     val contestedRate: Double,
+    val budgetTokens: Int,
+    val budgetContributions: Int,
+    val observedAtEpochMs: Long,
+    val dataFromEpochMs: Long,
+    val dataToEpochMs: Long,
+    val lastSuccessfulLoadEpochMs: Long,
+    val coverageStatus: String,
+    val historySource: String,
+    val retentionPolicy: String,
     val entries: List<ThreadEntry>,
 )

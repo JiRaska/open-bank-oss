@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.3.0
+  version: 1.4.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -315,7 +315,7 @@ components:
 
     ThreadEntry:
       type: object
-      required: [type, atEpochMs]
+      required: [type, atEpochMs, runtimeEvidence]
       properties:
         type:
           type: string
@@ -345,6 +345,32 @@ components:
         shadow:
           type: boolean
           description: True when this terminal result is recorded for the bounded shadow pilot and was not delivered to HITL.
+        tokensUsed:
+          type: integer
+          minimum: 0
+        runtimeEvidence:
+          $ref: '#/components/schemas/RuntimeEvidence'
+
+    RuntimeEvidence:
+      type: object
+      description: Runtime observation backing the rendered entry. Charter configuration never creates runtime evidence.
+      required: [evidenceId, source, stage, observedAtEpochMs, correlationId, detail]
+      properties:
+        evidenceId:
+          type: string
+        source:
+          type: string
+          enum: [case-coordinator-postgres-read-model, case-coordinator-transactional-outbox]
+        stage:
+          type: string
+          enum: [RECORDED, PERSISTED, EMITTED, PUBLISHED_TO_BROKER, PUBLISH_FAILED, SHADOW_RECORDED]
+        observedAtEpochMs:
+          type: integer
+          format: int64
+        correlationId:
+          type: string
+        detail:
+          type: string
 
     CaseThread:
       type: object
@@ -356,6 +382,15 @@ components:
         - openedAtEpochMs
         - deadlineAtEpochMs
         - contestedRate
+        - budgetTokens
+        - budgetContributions
+        - observedAtEpochMs
+        - dataFromEpochMs
+        - dataToEpochMs
+        - lastSuccessfulLoadEpochMs
+        - coverageStatus
+        - historySource
+        - retentionPolicy
         - entries
       properties:
         caseId:
@@ -374,6 +409,36 @@ components:
           format: int64
         contestedRate:
           type: number
+        budgetTokens:
+          type: integer
+        budgetContributions:
+          type: integer
+        observedAtEpochMs:
+          type: integer
+          format: int64
+          description: Timestamp of the newest observed durable evidence, not the load time.
+        dataFromEpochMs:
+          type: integer
+          format: int64
+          description: Oldest timestamp present in this returned case timeline.
+        dataToEpochMs:
+          type: integer
+          format: int64
+          description: Newest timestamp present in this returned case timeline.
+        lastSuccessfulLoadEpochMs:
+          type: integer
+          format: int64
+          description: Server time at which all read-model queries for this response completed successfully.
+        coverageStatus:
+          type: string
+          enum: [UNKNOWN_RETENTION]
+          description: Coverage cannot be claimed complete or partial while the durable read-model retention duration is not configured.
+        historySource:
+          type: string
+          enum: [case-coordinator-postgres-read-model]
+        retentionPolicy:
+          type: string
+          description: Durable read-model retention policy. `not-configured` means the service makes no retention-duration claim.
         entries:
           type: array
           items:

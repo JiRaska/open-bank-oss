@@ -57,6 +57,15 @@ interface AgentCostEntry {
   burnRate: 'low' | 'normal' | 'high' | 'exceeded'
 }
 
+interface MetricsCoverage {
+  source: string
+  retentionHours: number
+  dataFrom: string
+  dataTo: string
+  lastSuccessfulLoad: string | null
+  windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
+}
+
 interface FinOpsAnomaly {
   id: string
   detectedAt: string
@@ -153,6 +162,7 @@ function IAOpsContent() {
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [data, setData] = useState<GovData | null>(null)
   const [agentCosts, setAgentCosts] = useState<AgentCostEntry[]>([])
+  const [costCoverage, setCostCoverage] = useState<MetricsCoverage | null>(null)
   const [costAnomalies, setCostAnomalies] = useState<FinOpsAnomaly[]>([])
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
@@ -175,8 +185,9 @@ function IAOpsContent() {
       if (!govRes.ok) { setUnavailable({ kind: 'error' }); return }
       setData(await govRes.json())
       if (aiCostRes.ok) {
-        const ac = await aiCostRes.json() as { available: boolean; agents?: AgentCostEntry[] }
+        const ac = await aiCostRes.json() as { available: boolean; agents?: AgentCostEntry[]; coverage?: MetricsCoverage }
         setAgentCosts(ac.agents ?? [])
+        setCostCoverage(ac.coverage ?? null)
       }
       if (anomalyRes.ok) {
         const an = await anomalyRes.json() as { anomalies?: FinOpsAnomaly[] }
@@ -244,7 +255,7 @@ function IAOpsContent() {
 
       <PageHeader
         icon={<Bot size={20} aria-hidden="true" />}
-        title={t('IAOps — governance AI', 'IAOps — AI Governance')}
+        title={t('Řídicí centrum agentů', 'Agent Control Room')}
         subtitle={t(
           'Co AI děláme, proč, jak je to řízené a jak jsme compliant — ADR-0031',
           'What AI we run, why, how it is governed, and how we stay compliant — ADR-0031',
@@ -568,11 +579,11 @@ function IAOpsContent() {
                             {t('Náklady / rozpočet', 'Cost / Budget status')}
                           </div>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              24h: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
+                            <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {costCoverage?.windows['24h'].partial ? `${costCoverage.windows['24h'].availableHours}h / 24h` : '24h'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast24hUsd.toFixed(2)}</strong>
                             </span>
-                            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-                              7d: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
+                            <span title={costCoverage ? `${costCoverage.dataFrom} → ${costCoverage.dataTo}` : undefined} style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+                              {costCoverage?.windows['7d'].partial ? `${costCoverage.windows['7d'].availableHours}h / 7d` : '7d'}: <strong style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>${costEntry.costLast7dUsd.toFixed(2)}</strong>
                             </span>
                             {budgetPct != null && (
                               <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flex: 1, minWidth: '120px' }}>
@@ -590,6 +601,11 @@ function IAOpsContent() {
                               </span>
                             )}
                           </div>
+                          {costCoverage && (
+                            <div role="status" style={{ marginTop: '7px', fontSize: '9px', color: 'var(--text-tertiary)', lineHeight: 1.4 }}>
+                              {costCoverage.source} · retention {costCoverage.retentionHours}h · {costCoverage.dataFrom} → {costCoverage.dataTo} · last successful load {costCoverage.lastSuccessfulLoad ?? 'unavailable'}
+                            </div>
+                          )}
                         </div>
                       )}
 
