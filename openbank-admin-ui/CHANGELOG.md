@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.5...admin-ui-v0.187.6) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce IAOPS agent loading ([#6539](https://github.com/JiRaska/open-bank-oss/issues/6539)) ([69503d3](https://github.com/JiRaska/open-bank-oss/commit/69503d322c7494f40eb98ca6d59eb9c1f6e5c397))
+
 ## [0.187.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.4...admin-ui-v0.187.5) (2026-08-22)
 
 
