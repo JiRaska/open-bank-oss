@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: case-coordinator-agent
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "af1c1d5f1272dfab"
+    openbank.tech/policy-checksum: "a4ec411c4f743e8a"
 data:
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -549,4 +549,4 @@ data:
       - case.synthesize
     grants: []
   manifest.json: |
-    {"roots": ["openbank/agents", "openbank/copilot", "openbank/rest", "agents", "rules"]}
+    {"roots": ["openbank/agents", "openbank/case_collaboration", "agents", "case_collaboration"]}
