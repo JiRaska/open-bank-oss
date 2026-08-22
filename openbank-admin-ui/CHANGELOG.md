@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.8...admin-ui-v0.187.9) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify security loading state ([#6559](https://github.com/JiRaska/open-bank-oss/issues/6559)) ([08137ae](https://github.com/JiRaska/open-bank-oss/commit/08137ae93ef2b2c332e6f2c981a2dd7031707111))
+
 ## [0.187.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.7...admin-ui-v0.187.8) (2026-08-22)
 
 
