@@ -70,6 +70,12 @@ signals, zero duplicate terminal outcomes and complete stage correlation. Promot
 another principal, case class or delivery mode is a new rules/charter review, not a
 configuration toggle hidden from governance.
 
+**D8 — The case policy bundle is service-scoped.** The case decision uses a dedicated
+`openbank/case-collaboration/decision` policy and a generated projection containing only
+charter case capabilities plus the case-capability rules matrix. Only the case-coordinator
+bundle embeds and hashes those artifacts. Adding case policy must not restamp or roll every
+unrelated service that consumes the shared MCP/REST `agents.rego` bundle.
+
 ## Alternatives considered
 
 - **Reuse the MCP tool decision:** rejected; tool invocation and workflow participation
@@ -85,8 +91,9 @@ configuration toggle hidden from governance.
 
 - The pilot is useful but intentionally narrow: one RCA agent may add observability
   evidence to one non-money-path shadow workflow.
-- The generated OPA charter/rules subsets and case-coordinator bundle become release
-  artifacts and must pass differential policy tests.
+- The dedicated generated case-policy projection and case-coordinator bundle become
+  release artifacts and must pass differential policy tests without changing the shared
+  fleet MCP/REST bundle checksum.
 - The Control Room can later render each stage from evidence without inferring a solid
   edge from a charter declaration.
 - Operator mutations remain a later ADR after this collaboration path is proven.
