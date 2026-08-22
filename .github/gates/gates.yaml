@@ -2957,6 +2957,28 @@ gates:
   #
   # Self-test first: the classifier has to allow the harmless cases as well as flag the real
   # ones, and a guard that flags everything is noise nobody keeps.
+  # ADR-0252 phase 0: an off-by-default adapter reporting `success = true` is indistinguishable
+  # from a working one, and the disabled path is the quiet one — no error, no metric, no series
+  # that disagrees. Ships with an EMPTY baseline (fleet measured clean), so its only job is that
+  # the next occurrence is red at PR time rather than reported by a customer.
+  - id: noop-not-success-ratchet
+    name: "no-op is not success (ADR-0252 phase 0, issue #4348, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: >-
+      An off-by-default adapter that reports `success = true` is indistinguishable from a working
+      one, and the disabled path is the quiet one — no error, no metric, no series that disagrees.
+      notification-service counted every push as delivered in every environment without APNs
+      credentials, committed the row SENT, and emitted a delivery event; it shipped that way and a
+      customer reported it (#4348). Baseline is empty by measurement, so this gate is prevention
+      only — recheck whether the fleet still has no occurrences, not whether debt was paid down.
+    review_after: '2027-02-22'
+    min_subjects: 1500
+    selftest: python3 .github/scripts/check-noop-not-success.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-noop-not-success.py --root .
+
   - id: kafka-dotted-key-ratchet
     name: "kafka dotted-key ratchet (issues #686/#2945, enforced)"
     group: data
