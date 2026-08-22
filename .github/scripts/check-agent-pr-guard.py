@@ -313,6 +313,7 @@ FIXTURE = {
         "openbank-libs/governance/*",
         ".github/gates/*",
         ".github/scripts/*",
+        ".github/agent-prompts/*",
     ],
     "_money_path_services": ["openbank-ledger-service", "openbank-balance-service"],
 }
@@ -355,6 +356,11 @@ def self_test():
             "a gate script is governance machinery too",
             "openbank-agent-bot[bot]", True, "agent/x",
             [".github/scripts/check-something.py"], 1, "governance sources",
+        ),
+        (
+            "an agent's own PROMPT is its program — it may not edit its mandate",
+            "openbank-agent-bot[bot]", True, "agent/x",
+            [".github/agent-prompts/issue-worker.md"], 1, "governance sources",
         ),
         (
             "docs ABOUT authz are NOT the control (#3888)",
