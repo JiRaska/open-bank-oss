@@ -1001,6 +1001,7 @@ paths:
                           - MARKETING_COMMS_INAPP
                           - CREDIT_OFFERS
                           - CREDIT_PROFILE_USE
+                          - CREDIT_AI_AGENT
                     accountIbans: {type: array, items: {type: string}, nullable: true}
                     validFrom: {type: string, format: date-time}
                     validTo: {type: string, format: date-time}
@@ -1205,6 +1206,48 @@ paths:
               schema:
                 type: array
                 items: {$ref: '#/components/schemas/Loan'}
+
+  /credit/consents:
+    get:
+      tags: [Consents]
+      summary: The caller's own credit consents, as three switches
+      description: >-
+        ADR-0269 rule 1. Derived once here rather than by every client filtering a consent list —
+        the first client to write that filter differently gets a different answer. An unreadable
+        consent list answers "everything off", which is both the safe default and the true state
+        for anyone who has never granted these.
+      operationId: getCreditConsents
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: The three switches
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditConsents'}
+    put:
+      tags: [Consents]
+      summary: Set the caller's credit consents to exactly this state
+      description: >-
+        Full-state PUT, not a partial patch: "turn offers off" and "leave offers alone" must not be
+        the same request. Anything false is revoked immediately and for every channel. These are
+        GDPR Art. 7 data-processing consents, so no SCA ceremony is required (ADR-0205 D1); the
+        party comes from the JWT, never the body.
+      operationId: putCreditConsents
+      security:
+        - customerOidc: [accounts:read]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/CreditConsents'}
+      responses:
+        '200':
+          description: The resulting state, re-read after the change
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CreditConsents'}
+        '400': {description: Malformed body}
 
   /credit/quotes:
     post:
@@ -3330,6 +3373,28 @@ components:
 
     # Edge's projected view of lending-service's Loan (internal fields dropped — see
     # CustomerEdgeResource.projectLoan).
+    CreditConsents:
+      type: object
+      description: >-
+        ADR-0269's three credit consents. All default FALSE — absence of consent is denial, and no
+        path re-arms one on the customer's behalf.
+      required: [offers, profileUse, aiAgent]
+      properties:
+        offers:
+          type: boolean
+          description: May the bank show this customer a credit offer it was not asked for.
+        profileUse:
+          type: boolean
+          description: >-
+            May the 360 profile be used to work out WHICH offer. Separate from `offers` because a
+            customer may want an affordability answer they asked for without their spending being
+            mined for eligibility.
+        aiAgent:
+          type: boolean
+          description: >-
+            May the assistant watch and PREPARE on the customer's behalf. Never extends to
+            submitting, accepting, raising a limit or drawing funds.
+
     CreditQuote:
       type: object
       description: >-

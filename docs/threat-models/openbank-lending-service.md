@@ -422,9 +422,34 @@ consent, while the pre-approved read will. ADR-0269's rule is that the bank must
 refusing to answer a price question the customer just asked would be the same dark pattern pointing
 the other way. The distress floor applies to both, because there the answer itself is the harm.
 
+## 9b. The credit-offer gate's own dependencies (ADR-0269 #6215) — STRIDE supplement
+
+The gate that decides whether a customer may be offered or quoted credit now reaches two services
+outbound: consent-service for `CREDIT_OFFERS`, and analytics-sink for the 360 credit profile
+(`gold_party_credit_profile`). Both are new outbound client edges from a money-path service.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **T**ampering / **E**oP | A compromised or misconfigured upstream answers "consent granted" or "healthy cash flow" for everyone | Neither answer can *grant* anything on its own: consent only unlocks the PUSH surface, and the profile only relaxes thresholds the hard-fact rules (arrears, hardship) apply independently from lending's own book. A single upstream cannot manufacture an offer. |
+| **D**oS / availability | consent-service or analytics-sink is slow or down | Both reads fail CLOSED with a 2s timeout: an unreadable consent yields `SIGNALS_UNAVAILABLE`, an unreadable profile yields `complete = false` and a refusal. The cost of an outage is a suppressed offer, never an unconsented or unassessed one. |
+| **I**nformation disclosure | The credit profile leaks another party's finances into a decision | The profile is fetched by party id on an internal, OIDC-authenticated route restricted to operator/auditor/admin roles; the party id comes from the same trusted header the rest of section 9 uses, never from a request body. |
+| **R**epudiation | The bank cannot show what a creditworthiness decision was based on | The profile is a query over the ADR-0023 tamper-evident bronze layer, so the inputs can be recomputed as at a date; `monthsObserved` records how much history actually existed. |
+| **S**poofing | An unauthenticated caller reads a customer's cash-flow profile from analytics-sink | The route is `@RolesAllowed(OPERATOR, AUDITOR, ADMIN)`; the party id is parsed as a UUID *before* interpolation, which is also the injection boundary — ClickHouse's HTTP interface has no bound-parameter path. |
+
+**Known gap, stated rather than modelled away:** enforcement orders and insolvency proceedings have
+no source in this deployment — no service ingests a court register. They are reported as absent, not
+unknown, because permanent `complete = false` would suppress every offer forever and be
+indistinguishable from the feature being switched off. This is the first thing an operational-risk
+review of this gate should challenge.
+
 ## 10. Change log
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-21** — Trust-boundary change (ADR-0269 slice 3, #6215): two new outbound client edges
+  from the credit-offer gate — consent-service (`CREDIT_OFFERS`) and analytics-sink (the 360 credit
+  profile) — plus their `rest-client` configuration. See section 9b. Both fail closed on timeout or
+  error; neither can grant an offer on its own, because the hard-fact rules read lending's own book.
 
 - **2026-08-21** — Trust-boundary change (ADR-0269 slices 1-2): two new customer-edge-facing read
   surfaces, `GET /api/v1/lending/intake/applications[/{id}]` and `POST /api/v1/lending/intake/quotes`.

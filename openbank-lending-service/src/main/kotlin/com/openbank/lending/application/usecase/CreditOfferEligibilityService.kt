@@ -110,6 +110,7 @@ class CreditOfferEligibilityService(
             inHardshipArrangement = true,
             lastAffordabilityFailureAt = null,
             bufferDays = null,
+            monthsObserved = null,
             lastCreditContactAt = null,
             inputsChangedSinceLastContact = false,
             complete = false,

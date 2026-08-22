@@ -1049,6 +1049,113 @@ class CustomerEdgeResource(
         return Response.status(resp.status).entity(resp.entity).type(MediaType.APPLICATION_JSON).build()
     }
 
+    /**
+     * The caller's own ADR-0269 credit consents, as three booleans.
+     *
+     * ## Why this route exists at all
+     *
+     * consent-service could already grant these scopes, and the edge could already list and revoke
+     * consents — but there was no way for a CUSTOMER to switch one ON. The app's existing marketing
+     * toggle goes somewhere else entirely (party-service's `marketingConsent` boolean), so without
+     * this route the credit consents were grantable only by an operator, which is the opposite of
+     * what "the customer decides" means.
+     *
+     * ## Why booleans and not the consent objects
+     *
+     * The app renders three switches. Handing it consent aggregates would make every client
+     * re-derive "is CREDIT_OFFERS on" from a list, and the first client to write that filter
+     * slightly differently gets a different answer — the same reasoning ADR-0210 D2 gives for the
+     * party key. The derivation happens once, here.
+     */
+    @GET
+    @Path("/credit/consents")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getCreditConsents(): Response {
+        val customer = customer()
+        val party = customer.partyId.toString()
+        val resp = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        val arr = if (resp.status == 200) {
+            runCatching { objectMapper.readTree(resp.entity?.toString() ?: "") as? ArrayNode }.getOrNull()
+        } else {
+            null
+        }
+        // An unreadable consent list answers "everything off", which is the SAFE default and the
+        // true one for every customer who has never granted anything. It is not fail-soft
+        // convenience: the client uses this to decide whether to fetch offers at all, so an
+        // optimistic default here would fetch offers for a customer whose consent we cannot read.
+        val active = arr?.filter { it.get("status")?.asText() == "ACTIVE" }?.flatMap { c ->
+            c.get("scopes")?.mapNotNull { it.asText() } ?: emptyList()
+        }?.toSet().orEmpty()
+        val out = objectMapper.createObjectNode()
+        CREDIT_SCOPES.forEach { (field, scope) -> out.put(field, scope in active) }
+        return Response.ok(out).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /**
+     * Set the caller's credit consents to exactly the state in the body (ADR-0269 rule 1).
+     *
+     * A full-state PUT, not a partial patch: "turn offers off" and "leave offers alone" must not be
+     * the same request. Anything the body sets to false is revoked, immediately and for every
+     * channel — the ADR's requirement that switching offers off takes effect at once rather than at
+     * the next batch.
+     *
+     * These scopes are GDPR Art. 7 data-processing consents, so consent-service activates them
+     * without an SCA ceremony; an SCA designed for payment authorisation is a disproportionate
+     * burden on a data-processing opt-in (ADR-0205 D1). Granting still requires the customer's own
+     * authenticated session — the party comes from the JWT, never the body.
+     */
+    @PUT
+    @Path("/credit/consents")
+    @Authorize(action = "customer.profile.consent.update", resource = "")
+    @Blocking
+    fun putCreditConsents(body: String): Response {
+        val customer = customer()
+        val requested = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+            ?: return badRequest("Malformed credit consent body")
+        val desired = CREDIT_SCOPES.mapValues { (field, _) -> requested.get(field)?.asBoolean() ?: false }
+        val party = customer.partyId.toString()
+
+        val existing = upstream.get("$consentServiceUrl/api/v1/consents/party/$party", party)
+        if (existing.status != 200) return Response.status(existing.status).entity(existing.entity).build()
+        val consents = runCatching { objectMapper.readTree(existing.entity?.toString() ?: "") as? ArrayNode }
+            .getOrNull() ?: objectMapper.createArrayNode()
+
+        desired.forEach { (field, wanted) ->
+            val scope = CREDIT_SCOPES.getValue(field)
+            val held = consents.firstOrNull { c ->
+                c.get("status")?.asText() == "ACTIVE" &&
+                    c.get("scopes")?.any { it.asText() == scope } == true
+            }
+            when {
+                wanted && held == null -> grantCreditScope(customer.partyId, scope)
+                !wanted && held != null -> revokeHeldConsent(customer.partyId, held.get("id")?.asText())
+                else -> Unit // already in the requested state; granting again would churn the audit trail
+            }
+        }
+        return getCreditConsents()
+    }
+
+    private fun grantCreditScope(partyId: UUID, scope: String) {
+        val body = objectMapper.createObjectNode().apply {
+            put("partyId", partyId.toString())
+            put("granteeId", BANK_GRANTEE)
+            put("granteeType", "INTERNAL_SERVICE")
+            put("granteeName", "OpenBank")
+            putArray("scopes").add(scope)
+            // 365 days: the non-AISP bucket's maximum. It is a ceiling, not a promise — the customer
+            // can revoke at any time, and nothing re-arms the consent when it lapses.
+            put("validTo", java.time.OffsetDateTime.now(java.time.ZoneOffset.UTC).plusDays(CONSENT_DAYS).toString())
+        }.toString()
+        upstream.post("$consentServiceUrl/api/v1/consents", partyId.toString(), body)
+    }
+
+    private fun revokeHeldConsent(partyId: UUID, consentId: String?) {
+        if (consentId.isNullOrBlank()) return
+        val body = objectMapper.createObjectNode().put("reason", "Revoked by customer").toString()
+        upstream.delete("$consentServiceUrl/api/v1/consents/$consentId?partyId=$partyId", partyId.toString(), body)
+    }
+
     private fun projectConsent(c: com.fasterxml.jackson.databind.JsonNode): ObjectNode {
         val o = objectMapper.createObjectNode()
         o.put("id", c.get("id")?.asText())
@@ -4740,6 +4847,24 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        /**
+         * The ADR-0269 credit consents, as the app's field name → the consent-service scope.
+         *
+         * One map, so the read and the write cannot disagree about which switch means which scope —
+         * the failure that would look like a customer turning offers off and still being offered.
+         */
+        private val CREDIT_SCOPES: Map<String, String> = linkedMapOf(
+            "offers" to "CREDIT_OFFERS",
+            "profileUse" to "CREDIT_PROFILE_USE",
+            "aiAgent" to "CREDIT_AI_AGENT",
+        )
+
+        /** First-party consent: the bank itself is the grantee, not a TPP. */
+        private const val BANK_GRANTEE = "openbank"
+
+        /** The non-AISP validity ceiling. A ceiling, not a promise — revocation is immediate. */
+        private const val CONSENT_DAYS = 365L
+
         /** Closed at the edge as well as upstream: a path is never an app-controlled URL. */
         private val SURFACE_SLOTS: Set<String> = setOf(
             "HOME_BANNER",
