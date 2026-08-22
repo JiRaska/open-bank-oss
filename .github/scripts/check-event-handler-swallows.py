@@ -68,7 +68,13 @@ STATE_CALL = re.compile(
     r"\b\w*(?:repository|repo|usecase|port|store|dao|publisher|client|service)\s*\.\s*"
     r"(save|persist|insert|update|create|open|activate|grant|credit|debit|post|record|apply|"
     r"anonymize|anonymise|delete|upsert|merge|register|enrol|enroll|book|settle|publish|send|"
-    r"notify|emit|write|mark|complete|cancel|approve|reject|erase)\w*\s*\(",
+    r"notify|emit|write|mark|complete|cancel|approve|reject|erase|"
+    # Money-movement verbs the alternation still lacked. `initiate` is why
+    # `SddCollectionDebitConsumer`'s `transactionClient.initiateTransaction(...)` — a real
+    # direct-debit debit — was not flagged: the receiver matched (which is exactly what
+    # TRANSPORT_RECEIVER above keeps `client` in the list FOR), but the verb did not.
+    r"initiate|execute|transfer|charge|capture|reverse|refund|submit|dispatch|trigger|"
+    r"assign|revoke|close|freeze|release|disburse|repay|withdraw|deposit)\w*\s*\(",
     re.IGNORECASE,
 )
 # Two ways to be legitimately silent, and both must be STATED where a reviewer reads them.
@@ -96,12 +102,55 @@ HANDLED_IN_CATCH = re.compile(
 )
 
 
-def _state_change_in(body: str):
-    """First STATE_CALL in `body` that is not a transport-level read."""
+# A call to a helper declared in the SAME file. The state change often lives one level down:
+# `StandingOrderDueConsumer`'s try body calls `executeSepa(orderId, node)`, and only INSIDE that
+# does `sepaClient.createPayment(...)` appear — which STATE_CALL would have matched had it been
+# inline. Text-scanning the try body alone cannot see it, so a handler that delegates to a
+# well-named domain helper (the tidier way to write one) is invisible to this gate.
+LOCAL_CALL = re.compile(r"(?<![\w.])([a-z]\w*)\s*\(")
+
+
+def _local_fun_bodies(text: str) -> dict:
+    """Every `fun name(...)` declared in this file, by name — block- and expression-bodied."""
+    bodies = {}
+    for m in re.finditer(r"\bfun\s+(?:<[^>]*>\s*)?(\w+)\s*\(", text):
+        name = m.group(1)
+        depth, i = 0, m.end() - 1
+        while i < len(text):
+            depth += (text[i] == "(") - (text[i] == ")")
+            i += 1
+            if depth == 0:
+                break
+        rest = text[i : i + 400]
+        brace, eq = rest.find("{"), rest.find("=")
+        if brace != -1 and (eq == -1 or brace < eq) and rest[:brace].count("\n") <= 2:
+            bodies[name] = _block(text, i + brace)[0]
+        elif eq != -1 and rest[:eq].count("\n") <= 2:
+            nl = rest.find("\n", eq)
+            bodies[name] = rest[eq : nl if nl != -1 else len(rest)]
+    return bodies
+
+
+def _state_change_in(body: str, funs=None, depth: int = 2, _seen=None):
+    """First STATE_CALL in `body` that is not a transport-level read.
+
+    With `funs` (same-file `fun` bodies) it also follows calls to those helpers, `depth` levels
+    deep and cycle-safe. Depth 2 covers the real shape — handler -> executeSepa ->
+    sepaClient.createPayment — without letting one generic helper name drag half a file into scope.
+    """
     for m in STATE_CALL.finditer(body):
         if TRANSPORT_RECEIVER.search(body[: m.start() + len(m.group(0).split(".")[0]) + 1]):
             continue
         return m
+    if funs and depth > 0:
+        seen = _seen if _seen is not None else set()
+        for call in LOCAL_CALL.findall(body):
+            if call in seen or call not in funs:
+                continue
+            seen.add(call)
+            deeper = _state_change_in(funs[call], funs, depth - 1, seen)
+            if deeper:
+                return deeper
     return None
 
 
@@ -129,12 +178,12 @@ def _preceding_comment_block(text: str, try_idx: int) -> str:
     return "\n".join(block)
 
 
-def _run_catching_findings(text: str, path: str) -> list[tuple[str, int, str]]:
+def _run_catching_findings(text: str, path: str, funs=None) -> list[tuple[str, int, str]]:
     """runCatching { <state change> } whose result is recovered rather than rethrown."""
     out = []
     for m in RUN_CATCHING.finditer(text):
         body, after = _block(text, m.end() - 1)
-        state = _state_change_in(body)
+        state = _state_change_in(body, funs)
         if not state:
             continue
         # What happens to the Result decides it: .getOrThrow() or an else-branch that throws is
@@ -154,7 +203,8 @@ def _run_catching_findings(text: str, path: str) -> list[tuple[str, int, str]]:
 def findings_for(text: str, path: str) -> list[tuple[str, int, str]]:
     if not HANDLER.search(text):
         return []
-    out = _run_catching_findings(text, path)
+    funs = _local_fun_bodies(text)
+    out = _run_catching_findings(text, path, funs)
     for m in re.finditer(r"\btry\s*\{", text):
         try_body, after = _block(text, m.end() - 1)
         tail = text[after : after + 400]
@@ -164,7 +214,7 @@ def findings_for(text: str, path: str) -> list[tuple[str, int, str]]:
         catch_body, _ = _block(text, catch_open)
         if "throw" in catch_body or HANDLED_IN_CATCH.search(catch_body):
             continue
-        state = _state_change_in(try_body)
+        state = _state_change_in(try_body, funs)
         if not state:
             continue
         # The marker must justify THIS catch: it counts only inside the catch body, or in the
@@ -348,6 +398,79 @@ SELF_TEST_CASES = [
                     log.error("nope", e)
                 }
             }
+        }
+        """,
+        0,
+    ),
+    # --- shapes the naming-convention match could not see (money-path when found) ---
+    (
+        "a money verb outside the original list is still a state change (sdd: initiateTransaction)",
+        """
+        class C {
+            @Incoming("x")
+            suspend fun consume(p: String) {
+                try {
+                    transactionClient.initiateTransaction(request).awaitSuspending()
+                } catch (e: Exception) {
+                    log.error("swallowed", e)
+                }
+            }
+        }
+        """,
+        1,
+    ),
+    (
+        "a state change one private-helper deep is reached (standing-order: executeSepa)",
+        """
+        class C {
+            @Incoming("x")
+            suspend fun consume(p: String) {
+                try {
+                    executeSepa(orderId, node)
+                } catch (e: Exception) {
+                    log.error("swallowed", e)
+                }
+            }
+
+            private suspend fun executeSepa(orderId: UUID, node: JsonNode) {
+                sepaClient.createPayment(idempotencyKey, request).awaitSuspending()
+            }
+        }
+        """,
+        1,
+    ),
+    (
+        "helper indirection does not invent findings when the helper changes nothing",
+        """
+        class C {
+            @Incoming("x")
+            suspend fun consume(p: String) {
+                try {
+                    formatForLog(node)
+                } catch (e: Exception) {
+                    log.error("fine", e)
+                }
+            }
+
+            private fun formatForLog(node: JsonNode): String = node.toPrettyString()
+        }
+        """,
+        0,
+    ),
+    (
+        "a recursive helper terminates instead of hanging the scan",
+        """
+        class C {
+            @Incoming("x")
+            suspend fun consume(p: String) {
+                try {
+                    walk(node)
+                } catch (e: Exception) {
+                    log.error("fine", e)
+                }
+            }
+
+            private fun walk(n: JsonNode) { walk(n) }
         }
         """,
         0,
