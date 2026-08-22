@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.10.1...billing-service-v0.10.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **card-issuance:** alert on dead-lettered outbox rows and add an operator requeue path ([#4308](https://github.com/JiRaska/open-bank-oss/issues/4308)) ([c666a4d](https://github.com/JiRaska/open-bank-oss/commit/c666a4deae12d1025722647e4813e9ccd0d86944))
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.10.0...billing-service-v0.10.1) (2026-08-19)
 
 
