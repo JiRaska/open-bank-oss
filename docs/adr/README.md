@@ -280,7 +280,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0269](0269-customer-facing-lending-pull-only-offer-surfacing.md) | Customer-facing lending: pull-only offer surfacing, one credit journey, priced only by the server | Proposed | Planned | lending,mobile-app,customer-edge,privacy-gdpr | openbank-app |
 | [0270](0270-relationship-termination-and-offboarding.md) | Bank-initiated relationship termination and customer offboarding | Proposed | Planned | onboarding,accounts,aml-sanctions,compliance | — |
 | [0271](0271-opa-gated-case-collaboration-shadow-pilot.md) | OPA-gated case collaboration shadow pilot | Proposed | Planned | ai-agents,governance,security,resilience | — |
-| [0272](0272-merge-queue-for-main.md) | Merge queue for main | Proposed | Planned | ci,governance,release-versioning | — |
+| [0272](0272-merge-queue-for-main.md) | Merge queue for main | Rejected | N/A | ci,governance,release-versioning | — |
 
 ## By tag
 
