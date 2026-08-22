@@ -452,8 +452,9 @@ export default function DocumentTemplatesPage() {
                 <Plus size={14} /> {t('Nová šablona', 'New Template')}
               </button>
             )}
-            <button className="btn btn-secondary" onClick={load} disabled={loading}>
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <button className="btn btn-secondary" type="button" onClick={load} disabled={loading}
+              aria-busy={loading} aria-label={t('Obnovit šablony dokumentů', 'Refresh document templates')}>
+              <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
           </div>} />
