@@ -3677,14 +3677,14 @@ gates:
   # NOT an admin-ui vitest test: `ui-build` fires on openbank-admin-ui/ paths, and a broken
   # diagram arrives in a DOCS-only PR that touches none of them — the #4083 absent-job shape.
   - id: mermaid-parses
-    name: "every mermaid block parses in the renderer admin-ui uses (enforced)"
+    name: "every mermaid diagram parses in the renderer admin-ui uses — .md blocks and .mmd files (enforced)"
     group: lint
     mode: enforced
     rationale: "A mermaid block that does not parse renders as a red error box in the admin-ui Service Docs page and nothing else in CI looks at that page — 40 of 248 blocks across 21 services were broken when this was written, found only because a human opened one."
     review_after: "2027-02-19"
     selftest: bash .github/scripts/check-mermaid-parses.sh --self-test
     selftest_expect: pass
-    min_subjects: 150   # 248 mermaid blocks today (2026-08-19)
+    min_subjects: 220   # 362 diagrams today (2026-08-22): 248 ```mermaid blocks + 114 .mmd files (#6495)
     run: |
       bash .github/scripts/check-mermaid-parses.sh
 
