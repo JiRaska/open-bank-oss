@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.5](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.4...admin-ui-v0.187.5) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify flaky hunter loading ([#6528](https://github.com/JiRaska/open-bank-oss/issues/6528)) ([82fa7d2](https://github.com/JiRaska/open-bank-oss/commit/82fa7d24fd3c1ec1e9364ee342f9ceca1226150d))
+
 ## [0.187.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.3...admin-ui-v0.187.4) (2026-08-22)
 
 
