@@ -65,6 +65,8 @@ class CaseThreadServiceTest {
         deadlineAtEpochMs = T0 + DEADLINE_MS,
         contestedRate = 0.0,
         contributionCount = 0,
+        budgetTokens = 200_000,
+        budgetContributions = 40,
     )
 
     private companion object {

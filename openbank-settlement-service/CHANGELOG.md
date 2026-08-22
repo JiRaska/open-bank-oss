@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.1...settlement-service-v0.7.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **settlement:** stop rejecting a settlement whose compensation failed ([#6369](https://github.com/JiRaska/open-bank-oss/issues/6369)) ([fc82f8b](https://github.com/JiRaska/open-bank-oss/commit/fc82f8b581ce43b5b1599cb082383cfd0d25eaad))
+
+## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.0...settlement-service-v0.7.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **settlement:** publish stranded-age gauges for every non-terminal status ([#6284](https://github.com/JiRaska/open-bank-oss/issues/6284)) ([f581d11](https://github.com/JiRaska/open-bank-oss/commit/f581d118d4bb4bdff78c71eed434053eb3110a26)), closes [#6037](https://github.com/JiRaska/open-bank-oss/issues/6037)
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.6.1...settlement-service-v0.7.0) (2026-08-21)
 
 

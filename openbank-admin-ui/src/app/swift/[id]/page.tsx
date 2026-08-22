@@ -75,7 +75,14 @@ export default function SwiftDetailPage() {
         actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           {message?.status && <span className="pill" style={{ background: `${STATUS_COLOR[message.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[message.status] ?? 'var(--text-muted)' }}>{message.status}</span>}
           <Link href="/swift" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
+          <button
+            className="btn btn-secondary"
+            type="button"
+            onClick={load}
+            disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit SWIFT zprávu', 'Refresh SWIFT message')}
+          >
             <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
         </div>}

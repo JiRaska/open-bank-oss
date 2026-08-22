@@ -302,6 +302,7 @@ authz:
         - sanctions.create
         - sanctions.trigger
         - sanctions.update
+        - sctInstPayment.approval.decide
         - sctInstPayment.create
         - sepaPayment.approval.decide
         - sepaPayment.create

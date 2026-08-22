@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.10.1...statement-service-v0.10.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.10.0...statement-service-v0.10.1) (2026-08-21)
+
+
+### Bug Fixes
+
+* **statement-service:** add sourceService and occurredAt to the restated event ([#5898](https://github.com/JiRaska/open-bank-oss/issues/5898)) ([7143162](https://github.com/JiRaska/open-bank-oss/commit/7143162b16121899e0b25fd671fb7287691e2339)), closes [#5256](https://github.com/JiRaska/open-bank-oss/issues/5256)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/statement-service-v0.9.0...statement-service-v0.10.0) (2026-08-20)
 
 

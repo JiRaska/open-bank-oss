@@ -586,6 +586,27 @@ gates:
       python3 .github/scripts/check-alertmanager-url-route-prefix.py --selftest
     run: |
       python3 .github/scripts/check-alertmanager-url-route-prefix.py
+  # Loki logs every query it serves, query text included, so a rule that greps for a literal
+  # over an unpinned namespace matches its own evaluation and fires forever. ENFORCED.
+  - id: loki-rule-self-match
+    name: "no Loki rule matches Loki's own query log (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Measured 2026-08-21, minutes after the ruler evaluated a rule for the first time in this
+      estate: all three unscoped rules in loki-rules-silent-failures.yaml were firing and all
+      three were false positives, every matching line coming from pod=loki-0. Those are the
+      alerts for a dead scheduler, a service that failed to boot, and the Panache assigned-@Id
+      defect — the sharpest detectors here, all guaranteed to cry wolf the moment delivery
+      worked. Excluding the ruler component is not enough: the query frontend logs the same text
+      for any Grafana panel mentioning the literal, so 66 of 78 lines survived that filter.
+    review_after: "2027-02-21"
+    min_subjects: 4   # 5 line-filtered selectors today (2026-08-21); the Falco pair is safe by
+                      # namespace pinning and must stay counted, not skipped
+    selftest: |
+      python3 .github/scripts/check-loki-rule-self-match.py --selftest
+    run: |
+      python3 .github/scripts/check-loki-rule-self-match.py
 
   - id: loki-rule-load-test
     name: "Loki rule load test (enforced)"
@@ -2400,18 +2421,23 @@ gates:
       OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
     # Falsifies the URL-major scan, which had no self-test and shipped a false positive for months:
     # it read /api/v{N} out of RAW file text, so a comment explaining the URL-major rule read as an
-    # endpoint implementing it and failed a service whose every @Path says /api/v1 (#3119). Needs no
-    # oasdiff — it exercises url_majors / own_api_majors directly, including against the two real
-    # services (psd2, customer-edge) whose distinction a naive fix breaks.
+    # endpoint implementing it and failed a service whose every @Path says /api/v1 (#3119) — it
+    # exercises url_majors / own_api_majors directly, including against the two real services
+    # (psd2, customer-edge) whose distinction a naive fix breaks.
+    #
+    # It now ALSO falsifies the classifier, the half that decides whether a PR is red and which
+    # nothing exercised. That gap is how #6380 survived: `editorial` demands a PATCH bump, the bump
+    # was itself a non-excluded diff, so adding it reclassified the change as `additive` and no
+    # version satisfied it. Those cases need oasdiff, so the selftest installs it too — and the
+    # script FAILS rather than skips when the binary is absent, since a self-test that cannot run
+    # is not a self-test. The install is shared and idempotent; both steps run in the same job.
     selftest: |
+      set -euo pipefail
+      bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --self-test
     run: |
       set -euo pipefail
-      curl -fsSL -o /tmp/oasdiff.tar.gz \
-        "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
-      echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
-      tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
-      sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
+      bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
 
   # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
@@ -3403,6 +3429,47 @@ gates:
     run: |
       python3 .github/scripts/check-pr-file-overlap.py
 
+  # AGENT PR GUARD — the control that keeps unattended agent work off the money path.
+  #
+  # Until this landed, the only thing enforcing that rule was a PreToolUse hook on the
+  # maintainer's laptop. That hook cannot exist where an agent actually runs unattended (a
+  # cloud session, a GitHub runner), and it could not see through an interpreter even
+  # locally — 17 PRs merged in one session with every one of its rules unevaluated, because
+  # the merge went through a script rather than a bare `gh pr merge`. `main`'s ruleset does
+  # not supply the control either: required_approving_review_count is 0 and the admin bypass
+  # actor is the same identity an agent authenticates as. An agent has already reached for an
+  # administrative override, unprompted, when self-approval was refused.
+  #
+  # A required check is the one shape none of that defeats: it runs wherever the PR came
+  # from, the agent that tripped it cannot clear it, and `--auto` cannot merge past it.
+  #
+  # ENFORCED, not advisory, and deliberately so. The deadlock argument that makes
+  # pr-file-overlap advisory does not apply — a human PR is out of scope entirely, so this
+  # can never red a human's work, and an agent PR it reds is one that SHOULD be waiting for a
+  # human. PR-only: on a push to main there is no author or head branch to classify.
+  #
+  # Needs GH_TOKEN, which the shard job already exports. Exit 2 = the verdict could not be
+  # computed, which is a failure and not a clean — a permission-shaped absence is
+  # byte-identical to a real one.
+  - id: agent-pr-guard
+    name: "agent PR guard (autonomous agents may not land protected paths, enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      Unattended agents open PRs here around the clock, and the only control keeping them off
+      the money path was a PreToolUse hook on one laptop — absent in every environment an
+      agent actually runs in, and blind to a merge issued from inside a script (17 PRs merged
+      in one session with all of its rules unevaluated). main's ruleset does not supply it:
+      0 required approvals, and the admin bypass actor is the identity an agent authenticates
+      as. Re-examine when four-eyes is enforced at the ruleset, which would subsume this.
+    review_after: "2027-02-22"
+    min_subjects: 25   # 33 today: 30 derived+declared service tokens + 3 governance globs
+    when: pull_request
+    selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-agent-pr-guard.py
+
   # ADR-0251. The script this falsifies is the PROOF that an independent review happened, and
   # its predecessor is the reason the control was retired: ADR-0154's "Verify the Claude
   # fallback actually reviewed" step carried the SAME `if:` as the review it verified, so
@@ -3626,7 +3693,10 @@ gates:
     mode: enforced
     selftest: python3 .github/scripts/check-ruleset-context-parity.py --self-test
     selftest_expect: pass
-    min_subjects: 3   # 5 required contexts today (2026-08-09)
+    # 5 required contexts today (2026-08-21). Not applied to a run that could not READ the
+    # ruleset: the gate prints `SUBJECTS=UNRESOLVED` there and run-gates.py skips the floor,
+    # because 0 contexts from a rate-limited API means "not measured", not "corpus collapsed".
+    min_subjects: 3
     run: |
       python3 .github/scripts/check-ruleset-context-parity.py --enforce --repo "${GITHUB_REPOSITORY:-JiRaska/open-bank-oss}"
 
@@ -3702,3 +3772,25 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-gate-selftest-declaration.py --enforce
+
+  # A rethrow only helps if the connector PARKS the record. SmallRye's default failure-strategy is
+  # `fail`, which STOPS the channel — and before #5745 only 4 of the fleet's 44 incoming channels
+  # configured a DLQ, so most of the #5698 sweep traded silent data loss for a wedged consumer while
+  # the consumers' KDocs asserted the opposite. Three ways to write this config look right and do
+  # nothing: the dotted leaf key `dead-letter-queue.topic:` (SmallRye quotes it, the connector never
+  # reads it, #686), an implicit topic name derived from the channel alone (eight services declare
+  # `party-events-in`, so they would share one DLQ — observed live today between account-service and
+  # card-issuance-service on `delegation-events-in`), and a topic with no KafkaUser Write ACL (the
+  # DLQ send is denied and the consumer wedges on the failure the DLQ was added to park). None of
+  # the three errors at boot, which is why this is a gate and not a review note.
+  - id: incoming-dlq-wiring
+    name: "every incoming channel dead-letters into an explicit topic it may write (#5745, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "The #5698 sweep's rethrows depend on a DLQ that existed on 4 of 44 channels; each of the three ways to mis-wire one is silent at boot and invisible until a consumer wedges in production."
+    review_after: "2027-02-19"
+    selftest: python3 .github/scripts/check-incoming-dlq-wiring.py --self-test
+    selftest_expect: pass
+    min_subjects: 30   # 45 incoming channels today (2026-08-21, incl. audit-service agent-audit-events-in)
+    run: |
+      python3 .github/scripts/check-incoming-dlq-wiring.py --enforce

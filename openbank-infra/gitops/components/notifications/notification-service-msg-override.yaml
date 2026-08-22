@@ -54,6 +54,14 @@ data:
     mp.messaging.incoming.party-events-in.client.id=notification-service-party-${quarkus.uuid}
     mp.messaging.incoming.party-events-in.group.id=notification-service-party
     mp.messaging.incoming.party-events-in.auto.offset.reset=earliest
+    # #5698: explicit DLQ topic for the party-events-in channel (failure-strategy:
+    # dead-letter-queue, set in application.yaml). Explicit rather than implicit because
+    # SmallRye's default name is dead-letter-topic-<channel>, and account-service already owns
+    # `dead-letter-topic-party-events-in` for ITS party-events-in channel — sharing it would put
+    # two services' dead letters in one topic and misattribute them in the existing
+    # AccountPartyEventDeadLettered alert. Dotted leaf key, so it MUST live here and not in
+    # application.yaml (issue #686, same reason as group.id above).
+    mp.messaging.incoming.party-events-in.dead-letter-queue.topic=openbank.party.events.notification.dlq
     mp.messaging.incoming.delegation-events-in.client.id=notification-service-delegation-${quarkus.uuid}
     mp.messaging.incoming.delegation-events-in.group.id=notification-service-delegation
     mp.messaging.incoming.delegation-events-in.auto.offset.reset=earliest

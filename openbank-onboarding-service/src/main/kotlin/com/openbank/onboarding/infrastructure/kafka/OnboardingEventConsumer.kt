@@ -11,6 +11,7 @@ import com.openbank.onboarding.application.usecase.OnboardingProjectionService
 import com.openbank.onboarding.domain.model.KycStage
 import com.openbank.onboarding.domain.model.OnboardingEvent
 import com.openbank.onboarding.domain.model.PartyStage
+import com.openbank.onboarding.domain.model.ProjectionResult
 import com.openbank.onboarding.infrastructure.observability.ProjectionOutcomeMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -215,7 +216,7 @@ class OnboardingEventConsumer(private val clock: Clock) {
 
     @Suppress("TooGenericExceptionCaught")
     private suspend fun project(event: OnboardingEvent, topic: String) {
-        try {
+        val result = try {
             EventRetry.withRetry(log, "[$topic] Projection of ${event::class.simpleName}", partyIdOf(event)) {
                 projection.applyEvent(event)
             }
@@ -225,7 +226,25 @@ class OnboardingEventConsumer(private val clock: Clock) {
             metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
             throw e
         }
-        metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
+        // A skip is NOT a success (#6248). Recording both as PROJECTED is what let 15 DEVICE_ENROLLED
+        // events be consumed with zero lag, reach no row, and leave every alert reading healthy.
+        when (result) {
+            ProjectionResult.APPLIED ->
+                metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
+
+            ProjectionResult.SKIPPED_UNKNOWN_PARTY -> {
+                // WARN, not ERROR: an out-of-order arrival is expected across independent consumer
+                // groups. It is logged at all because the drop is otherwise invisible per-party —
+                // the metric says how many, only this line says which.
+                log.warnf(
+                    "[%s] Dropped %s for party %s: no onboarding record exists yet",
+                    topic,
+                    event::class.simpleName,
+                    partyIdOf(event),
+                )
+                metrics.record(topic, ProjectionOutcomeMetrics.Outcome.SKIPPED_UNKNOWN_PARTY)
+            }
+        }
     }
 
     // ── JSON helpers ─────────────────────────────────────────────────────────

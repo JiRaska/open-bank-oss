@@ -118,7 +118,7 @@ interface AgentCostEntry {
   agentId: string
   model: string
   tokensLast24h: number
-  tokensLast7d: number
+  tokensLast7d: number | null
   costLast24hUsd: number
   costLast7dUsd: number
   budgetMonthlyUsd: number | null
@@ -143,8 +143,16 @@ interface AiCostsData {
   available: boolean
   collectedAt: string
   totalCostLast7dUsd: number
-  totalCostLast30dUsd: number
-  selfHostedPct: number
+  totalCostLast30dUsd: number | null
+  selfHostedPct: number | null
+  coverage: {
+    source: 'prometheus'
+    retentionHours: number
+    dataFrom: string
+    dataTo: string
+    lastSuccessfulLoad: string | null
+    windows: Record<'24h' | '7d' | '30d', { requestedHours: number; availableHours: number; partial: boolean }>
+  }
   agents: AgentCostEntry[]
   anomalies: FinOpsAnomaly[]
 }
@@ -429,8 +437,11 @@ function FinOpsContent() {
             {t('Rozpad nákladů', 'Cost allocation')}
           </Link>
           <button
+            type="button"
             onClick={load}
             disabled={loading}
+            aria-busy={loading}
+            aria-label={t('Obnovit FinOps náklady', 'Refresh FinOps costs')}
             style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px',
               borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--surface)',
               color: 'var(--text-secondary)', fontSize: '12px', cursor: loading ? 'wait' : 'pointer' }}
@@ -962,13 +973,29 @@ function FinOpsContent() {
                       {t('Celkem AI náklady — posledních 7 dní', 'Total AI costs — last 7 days')}
                     </div>
                   </div>
-                  <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
-                    background: '#dcfce7', color: '#16a34a' }}>
-                    {t(`${aiCosts.selfHostedPct}% self-hosted vLLM`, `${aiCosts.selfHostedPct}% self-hosted vLLM`)}
-                  </span>
-                  <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-                    {t(`${100 - aiCosts.selfHostedPct}% Anthropic API`, `${100 - aiCosts.selfHostedPct}% Anthropic API`)}
-                  </span>
+                  {aiCosts.selfHostedPct == null ? (
+                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                      {t('Rozdělení podle poskytovatele bridge neexportuje.', 'Provider split is not exported by the bridge.')}
+                    </span>
+                  ) : (
+                    <>
+                      <span style={{ fontSize: '11px', fontWeight: 700, padding: '3px 10px', borderRadius: '20px',
+                        background: '#dcfce7', color: '#16a34a' }}>
+                        {aiCosts.selfHostedPct}% self-hosted vLLM
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+                        {100 - aiCosts.selfHostedPct}% Anthropic API
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div role="status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', margin: '-10px 0 16px' }}>
+                  {t('Pokrytí', 'Coverage')}: {aiCosts.coverage.windows['7d'].availableHours}h / 7d
+                  {' · '}{t('retence', 'retention')} {aiCosts.coverage.retentionHours}h
+                  {' · '}{t('poslední úspěšné načtení', 'last successful load')}:{' '}
+                  {aiCosts.coverage.lastSuccessfulLoad
+                    ? new Date(aiCosts.coverage.lastSuccessfulLoad).toLocaleString(locale)
+                    : t('žádné', 'none')}
                 </div>
 
                 {/* Per-agent rows */}

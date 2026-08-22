@@ -5,7 +5,7 @@ info:
   title: Consent Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.0 -> 1.1): additive
   # endpoint only (PATCH /approvals/{id}, ADR-0155 four-eyes) — no breaking change.
-  version: 1.5.0
+  version: 1.6.0
   description: >-
     Data sharing consent lifecycle — create, activate, reject, revoke, validate. PATCH
     /approvals/{id} decides a four-eyes approval paused by the platform's ADR-0155 maker-checker
@@ -101,8 +101,17 @@ paths:
           required: true
           schema:
             type: string
-            enum: [MARKETING_COMMS_EMAIL, MARKETING_COMMS_PUSH, MARKETING_COMMS_INAPP,
-                   ACCOUNTS_READ, BALANCES_READ, TRANSACTIONS_READ, PAYMENTS_INITIATE]
+            # Must list EVERY ConsentScope value: the api gate (issue #5962) compares this enum
+            # against the Kotlin one and fails on either direction of drift. A partial list here
+            # advertised a smaller consent vocabulary than the service actually accepts.
+            enum: [ACCOUNTS_READ, BALANCES_READ, TRANSACTIONS_READ, STATEMENTS_READ,
+                   PAYMENT_ACCOUNTS_READ, STANDING_ORDERS_READ, DIRECT_DEBITS_READ,
+                   PAYMENTS_INITIATE, PAYMENTS_STATUS_READ, DOMESTIC_PAYMENT_INITIATE,
+                   SIPO_PAYMENT_INITIATE, FUNDS_CONFIRMATION,
+                   AGENT_QUERY, AGENT_INITIATE, AGENT_NOTIFY, AGENT_ANALYZE,
+                   TELEMETRY_RUM,
+                   MARKETING_COMMS_EMAIL, MARKETING_COMMS_PUSH, MARKETING_COMMS_INAPP,
+                   CREDIT_OFFERS, CREDIT_PROFILE_USE]
       responses:
         '200':
           description: Whether the consent exists, is active now, and covers the scope

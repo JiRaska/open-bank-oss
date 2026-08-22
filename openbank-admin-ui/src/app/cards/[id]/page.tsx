@@ -171,8 +171,8 @@ export default function CardDetailPage() {
         </div>
 
         {loading ? (
-          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-            <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
+          <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+            <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} />
             <div>{waking
               ? t('Služba se probouzí…', 'The service is waking up…')
               : t('Načítám kartu…', 'Loading the card…')}</div>
@@ -193,7 +193,7 @@ export default function CardDetailPage() {
               actions={<div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
                 <CardStatusChip status={card.status} current />
                 {(canManage || canBlock) && <CardTransitionButtons card={card} busy={ops.busy} canManage={canManage} canBlock={canBlock} onSelect={onSelectTransition} />}
-                <button className="btn btn-ghost btn-sm" onClick={reload} disabled={ops.busy !== null}>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={ops.busy !== null} aria-label={t('Obnovit kartu', 'Refresh card')}>
                   <RefreshCw size={12} aria-hidden="true" /> {t('Obnovit', 'Refresh')}
                 </button>
               </div>}

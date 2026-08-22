@@ -152,8 +152,15 @@ export default function SecurityPage() {
                 <Shield size={12} /> {platformGrade} · {avgScore}/100
               </span>
             )}
-            <button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
+            <button
+              onClick={load}
+              disabled={loading}
+              type="button"
+              aria-busy={loading}
+              aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}
+              className="btn btn-secondary btn-sm"
+            >
+              <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
           </div>}

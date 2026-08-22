@@ -2,7 +2,7 @@
 date: 2026-08-05
 decision-status: proposed
 delivery-status: partial
-followup: "#5708 — the backend read model and REST surface are live; the admin-ui half of the thread view is the remainder"
+followup: "#5708 — backend read model is live; the read-only Control Room UI and evidence provenance are in delivery"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -14,6 +14,16 @@ summary: "The admin-ui swarm thread view is a read-only projection of Temporal c
 # ADR-0246 — Admin-ui swarm thread view over Temporal case history
 
 **Delivery note (2026-08-19).** The backend half is live on `main` while this ADR read `delivery-status: planned`: `CaseThread` (*"Read model for the ADR-0246 swarm thread view (Phase 2, #4185)"*), `CaseThreadProjection` (*"Pure projection from persistence rows to the ADR-0246 thread view"*) and `CaseCoordinatorResource`'s ADR-0246 thread endpoint, in `openbank-case-coordinator-agent`. The admin-ui rendering this ADR is named for is the remaining half, which is why this is `partial` and not `shipped`. Found by the code->ADR evidence read described in #5708.
+
+**Delivery clarification (2026-08-22).** `agents.yaml` is a charter registry, not
+runtime proof. A solid topology edge may be rendered only from an observed durable
+record: a persisted contribution, an event published by the transactional outbox,
+a Temporal-history observation, or an OPA allow decision. The current projection
+exposes the first two with source, evidence id, correlation id, observation time
+and precise stage. Persistence is not mislabeled as a separately observed Temporal
+consumption event. An outbox `SENT` status proves publication to the broker, not
+consumption by the HITL inbox. Declared-only relationships remain non-runtime
+claims and never become solid edges.
 
 
 ## Context
@@ -50,20 +60,20 @@ Constraints inherited from the estate:
 
 ## Decision
 
-**D1 — The thread view is a read-only projection of Temporal workflow history.**
-The swarm thread page renders the case workflow's history — case opened,
+**D1 — The thread view is a read-only projection of durable case runtime evidence.**
+The swarm thread page renders the case workflow's persisted read model and
+transactional-outbox evidence — case opened,
 contribution accepted/rejected (with contributor principal id and type), step
 pre-empted (`superseded-by-evidence`), budget state, synthesis, outcome — mapped
-one-to-one from history events. No new data model, no new write path, no second
-store to drift from the authoritative history.
+one-to-one from observed records. A later Temporal-history adapter may add another
+evidence source, but absence of that adapter is shown honestly. No new write path
+or second orchestration store is introduced.
 
-**D2 — Rendering is a chronological thread, not a graph.** The v1 surface is a
-chat-like timeline with per-agent attribution (avatar/charter, contribution type,
-timestamp, cited contribution ids per ADR-0244 D6 merge semantics). Temporal
-history is an ordered event log, so a thread maps onto it exactly, while a DAG
-would need a graph library (a new dependency) to render structure the history does
-not inherently have. An interactive flow explainer in the spirit of ADR-0208 may
-follow as a later enhancement; it is not the v1.
+**D2 — Rendering offers a thread, evidence timeline and minimal topology.** The
+thread remains the canonical chronological view with per-agent attribution. The
+topology is a dependency-free list of observed edges, not a workflow designer or
+a second control plane. Solid edges require runtime evidence; charter-only claims
+are never promoted to facts. Each observation has expandable provenance.
 
 **D3 — The view lives under `/iaops` and reuses the BFF path.** The page sits in
 the agent-ops information architecture (`/iaops/cases`, drill-down
@@ -106,9 +116,9 @@ as three different states.
 
 ## Consequences
 
-- Operators gain visibility into swarm orchestration with zero new data
-  infrastructure: the projection reads Temporal history the platform already
-  writes.
+- Operators gain visibility into swarm orchestration with zero new orchestration
+  infrastructure: the projection exposes durable records the case coordinator
+  already writes.
 - v1 needs one read port serving the history projection to the BFF — the only new
   server-side surface, read-only by construction.
 - The thread view becomes the natural link target for proposals in the ADR-0227

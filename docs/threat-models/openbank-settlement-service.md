@@ -175,6 +175,25 @@ replacing the former in-memory stub), so settlement state is durable across rest
    Recovering those funds is a collections/dispute process, not an API call — this is a real
    property of the world, and the design records it rather than smoothing it into a success.
 
+   Recording it is not the same as seeing it, and for a time it was only recorded:
+   `SettlementStrandedGauge` published a **hand-kept** list of non-terminal statuses written before
+   #6037, so `REVERSAL_FAILED` and `LEDGER_REVERSAL_UNSUPPORTED` had no age series at all and
+   neither `SettlementStrandedMidSaga` nor `SettlementStuckAfterCompensation` could fire for them —
+   the two states meaning *the money did not come back* were the two nothing could observe. The
+   list is now derived from `SettlementStatus`, `LEDGER_REVERSAL_UNSUPPORTED` joins the
+   `SettlementStuckAfterCompensation` warning, and `REVERSAL_FAILED` has its own **critical**
+   `SettlementReversalFailed` rule — separated because the other rule's premise ("funds are safe,
+   only the record is wrong") is false here.
+
+   Nor was it enough to publish the state: `SettlementWorkflowImpl` called `rejectSettlement`
+   unconditionally after the compensation loop, so the row was overwritten to `REJECTED` within
+   seconds — a terminal status asserting a clean unwind while funds were outstanding, and a row
+   the age gauge never saw. `REJECTED` is now written **only when every compensation succeeded**
+   (#6286); a settlement whose compensation was refused rests in `REVERSAL_FAILED`, non-terminal
+   and alerting, until the collections/dispute path resolves it. The residual risk that remains is
+   that this resolution is an operator action with no workflow behind it, so the alert stays lit
+   for as long as the obligation does — deliberately.
+
 7. **A debit applied by balance-service but not observed by settlement-service is not compensated
    (pre-existing, not addressed by #6037).** `SettlementWorkflowImpl` registers the `reverseDebit`
    compensation only *after* `debitPayer` returns, so a debit that balance-service applied while the

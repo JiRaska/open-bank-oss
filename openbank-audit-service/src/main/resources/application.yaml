@@ -85,6 +85,21 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      # D5 provenance is isolated from the legacy mixed stream: its handler only acknowledges a
+      # Kafka record after append-only persistence succeeds.
+      agent-audit-events-in:
+        connector: smallrye-kafka
+        enabled: ${AUDIT_AGENT_AUDIT_KAFKA_ENABLED:false}
+        client.id: audit-service-agent-provenance-${quarkus.uuid}
+        topic: openbank.agent.audit.events
+        # #5745, same reasoning as `audit-events-in` below. This channel needs it MORE, not less:
+        # it is the strict path — AgentAuditConsumer acknowledges only after append-only
+        # persistence succeeds, so it rethrows by design, and SmallRye's default `fail` would stop
+        # the D5 provenance stream on the first bad record. Explicit and NESTED (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.audit.agent-audit-events-in
+        value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
       # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
       # override loaded via QUARKUS_CONFIG_LOCATIONS) for where they're set instead. Summary:
@@ -114,6 +129,17 @@ mp:
       # mechanism is the CORRECT choice for a hyphenated channel like `audit-events-in`, not
       # merely a stylistic alternative.
       audit-events-in:
+        # #5745: rethrow only helps if the connector PARKS the record. SmallRye's DEFAULT
+        # failure-strategy is `fail`, which STOPS the channel — so a consumer that rethrows
+        # without this line trades silent data loss for a wedged partition. The topic name is
+        # EXPLICIT because SmallRye's implicit `dead-letter-topic-<channel>` is derived from the
+        # channel name alone, and channel names repeat across services (party-events-in exists in
+        # eight) — two services would dead-letter into one topic. NESTED, not the dotted leaf
+        # `dead-letter-queue.topic:` — SmallRye's YAML source quotes a leaf key containing a dot,
+        # registering it as ..."dead-letter-queue.topic" which the connector never reads (#686).
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.audit.audit-events-in
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
         # clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160 #996

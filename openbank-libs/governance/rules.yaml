@@ -2669,6 +2669,7 @@ authz:
         - sanctions.create
         - sanctions.trigger
         - sanctions.update
+        - sctInstPayment.approval.decide
         - sctInstPayment.create
         - sepaPayment.approval.decide
         - sepaPayment.create
@@ -2910,6 +2911,7 @@ shared_m2m_matrix_write_grants:
     - sanctions.create
     - sanctions.trigger
     - sanctions.update
+    - sctInstPayment.approval.decide
     - sctInstPayment.create
     - sepaPayment.approval.decide
     - sepaPayment.create
@@ -2995,3 +2997,63 @@ pr_file_overlap:
     - ".github/workflows/ci.yml"
     - ".github/workflows/auto-deploy.yml"
     - "openbank-infra/gitops/"
+
+# ---------------------------------------------------------------------------
+# AUTONOMOUS AGENT PULL REQUESTS (gate: agent-pr-guard, enforced)
+#
+# The repo runs scheduled, unattended agents that open PRs around the clock. Until now the
+# only thing keeping unattended work off the money path was a PreToolUse hook on the
+# maintainer's laptop — which does not exist in a cloud session or on a runner, and which a
+# command-string matcher cannot see through anyway. `main`'s ruleset does not supply the
+# control either: required_approving_review_count is 0 and the admin bypass actor is the
+# same identity an agent authenticates as.
+#
+# So the rule lives here and is enforced as a required check. A red required check cannot be
+# cleared by the agent that tripped it and cannot be cleared by `--auto`.
+#
+# The PROTECTED SERVICE SET IS DERIVED from money_path_services above (prefix/suffix
+# stripped), so onboarding a money-path service extends the guard with no edit here.
+# `extra_protected_tokens` is a hand-kept list of external FACTS — services that are high
+# blast radius without being money-path by that list's definition. The gate's SCOPE is not
+# hand-kept: an undeclared machine account fails the check rather than passing it.
+autonomous_agent_prs:
+  detect:
+    - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
+  require:
+    - an agent-authored PR that touches a protected path fails the check and waits for a human
+    - a machine account in neither agent_accounts nor automation_accounts fails the check — it must be classified first
+    - an unreadable author, branch or file list is exit 2 (undetermined), never a pass
+  gate: agent-pr-guard
+  enforced: block
+  ci_producer: .github/scripts/check-agent-pr-guard.py
+  # Autonomous coding agents. Adding a login here is a governance-path change, which this
+  # very guard blocks an agent from making.
+  agent_accounts:
+    - openbank-agent-bot[bot]
+  # Deterministic automation. These legitimately touch money-path paths and their content is
+  # generated rather than authored; blocking them deadlocks the release queue for no safety.
+  automation_accounts:
+    - release-please[bot]
+    - openbank-gitops-bot[bot]
+    - dependabot[bot]
+    - github-actions[bot]
+  # Coverage for an agent running under a HUMAN account, which is the state today — every
+  # open PR in this repo is authored by the maintainer's login. Without this an identity-only
+  # scope would cover nothing at all.
+  agent_branch_prefixes:
+    - agent/
+  # High blast radius, not money-path by the list above.
+  extra_protected_tokens:
+    - payment
+    - kyc
+    - party
+    - card-issuance
+    - aml
+    - tax
+    - dispute
+  # Governance sources and gate machinery: a gate can be defanged by editing its script
+  # without touching any YAML, so the scripts directory is in scope alongside the manifests.
+  governance_path_globs:
+    - openbank-libs/governance/*
+    - .github/gates/*
+    - .github/scripts/*

@@ -8,6 +8,19 @@ exercised DR drill, tracked as TTL'd attestations, never faked here. -->
 > Operational runbook for the `tax-reporting` service. Data domain **platform**,
 > classification **confidential**, datastore **PostgreSQL**.
 
+## Deployment status — NOT DEPLOYED
+
+**This service has no workload anywhere in `openbank-infra/gitops/`** — no Deployment,
+no Rollout, and therefore no namespace, no CNPG cluster, no NetworkPolicy and no
+PodMonitor coverage. It is a released component (it has a `version.txt`) that has never
+run, so **every `kubectl` command below names a namespace that does not exist** and every
+procedure here is a plan rather than a rehearsed one.
+
+The production-readiness matrix reports it as **NOT-DEPLOYED** rather than NO-GO for the
+same reason: the cells it fails are consequences of the absent workload, not controls
+someone skipped, and none of them can be closed by a repo change. Whether this service
+should be deployed is an owner decision — see the service's own `CLAUDE.md`.
+
 ## Service identity
 
 | Field | Value |
