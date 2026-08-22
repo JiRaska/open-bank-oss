@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.2](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.1...settlement-service-v0.7.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **settlement:** stop rejecting a settlement whose compensation failed ([#6369](https://github.com/JiRaska/open-bank-oss/issues/6369)) ([fc82f8b](https://github.com/JiRaska/open-bank-oss/commit/fc82f8b581ce43b5b1599cb082383cfd0d25eaad))
+
 ## [0.7.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.7.0...settlement-service-v0.7.1) (2026-08-21)
 
 
