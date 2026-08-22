@@ -156,8 +156,8 @@ export default function TransactionsPage() {
             <Filter size={13} />
             {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax,channel].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
           </button>
-          <button className="btn btn-primary" onClick={() => search()} disabled={loading}>
-            {loading ? <RefreshCw size={13} className="animate-spin" /> : <Search size={13} />}
+          <button type="button" className="btn btn-primary" onClick={() => search()} disabled={loading} aria-busy={loading} aria-label={loading ? t('Vyhledávání transakcí', 'Searching transactions') : t('Vyhledat transakce', 'Search transactions')}>
+            {loading ? <RefreshCw size={13} aria-hidden="true" className="animate-spin" /> : <Search size={13} aria-hidden="true" />}
             {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
           </button>
         </div>
