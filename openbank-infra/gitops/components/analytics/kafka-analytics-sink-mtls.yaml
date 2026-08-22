@@ -69,6 +69,11 @@ spec:
       - resource: { type: topic, name: openbank.engagement.events, patternType: literal }
         operations: [Read, Describe]
         host: "*"
+      # ADR-0269 rule 8 authenticated credit-journey funnel telemetry (customer-edge's
+      # CreditFunnelPublisher). Separate topic from openbank.onboarding.funnel.events on purpose.
+      - resource: { type: topic, name: openbank.credit.funnel.events, patternType: literal }
+        operations: [Read, Describe]
+        host: "*"
       - resource: { type: group, name: analytics-sink, patternType: literal }
         operations: [Read]
         host: "*"

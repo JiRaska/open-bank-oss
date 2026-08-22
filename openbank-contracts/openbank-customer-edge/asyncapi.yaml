@@ -1,0 +1,415 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS;
+# `check-event-contract-code-agreement.py` additionally checks channel addresses against produced
+# topics (both directions) and — where it can — message names/payloads against the producing code.
+#
+# WHY THIS CONTRACT HAS NO `components.messages` (unlike delegation/notification/engagement).
+# Every one of customer-edge's four producers (`EdgeAuditPublisher`, `OnboardingFunnelPublisher`,
+# `FeedbackPublisher`, `CreditFunnelPublisher`) builds its envelope by hand with Jackson's
+# `ObjectNode.put(...)` calls inside an ordinary `class ...Publisher(...)`, and stamps the event
+# type from a `companion object { const val EVENT_TYPE = "..." }` referenced by NAME
+# (`node.put("eventType", EVENT_TYPE)`), not written as a string literal at the call site. That is
+# neither of the two shapes `check-event-contract-code-agreement.py` can read: not a `data class`
+# primary constructor (`parse_event_classes`), and not the hand-built-outbox idiom of a bare
+# `eventType = "literal"` argument or an `OutboxMessage(...)` call (`parse_outbox_literals`) — the
+# publishers here call `Emitter.send(Record.of(...))` directly, no `OutboxMessage`. The gate's own
+# `class_body()` docstring names two of these four producers as exactly this shape and says so
+# is not a defect today "only because that service has no contract yet" — this file is that
+# contract, so the gap the docstring predicted is real: declaring a `components.messages` entry
+# for any of the four event types below would make check B report "message declared in the
+# contract but no class declares that event type", a false positive against code the gate simply
+# cannot parse, not a real disagreement. So the wire shape is documented in prose, per channel,
+# below — precise enough for a consumer author, without asserting something machine-verifiable
+# that the checker cannot actually verify. If a future PR moves these publishers onto a `data
+# class` payload or the `OutboxMessage` idiom, add `components.messages` then and this note goes
+# with it.
+#
+# Channels/topics below are DERIVED from `openbank-customer-edge/src/main/resources/application.yaml`
+# (`mp.messaging.outgoing.*`), the same file `check-event-contract-code-agreement.py` reads for
+# check A. All four are best-effort (a Kafka outage degrades to an ERROR log, never a customer-
+# facing failure) and all four use the shared `AnalyticsEnvelope`-ish shape (`eventType`,
+# `aggregateType`, `aggregateId`, `occurredAt`, `sourceService`, plus event-specific fields) that
+# analytics-sink already ingests generically for the three it consumes.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Customer Edge — events
+  version: 1.0.0
+  description: |
+    customer-edge produces four best-effort Kafka streams, none of them the fleet's usual
+    `DomainEvent` subtype: a compliance audit trail (ADR-0086), an anonymous pre-session
+    onboarding-funnel stream (ADR-0069 Phase 2), authenticated in-app screen feedback (ADR-0192),
+    and an authenticated credit-journey funnel stream (ADR-0269 rule 8). Every emit is
+    best-effort by design — telemetry and audit must never turn into a 5xx for the customer — so
+    each publisher catches everything and logs rather than propagates.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS: customer-edge holds
+      a dedicated least-privilege KafkaUser (Write + Describe on each topic below), configured in
+      `openbank-infra/gitops/components/customer-edge/kafka-customer-edge-mtls.yaml`.
+
+channels:
+  customerAudit:
+    address: openbank.customer.audit
+    title: Structured audit trail of customer-initiated actions (ADR-0086, GDPR Art. 30, DORA Art. 17)
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/customer-edge/kafka-topic.yaml`. Consumed by
+      audit-service into its hash-chained log.
+
+      **Producer:** `EdgeAuditPublisher.emit`, called from `KafkaCustomerAuditEventPublisher`
+      (the `CustomerAuditEventPublisher` port adapter) on every money-moving or identity-changing
+      route. The edge is the only place downstream of Keycloak that still knows the real customer
+      identity, so without this record the initiator is unreconstructable from the operational
+      stores.
+
+      **Partition key:** `partyId` — the audited party's id, so one customer's actions stay
+      ordered relative to each other.
+
+      **Wire shape** (hand-built `ObjectNode`, not a `data class` — see this file's header):
+      ```
+      {
+        "eventType":     string   // see the `eventType` values below
+        "aggregateType": "CUSTOMER_ACTION"
+        "partyId":       string   // also the partition key
+        "actorId":       string   // == partyId; the audited actor is always the authenticated customer
+        "actorType":     "CUSTOMER"
+        "operation":     string   // the raw action, e.g. "payments.domestic"
+        "result":        string   // outcome, e.g. "SUCCESS" / "FAILURE"
+        "resourceId":    string?  // present only when the action names a resource
+        "sourceService": "customer-edge"
+        "occurredAt":    string   // Instant.toString(), ISO-8601
+        // ...plus zero or more flat string fields from `details` (per-route, e.g. "reason",
+        // "accountType"), merged at the top level by EdgeAuditPublisher.emit — there is no fixed
+        // set; `details` is a free-form `Map<String, String?>` at each call site.
+      }
+      ```
+
+      **`eventType` values.** Two shapes, both routed through the one `EdgeAuditPublisher.emit`:
+
+        1. Most routes pass a LITERAL string directly (`audit.emit(eventType = "CUSTOMER_...", ...)`
+           in `CustomerEdgeResource.kt` / `OnboardingResumeService.kt`) — one message per literal
+           below, since each is independently greppable in `check-event-contract-code-agreement.py`'s
+           hand-built-outbox scan.
+        2. `KafkaCustomerAuditEventPublisher` (the generic `CustomerAuditEventPublisher` port
+           adapter) instead DERIVES `"CUSTOMER_${action.replace('.', '_').uppercase()}"` from
+           whatever `action` its caller passes — an open-ended value built at runtime, not a
+           literal, so no single message name can represent it. Not exempted under
+           `x-openbank-not-published`: it plainly IS published, on this channel; it is simply
+           dynamic rather than closed. Audit-service's consumer already parses any `CUSTOMER_*`
+           prefix as `aggregateType=CUSTOMER_ACTION` regardless of the suffix.
+      messages:
+        CustomerAccountOpened: { $ref: '#/components/messages/CustomerAccountOpened' }
+        CustomerCardActionRefused: { $ref: '#/components/messages/CustomerCardActionRefused' }
+        CustomerIdentityMatched: { $ref: '#/components/messages/CustomerIdentityMatched' }
+        CustomerIdentityPending: { $ref: '#/components/messages/CustomerIdentityPending' }
+        CustomerOnboardingRejected: { $ref: '#/components/messages/CustomerOnboardingRejected' }
+        CustomerOnboardingResumedCreated: { $ref: '#/components/messages/CustomerOnboardingResumedCreated' }
+        CustomerOnboardingResumedLinked: { $ref: '#/components/messages/CustomerOnboardingResumedLinked' }
+        CustomerPaymentInitiated: { $ref: '#/components/messages/CustomerPaymentInitiated' }
+        CustomerPaymentRefused: { $ref: '#/components/messages/CustomerPaymentRefused' }
+        CustomerPocketConverted: { $ref: '#/components/messages/CustomerPocketConverted' }
+        CustomerPocketExchanged: { $ref: '#/components/messages/CustomerPocketExchanged' }
+        CustomerRegistered: { $ref: '#/components/messages/CustomerRegistered' }
+        CustomerTransferInitiated: { $ref: '#/components/messages/CustomerTransferInitiated' }
+        LoanApplicationSubmitted: { $ref: '#/components/messages/LoanApplicationSubmitted' }
+        ScaDecisionRecorded: { $ref: '#/components/messages/ScaDecisionRecorded' }
+        ScaDeviceEnrolled: { $ref: '#/components/messages/ScaDeviceEnrolled' }
+        StandingOrderCreated: { $ref: '#/components/messages/StandingOrderCreated' }
+
+  onboardingFunnelEvents:
+    address: openbank.onboarding.funnel.events
+    title: Anonymous pre-session onboarding-funnel telemetry (ADR-0069 Phase 2)
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/customer-edge/kafka-topic.yaml`. Consumed by
+      analytics-sink into the ClickHouse bronze layer for the admin cockpit's conversion board.
+
+      **Producer:** `OnboardingFunnelPublisher.emit`. Deliberately a SEPARATE, anonymously-postable
+      stream from `credit.funnel.events` below: onboarding's first steps (welcome, identity, email,
+      consent) happen before any Keycloak session exists, so there is no authenticated party to key
+      on yet.
+
+      **Partition key:** `sessionId` — a client-generated onboarding session id (never PII); every
+      event of one attempt collapses onto one funnel row.
+
+      **Wire shape** (hand-built `ObjectNode`, not a `data class` — see this file's header):
+      ```
+      {
+        "eventType":     "onboarding.funnel.step"
+        "aggregateType": "ONBOARDING_FUNNEL"
+        "aggregateId":   string   // == sessionId, also the partition key
+        "sourceService": "customer-edge"
+        "schemaVersion": 1
+        "occurredAt":    string   // Instant.toString(), ISO-8601
+        "payload": {
+          "sessionId": string
+          "step":      string   // closed allow-list: WELCOME, IDENTITY, EMAIL, AGREEMENT, PASSKEY, SIGN
+          "action":    string   // closed allow-list: STEP_VIEWED, STEP_COMPLETED, HOLD_STARTED,
+                                 // HOLD_ABANDONED, KYC_METHOD_CHOSEN, SIGN_ATTEMPT, SIGN_SUCCESS, SIGN_FAIL
+          // ...plus zero or more caller-supplied string attributes (OnboardingFunnelPublisher.emit's
+          // `attributes` map), merged into payload — no fixed set beyond sessionId/step/action.
+        }
+      }
+      ```
+
+  feedbackEvents:
+    address: openbank.feedback.events
+    title: In-app screen-feedback submissions (ADR-0192)
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/customer-edge/kafka-topic.yaml`. Consumed by
+      analytics-sink into the ClickHouse bronze layer.
+
+      **Producer:** `FeedbackPublisher.emit`, shaped deliberately like `OnboardingFunnelPublisher`
+      so analytics-sink's generic ingest needs no new consumer for a new stream.
+
+      Carries feedback METADATA only — `screenshotKey` is an object-store key, never image bytes;
+      the PNG lives in S3 under a 90-day lifecycle rule (ADR-0192).
+
+      **Partition key:** `reference` — the feedback submission's own id.
+
+      **Wire shape** (hand-built `ObjectNode`, not a `data class` — see this file's header):
+      ```
+      {
+        "eventType":     "feedback.submitted"
+        "aggregateType": "SCREEN_FEEDBACK"
+        "aggregateId":   string   // == reference, also the partition key
+        "sourceService": "customer-edge"
+        "schemaVersion": 1
+        "occurredAt":    string   // Instant.toString(), ISO-8601
+        "payload": {
+          "reference":        string
+          "partyId":          string   // from the bearer token, never the request body
+          "screenId":         string
+          "category":         string   // closed allow-list: BUG, IDEA, CONFUSING
+          "comment":          string
+          "platform":         string?
+          "appVersion":       string?
+          "osVersion":        string?
+          "locale":           string?
+          "theme":            string?
+          "sessionId":        string?
+          "screenshotKey":    string?  // absent (not empty-string) when no screenshot was sent
+          "screenshotBytes":  integer
+          "screenshotStatus": string
+        }
+      }
+      ```
+
+  creditFunnelEvents:
+    address: openbank.credit.funnel.events
+    title: Authenticated credit-journey funnel telemetry (ADR-0269 rule 8)
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      declared in `openbank-infra/gitops/components/customer-edge/kafka-topic.yaml` alongside the
+      other three customer-edge streams. Consumed by analytics-sink into the ClickHouse bronze
+      layer.
+
+      **Producer:** `CreditFunnelPublisher.emit`. Deliberately a SEPARATE topic from
+      `onboarding.funnel.events`: credit steps happen inside an authenticated session and describe
+      "this person is looking at borrowing money" — routing that through the anonymous, publicly
+      postable onboarding stream would turn instrumentation into a leak/injection channel. This
+      stream is written only from an authenticated request and keyed by the party the JWT already
+      proved.
+
+      **What this deliberately does not measure:** no `CONVERTED`, no `ACCEPTED`, no `SOLD` action
+      exists in the closed vocabulary below. ADR-0269's programme metrics are self-activation,
+      opt-out-within-30-days, affordability declines, delinquency, and offers shown without a prior
+      customer action — not acceptance rate. A vocabulary able to express conversion is a
+      vocabulary someone would eventually optimise.
+
+      **Partition key:** `partyId` — the authenticated customer, same pseudonymous id the silver
+      layer already holds. Unlike the onboarding funnel, cross-session questions ("did they come
+      back after switching offers on") are in scope, so the stream is keyed by identity rather than
+      by session.
+
+      **Wire shape** (hand-built `ObjectNode`, not a `data class` — see this file's header):
+      ```
+      {
+        "eventType":     "credit.funnel.step"
+        "aggregateType": "CREDIT_FUNNEL"
+        "aggregateId":   string   // == partyId, also the partition key
+        "sourceService": "customer-edge"
+        "schemaVersion": 1
+        "occurredAt":    string   // Instant.toString(), ISO-8601
+        "payload": {
+          "partyId": string
+          "step":    string   // closed allow-list: CONSENT, HEALTH, FINANCING, QUOTE, APPLICATION
+          "action":  string   // closed allow-list: VIEWED, CONSENT_GRANTED, CONSENT_WITHDRAWN,
+                               // QUOTE_REQUESTED, QUOTE_SUPPRESSED, APPLICATION_STARTED,
+                               // APPLICATION_ABANDONED
+        }
+      }
+      ```
+
+operations:
+  publishCustomerAudit:
+    action: send
+    title: Publish a customer-initiated action to the audit trail
+    channel:
+      $ref: '#/channels/customerAudit'
+    description: '**Producer:** `openbank-customer-edge` (`EdgeAuditPublisher`). **Consumer:** `audit-service`.'
+
+  publishOnboardingFunnelEvents:
+    action: send
+    title: Publish an onboarding-funnel transition
+    channel:
+      $ref: '#/channels/onboardingFunnelEvents'
+    description: '**Producer:** `openbank-customer-edge` (`OnboardingFunnelPublisher`). **Consumer:** `analytics-sink`.'
+
+  publishFeedbackEvents:
+    action: send
+    title: Publish a screen-feedback submission
+    channel:
+      $ref: '#/channels/feedbackEvents'
+    description: '**Producer:** `openbank-customer-edge` (`FeedbackPublisher`). **Consumer:** `analytics-sink`.'
+
+  publishCreditFunnelEvents:
+    action: send
+    title: Publish a credit-journey funnel transition
+    channel:
+      $ref: '#/channels/creditFunnelEvents'
+    description: '**Producer:** `openbank-customer-edge` (`CreditFunnelPublisher`). **Consumer:** `analytics-sink`.'
+
+components:
+  schemas:
+    auditEventPayload:
+      type: object
+      description: |
+        The flat `ObjectNode` `EdgeAuditPublisher.emit` builds — see `customerAudit`'s own
+        description for the full field list including the free-form `details` passthrough.
+      required: [eventType, aggregateType, partyId, actorId, actorType, operation, result, sourceService, occurredAt]
+      properties:
+        eventType: { type: string }
+        aggregateType: { type: string, const: CUSTOMER_ACTION }
+        partyId: { type: string }
+        actorId: { type: string }
+        actorType: { type: string, const: CUSTOMER }
+        operation: { type: string }
+        result: { type: string }
+        resourceId: { type: string }
+        sourceService: { type: string, const: customer-edge }
+        occurredAt: { type: string, format: date-time }
+
+  messages:
+    CustomerAccountOpened:
+      name: CUSTOMER_ACCOUNT_OPENED
+      title: Account opened during onboarding
+      summary: 'CustomerEdgeResource.kt: `POST` account-open, after the upstream account-service call.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerCardActionRefused:
+      name: CUSTOMER_CARD_ACTION_REFUSED
+      title: A card action was refused for missing or rejected SCA
+      summary: 'CustomerEdgeResource.kt: the SCA gate ahead of a card action; `result` is always DENIED.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerIdentityMatched:
+      name: CUSTOMER_IDENTITY_MATCHED
+      title: A new Keycloak sub resolved to an existing party (ADR-0072 §5)
+      summary: 'CustomerEdgeResource.kt: identity resolution matched an existing golden-record party.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerIdentityPending:
+      name: CUSTOMER_IDENTITY_PENDING
+      title: Identity resolution parked for manual verification (ADR-0072 §6)
+      summary: 'CustomerEdgeResource.kt: no automatic match; a case was opened and the caller told NEEDS_MANUAL_VERIFICATION.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerOnboardingRejected:
+      name: CUSTOMER_ONBOARDING_REJECTED
+      title: A four-eyes auto-resume verdict rejected the pending onboarding
+      summary: 'OnboardingResumeService.kt `resume`: the reviewer verdict was REJECT.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerOnboardingResumedCreated:
+      name: CUSTOMER_ONBOARDING_RESUMED_CREATED
+      title: A four-eyes auto-resume created a new party
+      summary: 'OnboardingResumeService.kt `resume`: the reviewer verdict approved creating a new party.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerOnboardingResumedLinked:
+      name: CUSTOMER_ONBOARDING_RESUMED_LINKED
+      title: A four-eyes auto-resume linked the pending onboarding to an existing party
+      summary: 'OnboardingResumeService.kt `resumeLink`: the reviewer verdict linked to an existing party.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerPaymentInitiated:
+      name: CUSTOMER_PAYMENT_INITIATED
+      title: A payment was submitted upstream
+      summary: 'CustomerEdgeResource.kt `auditPayment`: fired for every payment submission, `result` reflects the upstream response.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerPaymentRefused:
+      name: CUSTOMER_PAYMENT_REFUSED
+      title: A payment was refused for missing or rejected SCA
+      summary: 'CustomerEdgeResource.kt `scaGate`: the SCA gate ahead of a payment; `result` is always DENIED.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerPocketConverted:
+      name: CUSTOMER_POCKET_CONVERTED
+      title: A savings pocket was converted
+      summary: 'CustomerEdgeResource.kt: pocket-conversion route.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerPocketExchanged:
+      name: CUSTOMER_POCKET_EXCHANGED
+      title: A savings pocket was currency-exchanged
+      summary: 'CustomerEdgeResource.kt: pocket-exchange route.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerRegistered:
+      name: CUSTOMER_REGISTERED
+      title: A new customer registered
+      summary: 'CustomerEdgeResource.kt: registration route.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    CustomerTransferInitiated:
+      name: CUSTOMER_TRANSFER_INITIATED
+      title: An internal transfer was submitted upstream
+      summary: 'CustomerEdgeResource.kt: transfer submission route.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    LoanApplicationSubmitted:
+      name: LOAN_APPLICATION_SUBMITTED
+      title: A loan application was submitted
+      summary: 'CustomerEdgeResource.kt: loan-application route (ADR-0269).'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    ScaDecisionRecorded:
+      name: SCA_DECISION_RECORDED
+      title: An SCA challenge decision was recorded
+      summary: 'CustomerEdgeResource.kt `recordDecision`: the customer''s approve/deny response to an SCA challenge.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    ScaDeviceEnrolled:
+      name: SCA_DEVICE_ENROLLED
+      title: An SCA device was enrolled
+      summary: 'CustomerEdgeResource.kt: device-enrolment route.'
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }
+    StandingOrderCreated:
+      name: STANDING_ORDER_CREATED
+      title: A standing order was created
+      summary: |
+        CustomerEdgeResource.kt: the creation route. A SEPARATE call site derives
+        `"STANDING_ORDER_${operation.uppercase()}"` for non-create operations (pause/resume/
+        cancel) — dynamic like `KafkaCustomerAuditEventPublisher`'s derivation, so it is not a
+        literal this gate's static scan can see and is not listed as its own message here.
+      contentType: application/json
+      payload: { $ref: '#/components/schemas/auditEventPayload' }

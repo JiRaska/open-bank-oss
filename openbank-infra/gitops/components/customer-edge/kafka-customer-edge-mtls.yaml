@@ -72,6 +72,15 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # Producer: CreditFunnelPublisher -> openbank.credit.funnel.events (ADR-0269 rule 8
+      # credit-journey funnel telemetry). Write only; the consumer is analytics-sink, not the
+      # edge. Separate topic from openbank.onboarding.funnel.events on purpose (see kafka-topic.yaml).
+      - resource:
+          type: topic
+          name: openbank.credit.funnel.events
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
       # Consumer: OnboardingResumeService <- party.events (pid-service's party-events-out).
       # Unprefixed topic name is deliberate and matches the producer — pid-service publishes
       # `party.events`, distinct from party-service's `openbank.party.events`.
