@@ -171,6 +171,19 @@ jobs:
           echo "Merge this workflow, then run it with mode=work (or wait for the schedule)."
 
       # ---- the actual work ----------------------------------------------------------------
+      # `--permission-mode acceptEdits` was the first attempt and it does not work here: it
+      # auto-accepts FILE EDITS only. Every Bash command still asks, and in a non-interactive
+      # run there is nobody to ask, so the tool is denied instantly. The first live run spent
+      # its whole session discovering that `gh`, `python3` and `curl` were all refused — it
+      # could not list issues, could not run the guard's self-test, could not open a PR. It
+      # reported that honestly and the job still went green, which is the second half of the
+      # defect and is fixed by the assertion below.
+      #
+      # `bypassPermissions` is the right mode for this specific context and not a shortcut:
+      # the container is ephemeral and discarded, the token is a job-scoped GITHUB_TOKEN with
+      # the three narrow permissions declared above, and everything the agent can actually
+      # land is still gated by `agent-pr-guard` and by branch protection. The blast radius is
+      # bounded by the credential, not by the prompt.
       - name: Work one issue
         if: steps.mode.outputs.mode == 'work'
         env:
@@ -182,9 +195,40 @@ jobs:
           git config user.email "openbank-issue-worker@users.noreply.github.com"
           claude -p "$(cat .github/agent-prompts/issue-worker.md)" \
             --max-turns 120 \
-            --permission-mode acceptEdits \
+            --permission-mode bypassPermissions \
           | tee /tmp/worker-output.txt
           echo "--- worker output above ---"
+
+      # ---- did it actually run? -----------------------------------------------------------
+      # The run this replaces exited 0 having done nothing at all, because `claude -p` exits 0
+      # when it finishes talking, whatever it managed to accomplish. An exit code is not a
+      # verdict. So the agent must END with one of three explicit lines, and this step fails
+      # the job when none is present: "the session produced prose" and "the session did the
+      # job" are otherwise the same green.
+      - name: Assert the worker reached a verdict
+        if: steps.mode.outputs.mode == 'work'
+        run: |
+          set -uo pipefail
+          if [ ! -s /tmp/worker-output.txt ]; then
+            echo "::error::the worker produced no output at all — it did not run, which is not the same as having nothing to do"
+            exit 1
+          fi
+          verdict=$(grep -oE '^WORKER-VERDICT: (OPENED .*|NOTHING QUALIFIED|BLOCKED .*)$' /tmp/worker-output.txt | tail -1)
+          if [ -z "${verdict}" ]; then
+            echo "::error::the worker never stated a verdict. It talked, but nothing here can tell whether it worked an issue, found nothing to do, or was blocked. Treating as NOT having run."
+            echo "--- last 20 lines of what it did say ---"
+            tail -20 /tmp/worker-output.txt
+            exit 1
+          fi
+          echo "verdict: ${verdict}"
+          # BLOCKED is a real outcome and must be loud: it means the runner or the credential
+          # could not do what the task needs, which is a defect in this workflow, not in the
+          # backlog. NOTHING QUALIFIED is a legitimate, quiet success.
+          case "${verdict}" in
+            "WORKER-VERDICT: BLOCKED"*)
+              echo "::error::${verdict}"
+              exit 1 ;;
+          esac
 
       - name: Summarise
         if: always() && steps.mode.outputs.mode == 'work'

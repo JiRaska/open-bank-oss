@@ -111,7 +111,23 @@ words you meant to write.
 If CI goes red: fix it if it is yours. If it is `agent-pr-guard`, you picked a protected issue —
 say so plainly, leave the draft for a human, and do not route around the gate.
 
-## Step 6 — report
+## Step 6 — report, and state a verdict
 
 Under 200 words: which issue, what you changed, the test that proves it, the PR link, anything a
 reviewer must check by hand, and any branch you left behind.
+
+Then end your output with **exactly one** of these three lines, alone on its own line. The job
+fails if none is present, because otherwise "the session produced prose" and "the session did the
+job" look identical from outside — a previous run spent its whole session discovering it could not
+run a single command, said so clearly, and the workflow still went green.
+
+```
+WORKER-VERDICT: OPENED <pr-url>
+WORKER-VERDICT: NOTHING QUALIFIED
+WORKER-VERDICT: BLOCKED <one-line reason>
+```
+
+Use `BLOCKED` when the runner or the credential could not do what this task needs — a tool you
+were denied, a command that does not exist, a missing permission. That is a defect in the
+workflow, not in the backlog, and it is treated as a job failure so somebody fixes it. Do not use
+`BLOCKED` for an issue you judged out of scope; that is `NOTHING QUALIFIED`.
