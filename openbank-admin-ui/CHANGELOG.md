@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.7](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.6...admin-ui-v0.187.7) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce flaky finding loading ([#6546](https://github.com/JiRaska/open-bank-oss/issues/6546)) ([1260ff8](https://github.com/JiRaska/open-bank-oss/commit/1260ff849873f4f9c84865bb9a05f9b6459169f7))
+
 ## [0.187.6](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.5...admin-ui-v0.187.6) (2026-08-22)
 
 
