@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.2...case-coordinator-agent-v0.7.0) (2026-08-22)
+
+
+### Features
+
+* **admin-ui:** add evidence-backed Agent Control Room ([#6424](https://github.com/JiRaska/open-bank-oss/issues/6424)) ([02317dd](https://github.com/JiRaska/open-bank-oss/commit/02317ddd2080efa3d6293999b39c3e1099fb009b))
+
 ## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.1...case-coordinator-agent-v0.6.2) (2026-08-20)
 
 

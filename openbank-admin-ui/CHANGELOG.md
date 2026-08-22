@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.13...admin-ui-v0.187.0) (2026-08-22)
+
+
+### Features
+
+* **admin-ui:** add evidence-backed Agent Control Room ([#6424](https://github.com/JiRaska/open-bank-oss/issues/6424)) ([02317dd](https://github.com/JiRaska/open-bank-oss/commit/02317ddd2080efa3d6293999b39c3e1099fb009b))
+
 ## [0.186.13](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.12...admin-ui-v0.186.13) (2026-08-22)
 
 
