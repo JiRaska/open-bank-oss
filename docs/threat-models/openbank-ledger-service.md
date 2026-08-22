@@ -238,6 +238,21 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-20** — `POST /api/v1/journals` answered 500 for `"lines": [null]` (issue #5913, found
+  by the two-pass fuzz lane once it could reach past authentication). **No new trust boundary:**
+  the edge, route, `@RolesAllowed(Roles.OPERATOR)` gate and `@Authorize(action = "ledger.create")`
+  decision are all unchanged, and no input that was rejected before is accepted now — the change is
+  strictly the opposite direction, a request that used to reach the handler and throw is now
+  refused. **Denial of service (the reason this is in the threat model at all):** an unhandled NPE
+  on the posting path is an unauthenticated-shaped fault an OPERATOR-authenticated caller can
+  trigger at will with a one-byte payload, and each occurrence costs a stack unwind plus a
+  generic-mapper render; declaring the element nullable moves the rejection to deserialization-time
+  argument validation. **Information disclosure:** none either way — `GenericExceptionMapper`
+  already rendered an opaque `INTERNAL_ERROR` body, so the NPE never leaked a stack trace; that is
+  also why no monitoring saw it. **Repudiation:** unchanged; a rejected request posts nothing, so
+  there is no journal, no outbox row and no audit event to reconcile. Rollback: revert the commit —
+  the change is confined to the request DTO and carries no migration and no persisted state.
+
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `ledger.reverse`
   four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
   id out of band — the ceremony completed only if the two operators were already talking, and the

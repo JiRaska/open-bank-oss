@@ -137,7 +137,7 @@ class LedgerResource(
             entryDate = LocalDate.parse(request.entryDate),
             valueDate = LocalDate.parse(request.valueDate),
             description = request.description,
-            lines = request.lines.map { it.toCommand() },
+            lines = request.requiredLines().map { it.toCommand() },
             postedBy = request.createdBy,
         )
         val entry = ledgerUseCase.postJournal(command)
@@ -209,8 +209,19 @@ data class PostJournalRequest(
     val valueDate: String,
     val description: String? = null,
     val createdBy: UUID,
-    val lines: List<PostJournalLineRequest>,
-)
+    /**
+     * `List<PostJournalLineRequest?>`, deliberately. Kotlin's element non-nullability is a
+     * COMPILE-TIME property, erased past Jackson, so `"lines": [null]` produced a list holding a
+     * null and the first dereference threw NPE — a 500 for malformed input (#5913). Declaring the
+     * element nullable makes the null representable so it can be REJECTED instead of exploding.
+     */
+    val lines: List<PostJournalLineRequest?>,
+) {
+    /** @throws IllegalArgumentException mapped to 400 by libs-runtime's shared mapper (never a service-local one, #526). */
+    fun requiredLines(): List<PostJournalLineRequest> = lines.map {
+        requireNotNull(it) { "lines must not contain null entries" }
+    }
+}
 
 data class ReverseJournalRequest(val reason: String, val reversedBy: UUID)
 
