@@ -106,6 +106,25 @@ gates:
     run: |
       bash .github/scripts/regen-derived.sh --selftest
 
+  # The shell probes this repo keeps getting wrong, each held to a known-positive AND a
+  # known-negative. The run: IS the self-test; the whole file is the falsification harness.
+  - id: probe-lib-known-positive
+    name: "shell probes are falsified against a known-positive (enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      A probe fails by reporting CLEAN, so a broken one is indistinguishable from a clean subject.
+      Seven measured instances here printed a green answer: a BSD-only find predicate that is always
+      empty, a date parsed in the local zone (53 false positives), a local tracking ref read as
+      remote state, an awk column that is a word of a job name, a post-filtered linter that hid a
+      syntax error, a newline-joined file list arriving as one argument, and an in_progress run
+      count inflated by 189 wedged records. This gate keeps each probe's red reachable.
+    review_after: '2027-02-22'
+    min_subjects: 10
+    selftest_exempt: "is-a-test-suite - the run: IS the probe library's own --selftest"
+    run: |
+      bash .github/scripts/lib/probe.sh --selftest
+
   - id: gate-runner-self-test
     selftest_exempt: "is-a-test-suite — the run: IS run-gates.py --self-test"
     name: "gate runner self-test (the runner must be falsifiable too)"
