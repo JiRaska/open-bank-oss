@@ -173,6 +173,19 @@ out of it (they are path-scoped, not less important — several are live-inciden
   egress policy in the same namespace and curl the target (HTTP 200 there + timeout from the
   policed pod pins it to egress, not to the Service, DNS or the ingress allow-list). Note the
   throwaway pod needs a `restricted` PodSecurity context or the namespace refuses it.
+- **`psql -tA` still prints the command-status line (`DELETE <n>`) interleaved with `RETURNING`
+  data rows — `wc -l` on that output overcounts by exactly one.** `-q` (quiet) is what suppresses
+  it; `-tA` alone is not enough. Measured against a real Postgres: `psql -tA -c "DELETE ... RETURNING
+  1"` on a single-row delete emits `1\nDELETE 1\n` (two lines), `psql -qtA` emits `1\n` (one).
+  A retention sweep counting deletions this way silently reports one MORE row deleted than actually
+  happened, every single run — verified by seeding an old/new row pair and checking the sweep's
+  reported count against the real remaining row count after (`langfuse-retention-cronjob.yaml`).
+- **`gen-network-policies-drift-gate`'s `git add -A --intent-to-add openbank-infra/gitops/components/`
+  stages EVERY untracked file under that tree, not just generated NetworkPolicy output — a brand-new,
+  unrelated manifest in the same PR reads as "drift" until it is `git add`ed for real.** Not a bug in
+  your manifest: it self-resolves the moment the file is staged as part of the normal commit, which
+  is exactly what a real PR does. Only surprising when running the gate by hand against an untracked
+  new file before committing it.
 - **A ConfigMap a pod parses ONCE at startup needs a pod-roll annotation, or the edit is a no-op
   against a green ArgoCD.** LiteLLM reads `--config` at boot and the ConfigMap is a plain volume
   mount, so a new model route reaches the pod's filesystem and the proxy keeps serving the list it
