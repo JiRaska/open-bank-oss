@@ -95,10 +95,62 @@ jobs:
       contents: write        # push an agent/ branch — never main, enforced by branch rules
       pull-requests: write   # open a draft PR
       issues: write          # comment on the issue it worked
+    env:
+      AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
     steps:
+      # ---- identity ------------------------------------------------------------------------
+      # A PR opened with the workflow's own GITHUB_TOKEN does not get its checks run. Measured
+      # on #6547: all NINE workflow runs on its head sat at `conclusion: action_required`,
+      # waiting for a maintainer to click "Approve and run". Nothing had failed — nothing had
+      # STARTED. That is GitHub refusing to let a token trigger further automation, and it
+      # stalls this loop at its first step: the steward has no verdict to act on, the PR sits,
+      # and a human has to click before any of it moves.
+      #
+      # An App token is not subject to that. `auto-deploy.yml` learned the same lesson for a
+      # second reason worth keeping in view: GitHub signs API-created commits only for Apps and
+      # the web UI, never for a user PAT — an assumption that was wrong for five days and
+      # stranded seven deploy PRs (#1269).
+      #
+      # It must be `openbank-agent-bot`, NOT the gitops App. `openbank-gitops-bot` is declared
+      # in `rules.yaml: autonomous_agent_prs.automation_accounts`, so `agent-pr-guard` treats
+      # its PRs as out of scope by design — borrowing that identity here would silently switch
+      # the guard OFF for every agent PR. `openbank-agent-bot` is in `agent_accounts`, which is
+      # what keeps the guard pointed at this work.
+      - name: Mint the agent App token
+        id: apptoken
+        if: env.AGENT_APP_ID != ''
+        env:
+          AGENT_APP_ID: ${{ secrets.AGENT_APP_ID }}
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.AGENT_APP_ID }}
+          private-key: ${{ secrets.AGENT_APP_PRIVATE_KEY }}
+
+      # Fall back rather than fail: without the secrets this still works, it just produces PRs
+      # whose checks need a manual "Approve and run". Say so loudly instead of leaving somebody
+      # to rediscover it from a PR that looks stuck for no reason.
+      - name: Resolve the token to use
+        id: token
+        env:
+          APP_TOKEN: ${{ steps.apptoken.outputs.token }}
+          FALLBACK: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${APP_TOKEN:-}" ]; then
+            echo "identity: openbank-agent-bot (App token)"
+            echo "token=${APP_TOKEN}" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::AGENT_APP_ID/AGENT_APP_PRIVATE_KEY are not set — falling back to GITHUB_TOKEN. Any PR opened by this run will have its checks stuck at 'action_required' until a maintainer approves them by hand."
+            echo "identity: github-actions (GITHUB_TOKEN fallback)"
+            echo "token=${FALLBACK}" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          # actions/checkout persists whatever token it is given as the git credential.
+          # Without this, `git push` would go out as GITHUB_TOKEN no matter what the
+          # steps below mint, and the PR's checks would sit at `action_required` again.
+          token: ${{ steps.token.outputs.token }}
 
       - name: Decide mode
         id: mode
@@ -188,7 +240,7 @@ jobs:
         if: steps.mode.outputs.mode == 'work'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -uo pipefail
           git config user.name  "openbank-issue-worker"
