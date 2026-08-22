@@ -45,5 +45,13 @@ consent:
 # Pozn. k `by:` u automatizovaných běhů — atestant je scheduled CI lane, ne člověk:
 #   ci-schemathesis = api-fuzz.yml (weekly Tue+Thu; consent-service je v default fuzz setu)
 #   ci-zap-baseline = dast-zap-baseline.yml (weekly; target = ledger-service v docker-compose)
+# POZOR na `pentest` z fuzz lane (#5769): zelený api-fuzz job NENÍ napříč službami
+# zaměnitelný. `ci-schemathesis` smí atestovat jen službu, která v openbank-libs/governance/
+# fuzz-coverage.yaml překročí práh skutečně profuzzovaných operací (selected - auth_errors
+# >= 3, gate readiness-attestation-format R8). Měřeno na runu 32103867665: consent se dostal
+# za auth vrstvu na 3 operacích (a našel dvě reálné 5xx), zbylých 25 služeb na 0 nebo 1 —
+# jejich zelená dokazuje, že služba nabootuje a že auth platí všude, nic víc. Takové služby
+# jsou ve fuzz-coverage.yaml vedené jako `auth-only-surface`: pojmenovaná mezera, ne tichý pass.
+#
 # TTL 21 dní je záměrně krátké: když lane umře, atestace vyprší a dimenze spadne zpět
 # na derived skóre — zelená přežije jen živou lane.
