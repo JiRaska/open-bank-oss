@@ -587,7 +587,8 @@ export default function TestCoveragePage() {
               {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
             </span>
           )}
-          <button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} className="btn btn-secondary btn-sm">
+          <button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading}
+            aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm">
             <RefreshCw size={13} aria-hidden="true" style={{ animation: (testLoading || qualityLoading) ? 'spin 0.8s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
