@@ -37,6 +37,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # ADR-0272. `all-green` is a required status check; without this trigger the queue waits on it
+  # forever. It aggregates the per-service builds, so this is also where the queue actually pays
+  # for itself -- the batch is compiled and tested as the tree it will become.
+  merge_group:
   # Nightly full-fleet health build. PRs are path-scoped (only changed services build),
   # so a PR that breaks a service it does NOT touch ships green and the breakage only
   # surfaces post-merge — where nobody watches. (account-service did not compile on main
@@ -62,8 +66,10 @@ concurrency:
   # (issue #846). Key push-to-main by SHA so every commit gets its own lane and is never
   # cancelled; PR pushes keep the superseding behavior (a new push to the same branch
   # should cancel the old run).
-  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci') }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # A merge_group run gets its own lane and is never cancelled: a cancelled run leaves the
+  # required context ABSENT, and the queue treats absent as "still waiting", not as a verdict.
+  group: services-ci-${{ github.ref }}-${{ github.event_name == 'schedule' && 'nightly' || (((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group') && github.sha || 'ci') }}
+  cancel-in-progress: ${{ !((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group') }}
 
 jobs:
   changes:
@@ -98,7 +104,8 @@ jobs:
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
             CHANGED="$ALL"
-          elif [ "${{ github.event_name }}" = "push" ]; then
+          elif [ "${{ github.event_name }}" = "push" ] \
+               || [ "${{ github.event_name }}" = "merge_group" ]; then
             # A push to main normally re-runs the WHOLE fleet so every provider
             # re-verifies every consumer's current contract (Pact matrix completeness,
             # ADR-0092) and publishes fresh results the SHA's auto-deploy gates on (#846).
@@ -114,8 +121,28 @@ jobs:
             # safe direction is over-build, never under-build (an under-build would leave a
             # stale/missing Pact verification). fetch-depth:0 above guarantees HEAD~1
             # exists (main is squash-merged => each push is a single commit).
-            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
-            echo "Push changed files:"; echo "$FILES"
+            # HEAD~1 is right for a squash-merged main push (each push is one commit) but wrong
+            # for a queue entry, whose parent is the previous entry in the same batch, not the
+            # branch point. merge_group carries base_sha for exactly this.
+            if [ "${{ github.event_name }}" = "merge_group" ]; then
+              DIFF_BASE="${{ github.event.merge_group.base_sha }}"
+              if [ -z "$DIFF_BASE" ] || ! git cat-file -e "${DIFF_BASE}^{commit}" 2>/dev/null; then
+                # Building nothing here would report all-green over an empty matrix -- a pass that
+                # examined no service. Fall back to the full fleet: over-build is recoverable,
+                # under-build ships an unbuilt module (#1001).
+                echo "::warning::merge_group base_sha missing or unfetchable -> full-fleet build."
+                DIFF_BASE=""
+              fi
+            else
+              DIFF_BASE="HEAD~1"
+            fi
+            if [ -z "$DIFF_BASE" ]; then
+              FILES="$(git ls-files)"
+            else
+              FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
+            fi
+            echo "Changed files (${{ github.event_name }}, base ${DIFF_BASE:-<full-fleet>}):"
+            echo "$FILES"
             # Inert = provably cannot change a compile input or a contract. Anchored so a
             # service's own src/ (or ANY build.gradle.kts, openbank-libs, gradle/, contracts
             # under pacts/) is NEVER matched here and thus never treated as inert. Feed grep

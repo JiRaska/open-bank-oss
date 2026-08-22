@@ -21,6 +21,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # ADR-0272. A merge queue only merges an entry once every required status check reports on
+  # `merge_group`. A context that never reports there does not fail the queue -- it STALLS it,
+  # forever, with zero failures. `OPA policy gate` is one of the five required contexts, so it
+  # must be reachable from this event before the queue is enabled.
+  merge_group:
 
 permissions:
   contents: read
@@ -34,8 +39,12 @@ concurrency:
   # PR pushes keep the superseding behaviour, which is what that setting is for.
   # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
   # stops the job being created at all (#3082).
-  group: opa-policy-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  # A merge_group run gets its own lane and is never cancelled, for the same reason a main
+  # push is not: a cancelled run leaves its required context ABSENT, and absent is not a third
+  # state the queue can act on -- it waits. github.ref is unique per queue entry, so the sha
+  # suffix is what keeps two entries on the same ref from cancelling each other.
+  group: opa-policy-${{ github.ref }}-${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group') && github.sha || 'ci' }}
+  cancel-in-progress: ${{ !((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group') }}
 
 jobs:
   changes:
@@ -75,8 +84,14 @@ jobs:
             PATTERN="${PATTERN}|^${dir//./\\.}/"
           done < <(find openbank-infra/gitops/components -name 'gen-*opa-bundle*.sh' -exec dirname {} \; | sort -u)
 
-          if [ "${{ github.event_name }}" = "push" ]; then
-            echo "Event push -> always verify (post-merge; keeps the deployed-bundle check current)."
+          # merge_group is grouped with push, not with pull_request, and the reason is not
+          # convenience. A path-based skip needs a base to diff against, and in a queue the
+          # entry under test is a BATCH whose contents were each green against a different
+          # base -- which is the exact staleness the queue exists to remove. Verifying
+          # unconditionally costs a few minutes per batch and cannot be wrong; skipping on a
+          # mis-derived diff can. `push` already takes this branch for the same reason.
+          if [ "${{ github.event_name }}" = "push" ] || [ "${{ github.event_name }}" = "merge_group" ]; then
+            echo "Event ${{ github.event_name }} -> always verify."
             echo "relevant=true" >> "$GITHUB_OUTPUT"
           else
             BASE="origin/${{ github.base_ref }}"

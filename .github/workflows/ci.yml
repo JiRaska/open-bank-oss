@@ -4,6 +4,11 @@ on:
   push:
     branches: [main]
   pull_request:
+  # ADR-0272. `Validate manifests` is a required status check, so the gate shards it aggregates
+  # must run on the queue's event too -- and they are the shards that catch the defect the queue
+  # exists for: 19 of 20 main breakages measured on 2026-08-22 came from PRs that were themselves
+  # green, failing in `gates (data)` / `gates (supplychain)` only once merged.
+  merge_group:
 
 permissions:
   contents: read
@@ -17,8 +22,8 @@ concurrency:
   # PR pushes keep the superseding behaviour, which is what that setting is for.
   # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
   # stops the job being created at all (#3082).
-  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
+  group: ci-${{ github.ref }}-${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group') && github.sha || 'ci' }}
+  cancel-in-progress: ${{ !((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'merge_group') }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -257,7 +262,10 @@ jobs:
       # that need them are set here rather than in the manifest.
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
-      BASE_REF: ${{ github.base_ref || github.ref_name }}
+      # On merge_group, github.base_ref is empty and github.ref_name is the queue's own ref, so
+      # the fallback would name a ref that is not the target branch. The queue always targets the
+      # default branch, and merge_group carries it explicitly.
+      BASE_REF: ${{ github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
       # `gh` needs GH_TOKEN; the job-level `permissions: contents: read` above is what
       # scopes it. check-msg-channel-image-parity.py reads a file at an arbitrary historical
       # commit (the sha an image tag names) through the contents API, because CI checks out
@@ -386,6 +394,35 @@ jobs:
           fi
           echo "PR diff base: ${base} (event base.sha: ${EVENT_BASE_SHA})"
           echo "PR_DIFF_BASE=${base}" >> "$GITHUB_ENV"
+
+      # ADR-0272. The diff-classifying gates (api-contract, db-migration, schema-compat,
+      # release-scope-mismatch, threat-model-on-trust-boundary-change) need a base or run-gates.py
+      # fails them rather than running them vacuously. In a merge group the honest base is where
+      # the BATCH branched from the target branch, which merge_group carries as base_sha -- so the
+      # whole batch classifies against main, in one comparison.
+      #
+      # That is not merely "good enough in the absence of a PR": it is the comparison ADR-0048
+      # says cannot be made on the pull_request event. A PR whose last CI run predates a competing
+      # spec merge is invisible to ANY base resolved at PR time, because the classification is only
+      # as fresh as the run. Here the base is resolved after the batch is assembled, so two entries
+      # claiming the same openapi info.version are compared against each other, not just against
+      # their own stale bases.
+      - name: resolve merge-group diff base (the batch's branch point)
+        if: github.event_name == 'merge_group'
+        env:
+          MG_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${MG_BASE_SHA}" ]; then
+            # Never fall through to an empty base: run-gates.py would fail the needs_base gates,
+            # which reads as "the change is bad" when the truth is "the harness lost its base".
+            echo "::error::merge_group payload carried no base_sha — refusing to classify against" \
+                 "an undefined base."
+            exit 1
+          fi
+          git fetch --depth=1 origin "${MG_BASE_SHA}" 2>/dev/null || true
+          echo "merge-group diff base: ${MG_BASE_SHA}"
+          echo "PR_DIFF_BASE=${MG_BASE_SHA}" >> "$GITHUB_ENV"
 
       - name: Run gates
         run: |

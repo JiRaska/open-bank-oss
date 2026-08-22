@@ -19,13 +19,22 @@ name: Issue hygiene
 on:
   pull_request:
     types: [opened, synchronize, reopened, edited]
+  # ADR-0272. `issue-hygiene` is a required status check and is PR-SCOPED: it asserts that the
+  # pull request links an issue, and a merge group has no pull request. It still has to REPORT
+  # on this event -- a required context that does not report blocks the queue with zero
+  # failures -- so it runs and succeeds as an explicit no-op. The property it asserts was
+  # already established on the PR, before the entry was ever queued.
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: issue-hygiene-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
+  # github.event.pull_request.number is empty on merge_group, so keying on it alone would put
+  # every queue entry in ONE group and let them cancel each other -- and a cancelled run leaves
+  # the required context absent, which stalls the queue. github.ref is unique per entry.
+  group: issue-hygiene-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 jobs:
   issue-hygiene:
@@ -34,7 +43,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10  # measured max 6s
     steps:
+      # Reported, not skipped: `if:` on the step would leave the JOB green either way, but being
+      # explicit here keeps the no-op visible in the log rather than looking like a check that
+      # quietly did nothing.
+      - name: No pull request in a merge group — nothing to lint
+        if: github.event_name == 'merge_group'
+        run: |
+          echo "::notice title=issue-hygiene::merge_group carries no pull request; the linked-issue" \
+               "requirement was enforced on each entry's own PR before it was queued (ADR-0272)."
+
       - name: Lint PR "Linked issues"
+        if: github.event_name != 'merge_group'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
