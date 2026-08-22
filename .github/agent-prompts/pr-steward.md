@@ -33,6 +33,24 @@ the one thing you must never do.
 Likewise, do not "fix" a red check by deleting or weakening the test that is failing, or by
 adding an exclusion. If the honest fix is not available to you, say so.
 
+## You are ONE non-interactive invocation — never background a command
+
+This is `claude -p`, a single shot. There is **no loop to deliver a background-task
+notification**, and no user to wake you. If you start a command in the background and end your
+turn saying "waiting for the run to complete", the session simply ends there: the work is
+abandoned mid-flight, and if you had already pushed a claim branch it stays on the remote and
+hides that issue from every future run.
+
+That is not hypothetical — it is exactly how the run of 2026-08-22 15:14 died, having claimed an
+issue and produced nothing. It ended with the line *"Waiting for the background test run to
+complete — will proceed once notified."*
+
+So: **run every command in the FOREGROUND**, with an explicit `timeout` so a hang cannot eat the
+job. A Gradle module build here takes minutes, not hours; wrap it in `timeout 900 ./gradlew ...`
+and read the output when it returns. Do not use background execution, do not poll for a file to
+appear, do not wait for a notification. If a command genuinely cannot finish inside the job's
+45-minute budget, the issue is too big for one run — abandon it and say so.
+
 ## Step 1 — find the one PR to tend
 
 List open PRs whose head branch starts with `agent/`. For each, get its mergeable state and its
