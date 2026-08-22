@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.13](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.12...admin-ui-v0.186.13) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify payment refresh state ([#6430](https://github.com/JiRaska/open-bank-oss/issues/6430)) ([78e25c7](https://github.com/JiRaska/open-bank-oss/commit/78e25c73e6b876b399766055f65206c4e93b6eef))
+
 ## [0.186.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.11...admin-ui-v0.186.12) (2026-08-22)
 
 
