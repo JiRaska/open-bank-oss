@@ -111,7 +111,7 @@ function PaymentDetailContent() {
           {payment?.status && <span className="pill" style={{ background: `${STATUS_COLOR[payment.status] ?? 'var(--text-muted)'}22`, color: STATUS_COLOR[payment.status] ?? 'var(--text-muted)' }}>{payment.status}</span>}
           {payment?.type && <span className="tag">{payment.type}</span>}
           <Link href="/payments" className="btn btn-secondary"><ArrowLeft size={13} aria-hidden="true" /> {t('Zpět', 'Back')}</Link>
-          <button className="btn btn-secondary" onClick={load} disabled={loading}>
+          <button type="button" className="btn btn-secondary" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit platbu', 'Refresh payment')}>
             <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
           </button>
         </div>}
