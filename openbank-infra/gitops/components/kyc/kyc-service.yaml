@@ -120,6 +120,14 @@ spec:
             # (never a silent PASSED), but every new case would need an operator's attention.
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # Orphaned-party reconciliation (issue #5698): kyc-service enumerates the party
+            # register hourly and reports parties that never got a KYC case, as
+            # openbank_kyc_orphaned_parties. Read-only — it opens no cases. Without this the
+            # rest-client falls back to its localhost dev default and every pass fails, which
+            # shows up as a stale kyc-orphaned-party-detection liveness heartbeat rather than
+            # as a silent "no orphans" (the gauges are not reset on a failed pass).
+            - name: PARTY_SERVICE_URL
+              value: http://party-service.party.svc:8111
             # Sandbox straight-through KYC (ADR-0116 §4): auto-approve cases opened from
             # PARTY_CREATED so onboarding activates without an operator. MUST be false in prod.
             - name: OPENBANK_KYC_AUTO_APPROVE
