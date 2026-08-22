@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.2...onboarding-service-v0.8.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.1...onboarding-service-v0.8.2) (2026-08-21)
 
 
