@@ -47,7 +47,7 @@ class CaseSignalAuthorizationService(
                 CaseCollaborationPolicyQuery(
                     agentId = agentId,
                     capability = capability,
-                    caseClass = context.caseClass.lowercase().replace('_', '-'),
+                    caseClass = context.caseClass,
                     deliveryMode = context.deliveryMode,
                 ),
             )

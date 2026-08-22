@@ -7,6 +7,7 @@ package com.openbank.casecoordinator.application
 
 import com.openbank.casecoordinator.application.port.out.CaseCollaborationPolicyDecision
 import com.openbank.casecoordinator.application.port.out.CaseCollaborationPolicyPort
+import com.openbank.casecoordinator.application.port.out.CaseCollaborationPolicyQuery
 import com.openbank.casecoordinator.domain.model.CaseSignalEvidence
 import com.openbank.casecoordinator.domain.model.CaseSignalEvidenceStage
 import com.openbank.casecoordinator.infrastructure.persistence.CaseAuthorizationContext
@@ -45,10 +46,14 @@ class CaseSignalAuthorizationServiceTest {
         )
         coEvery { audit.publish(any()) } returns Unit
         val evidence = slot<CaseSignalEvidence>()
+        val query = slot<CaseCollaborationPolicyQuery>()
 
         val result = service.authorize("case-1", "rca-investigator", "case.contribute")
 
         assertThat(result).isInstanceOf(CaseSignalAuthorizationResult.Authorized::class.java)
+        verify { policy.decide(capture(query)) }
+        assertThat(query.captured.caseClass).isEqualTo("INCIDENT_RESPONSE")
+        assertThat(query.captured.deliveryMode).isEqualTo("SHADOW")
         verify { repository.tryRecordAuthorized(capture(evidence), 8) }
         assertThat(evidence.captured.stage).isEqualTo(CaseSignalEvidenceStage.AUTHORIZED)
         assertThat(evidence.captured.policyDecisionId).isEqualTo("opa-decision-7")
