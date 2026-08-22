@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.`in`.IssueOnboardingDocumentCommand
 import com.openbank.document.application.port.`in`.OnboardingDocumentUseCase
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -60,7 +61,12 @@ class AccountCreatedConsumer(
         }
 
         try {
-            withBoundedRetry(log, "Onboarding-document issuance for account $accountId") {
+            EventRetry.withRetry(
+                log,
+                "Onboarding-document issuance for account $accountId",
+                null,
+                isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
+            ) {
                 onboardingUseCase.issueOnboardingDocument(
                     IssueOnboardingDocumentCommand(
                         accountId = accountId,

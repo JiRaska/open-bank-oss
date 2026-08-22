@@ -23,7 +23,22 @@ interface ConsentRepository {
      * at-least-once — closing the direct-Kafka dual-write that silently dropped the event on a
      * crash between the DB commit and the send.
      */
-    suspend fun save(consent: Consent, event: DomainEvent): Consent
+    suspend fun save(consent: Consent, event: DomainEvent): Consent = saveSuperseding(consent, event, emptyList())
+
+    /**
+     * Persist [consent] with [event], AND every aggregate in [superseded] with its own event, in a
+     * SINGLE transaction (issue #6487).
+     *
+     * Atomicity is the whole point: an activation that commits without its supersedes leaves two
+     * ACTIVE consents for the same grantee and scopes, each independently sufficient to grant
+     * access — which is the defect this exists to prevent. Two sequential [save] calls cannot give
+     * that guarantee.
+     */
+    suspend fun saveSuperseding(
+        consent: Consent,
+        event: DomainEvent,
+        superseded: List<Pair<Consent, DomainEvent>>,
+    ): Consent
 
     suspend fun findById(id: UUID): Consent?
 

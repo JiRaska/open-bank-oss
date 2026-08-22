@@ -19,7 +19,6 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.mockk
-import io.temporal.failure.ApplicationFailure
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -169,38 +168,6 @@ class SettlementActivitiesImplTest {
             assertThat(e.result).isEqualTo(AuditResult.FAILURE)
             assertThat(e.payload["status"]).isEqualTo("REVERSAL_FAILED")
         })
-    }
-
-    @Test
-    fun `reverseBookToLedger fails loudly as unsupported instead of claiming a reversal`() {
-        val id = UUID.randomUUID()
-        val events = mutableListOf<AuditEvent>()
-        coEvery { auditPublisher.publish(capture(events)) } returns Unit
-
-        assertThatThrownBy { activities.reverseBookToLedger(id) }
-            .isInstanceOf(ApplicationFailure::class.java)
-            .hasMessageContaining("Ledger reversal is not implemented")
-
-        coVerify(exactly = 0) { ledgerPort.book(any()) }
-        // Its own value, never the old LEDGER_REVERSED, which asserted an unwind that never ran.
-        coVerify { settlementRepository.updateStatus(id, SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED) }
-        @Suppress("DEPRECATION")
-        coVerify(exactly = 0) { settlementRepository.updateStatus(id, SettlementStatus.LEDGER_REVERSED) }
-        assertThat(events).singleElement().satisfies({ e ->
-            assertThat(e.result).isEqualTo(AuditResult.FAILURE)
-        })
-    }
-
-    @Test
-    fun `the unsupported ledger reversal is NON-retryable so it cannot delay the balance unwinds`() {
-        // SettlementWorkflowImpl runs compensations LIFO and catches ActivityFailure per step, so a
-        // retryable failure here would burn five attempts of backoff before reverseCredit and
-        // reverseDebit — the two that actually return money — even got to run.
-        assertThatThrownBy { activities.reverseBookToLedger(UUID.randomUUID()) }
-            .isInstanceOfSatisfying(ApplicationFailure::class.java) { failure ->
-                assertThat(failure.isNonRetryable).isTrue()
-                assertThat(failure.type).isEqualTo("LedgerReversalUnsupported")
-            }
     }
 
     @Test

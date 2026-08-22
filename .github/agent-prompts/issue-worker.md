@@ -56,8 +56,20 @@ run that test on this runner?** Check rather than assume — the job step before
 whether a real database image can be pulled here, and its output is in the run log. If the proof
 needs something this runner does not have, the issue is out of scope; say so and pick another.
 
-Prefer the OLDEST issue that is concretely specified. If nothing qualifies, open no PR, list
-what you considered and why each was rejected, and stop. That is a successful run.
+Prefer the OLDEST issue that is concretely specified.
+
+**If nothing qualifies, do not just stop — triage instead.** An empty run is honest but it is
+also free capacity, and this backlog goes stale faster than anyone re-reads it: two issues were
+found already-fixed on `main` on 2026-08-22 alone, one of them by this worker. So take the FIVE
+oldest open issues you did not pick and, for each, check against current `origin/main` whether
+the defect it describes is still real. Read the code it names; do not judge from the title.
+
+For any issue that is demonstrably already fixed, leave ONE comment quoting the evidence — the
+file and line that now does the right thing, and the PR or commit that did it — and say it looks
+closeable. **Do not close it**; that is a human's call, and the hard limits above still apply.
+
+Say in your report how many you triaged and what you found. Then end with `NOTHING QUALIFIED`,
+which is what this run was: a successful run that opened no PR.
 
 ## Step 2 — claim it
 

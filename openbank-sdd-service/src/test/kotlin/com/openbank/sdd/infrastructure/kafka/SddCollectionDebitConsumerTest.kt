@@ -5,6 +5,7 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.messaging.EventRetry
 import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
 import io.mockk.every
@@ -15,6 +16,7 @@ import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.core.Response
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.util.UUID
 
@@ -78,13 +80,21 @@ class SddCollectionDebitConsumerTest {
     }
 
     @Test
-    fun `a non-2xx-non-409 response is handled without throwing (logged as a failure)`(): Unit = runBlocking {
+    fun `a non-2xx-non-409 response is retried and then rethrown so the connector dead-letters`(): Unit = runBlocking {
+        // This test previously asserted the OPPOSITE — "handled without throwing (logged as a
+        // failure)" — and passing was exactly the problem (#5698): returning normally ACKS the
+        // message, so an authorised collection that never debited was indistinguishable from one
+        // that did. R-transaction/return generation is not built (#1000), so the DLQ is the only
+        // path by which a human learns the money did not move.
         every { transactionClient.initiateTransaction(any()) } returns
             Uni.createFrom().item(Response.status(500).build())
 
-        consumer.consume(collectionAuthorisedEvent())
+        assertThatThrownBy { runBlocking { consumer.consume(collectionAuthorisedEvent()) } }
+            .isInstanceOf(SddDebitFailedException::class.java)
+            .hasMessageContaining("did not move money")
 
-        verify(exactly = 1) { transactionClient.initiateTransaction(any()) }
+        // Bounded, not unbounded: a permanently refusing rail must not pin the partition forever.
+        verify(exactly = EventRetry.DEFAULT_MAX_ATTEMPTS) { transactionClient.initiateTransaction(any()) }
     }
 
     @Test

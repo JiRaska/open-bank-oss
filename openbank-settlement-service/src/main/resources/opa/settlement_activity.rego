@@ -10,7 +10,6 @@ allowed_activities := {
     "bookToLedger",
     "reverseDebit",
     "reverseCredit",
-    "reverseBookToLedger",
     "rejectSettlement",
 }
 

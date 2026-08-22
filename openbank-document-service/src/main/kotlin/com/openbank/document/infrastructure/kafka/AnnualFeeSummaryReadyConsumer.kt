@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.document.application.port.`in`.AnnualFeeLine
 import com.openbank.document.application.port.`in`.AnnualFeeSummaryReadyCommand
 import com.openbank.document.application.port.`in`.AnnualStatementDeliveryUseCase
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -56,7 +57,12 @@ class AnnualFeeSummaryReadyConsumer(
         }
 
         try {
-            withBoundedRetry(log, "Annual statement delivery for account ${cmd.accountId} year ${cmd.year}") {
+            EventRetry.withRetry(
+                log,
+                "Annual statement delivery for account ${cmd.accountId} year ${cmd.year}",
+                null,
+                isRetryable = EventRetry.RETRY_UNLESS_DETERMINISTIC,
+            ) {
                 deliveryUseCase.deliverAnnualStatement(cmd)
             }
         } catch (e: IllegalStateException) {

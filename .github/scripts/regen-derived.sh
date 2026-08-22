@@ -60,6 +60,7 @@ esac
 GENERATORS=(
   "rules-opa-data|python3 .github/scripts/gen-rules-opa-data.py|openbank-libs/governance/rules.yaml"
   "agents-opa-data|python3 .github/scripts/gen-agents-opa-data.py|openbank-libs/governance/agents.yaml"
+  "case-collaboration-opa-data|python3 .github/scripts/gen-case-collaboration-opa-data.py|openbank-libs/governance/agents.yaml openbank-libs/governance/rules.yaml .rego"
   "eu-ai-act|python3 .github/scripts/gen-eu-ai-act.py|openbank-libs/governance/agents.yaml"
   "ai-governance-snapshot|python3 .github/scripts/gen-ai-governance-snapshot.py|openbank-libs/governance/agents.yaml prompts/registry.yaml"
   "adr-index|bash docs/adr/gen-index.sh|docs/adr/"

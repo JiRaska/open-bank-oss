@@ -42,6 +42,7 @@ class LendingMapper {
         it.decidedAt = a.decidedAt
         it.jurisdiction = a.jurisdiction
         it.productType = a.productType
+        it.productKind = a.productKind
         it.packVersion = a.packVersion
         it.verifiedIncomeMonthly = a.verifiedIncomeMonthly?.amount
         it.existingDebtServiceMonthly = a.existingDebtServiceMonthly?.amount
@@ -68,7 +69,8 @@ class LendingMapper {
         periodsPerYear = e.periodsPerYear, method = e.method, firstDueDate = e.firstDueDate,
         status = e.status, proposedBy = e.proposedBy, decidedBy = e.decidedBy,
         decisionReason = e.decisionReason, createdAt = e.createdAt, decidedAt = e.decidedAt,
-        jurisdiction = e.jurisdiction, productType = e.productType, packVersion = e.packVersion,
+        jurisdiction = e.jurisdiction, productType = e.productType, productKind = e.productKind,
+        packVersion = e.packVersion,
         verifiedIncomeMonthly = e.verifiedIncomeMonthly?.let { Money.of(it, e.currency) },
         existingDebtServiceMonthly = e.existingDebtServiceMonthly?.let { Money.of(it, e.currency) },
         ageYears = e.ageYears, residency = e.residency, employmentTenureMonths = e.employmentTenureMonths,
