@@ -11,11 +11,23 @@
 #   public.ecr.aws and registry.k8s.io. So every issue whose proof needs a real database was
 #   unreachable, and on a 93-issue backlog the worker correctly opened nothing.
 #
-#   This repo already owns the right substrate. `openbank-batch` exists precisely for this:
-#   rules.yaml `ci_runners.pools.batch` justifies it as "a separate low-capped pool so a
-#   scan/cron burst cannot starve the merge-required build lane". A scheduled agent IS a cron
-#   burst, and putting it on `openbank-build` would do exactly the starving that pool split
-#   was created to prevent.
+#   The fix is not exotic: the fleet's own per-service build+test lane runs on `ubuntu-latest`
+#   and Testcontainers work there, because GitHub-hosted runners ship Docker at the standard
+#   socket and can reach Docker Hub. `_service-ci.yml` says so in place. This repository is
+#   public, so standard GitHub-hosted runners cost nothing, and nothing about this touches the
+#   EKS cluster, the fck-nat instance, or the account's cross-AZ transfer.
+#
+#   NOT `openbank-batch`, and the reason is worth recording. rules.yaml
+#   `ci_runners.pools.batch` describes it as "a separate low-capped pool so a scan/cron burst
+#   cannot starve the merge-required build lane", and seven workflows mention it in comments,
+#   so it reads as the obvious home for a scheduled agent. It does not exist: the sandbox
+#   Terraform defines exactly two scale sets, `openbank-build` and `openbank-deploy`, and no
+#   workflow anywhere carries `runs-on: openbank-batch`. The first version of this file did,
+#   and its job sat queued with no runner ever assigned — the pool is documentation of an
+#   intention, not capacity. Tracked separately; do not "fix" this by pointing the job there.
+#
+#   NOT `openbank-build` either: that is the merge-required lane, and a 30-minute agent job
+#   every 6h would occupy a runner that PR builds are waiting on.
 #
 # WHAT IT MAY NOT DO
 #   Never merges, never approves, never closes an issue, never touches main. Its branch is
@@ -37,12 +49,14 @@
 #   that depends on it.
 #
 # COST
-#   `ci_runners.model: ephemeral-scale-to-zero` on Karpenter spot, so this bills only for the
-#   minutes it runs — there is no idle capacity to pay for. At one ~30 min run every 6h that
-#   is ~2 node-hours/day. What is NOT known and must not be asserted: which instance type
-#   Karpenter picks, and what share of the account's ~$70/mo cross-AZ transfer any extra image
-#   pulls would add — Cost Explorer cannot attribute image pulls from pod-to-pod traffic. The
-#   probe prints the runner and the wall time so the first real numbers replace this estimate.
+#   Zero. Standard GitHub-hosted runners are free for public repositories, and this job never
+#   touches the AWS account: no ARC runner, no Karpenter node, no image pull over fck-nat, no
+#   cross-AZ byte. An earlier draft of this file proposed the in-cluster batch pool at an
+#   estimated ~$3/month; that estimate is superseded and the cluster is not involved at all.
+#
+#   Also considered and REFUSED on cost: pointing a runner at this project's own ECR to feed
+#   Testcontainers. ~180 GB/month of egress against a measured baseline of $0.63/fortnight is
+#   more than a tenfold jump — a jump, therefore a fail.
 # ─────────────────────────────────────────────────────────────────────────────
 name: Agent issue worker
 
@@ -75,7 +89,7 @@ concurrency:
 jobs:
   worker:
     name: Pick one issue, open one draft PR
-    runs-on: openbank-batch
+    runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
       contents: write        # push an agent/ branch — never main, enforced by branch rules
