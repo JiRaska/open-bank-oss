@@ -572,8 +572,8 @@ export default function RegulatoryPage() {
                     style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px', background: 'var(--surface-1)' }}
                   />
                 </label>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'}>
-                  <RefreshCw size={13} className={previewData.status === 'loading' ? 'animate-spin' : ''} />
+                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
+                  <RefreshCw size={13} aria-hidden="true" className={previewData.status === 'loading' ? 'animate-spin' : ''} />
                   {t('Načíst data', 'Load data')}
                 </button>
               </div>
