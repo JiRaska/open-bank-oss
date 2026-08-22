@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode
 import com.openbank.customeredge.domain.model.CustomerIdentity
 import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.cnb.CnbBanksClient
+import com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboarding
 import com.openbank.customeredge.infrastructure.onboarding.PendingOnboardingStore
 import com.openbank.libs.authz.Authorize
@@ -108,6 +109,9 @@ class CustomerEdgeResource(
     // detekt tolerates here and every test constructs this resource positionally.
     @Inject
     lateinit var partyMergeResolver: PartyMergeResolver
+
+    @Inject
+    lateinit var creditFunnel: com.openbank.customeredge.infrastructure.credit.CreditFunnelPublisher
 
     @ConfigProperty(name = "openbank.edge.account-service-url")
     lateinit var accountServiceUrl: String
@@ -748,6 +752,57 @@ class CustomerEdgeResource(
             .entity(resp.entity ?: "{}")
             .type(MediaType.APPLICATION_JSON)
             .build()
+    }
+
+    /**
+     * One credit-journey funnel event (ADR-0269 rule 8's metrics).
+     *
+     * Authenticated on purpose — see [CreditFunnelPublisher] for why this is not the onboarding
+     * funnel's public endpoint. The party is taken from the JWT and never from the body, so a
+     * caller can only ever describe their own journey.
+     *
+     * Always 202, even for a rejected value: telemetry must not teach a client anything, and a 400
+     * here would turn the allow-list into an oracle for what the bank tracks. Rejected values are
+     * counted, not answered.
+     */
+    @POST
+    @Path("/credit/events")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun trackCreditEvent(body: String): Response {
+        val customer = customer()
+        val node = runCatching { objectMapper.readTree(body) }.getOrNull() as? ObjectNode
+        val step = node?.get("step")?.asText()
+        val action = node?.get("action")?.asText()
+        if (step in CreditFunnelPublisher.VALID_STEPS && action in CreditFunnelPublisher.VALID_ACTIONS) {
+            creditFunnel.emit(customer.partyId, step!!, action!!)
+        }
+        return Response.accepted().build()
+    }
+
+    /**
+     * The caller's own four-pillar financial health (ADR-0269 / APP-ADR-0001 rule 5).
+     *
+     * Assembled by lending-service, which already reaches the credit profile and the loan book;
+     * this route only scopes it to the caller. No score, no rating, no eligibility — and no path
+     * into a credit decision.
+     *
+     * Fail-soft to an empty list. An unreachable upstream means the app shows no pillars rather
+     * than four invented ones, and each pillar can independently answer UNKNOWN, so a partial
+     * answer is the normal case rather than an error.
+     */
+    @GET
+    @Path("/financial-health")
+    @Authorize(action = "customer.profile.read", resource = "")
+    @Blocking
+    fun getFinancialHealth(): Response {
+        val customer = customer()
+        val resp = upstream.get(
+            "$lendingServiceUrl/api/v1/lending/intake/financial-health",
+            customer.partyId.toString(),
+        )
+        if (resp.status != 200) return Response.ok("[]").type(MediaType.APPLICATION_JSON).build()
+        return Response.ok(resp.entity ?: "[]").type(MediaType.APPLICATION_JSON).build()
     }
 
     /**

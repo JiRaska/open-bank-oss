@@ -60,6 +60,15 @@ mp:
         topic: openbank.onboarding.funnel.events
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Credit-journey funnel telemetry (ADR-0269 rule 8) -> analytics-sink -> ClickHouse. A
+      # SEPARATE topic from the onboarding funnel on purpose: that one is an anonymous public write,
+      # this one is authenticated and keyed by party, and mixing them would put credit-interest
+      # signals on a stream anyone can post to.
+      credit-funnel-out:
+        connector: smallrye-kafka
+        topic: openbank.credit.funnel.events
+        key.serializer: org.apache.kafka.common.serialization.StringSerializer
+        value.serializer: org.apache.kafka.common.serialization.StringSerializer
       # In-app screen feedback (ADR-0192) -> analytics-sink -> ClickHouse. Metadata + the
       # screenshot's object-store key only; the PNG itself never enters Kafka (FeedbackPublisher).
       feedback-out:

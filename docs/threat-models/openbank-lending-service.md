@@ -442,9 +442,28 @@ unknown, because permanent `complete = false` would suppress every offer forever
 indistinguishable from the feature being switched off. This is the first thing an operational-risk
 review of this gate should challenge.
 
+## 9c. Customer financial health (ADR-0269 rule 5) — STRIDE supplement
+
+`GET /api/v1/lending/intake/financial-health` — a third read on the section 9 trust boundary, with
+the same caller and party-header controls. It composes the ADR-0269 credit profile with the loan
+book, so it concentrates in one response things that until now lived in separate services.
+
+| Threat | Scenario | Mitigation |
+|---|---|---|
+| **I**nformation disclosure | The route becomes a convenient summary of another customer's finances | Party comes only from the header the edge sets from the JWT; the loan read and the profile read are both scoped by it. Same 403/400 split as section 9a — an authorised caller with no scope is a bad request, not a forbidden one. |
+| **I**nformation disclosure | The view leaks the bank's assessment of the customer | It carries zones and the working behind them, never a score, a rating, an eligibility or a reason code. The credit decision remains the ADR-0213 engine's and is not reachable from here. |
+| **T**ampering / misleading | An unavailable upstream produces a flattering view | Every pillar can answer UNKNOWN and does so independently: a failed profile read greys out cashflow and obligations while the loan-derived pillars stand. Nothing is approximated — in particular the reserve is left UNKNOWN rather than inferred from unspent cashflow, which would show a customer a buffer they do not have. |
+| **T**ampering / misleading | No live loans reads as a healthy debt ratio | An empty loan book gives debt service 0; an *unreadable* one gives null, and null makes the obligations pillar UNKNOWN. The two are not collapsed, because only one of them means "this customer has no debts". |
+| **D**oS | The route fans out to two upstreams per call | Both reads are best-effort with the service's existing timeouts; a slow upstream costs a greyed-out pillar, never a hung request. |
+
 ## 10. Change log
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
+- **2026-08-21** — Trust-boundary change (ADR-0269 rule 5): `GET /api/v1/lending/intake/financial-health`,
+  a customer-facing read that composes the credit profile with the loan book. See section 9c. No
+  score and no eligibility; every pillar degrades to UNKNOWN independently, and an unreadable loan
+  book is deliberately distinguished from a customer with no loans.
 
 - **2026-08-21** — Trust-boundary change (ADR-0269 slice 3, #6215): two new outbound client edges
   from the credit-offer gate — consent-service (`CREDIT_OFFERS`) and analytics-sink (the 360 credit
