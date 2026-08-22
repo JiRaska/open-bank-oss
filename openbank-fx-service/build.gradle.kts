@@ -68,6 +68,15 @@ kover {
             excludes {
                 annotatedBy("jakarta.ws.rs.Path")
                 annotatedBy("io.quarkus.runtime.annotations.RegisterForReflection")
+                // Shared library classes are on this module's classpath, so Kover counts them —
+                // but fx's test task never runs libs' tests, so any code fx does not itself call
+                // is measured as uncovered. That makes this floor a function of how large
+                // openbank-libs-* is rather than of how well fx is tested: #5719 added 13 lines to
+                // libs-runtime's EventRetry (53 -> 66), which fx never references, and fx dropped
+                // to 60.5% against a floor of 65 on a PR that touches no fx file. The floor's own
+                // comment below cites a measurement of fx's code; this keeps the number meaning
+                // that. Fleet-wide fix tracked in issue #6384.
+                classes("com.openbank.libs.*")
             }
         }
         verify {
