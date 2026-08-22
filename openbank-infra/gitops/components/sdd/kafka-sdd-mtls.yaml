@@ -48,6 +48,16 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
+      # #5745: SmallRye dead-letter topic for the `sdd-collection-authorised-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.sdd.sdd-collection-authorised-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
 ---
 # ExternalSecret: sdd-service keystore projected from messaging → sdd.
 apiVersion: external-secrets.io/v1beta1
