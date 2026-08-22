@@ -8,6 +8,25 @@ out of it (they are path-scoped, not less important — several are live-inciden
 ## Engineering notes (common pitfalls)
 
 ### GitOps / Kubernetes
+- **ArgoCD reports `Synced / Healthy` when it cannot compute a diff at all, and will then apply
+  NOTHING for as long as that lasts — measured at three weeks.** With `ServerSideApply=true` the
+  controller runs a server-side dry-run to diff; if that dry-run is rejected the comparison ERRORS,
+  and the app keeps serving its last known status. The condition lands in
+  `.status.conditions[].type == ComparisonError`, which **no ArgoCD metric exposes** — `argocd_app_info`
+  carries only `sync_status` and `health_status`, so `ArgoCDAppDegraded` and `ArgoCDAppHealthUnknown`
+  in `prometheus-rules-argocd.yaml` both stay quiet by construction. The trigger is any change to an
+  IMMUTABLE field: on 2026-08-21 the `loki` app had `singleBinary.persistence.size` raised 10Gi ->
+  30Gi (#3278), StatefulSet `volumeClaimTemplates` is immutable, and every values change merged
+  after that — including #6032's ruler fix — was never applied. `kubectl get application` showed
+  `Synced Healthy` throughout.
+  **Read `.status.operationState.finishedAt`, not `.status.sync.status`.** A last successful sync
+  three weeks old on an app whose values have changed since is the tell; `Synced` is not evidence.
+  The confirming probe is to render the chart locally with the app's own live values
+  (`kubectl get application <n> -o jsonpath='{.spec.source.helm.valuesObject}'` -> `helm template`)
+  and diff against the live ConfigMap — that is what turned "Argo says Synced" into "the ruler block
+  is the only thing missing". Fix without downtime: `kubectl delete sts <n> --cascade=orphan` leaves
+  the pod and the PVC running and lets Argo recreate the object with the new template; the PVC keeps
+  whatever size it was expanded to separately.
 - **`realm-template.json` is read ONLY on Keycloak's cold start (`--import-realm`), so editing it
   changes nothing on a running realm — and ArgoCD reports `Synced/Healthy` throughout.** ArgoCD
   manages the ConfigMap, and the ConfigMap does match the repo; the drift is one layer below what it
@@ -345,6 +364,20 @@ out of it (they are path-scoped, not less important — several are live-inciden
   unpriced, so the check meant to prove the price book complete was reporting the lookback window
   instead. Measured at the group's own `lastEvaluation`: 9 series at eval+60s, 0 at eval+600s
   (#6151). For a `vector(<constant>)` rule the interval is not a cost knob — evaluation is free.
+- **An agent's own metrics `interval` is how often it RECOMPUTES, not how often you scrape — and
+  the two are set in different files.** Falco's chart defaults to `metrics.interval: 1h`, so a 30s
+  ServiceMonitor returns the same hour-old numbers 120 times and every gauge lags reality by up to
+  an hour, with nothing anywhere looking broken. Set it to `1m` (#6322) and prove it by EFFECT, not
+  by reading the config back: `falcosecurity_falco_duration_seconds_total` grew by exactly 90.0s
+  over 90s of wall clock; at the default it would not have moved. Same family as the recording-rule
+  bullet above, one layer further out.
+- **A metric name is an unverified claim about someone else's build.** Falco's prefix is
+  `falcosecurity_`, NOT `falco_` — a probe written against the obvious guess reported zero for ten
+  minutes against a perfectly working agent serving 44 metrics on 12 scrape targets, all `up`. The
+  zero is indistinguishable from "the feature did not work". Read the names off the running
+  endpoint (`kubectl exec <pod> -- curl -s localhost:<port>/metrics`) or off
+  `/api/v1/label/__name__/values` before writing any rule, and when a probe returns nothing, check
+  the SCRAPE TARGETS before believing it.
 - **`loki.ruler` is not a chart key; it is `loki.rulerConfig`.** Helm drops unknown keys silently,
   so a detailed, well-commented ruler block can sit in git while the deployed config has
   `alertmanager_url` EMPTY and `storage.type: s3` instead of the sidecar's local directory. Three
