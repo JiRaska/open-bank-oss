@@ -113,8 +113,8 @@ function FlakyTestHunterContent() {
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><Link href="/iaops" className="breadcrumb-current" style={{ textDecoration: 'none' }}>{t('IAOps', 'IAOps')}</Link><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Flaky testy', 'Flaky tests')}</span></div>}
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button className="btn btn-secondary" onClick={() => void load()} disabled={loading}>
-              <RefreshCw size={13} className={loading ? 'animate-spin' : undefined} />
+            <button type="button" className="btn btn-secondary" onClick={() => void load()} disabled={loading} aria-busy={loading} aria-label={t('Obnovit flaky testy', 'Refresh flaky tests')}>
+              <RefreshCw size={13} aria-hidden="true" className={loading ? 'animate-spin' : undefined} />
               {t('Obnovit', 'Refresh')}
             </button>
             {canTrigger && (
@@ -168,8 +168,8 @@ function FlakyTestHunterContent() {
 
       <div className="card">
         {loading ? (
-          <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-            <RefreshCw size={20} className="animate-spin" style={{ marginBottom: '8px', margin: '0 auto', display: 'block' }} />
+          <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+            <RefreshCw size={20} aria-hidden="true" className="animate-spin" style={{ marginBottom: '8px', margin: '0 auto', display: 'block' }} />
             <div>{t('Načítám…', 'Loading…')}</div>
           </div>
         ) : findings.length === 0 ? (
