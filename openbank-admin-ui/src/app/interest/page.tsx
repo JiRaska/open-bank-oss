@@ -81,8 +81,8 @@ export default function InterestPage() {
             </div>
           </div>
           {loading ? (
-            <div style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
-              <RefreshCw size={20} style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
+            <div role="status" aria-live="polite" style={{ padding: '48px', textAlign: 'center', color: 'var(--text-tertiary)', fontSize: '13px' }}>
+              <RefreshCw size={20} aria-hidden="true" style={{ animation: 'spin 0.8s linear infinite', marginBottom: '8px' }} /><div>{t('Načítám…', 'Loading…')}</div>
             </div>
           ) : unavailable ? (
             <DataUnavailable kind={unavailable.kind} service={t('Interest-service', 'Interest-service')} feature={t('Úrokové záznamy', 'Interest records')} lang={language} />

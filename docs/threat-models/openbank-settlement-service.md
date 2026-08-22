@@ -185,6 +185,15 @@ replacing the former in-memory stub), so settlement state is durable across rest
    `SettlementReversalFailed` rule — separated because the other rule's premise ("funds are safe,
    only the record is wrong") is false here.
 
+   Nor was it enough to publish the state: `SettlementWorkflowImpl` called `rejectSettlement`
+   unconditionally after the compensation loop, so the row was overwritten to `REJECTED` within
+   seconds — a terminal status asserting a clean unwind while funds were outstanding, and a row
+   the age gauge never saw. `REJECTED` is now written **only when every compensation succeeded**
+   (#6286); a settlement whose compensation was refused rests in `REVERSAL_FAILED`, non-terminal
+   and alerting, until the collections/dispute path resolves it. The residual risk that remains is
+   that this resolution is an operator action with no workflow behind it, so the alert stays lit
+   for as long as the obligation does — deliberately.
+
 7. **A debit applied by balance-service but not observed by settlement-service is not compensated
    (pre-existing, not addressed by #6037).** `SettlementWorkflowImpl` registers the `reverseDebit`
    compensation only *after* `debitPayer` returns, so a debit that balance-service applied while the

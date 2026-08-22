@@ -188,11 +188,30 @@ for svc in $SERVICES; do
   # echoed at 18:43:10 and quarkusDev's first log line landed at 18:45:38 — 148 of 180 seconds
   # gone to configuration and compilation, leaving the application ~32s before teardown killed it.
   # Doing the compile as its own step makes the wait measure what it claims to measure.
+  # The compile status is READ, not discarded. `|| true` here reproduced exactly the
+  # misattribution this lane exists to remove: a compile failure leaves no classes to boot, the
+  # readiness wait then times out, and the job reports "failed to boot" about a COMPILE error.
+  # Fail fast instead, and name the real cause. Its own log file, because the boot log is what
+  # the readiness failure tails and appending the build output there would have it truncated away.
+  #
+  # Arrived on main as #5763's fourth commit while this branch was open; kept here rather than in
+  # the workflow because the inline `run:` step is extracted (see the header) and re-inlining it
+  # would push the step back past GitHub's ~20 KiB limit.
   echo "==> [${svc}] compiling (outside the readiness budget)"
   BUILD_START=$SECONDS
+  BUILD_LOG="fuzz-reports/${svc}-build.log"
   ./gradlew ":${svc}:quarkusGenerateCode" ":${svc}:classes" \
-    --console=plain --quiet >> "fuzz-reports/${svc}-boot.log" 2>&1 || true
-  echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s"
+    --console=plain --quiet > "${BUILD_LOG}" 2>&1
+  BUILD_RC=$?
+  echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s (gradle exit ${BUILD_RC})"
+  if [ "$BUILD_RC" != "0" ]; then
+    echo "::error::[${svc}] COMPILE FAILED (gradle exit ${BUILD_RC}) — this is a build error, NOT a boot failure; see ${svc}-build.log artifact"
+    tail -50 "${BUILD_LOG}" || true
+    OVERALL=1
+    docker rm -f fuzz-pg >/dev/null 2>&1 || true
+    docker rm -f fuzz-redis >/dev/null 2>&1 || true
+    continue
+  fi
 
   run_pass () {
     local label="$1"; shift

@@ -172,8 +172,9 @@ export default function OnboardingPage() {
             <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
             {t('Konverze', 'Conversion')}
           </Link>
-          <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <button className="btn btn-secondary" type="button" onClick={refresh} disabled={loading}
+            aria-busy={loading} aria-label={t('Obnovit onboarding', 'Refresh onboarding')}>
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}

@@ -117,7 +117,8 @@ const docsNav: NavItem[] = [
 const platformNav: NavItem[] = [
   { nameCs: 'FinOps',   nameEn: 'FinOps',   href: '/finops',   icon: PiggyBank,  permission: 'system:view' },
   { nameCs: 'DevOps',   nameEn: 'DevOps',   href: '/devops',   icon: GitBranch,  permission: 'system:view' },
-  { nameCs: 'IAOps',    nameEn: 'IAOps',    href: '/iaops',    icon: Bot,        permission: 'system:view' },
+  { nameCs: 'Řídicí centrum agentů', nameEn: 'Agent Control Room', href: '/iaops', icon: Bot, permission: 'system:view' },
+  { nameCs: 'Živé agentní případy', nameEn: 'Live Agent Cases', href: '/iaops/cases', icon: GitBranch, permission: 'system:view' },
   { nameCs: 'Flaky testy', nameEn: 'Flaky Tests', href: '/iaops/flaky-test-hunter', icon: Bug, permission: 'system:view' },
   { nameCs: 'Temporal', nameEn: 'Temporal', href: '/temporal', icon: Zap,        permission: 'system:view' },
   { nameCs: 'Tok workflow', nameEn: 'Workflow Flow', href: '/temporal/flow', icon: Workflow, permission: 'system:view' },

@@ -250,7 +250,7 @@ export default function IdentityCasesPage() {
         icon={<Fingerprint size={20} aria-hidden="true" />}
         title={t('Ověření identity — čtyři oči', 'Identity Verification — Four-Eyes')}
         subtitle={t('Nejednoznačné identity z onboardingu (kolize RČ nebo jmenovci). Rozhodnutí vyžaduje dva různé schvalovatele (ADR-0072 / ADR-0030).', 'Ambiguous onboarding identities (RČ collisions or namesakes). A decision requires two distinct approvers (ADR-0072 / ADR-0030).')}
-        actions={<button type="button" aria-busy={loading} className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
+        actions={<button type="button" aria-busy={loading} aria-label={t('Obnovit případy identity', 'Refresh identity cases')} className="btn btn-secondary" onClick={load} disabled={loading} style={{ fontSize: '13px' }}>
           <RefreshCw size={14} aria-hidden="true" style={{ marginRight: '4px' }} />{t('Obnovit', 'Refresh')}
         </button>}
       />

@@ -569,7 +569,8 @@ export default function ProductCatalogPage() {
               <button className="btn btn-primary" onClick={openCreateModal} disabled={loading}>
                 <Plus size={14} aria-hidden="true" /> {t('Nový produkt', 'New Product')}
               </button>
-              <button className="btn btn-secondary" onClick={load} disabled={loading}>
+              <button className="btn btn-secondary" type="button" onClick={load} disabled={loading}
+                aria-busy={loading} aria-label={t('Obnovit katalog produktů', 'Refresh product catalog')}>
                 <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
