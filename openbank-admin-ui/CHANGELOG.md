@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.10...admin-ui-v0.186.11) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify fraud refresh state ([#6408](https://github.com/JiRaska/open-bank-oss/issues/6408)) ([cd11d5e](https://github.com/JiRaska/open-bank-oss/commit/cd11d5e794079221fd6eafcd0c9f7e561537c08d))
+
 ## [0.186.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.9...admin-ui-v0.186.10) (2026-08-22)
 
 
