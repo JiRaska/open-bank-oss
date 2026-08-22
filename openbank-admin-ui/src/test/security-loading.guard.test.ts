@@ -8,7 +8,7 @@ describe('security findings loading contract', () => {
     const source = readFileSync(path.resolve(__dirname, '../app/security/page.tsx'), 'utf8')
     expect(source).toContain('type="button"')
     expect(source).toContain('aria-busy={loading}')
-    expect(source).toContain("aria-label={t('Obnovit bezpečnostní nálezy', 'Refresh security findings')}")
+    expect(source).toContain("aria-label={t('Obnovit bezpečnostní sken', 'Refresh security scan')}")
     expect(source).toContain('<div role="status" aria-live="polite"')
     expect(source).toContain('onClick={load}')
   })
