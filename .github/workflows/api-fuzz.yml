@@ -248,9 +248,60 @@ jobs:
               echo "==> [${svc}] disabling Temporal worker via ${prop}=false"
             done
 
+            # Compile BEFORE the readiness clock starts. The 180s budget below was being spent
+            # on the Gradle build, not on the Quarkus boot: measured on run 32288156614,
+            # `starting quarkusDev` was echoed at 18:43:10 and quarkusDev's first log line landed
+            # at 18:45:38 — 148 of the 180 seconds gone to configuration and compilation, leaving
+            # the application ~32s before teardown killed it. It never had a chance, and the job
+            # reported "failed to boot" about a service that had not finished starting.
+            #
+            # Services with a warm build cache passed; the ones without did not, which is why the
+            # same service flips between runs. Doing the compile as its own step makes the wait
+            # measure what it claims to measure, and a slow BUILD now shows up as a slow build.
+            # The compile status is READ, not discarded. `|| true` here would reproduce exactly
+            # the misattribution this PR exists to remove: a compile failure leaves no classes to
+            # run, quarkusDev exits immediately, the readiness loop below then spends its full
+            # 180s budget on a service that was never going to answer, and the job reports
+            # "failed to boot" about a COMPILE error. Fail fast instead, and name the real cause.
+            #
+            # The build log is its own file: quarkusDev opens `${svc}-boot.log` with `>` a few
+            # lines below, so appending the compile output there would have it truncated away
+            # before anyone could read it — the evidence destroyed by the next command.
+            echo "==> [${svc}] compiling (outside the readiness budget)"
+            BUILD_START=$SECONDS
+            BUILD_LOG="fuzz-reports/${svc}-build.log"
+            ./gradlew ":${svc}:quarkusGenerateCode" ":${svc}:classes" \
+              --console=plain --quiet > "${BUILD_LOG}" 2>&1
+            BUILD_RC=$?
+            echo "==> [${svc}] compiled in $((SECONDS - BUILD_START))s (gradle exit ${BUILD_RC})"
+            if [ "$BUILD_RC" != "0" ]; then
+              echo "::error::[${svc}] COMPILE FAILED (gradle exit ${BUILD_RC}) — this is a build error, NOT a boot failure; see ${svc}-build.log artifact"
+              tail -50 "${BUILD_LOG}" || true
+              OVERALL=1
+              docker rm -f fuzz-pg >/dev/null 2>&1 || true
+              continue
+            fi
+
             echo "==> [${svc}] starting quarkusDev"
+            # FORCE the credentials this job actually created the container with, rather than
+            # trusting the service to pick them up from an env var. The fleet convention is
+            # `password: ${POSTGRES_PASSWORD:CHANGE_ME_LOCAL_DEV_ONLY}`, and the job env supplies
+            # POSTGRES_PASSWORD — but openbank-settlement-service names its expressions
+            # QUARKUS_DATASOURCE_USERNAME/PASSWORD instead, so POSTGRES_PASSWORD never reached it
+            # and Flyway died on `FATAL: password authentication failed for user
+            # "openbank_settlement"` after a 237s compile (run 32289597634). Only 3 of ~50
+            # services use that spelling, which is exactly why an assumption about it is worth
+            # nothing: this is the third naming convention this lane assumed and did not have
+            # (#5714 was the username expression and the six differently-named worker properties).
+            #
+            # System properties sit above application.yaml in SmallRye's ordinal chain, so they
+            # win over any `${...:default}` expression whatever it is spelled. username/password
+            # live on `quarkus.datasource`, above both `reactive:` and `jdbc:`, so one pair of
+            # overrides covers the reactive datasource and the Flyway/Agroal one together.
             ./gradlew ":${svc}:quarkusDev" \
               -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+              -Dquarkus.datasource.username="${DBUSER}" \
+              -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
               "${WORKER_FLAGS[@]}" \
               -Dquarkus.console.basic=true \
               --console=plain --quiet \
@@ -260,13 +311,35 @@ jobs:
             # Readiness = the main HTTP socket answers anything (000 = conn
             # refused). /q/* may live on the management port in prod profiles;
             # here only socket-open matters before pointing schemathesis at it.
+            #
+            # The wait deliberately does NOT use $DEV_PID as a liveness proxy. `./gradlew` is a
+            # launcher: it hands the build to the Gradle daemon and the client can exit while
+            # quarkusDev keeps running under the daemon. `kill -0 $DEV_PID || break` therefore
+            # aborted the wait on a service that was booting perfectly well — a race, which is why
+            # the same service passed one run and "failed to boot" the next. Measured on run
+            # 32284304038: openbank-domestic-payment logged `Listening on: http://localhost:8116`
+            # at 18:21:52, ~34s into a 180s budget, and the job still reported
+            # "failed to boot"; its boot log ends one second later, when teardown killed it. Its
+            # artifact contains no error of any kind. openbank-settlement-service is the same
+            # shape, one step earlier — it was still pulling a Dev Services LGTM container
+            # (46 mentions in 137 lines) when the wait gave up.
+            #
+            # So the loop now runs its full budget and reports what it actually observed. A
+            # genuinely dead JVM costs the remaining wait instead of exiting early — the right
+            # trade against silently mislabelling a healthy service, which is the failure this
+            # lane exists to avoid making. WAITED is printed so a slow boot is visible as a slow
+            # boot rather than inferred from a timestamp in an artifact.
             UP=0
+            WAITED=0
             for i in $(seq 1 90); do
               code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
               if [ "$code" != "000" ]; then UP=1; break; fi
-              kill -0 "$DEV_PID" 2>/dev/null || break
+              WAITED=$((WAITED + 2))
               sleep 2
             done
+            if [ "$UP" = "1" ]; then
+              echo "==> [${svc}] answered after ${WAITED}s"
+            fi
             if [ "$UP" != "1" ]; then
               echo "::error::[${svc}] failed to boot — see ${svc}-boot.log artifact"
               tail -50 "fuzz-reports/${svc}-boot.log" || true
