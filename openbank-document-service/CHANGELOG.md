@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.2](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.1...document-service-v0.12.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
 ## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/document-service-v0.12.0...document-service-v0.12.1) (2026-08-19)
 
 
