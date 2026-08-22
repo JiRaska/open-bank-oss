@@ -55,21 +55,31 @@ open class DiagnoseAndProposeActivityImpl(
         val rootCause = finding.rootCause
             ?: error("Cannot propose without a diagnosis for finding ${finding.id}")
         val fixDiff = llm.proposeFixDiff(finding, rootCause)
-        val proposed = if (fixDiff != null) {
-            val prUrl = githubProposal.openProposalPr(finding, fixDiff)
+        val prUrl = fixDiff?.let { githubProposal.openProposalPr(finding, it) }
+        val proposalUrl = prUrl ?: githubProposal.openTicket(finding, rootCause)
+        val proposed = if (proposalUrl != null) {
             finding.copy(
-                proposedFixDiff = fixDiff,
-                proposalUrl = prUrl,
+                proposedFixDiff = if (prUrl != null) fixDiff else finding.proposedFixDiff,
+                proposalUrl = proposalUrl,
                 status = FindingStatus.PROPOSED,
                 proposedAt = Instant.now(),
             )
         } else {
-            val ticketUrl = githubProposal.openTicket(finding, rootCause)
-            finding.copy(
-                proposalUrl = ticketUrl,
-                status = FindingStatus.PROPOSED,
-                proposedAt = Instant.now(),
+            // NOTHING was created, so the finding must NOT read as proposed. It stays DIAGNOSED
+            // with a null proposalUrl and a null proposedAt, which is what keeps it out of
+            // AuthzPolicyAuditorWorkflowImpl's `findingsProposed` count and out of the HITL queue
+            // as a delivered proposal. The predecessor of this branch returned a fabricated
+            // `pending-authz-policy-auditor-<id>` URL and moved the finding to PROPOSED — a no-op
+            // that shared its shape with a real result (#5897). On this agent that is the worse
+            // failure of the two: an unfiled authorization-policy finding reported as filed.
+            log.warnf(
+                "No proposal was created for finding %s (%s) on %s — leaving it DIAGNOSED; " +
+                    "nothing is awaiting a human.",
+                finding.id,
+                finding.checkType,
+                finding.component,
             )
+            finding.copy(status = FindingStatus.DIAGNOSED, proposalUrl = null, proposedAt = null)
         }
         findingRepository.update(proposed)
     }
