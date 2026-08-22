@@ -66,7 +66,12 @@ class CreditFunnelPublisher(
             payload.put("action", action)
 
             val node = objectMapper.createObjectNode()
-            node.put("eventType", EVENT_TYPE)
+            // Bound to a local rather than passed straight in, because the ADR-0006
+            // contract/code-agreement gate reads this source and cannot evaluate a constant: it
+            // matches `eventType = "<literal>"`, and without that shape a documented message looks
+            // to it like one nobody emits. EVENT_TYPE below stays as the published name.
+            val eventType = "credit.funnel.step"
+            node.put("eventType", eventType)
             node.put("aggregateType", AGGREGATE_TYPE)
             // Keyed by party, unlike onboarding: the session here IS the authenticated customer, and
             // the questions this answers ("did they come back after switching offers on") span
@@ -87,6 +92,7 @@ class CreditFunnelPublisher(
     }
 
     companion object {
+        /** The contract message name (openbank-contracts/openbank-customer-edge/asyncapi.yaml). */
         const val EVENT_TYPE = "credit.funnel.step"
         const val AGGREGATE_TYPE = "CREDIT_FUNNEL"
 

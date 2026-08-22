@@ -69,7 +69,7 @@ channels:
       "converted" is one somebody eventually optimises, and optimising credit acceptance is the
       thing ADR-0269 exists to prevent.
     messages:
-      creditFunnelStep:
+      credit.funnel.step:
         $ref: '#/components/messages/creditFunnelStep'
 
   customerAudit:
@@ -81,8 +81,40 @@ channels:
       not fail the customer's request — but unlike them this is evidence, so the durable record is
       audit-service's own store and this topic is only the transport.
     messages:
-      auditEvent:
-        $ref: '#/components/messages/passthroughEnvelope'
+      customeraccountopened:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_ACCOUNT_OPENED'
+      customercardactionrefused:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_CARD_ACTION_REFUSED'
+      customeridentitymatched:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_IDENTITY_MATCHED'
+      customeridentitypending:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_IDENTITY_PENDING'
+      customeronboardingrejected:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_ONBOARDING_REJECTED'
+      customeronboardingresumedcreated:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_ONBOARDING_RESUMED_CREATED'
+      customeronboardingresumedlinked:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_ONBOARDING_RESUMED_LINKED'
+      customerpaymentinitiated:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_INITIATED'
+      customerpaymentrefused:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_PAYMENT_REFUSED'
+      customerpocketconverted:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_POCKET_CONVERTED'
+      customerpocketexchanged:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_POCKET_EXCHANGED'
+      customerregistered:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_REGISTERED'
+      customertransferinitiated:
+        $ref: '#/components/messages/auditEvent_CUSTOMER_TRANSFER_INITIATED'
+      loanapplicationsubmitted:
+        $ref: '#/components/messages/auditEvent_LOAN_APPLICATION_SUBMITTED'
+      scadecisionrecorded:
+        $ref: '#/components/messages/auditEvent_SCA_DECISION_RECORDED'
+      scadeviceenrolled:
+        $ref: '#/components/messages/auditEvent_SCA_DEVICE_ENROLLED'
+      standingordercreated:
+        $ref: '#/components/messages/auditEvent_STANDING_ORDER_CREATED'
 
   onboardingFunnelEvents:
     address: openbank.onboarding.funnel.events
@@ -94,8 +126,8 @@ channels:
 
       Its allow-lists are closed for the same reason this one's are: anyone can post to it.
     messages:
-      onboardingFunnelStep:
-        $ref: '#/components/messages/passthroughEnvelope'
+      onboarding.funnel.step:
+        $ref: '#/components/messages/onboardingFunnelStep'
 
   feedbackEvents:
     address: openbank.feedback.events
@@ -104,8 +136,8 @@ channels:
       Feedback METADATA only — screen id, category, comment and the screenshot's object-store key.
       The PNG itself lives in S3 under a 90-day lifecycle rule and never enters Kafka.
     messages:
-      feedbackEvent:
-        $ref: '#/components/messages/passthroughEnvelope'
+      feedback.submitted:
+        $ref: '#/components/messages/feedbackSubmitted'
 
 operations:
   publishCreditFunnelStep:
@@ -122,25 +154,188 @@ operations:
       Best-effort by design: a Kafka outage degrades to an ERROR log, never a 5xx. Telemetry must
       not break the screen it is watching.
     messages:
-      - $ref: '#/channels/creditFunnelEvents/messages/creditFunnelStep'
+      - $ref: '#/channels/creditFunnelEvents/messages/credit.funnel.step'
 
 components:
   messages:
     creditFunnelStep:
-      name: creditFunnelStep
+      name: credit.funnel.step
       title: One step of a customer's credit journey
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AnalyticsEnvelope'
 
-    passthroughEnvelope:
-      name: passthroughEnvelope
-      title: The generic analytics envelope, unchanged
+    auditEvent_CUSTOMER_ACCOUNT_OPENED:
+      name: CUSTOMER_ACCOUNT_OPENED
+      title: Customer audit event CUSTOMER_ACCOUNT_OPENED
       contentType: application/json
       description: |
-        Documented as the shared envelope rather than field-by-field: these three streams predate
-        this contract and nothing validates payload content against the code today (see the header).
-        Claiming a precise schema here would assert more than is checked.
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_ACCOUNT_OPENED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_CARD_ACTION_REFUSED:
+      name: CUSTOMER_CARD_ACTION_REFUSED
+      title: Customer audit event CUSTOMER_CARD_ACTION_REFUSED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_CARD_ACTION_REFUSED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_IDENTITY_MATCHED:
+      name: CUSTOMER_IDENTITY_MATCHED
+      title: Customer audit event CUSTOMER_IDENTITY_MATCHED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_IDENTITY_MATCHED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_IDENTITY_PENDING:
+      name: CUSTOMER_IDENTITY_PENDING
+      title: Customer audit event CUSTOMER_IDENTITY_PENDING
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_IDENTITY_PENDING`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_ONBOARDING_REJECTED:
+      name: CUSTOMER_ONBOARDING_REJECTED
+      title: Customer audit event CUSTOMER_ONBOARDING_REJECTED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_ONBOARDING_REJECTED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_ONBOARDING_RESUMED_CREATED:
+      name: CUSTOMER_ONBOARDING_RESUMED_CREATED
+      title: Customer audit event CUSTOMER_ONBOARDING_RESUMED_CREATED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_ONBOARDING_RESUMED_CREATED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_ONBOARDING_RESUMED_LINKED:
+      name: CUSTOMER_ONBOARDING_RESUMED_LINKED
+      title: Customer audit event CUSTOMER_ONBOARDING_RESUMED_LINKED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_ONBOARDING_RESUMED_LINKED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_PAYMENT_INITIATED:
+      name: CUSTOMER_PAYMENT_INITIATED
+      title: Customer audit event CUSTOMER_PAYMENT_INITIATED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_PAYMENT_INITIATED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_PAYMENT_REFUSED:
+      name: CUSTOMER_PAYMENT_REFUSED
+      title: Customer audit event CUSTOMER_PAYMENT_REFUSED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_PAYMENT_REFUSED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_POCKET_CONVERTED:
+      name: CUSTOMER_POCKET_CONVERTED
+      title: Customer audit event CUSTOMER_POCKET_CONVERTED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_POCKET_CONVERTED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_POCKET_EXCHANGED:
+      name: CUSTOMER_POCKET_EXCHANGED
+      title: Customer audit event CUSTOMER_POCKET_EXCHANGED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_POCKET_EXCHANGED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_REGISTERED:
+      name: CUSTOMER_REGISTERED
+      title: Customer audit event CUSTOMER_REGISTERED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_REGISTERED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_CUSTOMER_TRANSFER_INITIATED:
+      name: CUSTOMER_TRANSFER_INITIATED
+      title: Customer audit event CUSTOMER_TRANSFER_INITIATED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: CUSTOMER_TRANSFER_INITIATED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_LOAN_APPLICATION_SUBMITTED:
+      name: LOAN_APPLICATION_SUBMITTED
+      title: Customer audit event LOAN_APPLICATION_SUBMITTED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: LOAN_APPLICATION_SUBMITTED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_SCA_DECISION_RECORDED:
+      name: SCA_DECISION_RECORDED
+      title: Customer audit event SCA_DECISION_RECORDED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: SCA_DECISION_RECORDED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_SCA_DEVICE_ENROLLED:
+      name: SCA_DEVICE_ENROLLED
+      title: Customer audit event SCA_DEVICE_ENROLLED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: SCA_DEVICE_ENROLLED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+    auditEvent_STANDING_ORDER_CREATED:
+      name: STANDING_ORDER_CREATED
+      title: Customer audit event STANDING_ORDER_CREATED
+      contentType: application/json
+      description: |
+        Emitted by `EdgeAuditPublisher` from `CustomerEdgeResource`, on the hand-built outbox path.
+        Carries the envelope below with `eventType: STANDING_ORDER_CREATED`.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+
+    onboardingFunnelStep:
+      name: onboarding.funnel.step
+      title: One onboarding funnel step
+      contentType: application/json
+      description: |
+        Emitted by `OnboardingFunnelPublisher.emit`. Keyed by a client-generated onboarding session
+        id, never by identity.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+
+    feedbackSubmitted:
+      name: feedback.submitted
+      title: One in-app screen-feedback submission (metadata only)
+      contentType: application/json
+      description: |
+        Emitted by `FeedbackPublisher`. Metadata and the screenshot's object-store key only — the
+        PNG never enters Kafka.
       payload:
         $ref: '#/components/schemas/AnalyticsEnvelope'
 
