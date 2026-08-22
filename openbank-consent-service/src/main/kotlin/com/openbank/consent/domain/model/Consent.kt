@@ -142,6 +142,28 @@ data class Consent(
     )
 
     /**
+     * Replaced by a newer consent covering the same grantee and the same scopes (issue #6487).
+     *
+     * Distinct from [revoke]: the customer did not withdraw anything, so recording this as REVOKED
+     * would put a withdrawal in the audit trail that never happened. It is the *bank* retiring a
+     * row the customer replaced.
+     */
+    fun supersede(now: OffsetDateTime): Consent = copy(
+        status = ConsentStatus.SUPERSEDED,
+        updatedAt = now,
+    )
+
+    /**
+     * True when [other] grants the same grantee exactly the same scope set.
+     *
+     * Set EQUALITY, not overlap: a consent for {ACCOUNTS} and one for {ACCOUNTS, PAYMENTS} are
+     * different grants, and superseding the narrower one would silently widen what the customer
+     * agreed to. Overlap is a different question that needs a customer-facing decision, not a
+     * comparison operator.
+     */
+    fun supersedes(other: Consent): Boolean = other.id != id && other.granteeId == granteeId && other.scopes == scopes
+
+    /**
      * PSD2 RTS Art. 10(2)(b) access-frequency cap for this consent's scopes: an AISP may read the
      * account data at most [AISP_MAX_ACCESSES_PER_DAY] times per day without fresh SCA. Returned by
      * `/validate` so a resource server can cache within that window. null when no AISP scope applies
