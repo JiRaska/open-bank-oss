@@ -2421,18 +2421,23 @@ gates:
       OASDIFF_SHA256: "8b972accaf49f984cf40702af8b29360126ac9436594ccf6ac1ae662209a5fe6"
     # Falsifies the URL-major scan, which had no self-test and shipped a false positive for months:
     # it read /api/v{N} out of RAW file text, so a comment explaining the URL-major rule read as an
-    # endpoint implementing it and failed a service whose every @Path says /api/v1 (#3119). Needs no
-    # oasdiff — it exercises url_majors / own_api_majors directly, including against the two real
-    # services (psd2, customer-edge) whose distinction a naive fix breaks.
+    # endpoint implementing it and failed a service whose every @Path says /api/v1 (#3119) — it
+    # exercises url_majors / own_api_majors directly, including against the two real services
+    # (psd2, customer-edge) whose distinction a naive fix breaks.
+    #
+    # It now ALSO falsifies the classifier, the half that decides whether a PR is red and which
+    # nothing exercised. That gap is how #6380 survived: `editorial` demands a PATCH bump, the bump
+    # was itself a non-excluded diff, so adding it reclassified the change as `additive` and no
+    # version satisfied it. Those cases need oasdiff, so the selftest installs it too — and the
+    # script FAILS rather than skips when the binary is absent, since a self-test that cannot run
+    # is not a self-test. The install is shared and idempotent; both steps run in the same job.
     selftest: |
+      set -euo pipefail
+      bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --self-test
     run: |
       set -euo pipefail
-      curl -fsSL -o /tmp/oasdiff.tar.gz \
-        "https://github.com/oasdiff/oasdiff/releases/download/v${OASDIFF_VERSION}/oasdiff_${OASDIFF_VERSION}_linux_amd64.tar.gz"
-      echo "${OASDIFF_SHA256}  /tmp/oasdiff.tar.gz" | sha256sum -c -
-      tar -xzf /tmp/oasdiff.tar.gz -C /tmp oasdiff
-      sudo install -m 0755 /tmp/oasdiff /usr/local/bin/oasdiff
+      bash .github/scripts/install-oasdiff.sh
       python3 .github/scripts/check-api-contract.py --base "${PR_DIFF_BASE}" --enforce
 
   # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
