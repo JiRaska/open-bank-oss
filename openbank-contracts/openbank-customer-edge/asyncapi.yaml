@@ -1,0 +1,204 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+#
+# WHAT IS AND IS NOT ENFORCED HERE. `check-event-contract-coverage.py` asserts this FILE EXISTS and
+# declares the channel; nothing validates its content against what the code actually sends, and no
+# schema is registered in Apicurio yet (#1916 sequences that, money-path topics first). Everything
+# below is DERIVED from `CreditFunnelPublisher.emit`, and each claim names its source — the same
+# convention the engagement-service and delegation-service contracts use.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Customer Edge — events
+  version: 1.0.0
+  description: |
+    Customer-edge is a BFF, not an aggregate owner, so it publishes no domain events. What it does
+    publish is TELEMETRY about journeys that happen in the app, and this contract covers the
+    ADR-0269 credit-journey funnel.
+
+    The edge's three older streams — the customer audit trail, the onboarding funnel and screen
+    feedback — predated this file and were grandfathered in `.github/event-contract-baseline.txt`.
+    Creating this contract made those entries stale (the coverage gate treats a service as either
+    documented or not), so they are documented below and their baseline lines are removed. The
+    ratchet only shrinks.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: |
+      Strimzi cluster `openbank-cluster` in the `messaging` namespace. mTLS; the producer
+      (customer-edge) and the consumer (analytics-sink) each use a dedicated least-privilege
+      KafkaUser, declared in `openbank-infra/gitops/components/customer-edge/` and
+      `.../components/analytics/` respectively.
+
+channels:
+  creditFunnelEvents:
+    address: openbank.credit.funnel.events
+    title: Credit-journey funnel telemetry (ADR-0269 rule 8)
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days),
+      declared in `openbank-infra/gitops/components/customer-edge/kafka-topic.yaml`. The durable
+      copy is the ClickHouse bronze layer (≥10 years); this topic is only the transport.
+
+      **Why this is NOT the onboarding funnel topic.** That stream is written from an ANONYMOUS,
+      publicly postable endpoint — which is right for steps that happen before a session exists.
+      These events say *"this customer is looking at borrowing money"* and are written only from an
+      authenticated request. On a public stream that signal would be both forgeable and probeable,
+      so the two are deliberately separate topics with separate ACLs, and must never be unioned
+      into one view downstream: doing so would silently give the anonymous stream's trust level to
+      the credit one.
+
+      **Partitioning key: the party id** (`CreditFunnelPublisher.emit` passes it as the record key
+      and as `aggregateId`). Unlike the onboarding funnel, which keys on a client-generated session
+      id, the questions this answers — "did they come back after switching offers on" — span
+      sessions, so the pseudonymous party id the silver layer already holds is the right grain.
+
+      **What this vocabulary cannot express: a conversion.** There is no CONVERTED, ACCEPTED or
+      SOLD action, and tests on both the publisher and the app-side tracker assert their absence.
+      The programme's metrics are self-activation, opt-out-within-30-days, affordability declines,
+      delinquency, and offers shown without a prior customer action. A funnel that can say
+      "converted" is one somebody eventually optimises, and optimising credit acceptance is the
+      thing ADR-0269 exists to prevent.
+    messages:
+      creditFunnelStep:
+        $ref: '#/components/messages/creditFunnelStep'
+
+  customerAudit:
+    address: openbank.customer.audit
+    title: Customer-facing audit trail
+    description: |
+      Every customer-initiated action the edge brokers, emitted by `EdgeAuditPublisher` for
+      audit-service. Best-effort in the same sense as the telemetry streams — a broker outage must
+      not fail the customer's request — but unlike them this is evidence, so the durable record is
+      audit-service's own store and this topic is only the transport.
+    messages:
+      auditEvent:
+        $ref: '#/components/messages/passthroughEnvelope'
+
+  onboardingFunnelEvents:
+    address: openbank.onboarding.funnel.events
+    title: Onboarding funnel telemetry (ADR-0069 Phase 2)
+    description: |
+      Written from an ANONYMOUS, publicly postable endpoint, because the drop-off worth measuring
+      happens before any Keycloak session exists. Keyed by a client-generated onboarding session id,
+      never by identity; the party id rides in the payload only from the sign step onward.
+
+      Its allow-lists are closed for the same reason this one's are: anyone can post to it.
+    messages:
+      onboardingFunnelStep:
+        $ref: '#/components/messages/passthroughEnvelope'
+
+  feedbackEvents:
+    address: openbank.feedback.events
+    title: In-app screen feedback (ADR-0192)
+    description: |
+      Feedback METADATA only — screen id, category, comment and the screenshot's object-store key.
+      The PNG itself lives in S3 under a 90-day lifecycle rule and never enters Kafka.
+    messages:
+      feedbackEvent:
+        $ref: '#/components/messages/passthroughEnvelope'
+
+operations:
+  publishCreditFunnelStep:
+    action: send
+    channel:
+      $ref: '#/channels/creditFunnelEvents'
+    title: customer-edge publishes one credit-journey funnel step
+    description: |
+      Emitted by `CreditFunnelPublisher.emit`, called from `CustomerEdgeResource.trackCreditEvent`
+      (`POST /customer/v1/credit/events`). Both `step` and `action` are validated against closed
+      allow-lists BEFORE publication; anything else is dropped and the caller still receives 202,
+      because a 400 would turn the allow-list into an oracle for what the bank tracks.
+
+      Best-effort by design: a Kafka outage degrades to an ERROR log, never a 5xx. Telemetry must
+      not break the screen it is watching.
+    messages:
+      - $ref: '#/channels/creditFunnelEvents/messages/creditFunnelStep'
+
+components:
+  messages:
+    creditFunnelStep:
+      name: creditFunnelStep
+      title: One step of a customer's credit journey
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+
+    passthroughEnvelope:
+      name: passthroughEnvelope
+      title: The generic analytics envelope, unchanged
+      contentType: application/json
+      description: |
+        Documented as the shared envelope rather than field-by-field: these three streams predate
+        this contract and nothing validates payload content against the code today (see the header).
+        Claiming a precise schema here would assert more than is checked.
+      payload:
+        $ref: '#/components/schemas/AnalyticsEnvelope'
+
+  schemas:
+    AnalyticsEnvelope:
+      type: object
+      description: |
+        The envelope analytics-sink already ingests generically (eventType / aggregateType /
+        aggregateId / occurredAt / sourceService / schemaVersion / payload), so this stream needs no
+        bespoke consumer — the same shape the onboarding funnel and screen feedback use.
+      required: [eventType, aggregateType, aggregateId, occurredAt, sourceService, schemaVersion, payload]
+      properties:
+        eventType:
+          type: string
+          description: "`credit.funnel.step` for the credit funnel; each other channel has its own."
+        aggregateType:
+          type: string
+          description: "`CREDIT_FUNNEL` for the credit funnel; each other channel has its own." 
+        aggregateId:
+          type: string
+          format: uuid
+          description: The party id — see the channel's partitioning note.
+        occurredAt:
+          type: string
+          format: date-time
+        sourceService:
+          type: string
+          const: customer-edge
+        schemaVersion:
+          type: integer
+          const: 1
+        payload:
+          type: object
+          description: |
+            Shape below is the CREDIT FUNNEL's payload. The audit, onboarding-funnel and feedback
+            channels carry their own payloads on the same envelope.
+          required: [partyId, step, action]
+          properties:
+            partyId:
+              type: string
+              format: uuid
+              description: |
+                Taken from the JWT, never from the request body. A partyId supplied by a client is
+                ignored, so a caller can only ever describe their own journey.
+            step:
+              type: string
+              enum: [CONSENT, HEALTH, FINANCING, QUOTE, APPLICATION]
+            action:
+              type: string
+              description: |
+                Closed list, and closed for two reasons: these values are Prometheus labels, so an
+                open vocabulary is a cardinality bomb reachable by any authenticated customer — and
+                the list deliberately contains no word for conversion.
+              enum:
+                - VIEWED
+                - CONSENT_GRANTED
+                - CONSENT_WITHDRAWN
+                - QUOTE_REQUESTED
+                - QUOTE_SUPPRESSED
+                - APPLICATION_STARTED
+                - APPLICATION_ABANDONED

@@ -101,9 +101,14 @@ mp:
         # engagement.events closes campaign attribution from accepted PUSH handoff to the app's
         # observed impression/click/dismiss/conversion signal. Campaign ids in this stream are
         # resolved by campaign-service from an opaque interactionRef, never trusted from the app.
+        # credit.funnel.events (ADR-0269 rule 8) is the credit-journey counterpart of the
+        # onboarding funnel, and a SEPARATE topic on purpose: the onboarding stream is written from
+        # an anonymous public endpoint, these events only from an authenticated request. Keep them
+        # separate downstream too — unioning them would give the anonymous stream's trust level to
+        # the credit one.
         # Every topic here also needs a Read ACL on the analytics-sink KafkaUser
         # (openbank-infra/gitops/components/analytics/kafka-analytics-sink-mtls.yaml).
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.sca.events,openbank.documents.document.event,openbank.onboarding.funnel.events,openbank.feedback.events,openbank.engagement.events
+        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.sca.events,openbank.documents.document.event,openbank.onboarding.funnel.events,openbank.feedback.events,openbank.engagement.events,openbank.credit.funnel.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
         # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
         # openbank-fraud-service's application.yaml / openbank-anacredit-service's
