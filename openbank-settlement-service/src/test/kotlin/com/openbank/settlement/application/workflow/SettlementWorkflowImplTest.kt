@@ -66,7 +66,6 @@ class SettlementWorkflowImplTest {
         assertThat(calls.bookToLedger.get()).isEqualTo(1)
         assertThat(calls.reverseDebit.get()).isZero()
         assertThat(calls.reverseCredit.get()).isZero()
-        assertThat(calls.reverseBookToLedger.get()).isZero()
         assertThat(calls.rejectSettlement.get()).isZero()
     }
 
@@ -85,7 +84,6 @@ class SettlementWorkflowImplTest {
         // Both prior steps get compensated (most-recent-first), booking itself is not reversed.
         assertThat(calls.reverseCredit.get()).isEqualTo(1)
         assertThat(calls.reverseDebit.get()).isEqualTo(1)
-        assertThat(calls.reverseBookToLedger.get()).isZero()
         assertThat(calls.rejectSettlement.get()).isEqualTo(1)
         assertThat(calls.order).containsExactly(
             "debitPayer",
@@ -127,7 +125,6 @@ class SettlementWorkflowImplTest {
         assertThat(calls.creditPayee.get()).isZero()
         assertThat(calls.reverseDebit.get()).isZero()
         assertThat(calls.reverseCredit.get()).isZero()
-        assertThat(calls.reverseBookToLedger.get()).isZero()
         assertThat(calls.rejectSettlement.get()).isEqualTo(1)
     }
 
@@ -177,29 +174,27 @@ class SettlementWorkflowImplTest {
     }
 
     /**
-     * `reverseBookToLedger` is currently UNREACHABLE, and this test exists to say so out loud.
+     * The saga shape that makes the ledger posting compensation-free, asserted rather than assumed.
      *
-     * Its compensation is registered only after `bookToLedger` returns, and `bookToLedger` is the
-     * last forward step — so nothing can fail afterwards to trigger the unwind. The activity, its
-     * LEDGER_REVERSAL_UNSUPPORTED status, and the `SettlementStuckAfterCompensation` coverage of
-     * that status are all dead until the saga gains a step after the ledger booking.
-     *
-     * The workflow still pairs that compensation with its status (see `Compensation`), so the day
-     * a step IS added the reporting is already correct rather than silently reporting the wrong
-     * half. If this test ever fails, the saga grew a step and the pairing became live — which is
-     * the moment to add the reachable-path assertions.
+     * `bookToLedger` is the last forward step and writes the terminal BOOKED status itself, so no
+     * failure can occur after it. That is why #6410 could delete `reverseBookToLedger`, its
+     * LEDGER_REVERSAL_UNSUPPORTED status and that status's alert coverage — all three were
+     * unreachable. If a step is ever added after the ledger booking, this test goes red, which is
+     * the signal to answer the GL question (see `SettlementActivitiesImpl.bookToLedger`) before
+     * the new step ships.
      */
     @Test
-    fun `the ledger compensation is unreachable in the current saga shape`() {
-        val calls = RecordingActivities(failBookToLedger = true, failReverseBookToLedger = true)
+    fun `booking to the ledger is the last forward step, so it registers no compensation`() {
+        val calls = RecordingActivities()
         worker.registerActivitiesImplementations(calls)
         env.start()
 
-        newWorkflow().settle(UUID.randomUUID())
+        val result = newWorkflow().settle(UUID.randomUUID())
 
-        assertThat(calls.reverseBookToLedger.get())
-            .describedAs("bookToLedger is the last forward step, so its compensation can never run")
-            .isZero()
+        assertThat(result).isEqualTo(SettlementStatus.BOOKED)
+        assertThat(calls.order)
+            .describedAs("nothing may run after bookToLedger, or the GL posting needs a compensation")
+            .endsWith("bookToLedger")
     }
 
     /** A clean unwind still reaches its terminal state — REJECTED must stay reachable. */
@@ -221,14 +216,12 @@ class SettlementWorkflowImplTest {
         private val failCreditPayee: Boolean = false,
         private val failBookToLedger: Boolean = false,
         private val failReverseCredit: Boolean = false,
-        private val failReverseBookToLedger: Boolean = false,
     ) : SettlementActivities {
         val debitPayer = AtomicInteger(0)
         val creditPayee = AtomicInteger(0)
         val bookToLedger = AtomicInteger(0)
         val reverseDebit = AtomicInteger(0)
         val reverseCredit = AtomicInteger(0)
-        val reverseBookToLedger = AtomicInteger(0)
         val rejectSettlement = AtomicInteger(0)
         val order = mutableListOf<String>()
 
@@ -259,17 +252,6 @@ class SettlementWorkflowImplTest {
             order += "reverseCredit"
             reverseCredit.incrementAndGet()
             if (failReverseCredit) throw ApplicationFailure.newNonRetryableFailure("balance down", "BalanceError")
-        }
-
-        override fun reverseBookToLedger(settlementId: UUID) {
-            order += "reverseBookToLedger"
-            reverseBookToLedger.incrementAndGet()
-            if (failReverseBookToLedger) {
-                throw ApplicationFailure.newNonRetryableFailure(
-                    "ledger reversal unsupported",
-                    "LedgerReversalUnsupported",
-                )
-            }
         }
 
         override fun rejectSettlement(settlementId: UUID) {
