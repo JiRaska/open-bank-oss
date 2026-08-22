@@ -503,6 +503,31 @@ gates:
     run: |
       python3 .github/scripts/check-entity-column-names.py
 
+  # A @Provider in openbank-libs-* is registered in EVERY consumer, and ArC loads its type
+  # closure at init — so naming a type from a `compileOnly` dependency is a boot failure for
+  # every service that lacks it, not a compile error for anyone. #6240 did exactly that with
+  # Hibernate types and took down agent-service, analytics-sink and ap2-service before
+  # d24c84374 stripped the annotations.
+  #
+  # The rule was already written down, five lines above where the defect was added, and the
+  # author read it and added the defect anyway. That is the specific case for a gate rather
+  # than a comment. ENFORCED, and clean at 10 subjects today, so it is a ratchet and not a
+  # backlog.
+  - id: provider-type-classpath
+    name: "shared-library @Provider names only types every consumer has (enforced)"
+    group: lint
+    mode: enforced
+    rationale: >-
+      A @Provider in a shared library is registered in every consumer and ArC loads its type
+      closure at init, so a type from a compileOnly dependency crashes every service without
+      that dependency — measured on three services in #6240.
+    review_after: 2027-02-22
+    min_subjects: 8   # 10 typed JAX-RS providers in openbank-libs-* today (2026-08-22)
+    selftest: |
+      python3 .github/scripts/check-provider-type-classpath.py --self-test
+    run: |
+      python3 .github/scripts/check-provider-type-classpath.py
+
   - id: podmonitor-namespace-coverage
     name: "PodMonitor namespace coverage (issue #2255, enforced)"
     group: gitops

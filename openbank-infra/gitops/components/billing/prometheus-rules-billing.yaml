@@ -41,3 +41,28 @@ spec:
           annotations:
             summary: "billing-service is returning 5xx while reporting Ready"
             description: "billing-service has sustained >0.1 server-error/s for >10m while its readiness probe is green. The DB pool may be wedged (a healthy DB is still reachable for the SELECT-1 readiness check while pooled connections are dead) — verify the reactive pg pool, not just billing-db. Refs #1682."
+
+    - name: openbank.billing.outbox
+      rules:
+        # WHY a gauge over the table and not an error rate (#4701):
+        #   DEAD is terminal by design (ADR-0050 N5) — once a row is parked, the failure has
+        #   FINISHED failing. There is no rate left to watch, no log line emitted (listProcessable
+        #   excludes DEAD, so the dispatcher never touches the row again), and
+        #   `openbank_outbox_backlog{service="billing"}` counts PENDING+FAILED only, so it reads a
+        #   fully-parked outbox as `0` — identical to a healthy idle one. This alert is therefore
+        #   on a SUCCESS STATE ("no rows are parked"), which is the only observable left.
+        #
+        #   The `openbank_outbox_dead_total` COUNTER is not a substitute and cannot be: a Micrometer
+        #   counter is not created until its first increment and resets on every pod restart, so it
+        #   answers "did this process dead-letter anything", never "are there dead rows in the
+        #   table". Measured 2026-08-09: zero series fleet-wide while two services held dead rows.
+        #   `OutboxDeadLetterAlertNamingTest` pins the selector below to a real gauge registration.
+        - alert: BillingOutboxDeadLettered
+          expr: openbank_outbox_dead_lettered{service="billing"} > 0
+          for: 15m
+          labels:
+            severity: critical
+            service: billing
+          annotations:
+            summary: "billing-service has dead-lettered outbox rows (fee postings that never reached the ledger)"
+            description: "openbank_outbox_dead_lettered{service=\"billing\"} is >0: one or more billing_outbox rows are in terminal DEAD and will never be retried — listProcessable excludes them. Each one is a fee assessed but never posted to the ledger, so the GL is short by exactly those rows. Read last_error on them before requeueing: a transport fast-fail (breaker/bulkhead) no longer consumes the attempt budget after #4163, so a DEAD row now means a real per-row failure. Refs #4701, #4005."

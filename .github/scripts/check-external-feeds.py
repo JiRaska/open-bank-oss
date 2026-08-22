@@ -220,6 +220,14 @@ NOT_PROBED = [
     ("https://plugins.gradle.org", "Gradle plugin portal, mirrored by Reposilite"),
     ("https://dl.google.com", "Google Maven, mirrored by Reposilite"),
     #
+    # (3b) AUTHENTICATED LLM EGRESS. Real third-party egress from a running workload, but it
+    # cannot be probed: the endpoint answers 401 without a key, so a probe would assert the
+    # liveness of an error page (the #2204 shape it exists to prevent). HolmesGPT dials this for
+    # its meta/llama-3.1-70b-instruct route; a failure surfaces as a failed investigation, not as
+    # a silently-empty table, and the LLM-failure alerts (#6041) cover the gateway path.
+    # Same category and same reason as api.deepinfra.com above.
+    ("https://integrate.api.nvidia.com/v1", "authenticated LLM endpoint for HolmesGPT; needs a key, so a probe would only measure a 401"),
+    #
     # (4) ACME. Real egress; a failure surfaces as an un-renewed Certificate, which cert-manager
     # reports and the certificate-expiry alert covers.
     ("https://acme-v02.api.letsencrypt.org", "ACME directory; failure surfaces as a cert-manager Certificate condition"),
