@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.3...admin-ui-v0.187.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce IAOPS case loading ([#6525](https://github.com/JiRaska/open-bank-oss/issues/6525)) ([547dd98](https://github.com/JiRaska/open-bank-oss/commit/547dd98f9503ee7e3dd2a0da188f691924d991d7))
+
 ## [0.187.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.2...admin-ui-v0.187.3) (2026-08-22)
 
 
