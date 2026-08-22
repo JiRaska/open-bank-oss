@@ -12,9 +12,11 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
+import { resolveAgentIdentity, type AgentIdentityRegistry } from '@/lib/governance/agentIdentity'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 
 interface Proposal {
@@ -59,6 +61,11 @@ export default function ApprovalsPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [reasons, setReasons] = useState<Record<string, string>>({})
   const [error, setError] = useState<string | null>(null)
+  // The enforced charter registry (agents.yaml). `null` while it is still being fetched or
+  // after the fetch failed — resolveAgentIdentity turns both into `unverifiable`, and
+  // `registryLoading` keeps the two apart in the UI (#5904).
+  const [registry, setRegistry] = useState<AgentIdentityRegistry | null>(null)
+  const [registryLoading, setRegistryLoading] = useState(true)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -83,6 +90,25 @@ export default function ApprovalsPage() {
   }, [])
 
   useEffect(() => { void load() }, [load])
+
+  // Charter lookup is deliberately a separate read from the queue: a registry that cannot be
+  // read must degrade the IDENTITY column only, never blank the queue itself.
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const res = await fetch('/api/governance/agent-identities', { cache: 'no-store' })
+        if (!res.ok) throw new Error('registry')
+        const body = (await res.json()) as AgentIdentityRegistry
+        if (!cancelled) setRegistry(body)
+      } catch {
+        if (!cancelled) setRegistry(null)
+      } finally {
+        if (!cancelled) setRegistryLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
 
   const decide = async (p: Proposal, approve: boolean) => {
     setBusyId(p.id)
@@ -206,23 +232,26 @@ export default function ApprovalsPage() {
       <div style={{ display: 'grid', gap: 12 }}>
         {pending.map(p => {
           const m = STATE_META[p.state]
-          const aiGenerated = /assistant|agent|\bai\b/i.test(p.proposedBy)
+          // Provenance comes from the enforced charter registry, never from the shape of the
+          // proposedBy string. `unresolved` means agents.yaml has no such actor; `unverifiable`
+          // means we could not read agents.yaml and must not claim either way (#5904).
+          const identity = resolveAgentIdentity(p.proposedBy, registry)
+          const chartered = identity.status === 'chartered'
+          // The ADR-0080 caution stands whenever AI authorship is established OR cannot be
+          // ruled out. Only a positively unchartered actor drops it.
+          const cautionAi = identity.status !== 'unresolved'
           return (
-            <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${aiGenerated ? '#d97706' : m.color}` }}>
+            <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? '#d97706' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
                   {p.title}
-                  {aiGenerated && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10, fontWeight: 700, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      <Bot size={11} /> {t('AI návrh', 'AI-generated')}
-                    </span>
-                  )}
+                  <AgentIdentityBadge identity={identity} loading={registryLoading} lang={language} />
                 </div>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, fontSize: 11, fontWeight: 700, color: m.color, background: m.bg, border: `1px solid ${m.border}`, padding: '2px 8px', borderRadius: 20 }}>
                   <m.Icon size={11} /> {t(m.cs, m.en)}
                 </span>
               </div>
-              {aiGenerated && (
+              {cautionAi && !registryLoading && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#b45309', background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0 }} />
                   {t(
