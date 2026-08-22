@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.186.9](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.8...admin-ui-v0.186.9) (2026-08-22)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify fee refresh state ([#6397](https://github.com/JiRaska/open-bank-oss/issues/6397)) ([6c486ed](https://github.com/JiRaska/open-bank-oss/commit/6c486ed0397cba2793ca127928de1d541935010f))
+
 ## [0.186.8](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.186.7...admin-ui-v0.186.8) (2026-08-22)
 
 
