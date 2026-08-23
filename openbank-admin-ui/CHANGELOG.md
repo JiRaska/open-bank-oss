@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.17](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.16...admin-ui-v0.187.17) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify delegation refresh ([#6600](https://github.com/JiRaska/open-bank-oss/issues/6600)) ([075cad5](https://github.com/JiRaska/open-bank-oss/commit/075cad571214bca5ef89b182161d7ed8ec71ad1e))
+
 ## [0.187.16](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.15...admin-ui-v0.187.16) (2026-08-23)
 
 
