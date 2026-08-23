@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.13](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.12...admin-ui-v0.187.13) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce SWIFT detail loading ([#6584](https://github.com/JiRaska/open-bank-oss/issues/6584)) ([1499694](https://github.com/JiRaska/open-bank-oss/commit/149969413bd53a26d7ff2c1c1b3b5244b5bd4205))
+
 ## [0.187.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.11...admin-ui-v0.187.12) (2026-08-23)
 
 
