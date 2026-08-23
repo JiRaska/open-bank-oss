@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.12](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.11...admin-ui-v0.187.12) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify catalog actions ([#6578](https://github.com/JiRaska/open-bank-oss/issues/6578)) ([484de21](https://github.com/JiRaska/open-bank-oss/commit/484de2125a53ea2c4766bd1c779f1e0c61979dcd))
+
 ## [0.187.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.10...admin-ui-v0.187.11) (2026-08-23)
 
 
