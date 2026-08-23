@@ -9,6 +9,6 @@ describe('screen feedback loading contract', () => {
     expect(source).toContain('<p role="status" aria-live="polite">')
     expect(source).toContain("cs ? 'Načítám…' : 'Loading…'")
     expect(source).toContain("aria-label={cs ? 'Obnovit zpětnou vazbu k obrazovkám' : 'Refresh screen feedback'}")
-    expect(source).toContain("fetch('/api/feedback/screen')")
+    expect(source).toContain("fetch('/api/feedback/screen-feedback', { cache: 'no-store' })")
   })
 })
