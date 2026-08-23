@@ -6,11 +6,10 @@ Name a Docker-registry fetch failure as such, instead of leaving it disguised as
 
 THE PROBLEM THIS SOLVES
 -----------------------
-`_service-ci.yml` runs every PR build on `ubuntu-latest` (only the main-push lane gets the
-self-hosted pool). The "Pre-warm Testcontainers image cache via ECR" step is gated on
-`runner.environment == 'self-hosted'`, so on the PR lane it is skipped entirely: there is no
-ECR pull-through cache and no in-cluster registry-cache, and Testcontainers pulls
-postgres/valkey/redpanda/apicurio straight from Docker Hub. When Docker Hub is slow or
+`_service-ci.yml` runs every PR build on `ubuntu-latest`. It best-effort pre-warms the common
+Testcontainers images through the ECR pull-through cache, but the cache/auth service is not a
+test dependency: a cache miss or unavailable AWS login deliberately falls back to Docker Hub.
+Images not yet covered by that pre-warm have the same fallback. When Docker Hub is slow or
 rate-limits the shared hosted-runner egress IP, the pull times out.
 
 What the reader then sees at the top of the log is:
@@ -178,8 +177,9 @@ def main() -> int:
     print(
         "::error title=Build failed on a Docker registry pull, not on your code::"
         f"Testcontainers could not fetch an image for {args.service}. "
-        "PR builds run on GitHub-hosted runners, which have no ECR pull-through cache, so images "
-        "come straight from Docker Hub and a slow or rate-limited pull surfaces as ordinary test "
+        "A Testcontainers pull fell back to Docker Hub (for example because the best-effort ECR "
+        "pull-through cache was unavailable or did not contain the image), and a slow or "
+        "rate-limited pull surfaces as ordinary test "
         "failures. The named tests above are almost certainly NOT the defect. "
         f"Signatures: {', '.join(sorted(sigs))}. Re-run the job before investigating."
     )
