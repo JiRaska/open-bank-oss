@@ -58,6 +58,7 @@ NO_CORPUS = {
     # `gh`/`aws`/`curl` stub them inside the self-test (ensure-ecr-repository.sh even validates its
     # own stub first). No repo corpus to floor.
     "agent-review-proof-falsifiable",
+    "argocd-sync-integrity-unit-test",
     "agent-review-scope-falsifiable",
     "auto-deploy-reconcile-probe-unit-test",
     "blocking-counterpart-probe-unit-test",

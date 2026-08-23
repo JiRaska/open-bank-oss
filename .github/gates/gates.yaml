@@ -4401,3 +4401,31 @@ gates:
     min_subjects: 1600   # 1628 raw hex colour literals today (2026-08-31)
     run: |
       python3 .github/scripts/check-raw-colour-literal-ratchet.py
+
+  # ArgoCD applied NOTHING to the `loki` app for three weeks and reported `Synced / Healthy`
+  # throughout (#6371). With `ServerSideApply=true` the controller diffs by a server-side dry-run
+  # apply; a rejected dry-run makes the COMPARISON error, and the Application then keeps serving
+  # its last known status instead of going OutOfSync. The state is recorded as
+  # `.status.conditions[].type == ComparisonError` and NO ArgoCD metric exposes it —
+  # `argocd_app_info` carries `sync_status` and `health_status` only — so both rules in
+  # prometheus-rules-argocd.yaml were quiet BY CONSTRUCTION, keying on Degraded and Unknown
+  # against an app that was Healthy.
+  #
+  # The live observation cannot happen here: no PR runner holds cluster credentials. It happens
+  # in the `argocd-sync-verifier` CronJob, six-hourly, publishing a report ConfigMap and then
+  # FAILING the Job so KubeJobFailed carries it. What this gate holds is the other half — that
+  # the comparison logic still classifies correctly, and that the in-cluster detector is still
+  # wired to THAT script rather than deleted, unregistered, or replaced by an inline copy that
+  # can drift. A detector that runs nowhere reports nothing, which reads exactly like a detector
+  # reporting no findings.
+  - id: argocd-sync-integrity-unit-test
+    name: "the ArgoCD Synced-but-applying-nothing detector still classifies, and is still wired (#6371, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "ArgoCD reported Synced/Healthy on an app it had applied nothing to for three weeks, and no metric exposes the condition that recorded it; the replacement detector runs in-cluster, so only this gate can notice it being unwired or its comparison being broken."
+    review_after: "2027-02-23"
+    selftest: python3 .github/scripts/check-argocd-sync-integrity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 -m unittest openbank-infra/scripts/check_argocd_sync_integrity_test.py
+      python3 .github/scripts/check-argocd-sync-integrity.py --check-wiring

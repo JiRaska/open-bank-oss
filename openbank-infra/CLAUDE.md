@@ -27,6 +27,18 @@ out of it (they are path-scoped, not less important — several are live-inciden
   is the only thing missing". Fix without downtime: `kubectl delete sts <n> --cascade=orphan` leaves
   the pod and the PVC running and lets Argo recreate the object with the new template; the PVC keeps
   whatever size it was expanded to separately.
+  **Now held by the `argocd-sync-verifier` CronJob** (#6371): six-hourly it captures
+  `kubectl -n argocd get applications -o json`, runs the committed
+  `.github/scripts/check-argocd-sync-integrity.py`, publishes a report ConfigMap and then FAILS the
+  Job so `KubeJobFailed` carries it. It rejects three states — any `*Error` condition (the class no
+  metric exposes), an app reporting `Synced` at the very revision whose only sync operation
+  *Failed*, and a repo-sourced app whose `sync.revision` is not an ancestor of `origin/main`
+  (ancestry, never a tag — #6234). It deliberately does NOT fire on a stale `finishedAt`: 15 of 93
+  apps last synced over a month ago and every one was correct. The kube-state-metrics
+  `customResourceState` route was rejected on blast radius — a malformed CRS config takes down the
+  pod serving every `kube_*` series, and KSM parses that config only after connecting to an
+  apiserver, so it cannot be falsified offline. Exposing the condition as a metric is still the
+  better long-run answer and needs a *dedicated* KSM instance.
 - **`realm-template.json` is read ONLY on Keycloak's cold start (`--import-realm`), so editing it
   changes nothing on a running realm — and ArgoCD reports `Synced/Healthy` throughout.** ArgoCD
   manages the ConfigMap, and the ConfigMap does match the repo; the drift is one layer below what it
