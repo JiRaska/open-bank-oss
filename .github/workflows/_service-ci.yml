@@ -252,8 +252,9 @@ jobs:
             --service "${{ inputs.service }}" \
             --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
 
-      # Coverage upload (Codecov is free for public repos; tokenless via the OIDC
-      # id-token this job already has). Advisory only — never gates the build.
+      # Coverage upload is tokenless for this public repository. It is advisory only —
+      # never gates the build — and deliberately must not regain an OIDC token in this
+      # untrusted PR-code execution job.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
       #
       # No -D pact flags to mirror here (unlike the pre-split single job's #1009 workaround):
@@ -289,7 +290,6 @@ jobs:
         with:
           files: ${{ inputs.service }}/build/reports/kover/report.xml
           flags: ${{ inputs.service }}
-          use_oidc: true
           fail_ci_if_error: false
 
       # Consumer pacts this service just (re)generated (pact.rootDir -> repo /pacts, ADR-0063)
