@@ -75,10 +75,6 @@ on:
 
 permissions:
   contents: read
-  # GitHub OIDC → assume openbank-arc-build-runner for ECR auth (see the "Authenticate to
-  # ECR via OIDC" step, `contract` job). Needed on the Hetzner self-hosted pool, which has
-  # no ambient AWS creds (no EKS Pod Identity); harmless on the ARC pool.
-  id-token: write
 
 jobs:
   # ── build: compile, test, quarkusBuild, consumer-pact generation ────────────────────────
@@ -91,6 +87,10 @@ jobs:
     name: ${{ inputs.service }} (build)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    # This job executes pull-request code.  Keep the OIDC token unavailable even though the
+    # trusted contract job below needs it for the private ECR pull-through cache.
+    permissions:
+      contents: read
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
       # Force a UTF-8 locale so the JVM's sun.jnu.encoding (the *filename* charset,
@@ -381,6 +381,10 @@ jobs:
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: openbank-build
     timeout-minutes: 45
+    # Only this post-merge, trusted runner receives an OIDC token for its ECR cache access.
+    permissions:
+      contents: read
+      id-token: write
     env:
       # Pact Broker (ADR-0092). The broker has no public ingress (ADR-0056); the
       # in-cluster ARC runner reaches it over cluster DNS.

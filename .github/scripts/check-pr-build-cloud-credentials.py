@@ -6,11 +6,14 @@
 It may build arbitrary Gradle plugins, test fixtures and containers, so an OIDC role intended
 for deploys or self-hosted infrastructure would become an exfiltrable credential there. The
 separate ``contract`` job is not covered: it runs only after a trusted main push on the dedicated
-self-hosted runner and has its own audited need for ECR cache access.
+self-hosted runner and has its own audited need for ECR cache access. The build job also must
+not receive OIDC write permission: without that restriction untrusted code could mint a token
+even if it never calls an AWS helper action.
 
 This narrow ownership boundary deliberately does not attempt to classify every GitHub workflow
 or every safe read-only role. It protects the one reusable PR lane that executes every changed
-service, and fails closed if it gains a cloud-login action, role assumption, or ECR login command.
+service, and fails closed if it gains a cloud-login action, role assumption, ECR login command,
+or an OIDC token permission.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ FORBIDDEN = (
     "aws-actions/amazon-ecr-login@",
     "role-to-assume:",
     "aws ecr get-login-password",
+    "id-token: write",
 )
 
 
@@ -62,6 +66,10 @@ def self_test() -> int:
         "- run: ./gradlew :service:build",
         "- run: echo role-to-assume: arn:aws:iam::123:role/unsafe",
     )
+    oidc_build = trusted_contract.replace(
+        "- run: ./gradlew :service:build",
+        "permissions:\n      contents: read\n      id-token: write",
+    )
     missing_build = "jobs:\n  contract:\n    runs-on: openbank-build\n"
     cases = (
         ("trusted contract lane is outside the guard", trusted_contract, []),
@@ -74,6 +82,11 @@ def self_test() -> int:
             "role assumption command in PR build is rejected",
             role_only_build,
             ["role-to-assume:"],
+        ),
+        (
+            "OIDC write permission in PR build is rejected",
+            oidc_build,
+            ["id-token: write"],
         ),
         (
             "missing build job fails closed",
