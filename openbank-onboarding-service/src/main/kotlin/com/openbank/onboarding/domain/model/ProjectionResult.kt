@@ -6,30 +6,27 @@ package com.openbank.onboarding.domain.model
 /**
  * What the projection actually did with an event it was handed (#6248).
  *
- * Every branch of the projection except `PartyCreated` needs an existing row to update, and
- * guards with `repo.findByPartyId(...) ?: return`. That guard is correct — the three source
- * topics are three independent consumer groups with no ordering between them, so an event can
- * legitimately arrive before the party row exists, and throwing would wedge the group. What was
- * wrong is that the guard returned normally and the caller could not tell it apart from work
- * done: a dropped event was counted as `PROJECTED`.
+ * History, because it explains why an out-of-order arrival gets its own value rather than being
+ * silently normal. Every branch except `PartyCreated` used to guard with
+ * `repo.findByPartyId(...) ?: return`: an event naming a party with no row was discarded, the
+ * caller could not tell that apart from work done, and it was counted as a success. Nothing
+ * replays this read model — the consumer's own KDoc said it "can be replayed" and no such job
+ * exists — so the discarded event was gone for good. #6258 made the drop visible; this change
+ * stops it happening. The row is seeded from the event instead.
  *
- * That cost the platform a real defect. All 15 `DEVICE_ENROLLED` events in the sandbox were
- * consumed with zero lag and none reached `onboarding_records`, and the alert built for exactly
- * this class of failure (`UNRECOGNISED > 0 and PROJECTED == 0`, #4353) was structurally unable
- * to fire, because the drop was landing in the success bucket it compares against.
- *
- * So the skip gets its own value, never a flag shared with success — the same rule as
- * `PushSendOutcome.SKIPPED` (ADR-0252 phase 0), and the same rule the sibling
- * `ProjectionOutcomeMetrics.Outcome.UNRECOGNISED` already follows one layer up.
+ * The seeded case still needs its own value. It means the read model is being assembled
+ * backwards, which is legal but is also the shape that precedes a real ordering problem, and a
+ * quiet path that reports as an ordinary success is exactly what cost the platform 15 enrolments.
  */
 enum class ProjectionResult {
-    /** The read model was updated. */
+    /** The event was applied to a row that already existed. */
     APPLIED,
 
     /**
-     * The event named a party that has no row yet, so there was nothing to update and the event
-     * was discarded. Not an error and not a success — this is the state in which enrolments,
-     * KYC transitions and status changes are silently lost.
+     * The event named a party with no row, so a placeholder was created from the event and the
+     * event applied to it. Not a loss — but not an ordinary success either: it says an SCA or KYC
+     * event overtook `PARTY_CREATED`, and the row will carry no legal name or email until that
+     * event arrives.
      */
-    SKIPPED_UNKNOWN_PARTY,
+    APPLIED_TO_SEEDED_RECORD,
 }
