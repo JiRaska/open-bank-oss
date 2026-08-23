@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.24](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.23...admin-ui-v0.187.24) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify lending overview tabs ([#6645](https://github.com/JiRaska/open-bank-oss/issues/6645)) ([5dc511d](https://github.com/JiRaska/open-bank-oss/commit/5dc511d9f206598bbe616fb6f4c3e13bd847ed50))
+
 ## [0.187.23](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.22...admin-ui-v0.187.23) (2026-08-23)
 
 
