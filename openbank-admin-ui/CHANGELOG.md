@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.15](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.14...admin-ui-v0.187.15) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce onboarding analytics loading ([#6592](https://github.com/JiRaska/open-bank-oss/issues/6592)) ([9cdee3d](https://github.com/JiRaska/open-bank-oss/commit/9cdee3dee1d01ad830cdf8d6d1c513a21524f756))
+
 ## [0.187.14](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.13...admin-ui-v0.187.14) (2026-08-23)
 
 
