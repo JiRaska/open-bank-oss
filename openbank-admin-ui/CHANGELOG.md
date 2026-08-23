@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.16](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.15...admin-ui-v0.187.16) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** mark onboarding table busy ([#6596](https://github.com/JiRaska/open-bank-oss/issues/6596)) ([1ff329e](https://github.com/JiRaska/open-bank-oss/commit/1ff329e986a472b6e3077ee02e314cd1b3d60c91))
+
 ## [0.187.15](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.14...admin-ui-v0.187.15) (2026-08-23)
 
 
