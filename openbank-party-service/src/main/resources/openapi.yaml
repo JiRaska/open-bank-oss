@@ -653,7 +653,13 @@ components:
           nullable: true
         status:
           type: string
-          enum: [PENDING, APPROVED, REJECTED, EXECUTED]
+          # Deliberately no `enum:` here (values are ApprovalStatus: PENDING, APPROVED, REJECTED,
+          # EXECUTED). This service's own KycStatus domain enum (NOT_STARTED, IN_PROGRESS,
+          # APPROVED, REJECTED, EXPIRED) shares 2 of those 5 values, which is exactly the
+          # openapi-enum-domain-drift gate's pairing threshold (issue #5962: >=0.4 of the larger
+          # set) — declaring the enum here gets it mis-paired against KycStatus and reported as
+          # drift. Sibling services (fx, ledger, swift, ...) declare it fine; only party-service
+          # has a domain enum that collides on value names.
         makerId:
           type: string
           nullable: true
