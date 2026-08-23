@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.9.1...aml-service-v0.9.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **aml:** stamp the real decision time on every AML case transition, and decide openbank.aml.auto-clear ([#5837](https://github.com/JiRaska/open-bank-oss/issues/5837)) ([#6029](https://github.com/JiRaska/open-bank-oss/issues/6029)) ([60e9450](https://github.com/JiRaska/open-bank-oss/commit/60e9450313db736ed32d26c3477c973dc719bf9b))
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/aml-service-v0.9.0...aml-service-v0.9.1) (2026-08-22)
 
 

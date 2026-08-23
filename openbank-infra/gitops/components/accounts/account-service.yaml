@@ -56,7 +56,7 @@ spec:
             - name: management
               containerPort: 8085
           env:
-            # AML/sanctions screening gate for account opening (ADR-0073). The
+            # AML/sanctions screening gate for account opening (ADR-0032 §C). The
             # service lives in the `sanctions` namespace on :8123; without this the
             # app falls back to a non-resolving default and account opening fails
             # closed (AccountScreeningUnavailableException) — blocking onboarding.

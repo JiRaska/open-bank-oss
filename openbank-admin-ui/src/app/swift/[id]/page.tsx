@@ -89,8 +89,8 @@ export default function SwiftDetailPage() {
       />
 
       {loading && !message ? (
-        <div style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <RefreshCw size={14} className="animate-spin" /> {t('Načítám zprávu…', 'Loading message…')}
+        <div role="status" aria-live="polite" style={{ padding: '40px 0', color: 'var(--text-tertiary)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <RefreshCw size={14} aria-hidden="true" className="animate-spin" /> {t('Načítám zprávu…', 'Loading message…')}
         </div>
       ) : !message && unavailable ? (
         <div className="card"><DataUnavailable kind={unavailable.kind} service={t('SWIFT-service', 'SWIFT-service')} feature={t('SWIFT zpráva', 'SWIFT message')} lang={language} /></div>

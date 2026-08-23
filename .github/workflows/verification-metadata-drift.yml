@@ -55,14 +55,14 @@ jobs:
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # No `cache: gradle` on purpose. Two reasons, one FinOps and one correctness:
       # the repo's Actions cache sits at ~9 GB of its 10 GB ceiling across 61 entries, so
       # eight more entries per night would evict caches that PR builds depend on — slowing
       # everyone else down to speed up a nightly job that has no deadline. And the sweep
       # passes --refresh-dependencies anyway, so a warm cache buys it nothing.
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: "25"
@@ -103,7 +103,7 @@ jobs:
 
       - name: Upload this shard's verdict
         if: ${{ always() && hashFiles('sweep-verdict/**') != '' }}
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: sweep-verdict-${{ matrix.shard }}
           path: ${{ github.workspace }}/sweep-verdict/
@@ -122,14 +122,14 @@ jobs:
       contents: read
       issues: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # Read what the shards actually concluded. `if: failure()` fires on ANY shard
       # failure, so without this the drift template is published whenever the sweep
       # itself dies — which is how #4162 asserted "unpinned artifacts on main" while
       # all three failing shards had died of `Java heap space`.
       - name: Download shard verdicts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
         with:
           pattern: sweep-verdict-*
           path: /tmp/verdicts

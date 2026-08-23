@@ -241,7 +241,7 @@ export default function OnboardingPage() {
           <DataUnavailable kind={listUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Onboarding záznamy', 'Onboarding records')} lang={language} dense />
         </div>
       ) : (
-        <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="card" aria-busy={loading} style={{ overflow: 'hidden' }}>
           <table className="data-table">
             <thead>
               <tr>

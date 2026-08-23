@@ -144,7 +144,7 @@ jobs:
         run: |
           # PyYAML is not guaranteed on the runner image, and a scope step that dies leaves
           # in_scope unset — which silently means "never review".
-          python3 -m pip install --quiet pyyaml
+          bash .github/scripts/install-pyyaml-hash-pinned.sh
           python3 .github/scripts/agent-review-scope.py --title "${PR_TITLE}" >> "$GITHUB_OUTPUT"
 
       - name: skipped (out of scope)
@@ -210,7 +210,12 @@ jobs:
           PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
           set +e
-          npm install -g @anthropic-ai/claude-code >/dev/null 2>&1
+          # `npm ci` verifies package-lock.json hashes (OpenSSF Scorecard Pinned-Dependencies:
+          # npmCommand) — a bare `npm install -g` cannot be pinned by hash at all, per
+          # ossf/scorecard's isNpmUnpinnedDownload. See
+          # .github/scripts/agent-review-claude-cli/package.json.
+          npm ci --prefix .github/scripts/agent-review-claude-cli >/dev/null 2>&1
+          export PATH="$PWD/.github/scripts/agent-review-claude-cli/node_modules/.bin:$PATH"
 
           # CONTROL PROBE, ~2s. Separates "the invocation or credential is broken" from "this
           # particular review failed", which are otherwise the same red. Both live runs of

@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.4](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.3...onboarding-service-v0.8.4) (2026-08-23)
+
+
+### Bug Fixes
+
+* **onboarding:** SCA enrolments are seeded, not dropped, and device_count is derived ([#6617](https://github.com/JiRaska/open-bank-oss/issues/6617)) ([2c50318](https://github.com/JiRaska/open-bank-oss/commit/2c503183bafbff66fed399e43de8222470beb57e)), closes [#6248](https://github.com/JiRaska/open-bank-oss/issues/6248)
+
 ## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.8.2...onboarding-service-v0.8.3) (2026-08-22)
 
 

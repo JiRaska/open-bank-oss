@@ -446,20 +446,6 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     }
   }
 
-  const stateLabel = (s: string): string => {
-    switch (s) {
-      case 'ACTIVE': return t('Aktivní', 'Active')
-      case 'COMPLETED': return t('Dokončeno', 'Completed')
-      case 'TERMINATED_CONSENT_REVOKED': return t('Ukončeno — odvolaný souhlas', 'Ended — consent withdrawn')
-      case 'TERMINATED_CAMPAIGN_CLOSED': return t('Ukončeno — kampaň uzavřena', 'Ended — campaign closed')
-      case 'COMPLETED_GOAL_REACHED': return t('Dokončeno — cíl splněn', 'Completed — goal reached')
-      case 'TERMINATED_SUPPRESSED': return t('Ukončeno — potlačeno', 'Ended — suppressed')
-      case 'STOPPED_MAX_SENDS': return t('Zastaveno — limit odeslání', 'Stopped — send cap reached')
-      case 'HOLDOUT': return t('Kontrolní skupina — neosloveno', 'Control group — not contacted')
-      default: return s
-    }
-  }
-
   /** Short id for scanning; the full value stays in `title` and is what you copy. */
   const shortId = (id: string) => id.slice(0, 8)
 

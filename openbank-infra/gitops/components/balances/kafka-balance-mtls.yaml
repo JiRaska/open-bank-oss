@@ -3,7 +3,7 @@
 # balance-service is both a producer and a consumer:
 #   Produces: openbank.balance.events (two channels: balance-events-out + balance-outbox-out)
 #   Consumes: openbank.ledger.journal.posted (group: openbank-balance-service, ADR-0039 Phase D)
-#             openbank.accounts.account.created (group: openbank-balance-service, ADR-0073)
+#             openbank.accounts.account.created (group: openbank-balance-service, ADR-0267 §3)
 #
 # ACL model (ADR-0137): one KafkaUser = one mTLS identity for ALL of this service's Kafka
 # traffic. The global gate allow.everyone.if.no.acl.found=true remains until all ~33 clients

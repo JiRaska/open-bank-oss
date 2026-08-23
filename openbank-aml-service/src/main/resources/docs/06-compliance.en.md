@@ -88,7 +88,9 @@ sequenceDiagram
   end
 ```
 
-In **production** the decision endpoint is the only path to a terminal `CLEARED`/`BLOCKED` — four-eyes accountability via `decidedBy`/`assignedAnalyst`. The **sandbox** `openbank.aml.auto-clear` flag (default `false`) bypasses this only for non-production onboarding flows.
+In **production** the decision endpoint is the only path to a terminal `CLEARED`/`BLOCKED`. The **sandbox** `openbank.aml.auto-clear` flag (default `false`) skips it for non-production onboarding flows, attributing the decision to the sentinel `decidedBy = SANDBOX_SYSTEM` — that string outside the sandbox is a compliance incident (ADR-0268 §3).
+
+> ⚠️ **Not four-eyes today.** This paragraph used to claim "four-eyes accountability via `decidedBy`/`assignedAnalyst`". It does not hold: `decidedBy` arrives in the **request body**, not from the authenticated security context, and is only checked for non-blankness — so one operator can clear a case and self-declare any attribution. There is also no maker-checker separation (`OPEN → CLEARED` is a legal transition), `openbank-aml-service` is not in `rules.yaml: money_path_services` so OPA's `four_eyes_required` can never derive an `aml` scope, and `AUTHZ_ENFORCE` is `false` here so `@Authorize` is advisory. ADR-0268 §4 records this and §5 lists what is owed before a non-sandbox environment. Contrast ADR-0116 §3, which requires the reviewer identity to come from the security context for the KYC twin.
 
 ## Audit trail
 

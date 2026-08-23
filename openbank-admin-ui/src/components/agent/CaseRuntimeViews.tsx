@@ -6,7 +6,7 @@
 import { ArrowRight, CheckCircle2, CircleDot, Database, ShieldCheck, TriangleAlert } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
-export type RuntimeStage = 'RECORDED' | 'PERSISTED' | 'EMITTED' | 'PUBLISHED_TO_BROKER' | 'PUBLISH_FAILED' | 'SHADOW_RECORDED'
+export type RuntimeStage = 'AUTHORIZED' | 'DENIED' | 'INVOKED' | 'CONSUMED' | 'RECORDED' | 'PERSISTED' | 'EMITTED' | 'PUBLISHED_TO_BROKER' | 'PUBLISH_FAILED' | 'SHADOW_RECORDED'
 
 export interface RuntimeEvidenceView {
   evidenceId: string
@@ -22,6 +22,9 @@ export interface RuntimeEntryView {
   atEpochMs: number
   actor?: string
   proposalType?: string
+  signalId?: string
+  capability?: string
+  rolloutId?: string
   runtimeEvidence: RuntimeEvidenceView
 }
 
@@ -38,9 +41,19 @@ export interface RuntimeCaseView {
 }
 
 function stageTone(stage: RuntimeStage): { color: string; bg: string; Icon: typeof CircleDot } {
-  if (stage === 'PUBLISH_FAILED') return { color: 'var(--danger)', bg: 'var(--danger-bg)', Icon: TriangleAlert }
+  if (stage === 'PUBLISH_FAILED' || stage === 'DENIED') return { color: 'var(--danger)', bg: 'var(--danger-bg)', Icon: TriangleAlert }
   if (stage === 'PUBLISHED_TO_BROKER') return { color: 'var(--success)', bg: 'var(--success-bg)', Icon: CheckCircle2 }
   return { color: 'var(--accent-text)', bg: 'var(--accent-bg)', Icon: CircleDot }
+}
+
+function evidenceAge(epochMs: number): string {
+  const seconds = Math.max(0, Math.floor((Date.now() - epochMs) / 1000))
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h`
+  return `${Math.floor(hours / 24)}d`
 }
 
 function EvidenceDetails({ evidence, locale }: { evidence: RuntimeEvidenceView; locale: string }) {
@@ -54,6 +67,7 @@ function EvidenceDetails({ evidence, locale }: { evidence: RuntimeEvidenceView; 
       <dl style={{ display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 10px', margin: '8px 0 0', fontSize: '10px' }}>
         <dt style={{ color: 'var(--text-tertiary)' }}>{t('Zdroj', 'Source')}</dt><dd style={{ margin: 0, fontFamily: 'var(--font-mono)' }}>{evidence.source}</dd>
         <dt style={{ color: 'var(--text-tertiary)' }}>{t('Pozorováno', 'Observed')}</dt><dd style={{ margin: 0 }}>{new Date(evidence.observedAtEpochMs).toLocaleString(locale)}</dd>
+        <dt style={{ color: 'var(--text-tertiary)' }}>{t('Stáří', 'Age')}</dt><dd style={{ margin: 0 }}>{evidenceAge(evidence.observedAtEpochMs)}</dd>
         <dt style={{ color: 'var(--text-tertiary)' }}>{t('Korelace', 'Correlation')}</dt><dd style={{ margin: 0, fontFamily: 'var(--font-mono)' }}>{evidence.correlationId}</dd>
         <dt style={{ color: 'var(--text-tertiary)' }}>{t('Význam', 'Meaning')}</dt><dd style={{ margin: 0 }}>{evidence.detail}</dd>
       </dl>
@@ -74,8 +88,14 @@ export function CaseRuntimeTimeline({ thread, locale }: { thread: RuntimeCaseVie
               <Icon size={13} style={{ color: tone.color }} />
               <strong style={{ fontSize: '11px' }}>{entry.type}</strong>
               <span style={{ fontSize: '10px', color: 'var(--text-secondary)' }}>{entry.actor ?? 'case-coordinator'}</span>
+              {entry.capability && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent-text)' }}>{entry.capability}</span>}
               <time style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)' }}>{new Date(entry.atEpochMs).toLocaleString(locale)}</time>
             </div>
+            {(entry.signalId || entry.rolloutId) && (
+              <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>
+                {entry.signalId && <>signal {entry.signalId}</>}{entry.signalId && entry.rolloutId && ' · '}{entry.rolloutId && <>rollout {entry.rolloutId}</>}
+              </div>
+            )}
             <EvidenceDetails evidence={entry.runtimeEvidence} locale={locale} />
           </article>
         )
@@ -92,6 +112,10 @@ interface Edge {
 
 function runtimeEdges(thread: RuntimeCaseView): Edge[] {
   return thread.entries.flatMap(entry => {
+    if (entry.type === 'POLICY_DECISION' && entry.actor && entry.runtimeEvidence.stage === 'AUTHORIZED') return [{ from: entry.actor, to: 'OPA case policy', evidence: entry.runtimeEvidence }]
+    if (entry.type === 'SIGNAL_INVOKED' && entry.actor) return [{ from: entry.actor, to: 'Temporal signal client', evidence: entry.runtimeEvidence }]
+    if (entry.type === 'SIGNAL_CONSUMED' && entry.actor) return [{ from: entry.actor, to: 'case workflow', evidence: entry.runtimeEvidence }]
+    if (entry.type === 'CONTRIBUTION_PERSISTED' && entry.actor) return [{ from: entry.actor, to: 'durable case read model', evidence: entry.runtimeEvidence }]
     if (entry.type === 'CONTRIBUTION' && entry.actor) return [{ from: entry.actor, to: 'case-coordinator', evidence: entry.runtimeEvidence }]
     if (entry.type === 'PROPOSAL_EMITTED') return [{ from: 'case-coordinator', to: 'proposal event broker', evidence: entry.runtimeEvidence }]
     if (entry.type === 'SHADOW_RECORDED') return [{ from: 'case-coordinator', to: 'shadow evidence only', evidence: entry.runtimeEvidence }]

@@ -7,6 +7,7 @@ package com.openbank.audit.application
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.audit.domain.model.ActorProvenance
+import com.openbank.audit.domain.model.AggregateIdProvenance
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.domain.model.OccurredAtSource
@@ -73,9 +74,14 @@ class AuditConsumer {
         try {
             persist(payload, addressOf(message))
         } catch (e: Exception) {
-            // This legacy multi-producer channel deliberately retains its historic availability
-            // behaviour. D5 agent events use AgentAuditConsumer instead: it acknowledges only a
-            // successful durable write, so a store failure is retried by Kafka rather than lost.
+            // best-effort: DELIBERATE, and #6209 is where it was decided — this legacy
+            // multi-producer channel keeps its historic availability behaviour rather than wedging
+            // ~20 producers on one store failure. Stated plainly because the marker suppresses the
+            // event-handler-swallow gate (#5698) and the cost is real: a store failure here loses
+            // an evidentiary row, and an acked message is indistinguishable from a stored one.
+            // The strict path is AgentAuditConsumer — it acknowledges only a successful durable
+            // write, so a D5 provenance store failure is retried by Kafka rather than lost. Any
+            // producer that cannot tolerate this trade belongs on that consumer, not this one.
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         } finally {
             // Switching the signature from `String` to `Message<String>` also switches SmallRye
@@ -114,6 +120,9 @@ class AuditConsumer {
         try {
             persist(payload, address)
         } catch (e: Exception) {
+            // best-effort: the same deliberate #6209 trade as the @Incoming overload above, and for
+            // the same channel — this is the no-broker-metadata entry point into it. See there for
+            // why, and for the strict alternative (AgentAuditConsumer).
             log.errorf(e, "Failed to record audit entry: %s", payload.take(200))
         }
     }
@@ -128,6 +137,7 @@ class AuditConsumer {
         val eventTime = eventTime(node)
         val resolvedSource = resolveSourceService(node, address)
         val actor = resolveActor(node)
+        val resolvedAggregateId = resolveAggregateId(node)
         val entry = AuditEntry(
             // A producer event id makes at-least-once Kafka delivery idempotent. Legacy
             // producers without one retain the previous random entry id behaviour.
@@ -154,7 +164,31 @@ class AuditConsumer {
             // audit trail (ADR-0023-equivalent reasoning: a mutation of the log of record needs
             // its own decision, not a drive-by fix here).
             aggregateType = (node.textOrNull("aggregateType") ?: inferAggregateType(node)).uppercase(),
-            aggregateId = inferAggregateId(node),
+            // Envelope first, mirroring aggregateType directly above (#6318). The producer's
+            // own `aggregateId` is a DECLARATION of which resource the event is about;
+            // inferAggregateId is an INFERENCE that takes the first business id it recognises,
+            // which is not the same question. Reading the type from the producer and the id from
+            // the chain let one row assert both at once: measured on the live table before this
+            // fix, `JournalPosted` rows carried aggregate_type=JOURNALENTRY (declared) with
+            // aggregate_id = the transactionId (inferred) — a type and an id naming different
+            // objects, and `AccountCreated`/`ConsentGranted` were keyed by partyId the same way.
+            //
+            // Blast radius, established per producer rather than assumed (the issue's condition
+            // for this change). A grep for the literal key finds ONE topic; the true count is
+            // SEVEN, because `com.openbank.libs.domain.event.DomainEvent` declares
+            // `abstract val aggregateId: UUID`, so every Jackson-serialised subclass puts the key
+            // on the wire with no literal anywhere to grep. On the live table every row whose
+            // envelope named the resource stored something else instead — most as the "unknown"
+            // sentinel, the rest as a different resource's id — while rows whose envelope stayed
+            // silent were almost never "unknown". So this changes the stored id only where the
+            // producer had already said what it should be.
+            //
+            // Rows already written keep their value: audit_entries is append-only at the DB
+            // (`no_update_audit` is DO INSTEAD NOTHING, so an UPDATE affects zero rows and
+            // REPORTS SUCCESS) and aggregate_id is chain-hashed into record_hash. This stops the
+            // gap growing; a backfill of the tamper-evident log needs its own decision, not a
+            // drive-by migration here — the same reasoning #4553 applied to the casing split.
+            aggregateId = resolvedAggregateId.first,
             actorId = actor.first,
             actorType = actor.second,
             payload = payload,
@@ -189,6 +223,9 @@ class AuditConsumer {
                 entry.sourceService,
                 actorProvenance(entry.actorId, entry.actorType),
             )
+            // Folded into the existing guard rather than given its own `if`: detekt's
+            // CyclomaticComplexMethod fires AT the threshold (15), and persist() was already there.
+            meterRegistry.countAggregateIdProvenance(entry.sourceService, resolvedAggregateId.second)
         }
         if (entry.sourceServiceSource != AttributionSource.EVENT) {
             countMissingAttribution(entry.sourceService, entry.sourceServiceSource)
@@ -326,12 +363,73 @@ private val aggregateFields = listOf(
 // side claimed the aggregate ("accountId": null -> ACCOUNT) while the id side produced the
 // string "null" — a typed aggregate pointing at an id that identifies nothing. Keeping the
 // predicate identical is what makes the two sides answer about the same field (#3994).
+/**
+ * The resource the event is about, and who decided it (#6318).
+ *
+ * Ordered strongest claim first, exactly as [AuditConsumer.resolveSourceService] does for the
+ * producing service:
+ *  1. the producer's own top-level `aggregateId` — [AggregateIdProvenance.DECLARED];
+ *  2. the ordered business-id chain below — [AggregateIdProvenance.INFERRED];
+ *  3. neither — the `"unknown"` sentinel, [AggregateIdProvenance.ABSENT].
+ *
+ * The pair is returned together so a caller cannot take the value without the provenance, which
+ * is what stops an inferred id being counted as a declared one.
+ *
+ * Uses [textOrNull], so an explicit `"aggregateId": null` or `""` falls through to inference
+ * rather than storing the four-character string `"null"` as a resource id — the same trap that
+ * put seven money-path rows on the live table with `actor_id = 'null'`.
+ *
+ * One producer needs naming rather than leaving to a reader: `openbank.agent.audit.events` sets
+ * `aggregateId = event.resourceId ?: event.actorId`, so an agent action with no resource now
+ * stores the ACTOR's id as the aggregate instead of `"unknown"`. That is a producer-side defect
+ * this consumer cannot see or correct — the envelope is a declaration and there is nothing in it
+ * to distinguish the fallback — and it is filed separately. It is not an argument for
+ * inference-first: inference stores `"unknown"` for that same payload, so the honest-looking
+ * value today is an accident of the chain not recognising anything, not a judgement about the
+ * producer.
+ */
+private fun resolveAggregateId(node: JsonNode): Pair<String, AggregateIdProvenance> {
+    node.textOrNull("aggregateId")?.let { return it to AggregateIdProvenance.DECLARED }
+    val inferred = inferAggregateId(node)
+    return if (inferred == UNKNOWN_AGGREGATE_ID) {
+        inferred to AggregateIdProvenance.ABSENT
+    } else {
+        inferred to AggregateIdProvenance.INFERRED
+    }
+}
+
+/**
+ * `openbank.audit.aggregate.id.provenance{source_service,provenance}` — which of the three paths
+ * above decided each row's `aggregate_id` (#6318).
+ *
+ * Counted for DECLARED as well as the two weaker outcomes, not only on failure: a counter that
+ * increments only when something is missing cannot distinguish "no gaps" from "no traffic", and
+ * the ratio this exists to expose needs its denominator. Tag cardinality is bounded by the fixed
+ * subscribed-topic service list times three enum values.
+ *
+ * The alertable state is a producer that STOPS declaring — DECLARED falling to INFERRED for a
+ * source_service that used to be all-DECLARED is a regression that writes permanently wrong ids
+ * into an append-only table, and before this counter nothing anywhere would have said so.
+ */
+internal fun MeterRegistry.countAggregateIdProvenance(sourceService: String, provenance: AggregateIdProvenance) {
+    counter(
+        "openbank.audit.aggregate.id.provenance",
+        "source_service",
+        sourceService,
+        "provenance",
+        provenance.name,
+    ).increment()
+}
+
+/** The sentinel stored when neither the producer nor the inference chain names a resource. */
+private const val UNKNOWN_AGGREGATE_ID = "unknown"
+
 private fun inferAggregateId(node: JsonNode): String {
     node["incident"]?.textOrNull("id")?.let { return it }
     for ((field, _) in aggregateFields) {
         node.textOrNull(field)?.let { return it }
     }
-    return "unknown"
+    return UNKNOWN_AGGREGATE_ID
 }
 
 private fun inferAggregateType(node: JsonNode): String {

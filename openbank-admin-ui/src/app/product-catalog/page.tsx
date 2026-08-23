@@ -566,7 +566,7 @@ export default function ProductCatalogPage() {
             subtitle={t('Správa bankovních produktů, sazeb, poplatků a obchodních podmínek', 'Manage banking products, rates, fees and terms')}
             breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Katalog produktů', 'Product Catalog')}</span></div>}
             actions={<div style={{ display: 'flex', gap: '8px' }}>
-              <button className="btn btn-primary" onClick={openCreateModal} disabled={loading}>
+              <button type="button" className="btn btn-primary" onClick={openCreateModal} disabled={loading} aria-label={t('Vytvořit nový produkt', 'Create new product')}>
                 <Plus size={14} aria-hidden="true" /> {t('Nový produkt', 'New Product')}
               </button>
               <button className="btn btn-secondary" type="button" onClick={load} disabled={loading}
@@ -690,10 +690,10 @@ export default function ProductCatalogPage() {
                     <td style={{ textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                       <div style={{ display: 'flex', gap: '3px', justifyContent: 'flex-end' }}>
                         <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
-                          <Edit size={13} />
+                          <Edit size={13} aria-hidden="true" />
                         </button>
                         <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
-                          {p.status === 'ACTIVE' ? <Square size={13} /> : <Play size={13} />}
+                          {p.status === 'ACTIVE' ? <Square size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
                         </button>
                       </div>
                     </td>

@@ -7,6 +7,7 @@ package com.openbank.engagement.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.domain.model.AdverseState
+import com.openbank.libs.messaging.EventRetry
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.jboss.logging.Logger
@@ -36,7 +37,7 @@ class FraudHoldEventConsumer(
     @Incoming("fraud-hold-events-in")
     suspend fun consume(payload: String) {
         val signal = parse(payload) ?: return
-        withBoundedRetry(log, "fraud-hold exclusion for party ${signal.partyId} (active=${signal.active})") {
+        EventRetry.withRetry(log, "fraud-hold exclusion for party ${signal.partyId} (active=${signal.active})", null) {
             if (signal.active) {
                 adverseState.setActive(signal.partyId, AdverseState.FRAUD_HOLD, Instant.now())
             } else {

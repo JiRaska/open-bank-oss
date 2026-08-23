@@ -54,6 +54,7 @@ V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:56: plainte
 V9.1 openbank-infra/gitops/components/devops-agent/devops-agent.yaml:65: plaintext http:// env value http://litellm.ai-platform.svc:4000/v1
 V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:113: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:122: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
+V9.1 openbank-infra/gitops/components/kyc/kyc-service.yaml:130: plaintext http:// env value http://party-service.party.svc:8111
 V9.1 openbank-infra/gitops/components/anacredit/anacredit-service.yaml:63: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:143: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/customer-edge/customer-edge.yaml:153: plaintext http:// env value http://product-catalog.accounts.svc:8104
