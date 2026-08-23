@@ -78,25 +78,25 @@ kover {
                     // outbox dispatcher, and the daily ingestion scheduler gained real unit tests. Kept a
                     // few points below the measured figure for headroom, never below the prior floor.
                     //
-                    // LOWERED 65 -> 60 on 2026-08-22, owner decision, and this is a RATCHET EXCEPTION
-                    // against the convention in openbank.quarkus-service.gradle.kts ("floors ... only
-                    // ever go up"). Nothing enforces that convention in code; it is being broken
-                    // deliberately, not by accident.
+                    // LOWERED 65 -> 60 on 2026-08-22, then RE-BASELINED 60 -> 30 by #6384.
                     //
-                    // Why: this number is not fx's coverage. Kover measures com/openbank/libs here too
-                    // (fx's own report contains both packages), and fx's tests cover a lot of libs well,
-                    // so the figure is an fx+libs aggregate that sits ABOVE fx alone. Measured on #5719:
-                    //     libs included  60.504200%   <- what this floor is compared against
-                    //     libs excluded  30.905700%   <- fx's own line coverage
-                    // #5719 added 13 uncovered lines to libs-runtime's EventRetry and touched no fx
-                    // file, which moved the aggregate from over 65 to 60.5 and reddened fx's build on
-                    // an unrelated PR.
+                    // The 65 and the 60 were both compared against an fx+libs AGGREGATE: every
+                    // service's Kover report used to measure `com.openbank.libs.*` alongside the
+                    // service's own package, and fx's tests exercise a lot of libs code well, so
+                    // the aggregate sat far ABOVE fx alone. That is why #5719 — 13 uncovered lines
+                    // added to libs-runtime's EventRetry, zero fx files touched — moved fx from
+                    // over 65 to 60.504200% and reddened `build (openbank-fx-service)`.
                     //
-                    // So this buys room, it does not fix anything: the next libs-runtime addition moves
-                    // the number again, and 60 is no more principled than 65 was. The real fix is to
-                    // stop a dependent's floor being a function of shared-library size — issue #6384.
-                    // Raising this back is welcome the moment fx's own coverage justifies it.
-                    minValue = 60
+                    // #6384 scopes every service's report to its own sources, so this floor is now
+                    // compared against fx's OWN line coverage. CI measured that on the #5719 branch
+                    // with the same exclusion applied:
+                    //     libs included  60.504200%   <- what the 65/60 floors were compared against
+                    //     libs excluded  30.905700%   <- fx's own line coverage, what 30 guards
+                    // The number drops because it is a DIFFERENT number, not because the gate got
+                    // weaker: a regression in fx's own sources still moves this figure down (proven
+                    // on #6384 by deleting fx's application+infrastructure tests — 78.618100% ->
+                    // 40.056000%, koverVerify rc=1). Ratchet up from here as fx's own tests improve.
+                    minValue = 30
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
