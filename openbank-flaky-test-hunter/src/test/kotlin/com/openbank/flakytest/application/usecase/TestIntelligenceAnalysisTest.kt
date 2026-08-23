@@ -49,6 +49,13 @@ class TestIntelligenceAnalysisTest {
                         declaredInfrastructure = listOf("postgres"),
                         observedInfrastructureStarts = 0,
                     ),
+                    TestIntelligenceComponentInput(
+                        component = "openbank-app",
+                        moneyPath = true,
+                        evidence = listOf(TestIntelligenceEvidenceInput("visual", "passed")),
+                        declaredInfrastructure = emptyList(),
+                        observedInfrastructureStarts = 0,
+                    ),
                 ),
             ),
         )

@@ -46,6 +46,8 @@ describe('Test Intelligence agent BFF', () => {
       components: [{ component: 'openbank-ledger-service', moneyPath: true,
         evidence: [{ kind: 'integration', state: 'stale', source: '/private/path' }],
         testInfrastructure: { declared: ['postgres'], observed: [{ lifecycle: 'started' }] } }],
+      clientExperiences: [{ id: 'openbank-app', evidence: [{ kind: 'visual', state: 'passed', source: '/private/app/path' }],
+        rum: { state: 'passed', detail: '12 sampled spans', sampledSpansLast7d: 12 } }],
     }))
     process.env.OPENBANK_TEST_INTELLIGENCE = file
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{ id: 'diagnosed-1' }]), { status: 200 }))
@@ -56,7 +58,11 @@ describe('Test Intelligence agent BFF', () => {
     const outbound = JSON.parse(fetchMock.mock.calls[0][1].body as string)
     expect(outbound.components[0]).toEqual({ component: 'openbank-ledger-service', moneyPath: true,
       evidence: [{ kind: 'integration', state: 'stale' }], declaredInfrastructure: ['postgres'], observedInfrastructureStarts: 1 })
+    expect(outbound.components[1]).toEqual({ component: 'openbank-app', moneyPath: true,
+      evidence: [{ kind: 'visual', state: 'passed' }], declaredInfrastructure: [], observedInfrastructureStarts: 0 })
     expect(JSON.stringify(outbound)).not.toContain('/private/path')
+    expect(JSON.stringify(outbound)).not.toContain('/private/app/path')
+    expect(JSON.stringify(outbound)).not.toContain('sampledSpansLast7d')
     rmSync(dir, { recursive: true, force: true })
   })
 })

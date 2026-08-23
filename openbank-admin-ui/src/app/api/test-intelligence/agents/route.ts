@@ -39,16 +39,26 @@ export async function POST(): Promise<NextResponse> {
   try {
     const file = process.env.OPENBANK_TEST_INTELLIGENCE ?? path.resolve(process.cwd(), 'test-intelligence.json')
     const report = JSON.parse(await fs.readFile(file, 'utf8')) as TestIntelligenceReport
+    const serviceComponents = report.components.map(component => ({
+      component: component.component,
+      moneyPath: component.moneyPath,
+      evidence: component.evidence.map(item => ({ kind: item.kind, state: item.state })),
+      declaredInfrastructure: component.testInfrastructure?.declared ?? [],
+      observedInfrastructureStarts: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'started').length ?? 0,
+    }))
+    const clientComponents = (report.clientExperiences ?? []).map(client => ({
+      component: client.id,
+      // The customer app can initiate money movement; absence of its execution evidence
+      // deserves the same critical human attention as a money-path service gap.
+      moneyPath: client.id === 'openbank-app',
+      evidence: client.evidence.map(item => ({ kind: item.kind, state: item.state })),
+      declaredInfrastructure: [],
+      observedInfrastructureStarts: 0,
+    }))
     const payload = {
       snapshotId: `${report.collectedAt}:schema-${report.schemaVersion}`,
       collectedAt: report.collectedAt,
-      components: report.components.map(component => ({
-        component: component.component,
-        moneyPath: component.moneyPath,
-        evidence: component.evidence.map(item => ({ kind: item.kind, state: item.state })),
-        declaredInfrastructure: component.testInfrastructure?.declared ?? [],
-        observedInfrastructureStarts: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'started').length ?? 0,
-      })),
+      components: [...serviceComponents, ...clientComponents],
     }
     const response = await fetch(`${flakyHunterBase()}/api/v1/flaky-test-hunter/evidence/analyze`, {
       method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },

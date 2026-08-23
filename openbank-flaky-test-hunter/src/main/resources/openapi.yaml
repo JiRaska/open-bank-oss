@@ -121,5 +121,5 @@ components:
       type: object
       required: [kind, state]
       properties:
-        kind: { type: string, enum: [unit, integration, contract, e2e, performance, synthetic, mutation, simulation] }
+        kind: { type: string, enum: [unit, integration, contract, e2e, performance, synthetic, mutation, visual, simulation] }
         state: { type: string, enum: [passed, failed, skipped, not-run, stale, blocked, unknown] }

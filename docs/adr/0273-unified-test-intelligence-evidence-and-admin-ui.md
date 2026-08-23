@@ -228,9 +228,9 @@ capability from a read-only checkout that is excluded from the Docker build cont
 queries Tempo span-metrics through Prometheus for sampled `openbank-app` arrival over seven days. A
 non-zero observation proves that telemetry crossed the hardened gateway; it does not prove traffic
 volume, a particular OS deployment, or test success. Zero is an explicit absent observation, not a
-failure, because consent is opt-in. The AI analysis boundary remains unchanged: agents may interpret
-these server-side facts in a future chartered check, but cannot synthesize a client verdict or alter
-CI/RUM state.
+failure, because consent is opt-in. Operator-triggered AI analysis receives only bounded client CI
+kind/state pairs; it does not receive RUM counts, details or source paths. The agent may diagnose a
+missing mobile execution envelope, but cannot synthesize a client verdict or alter CI/RUM state.
 
 ## Alternatives considered
 
