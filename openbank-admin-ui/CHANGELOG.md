@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.20](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.19...admin-ui-v0.187.20) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** announce FinOps allocation loading ([#6627](https://github.com/JiRaska/open-bank-oss/issues/6627)) ([f5b4e33](https://github.com/JiRaska/open-bank-oss/commit/f5b4e3350b8268a851dd5da22574c414136e5d58))
+
 ## [0.187.19](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.18...admin-ui-v0.187.19) (2026-08-23)
 
 
