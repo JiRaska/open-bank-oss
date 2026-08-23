@@ -31,12 +31,15 @@ import jakarta.inject.Inject
  * Producer and consumer disagree about the wire format:
  *   sum by (topic) (rate(...{outcome="UNRECOGNISED"}[1h])) > 0
  *     and sum by (topic) (rate(...{outcome="PROJECTED"}[1h])) == 0
- * Events are arriving for parties the read model does not have, i.e. cross-topic ordering is
- * losing them (#6248):
- *   sum by (topic) (rate(...{outcome="SKIPPED_UNKNOWN_PARTY"}[1h])) > 0
+ * Events are arriving for parties the read model does not have yet, i.e. cross-topic ordering
+ * is running backwards (#6248):
+ *   sum by (topic) (rate(...{outcome="SEEDED_UNKNOWN_PARTY"}[1h])) > 0
  *
- * The second rule needs no PROJECTED == 0 companion: unlike an unrecognised payload, a skip is
- * per-party, so a steady trickle among healthy traffic is exactly the shape to alert on.
+ * Both rules are DEPLOYED, in
+ * `openbank-infra/gitops/components/observability/prometheus-rules-onboarding.yaml`. They were
+ * written here as prose only and never became a PrometheusRule, so "the alert did not fire"
+ * for #6248 had a simpler explanation than anyone reached for: there was no alert. A suggested
+ * rule in a KDoc is documentation, not a control.
  *
  * Cardinality is bounded: three topics, four outcomes.
  *
@@ -66,16 +69,14 @@ class ProjectionOutcomeMetrics(private val registry: MeterRegistry?) {
         UNRECOGNISED,
 
         /**
-         * Parsed and recognised, but the projection had nothing to update: the event names a
-         * party with no row yet. Its own value rather than part of [PROJECTED], because the two
-         * are opposite states — one means the read model advanced, the other means an enrolment
-         * or a KYC transition was discarded.
-         *
-         * This is the outcome that was missing when this class was written, and its absence is
-         * why the rule below could not fire for #6248: the drops were being counted as
-         * [PROJECTED], the very series the rule requires to be zero.
+         * Parsed, recognised and applied — to a row the projection had to create first, because
+         * the event named a party `PARTY_CREATED` had not reached it for yet. Its own value
+         * rather than part of [PROJECTED]: the event is no longer lost (it was, until #6248),
+         * but the read model is being assembled backwards and the row carries no identity until
+         * `PARTY_CREATED` lands. A steady trickle is normal across independent consumer groups;
+         * a topic where this is the *dominant* outcome is a real ordering problem.
          */
-        SKIPPED_UNKNOWN_PARTY,
+        SEEDED_UNKNOWN_PARTY,
 
         /** Malformed payload, or the projection itself threw. Already logged at ERROR. */
         FAILED,
