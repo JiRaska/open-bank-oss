@@ -67,7 +67,7 @@ export default function ScreenFeedbackPage() {
   const catLabel = (c: string) => (cs ? CATEGORY_LABEL_CS[c] : CATEGORY_LABEL_EN[c]) ?? c
 
   if (loading && !data) {
-    return <div className="page"><p>{cs ? 'Načítám…' : 'Loading…'}</p></div>
+    return <div className="page"><p role="status" aria-live="polite">{cs ? 'Načítám…' : 'Loading…'}</p></div>
   }
   if (!data?.available) {
     return (
