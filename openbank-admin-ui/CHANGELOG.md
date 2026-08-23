@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.19](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.18...admin-ui-v0.187.19) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify dashboard refresh ([#6619](https://github.com/JiRaska/open-bank-oss/issues/6619)) ([f31eab6](https://github.com/JiRaska/open-bank-oss/commit/f31eab63f884834c5e8e6bdc056095e1298ecfad))
+
 ## [0.187.18](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.17...admin-ui-v0.187.18) (2026-08-23)
 
 
