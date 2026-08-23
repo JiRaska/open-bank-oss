@@ -179,10 +179,14 @@ creation and automated test skipping are not claimed.
 
 ### D7 — Animated evidence map and bounded AI agents
 
-The page visualises the testing system as an animated evidence flow: a change fans out into CI and
-sandbox observations, the common model preserves provenance and freshness, and deterministic gates
-plus human decisions consume the result. Motion is disabled when the operator requests reduced
-motion, and every node remains keyboard accessible.
+The page visualises the testing system as a seven-stage animated evidence journey: change intent,
+deterministic CI proof, Testcontainers runtime reality, performance and sandbox challenge, runtime
+observation including consent-gated mobile RUM, bounded AI reasoning, and accountable human
+decision. Each keyboard-accessible stage teaches both what its evidence proves and the claim it must
+never be stretched to support. Live fleet coverage, observed container starts, active synthetics,
+mobile-RUM arrival and HITL mode are projected into the same canvas without collapsing them into one
+score. Motion is disabled when the operator requests reduced motion; the mobile layout becomes a
+scrollable narrative rather than shrinking the system into an unreadable diagram.
 
 AI is an interpretation layer, never an evidence producer. The existing flaky-test-hunter reads its
 own authorised sources, detects silent or unstable-test patterns, uses the governed LLM gateway to
