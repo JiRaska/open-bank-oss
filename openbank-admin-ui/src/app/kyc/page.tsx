@@ -115,7 +115,7 @@ export default function KycPage() {
         </div>
       )}
 
-      <div className="card" style={{ overflow: 'hidden' }}>
+      <div className="card" aria-busy={loading} style={{ overflow: 'hidden' }}>
         <table className="data-table">
           <thead>
             <tr>
