@@ -187,7 +187,9 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          # This advisory command is allowed to time out.  It must not leave a Gradle
+          # daemon writing test/Kover files while the mandatory build begins (#6614).
+          timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
           warmup_status=$?
           if [ $warmup_status -eq 124 ]; then
             echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
@@ -196,7 +198,7 @@ jobs:
             cat /tmp/gradle-warmup.log
             if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
               echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
               retry_status=$?
               if [ $retry_status -eq 124 ]; then
                 echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
@@ -630,7 +632,9 @@ jobs:
         continue-on-error: true
         run: |
           set +e
-          timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
+          # This advisory command is allowed to time out.  It must not leave a Gradle
+          # daemon writing test/Kover files while the mandatory build begins (#6614).
+          timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:quarkusDependenciesBuild --console=plain > /tmp/gradle-warmup.log 2>&1
           warmup_status=$?
           if [ $warmup_status -eq 124 ]; then
             echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory step"
@@ -639,7 +643,7 @@ jobs:
             cat /tmp/gradle-warmup.log
             if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
               echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout 120s ./gradlew :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
+              timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:quarkusDependenciesBuild --console=plain
               retry_status=$?
               if [ $retry_status -eq 124 ]; then
                 echo "::warning::dependency warm-up retry timed out after 120s; continuing"
