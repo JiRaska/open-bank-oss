@@ -214,6 +214,24 @@ The admin route is a primary platform destination, first in Platform navigation 
 platform persona workspace. Its E2E test navigates from the dashboard through the visible link;
 opening `/system/tests` directly is not evidence of discoverability.
 
+### D9 — Client experience evidence and RUM boundary
+
+Client quality is part of Test Intelligence, but CI and real-user telemetry remain distinct
+observations. The Admin UI contributes its Playwright and visual-regression evidence; browser RUM
+remains rejected for this internal operator surface by ADR-0088. The separate customer-app repository
+publishes a bounded, immutable envelope containing unit and committed-golden verdicts plus run
+provenance. Missing private-repository access or an expired artifact renders `not-run` with a blocker;
+source presence is never promoted to a completed test.
+
+Mobile RUM is consent-gated runtime evidence. The deploy-time projection records Android/iOS exporter
+capability from a read-only checkout that is excluded from the Docker build context, while the BFF
+queries Tempo span-metrics through Prometheus for sampled `openbank-app` arrival over seven days. A
+non-zero observation proves that telemetry crossed the hardened gateway; it does not prove traffic
+volume, a particular OS deployment, or test success. Zero is an explicit absent observation, not a
+failure, because consent is opt-in. The AI analysis boundary remains unchanged: agents may interpret
+these server-side facts in a future chartered check, but cannot synthesize a client verdict or alter
+CI/RUM state.
+
 ## Alternatives considered
 
 - **Only fix the hard-coded service lists.** This repairs the most visible undercount but preserves

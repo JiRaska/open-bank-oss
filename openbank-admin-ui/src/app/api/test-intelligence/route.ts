@@ -102,6 +102,41 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
   return { ...report, syntheticJourneys }
 }
 
+async function attachLiveClientExperience(report: TestIntelligenceReport): Promise<TestIntelligenceReport> {
+  const base = prometheusBase()
+  if (!base) return report
+  const mobile = report.clientExperiences.find(client => client.id === 'openbank-app')
+  if (!mobile) return report
+
+  // Tempo's span-metrics prove arrival after the hardened, consent-gated RUM gateway.
+  // `or vector(0)` distinguishes a reachable Prometheus with no sampled mobile signal
+  // from an unavailable query. Zero is normal and must not become a failed CI verdict.
+  const [sampledSpans, errorSpans] = await Promise.all([
+    queryPrometheus(base, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*"}[7d])) or vector(0)'),
+    queryPrometheus(base, 'sum(increase(traces_spanmetrics_calls_total{service=~"openbank-app.*",status_code="STATUS_CODE_ERROR"}[7d])) or vector(0)'),
+  ])
+  if (sampledSpans === null) return report
+
+  const observedAt = new Date().toISOString()
+  const sampled = Math.max(0, Math.round(sampledSpans))
+  const errors = errorSpans === null ? null : Math.max(0, Math.round(errorSpans))
+  const clientExperiences = report.clientExperiences.map(client => client.id !== mobile.id ? client : ({
+    ...client,
+    rum: {
+      ...client.rum,
+      state: sampled > 0 ? 'passed' as const : 'not-run' as const,
+      source: 'prometheus' as const,
+      observedAt,
+      sampledSpansLast7d: sampled,
+      errorSpansLast7d: errors,
+      detail: sampled > 0
+        ? `${sampled} sampled mobile RUM span(s) reached Tempo in the last 7 days${errors === null ? '' : `; ${errors} carried an error status`}. This proves telemetry arrival, not customer traffic volume or test success.`
+        : 'No sampled mobile RUM span reached Tempo in the last 7 days. Consent is opt-in, so this is an explicit absent runtime observation rather than a failed CI test.',
+    },
+  }))
+  return { ...report, clientExperiences }
+}
+
 export async function GET(): Promise<NextResponse> {
   try {
     const parsed = JSON.parse(await fs.readFile(reportFile(), 'utf8')) as TestIntelligenceReport
@@ -115,7 +150,8 @@ export async function GET(): Promise<NextResponse> {
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },
       })),
     }
-    return NextResponse.json(await attachLiveJourneys(compatible), { headers: { 'Cache-Control': 'no-store' } })
+    const withJourneys = await attachLiveJourneys(compatible)
+    return NextResponse.json(await attachLiveClientExperience(withJourneys), { headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return NextResponse.json(emptyReport('test-intelligence.json is not bundled'))
   }

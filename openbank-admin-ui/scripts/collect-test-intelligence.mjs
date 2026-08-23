@@ -348,6 +348,7 @@ function clientExperiences() {
       id: 'admin-ui', title: 'Admin UI web', surface: 'web', platforms: ['web'], evidence: webEvidence,
       rum: {
         state: 'not-run', policy: 'rejected', observedAt: null,
+        source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
         detail: 'Browser RUM is intentionally rejected for the internal operator console by ADR-0088; Playwright and server-side telemetry remain the evidence path.',
       }, blocker: null,
     },
@@ -355,6 +356,7 @@ function clientExperiences() {
       id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: mobileEvidence,
       rum: {
         state: androidRum || iosRum ? 'unknown' : 'not-run', policy: 'consent-gated', observedAt: null,
+        source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
         detail: androidRum || iosRum
           ? `Mobile RUM is implemented in source for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
           : 'openbank-app source was not staged for this deployment, so RUM implementation status is unknown.',
