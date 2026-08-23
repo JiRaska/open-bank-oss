@@ -34,6 +34,15 @@ journeys:
     severity: page
     schedule: "*/5 * * * *"
     falsification: break it
+  - id: mobile
+    title: Mobile
+    status: planned
+    severity: page
+    money_moving: true
+    target_schedule: "0 * * * *"
+    capability: proves the mobile critical path
+    falsification: break the app route
+    blocked_by: needs canary devices
 `)
     write(repo, 'perf/k6/smoke.js', 'export const options = { thresholds: { checks: ["rate>0.99"] } }')
     const out = path.join(repo, 'report.json')
@@ -47,6 +56,7 @@ journeys:
     expect(report.components[1].evidence).toEqual([])
     expect(report.totals.missingEvidence).toBe(1)
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
+    expect(report.syntheticJourneys[1]).toMatchObject({ id: 'mobile', state: 'blocked', schedule: '0 * * * *', blocker: 'needs canary devices' })
     expect(report.performance[0]).toMatchObject({ id: 'smoke', state: 'not-run' })
     expect(report.clientExperiences).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),

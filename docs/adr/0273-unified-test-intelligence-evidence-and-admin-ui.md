@@ -136,8 +136,9 @@ The consolidated page exposes:
 - code coverage: Kover line and branch observations, never labelled scenario coverage;
 - contracts and mutation results;
 - performance observations and their measured denominator;
-- synthetic journeys with status, schedule, severity, covered services, falsification statement and
-  blocker, enriched at request time from the already-governed kube-state-metrics Prometheus signals;
+- synthetic journeys with status, active or target schedule, severity, covered services,
+  falsification statement and blocker, enriched at request time from the already-governed
+  kube-state-metrics Prometheus signals; planned cadence is never represented as a running scheduler;
 - a 30-snapshot evidence trend plus immutable service run/attempt history which keeps missing,
   failing and runtime-proof denominators visible;
 - declared Testcontainers topology alongside observed start/stop lifecycle proof; and

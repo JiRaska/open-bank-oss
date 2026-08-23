@@ -317,7 +317,7 @@ function syntheticJourneys() {
     return (raw?.journeys ?? []).map(item => ({
       id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
       state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
-      schedule: item.schedule ?? null, environment: item.environment ?? null,
+      schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
       covers: item.covers ?? item.covered_services ?? [],
       falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
     }))
