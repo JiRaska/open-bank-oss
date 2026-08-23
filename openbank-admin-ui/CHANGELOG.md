@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.11](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.10...admin-ui-v0.187.11) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify parties pagination ([#6574](https://github.com/JiRaska/open-bank-oss/issues/6574)) ([e807981](https://github.com/JiRaska/open-bank-oss/commit/e8079810ab698575ab8d0ac51cd69f8e884d0a8b))
+
 ## [0.187.10](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.9...admin-ui-v0.187.10) (2026-08-22)
 
 
