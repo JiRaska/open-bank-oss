@@ -47,6 +47,9 @@ def check(root: Path) -> list[str]:
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
     if "build/test-intelligence/run.json" not in deploy:
         errors.append("admin deployment does not stage the versioned run envelope")
+    for needle in ("openbank-app-test-intelligence-", ".get('head_branch') == 'main'", "client-test-evidence/openbank-app-${artifact_id}.json"):
+        if needle not in deploy:
+            errors.append(f"admin deployment lost trusted mobile evidence staging: {needle}")
     for workflow_name, required in {
         "perf-gate.yml": ("--performance-summary", "Build performance Test Intelligence envelope"),
         "perf-baseline.yml": ("--performance-summary", "test-intelligence-run-openbank-money-path"),
@@ -64,6 +67,8 @@ def check(root: Path) -> list[str]:
     for needle in ("kube_cronjob_status_last_schedule_time", "kube_cronjob_status_last_successful_time", "kube_job_status_failed"):
         if needle not in synthetic_route:
             errors.append(f"synthetic runtime projection lost its verified Kubernetes signal: {needle}")
+    if 'traces_spanmetrics_calls_total{service=~"openbank-app.*"}' not in synthetic_route:
+        errors.append("mobile RUM projection lost its live Tempo span-metrics signal")
     if not (root / "openbank-libs/governance/journeys.yaml").exists():
         errors.append("synthetic journey inventory is missing")
     return errors

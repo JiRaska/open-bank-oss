@@ -364,8 +364,10 @@ jobs:
           set -u
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/client-test-evidence
+          # Only reviewed default-branch evidence may enter a deployed control plane. A newer
+          # PR artifact remains visible in GitHub but cannot replace the sandbox verdict.
           ARTIFACTS="$(api "https://api.github.com/repos/${APP_REPO}/actions/artifacts?per_page=100" \
-            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('openbank-app-test-intelligence-') and not x['expired']]; a.sort(key=lambda x:x['created_at'], reverse=True); [print(x['id']) for x in a[:20]]" 2>/dev/null || true)"
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('openbank-app-test-intelligence-') and not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; a.sort(key=lambda x:x['created_at'], reverse=True); [print(x['id']) for x in a[:20]]" 2>/dev/null || true)"
           while read -r artifact_id; do
             [ -n "${artifact_id}" ] || continue
             archive="/tmp/openbank-app-test-intelligence-${artifact_id}.zip"
