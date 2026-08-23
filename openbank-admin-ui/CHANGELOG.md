@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.25](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.24...admin-ui-v0.187.25) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify sanctions disclosure ([#6650](https://github.com/JiRaska/open-bank-oss/issues/6650)) ([f4517da](https://github.com/JiRaska/open-bank-oss/commit/f4517da780b35d5e78f7ba4e8b3e211688ae4b0e))
+
 ## [0.187.24](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.23...admin-ui-v0.187.24) (2026-08-23)
 
 
