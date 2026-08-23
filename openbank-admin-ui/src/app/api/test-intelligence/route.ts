@@ -14,7 +14,7 @@ const reportFile = () => process.env.OPENBANK_TEST_INTELLIGENCE
 const emptyReport = (error: string): TestIntelligenceReport => ({
   schemaVersion: 1,
   collectedAt: new Date(0).toISOString(),
-  components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [], history: [], runHistory: [], testCases: [],
+  components: [], contracts: [], mutations: [], performance: [], syntheticJourneys: [], clientExperiences: [], history: [], runHistory: [], testCases: [],
   totals: {
     components: 0, componentsWithExecutionEvidence: 0, moneyPathComponents: 0,
     failingEvidence: 0, missingEvidence: 0, staleEvidence: 0,
@@ -109,7 +109,7 @@ export async function GET(): Promise<NextResponse> {
       return NextResponse.json(emptyReport('Unsupported test-intelligence report schema'))
     }
     const compatible = {
-      ...parsed, history: parsed.history ?? [], runHistory: parsed.runHistory ?? [], testCases: parsed.testCases ?? [],
+      ...parsed, history: parsed.history ?? [], runHistory: parsed.runHistory ?? [], testCases: parsed.testCases ?? [], clientExperiences: parsed.clientExperiences ?? [],
       components: parsed.components.map(component => ({
         ...component,
         testInfrastructure: component.testInfrastructure ?? { declared: [], observed: [] },

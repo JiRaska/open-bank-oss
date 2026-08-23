@@ -112,6 +112,9 @@ jobs:
       # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
       # — only job-level env can read it. Used solely to decide whether to mint an App token.
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+      # Read-only token for the separate private customer-app repository. It is optional:
+      # missing scope/evidence renders an explicit blocked client row; it never blocks deploy.
+      APP_RO_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
 
     outputs:
       tag: ${{ steps.build.outputs.tag }}
@@ -123,6 +126,16 @@ jobs:
           fetch-depth: 0
           # persist-credentials: true (default) — needed so git in the collectors
           # can read the repo; the gitops step uses a separate checkout.
+
+      - name: Checkout mobile RUM capability metadata
+        if: env.APP_RO_TOKEN != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: JiRaska/openbank-app
+          token: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+          path: .app-src
+          persist-credentials: false
+          fetch-depth: 1
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -339,6 +352,27 @@ jobs:
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
           RUN_COUNT=$(find . -path "*/build/test-intelligence/run.json" | wc -l | tr -d ' ')
           echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
+
+      - name: Stage customer-app Test Intelligence evidence
+        # Cross-repository evidence is read-only and best-effort. The compact JSON artifact
+        # contains counts and provenance only; it never imports private source or test output.
+        if: env.APP_RO_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.OPENBANK_APP_RO_TOKEN }}
+          APP_REPO: JiRaska/openbank-app
+        run: |
+          set -u
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/client-test-evidence
+          ARTIFACTS="$(api "https://api.github.com/repos/${APP_REPO}/actions/artifacts?per_page=100" \
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('openbank-app-test-intelligence-') and not x['expired']]; a.sort(key=lambda x:x['created_at'], reverse=True); [print(x['id']) for x in a[:20]]" 2>/dev/null || true)"
+          while read -r artifact_id; do
+            [ -n "${artifact_id}" ] || continue
+            archive="/tmp/openbank-app-test-intelligence-${artifact_id}.zip"
+            api "https://api.github.com/repos/${APP_REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
+            unzip -joq "${archive}" '*.json' -d openbank-admin-ui/client-test-evidence 2>/dev/null || true
+          done <<< "${ARTIFACTS}"
+          echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 
       - name: Stage immutable per-attempt Test Intelligence history
         env:

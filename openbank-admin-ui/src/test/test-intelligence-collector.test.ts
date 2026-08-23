@@ -48,6 +48,10 @@ journeys:
     expect(report.totals.missingEvidence).toBe(1)
     expect(report.syntheticJourneys[0]).toMatchObject({ id: 'edge', state: 'unknown', schedule: '*/5 * * * *' })
     expect(report.performance[0]).toMatchObject({ id: 'smoke', state: 'not-run' })
+    expect(report.clientExperiences).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'admin-ui', rum: expect.objectContaining({ policy: 'rejected' }) }),
+      expect.objectContaining({ id: 'openbank-app', evidence: [], blocker: expect.stringMatching(/artifact/i) }),
+    ]))
   })
 
   it('prefers the versioned run envelope and preserves provenance plus Testcontainers runtime proof', () => {
@@ -85,5 +89,25 @@ journeys:
       fingerprint: '0123456789abcdef01234567', state: 'flaky', observations: 2,
       failureRate: 50, wastedDurationMs: 500, sameCommitTransitions: 1, owner: 'unowned',
     })
+  })
+
+  it('projects immutable mobile CI evidence while keeping RUM runtime state independent', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-client-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    write(repo, '.app-src/shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt', 'actual object RumMonitor')
+    write(repo, '.app-src/shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt', 'actual object RumMonitor')
+    write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-unit.json', JSON.stringify({
+      schemaVersion: 1, component: 'openbank-app',
+      run: { id: '9', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/9', observedAt: '2026-08-23T10:00:00Z' },
+      suites: [{ kind: 'unit', state: 'passed', durationMs: 100, counts: { discovered: 2, executed: 2, passed: 2, failed: 0, skipped: 0, errors: 0 } }],
+    }))
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const app = report.clientExperiences.find(item => item.id === 'openbank-app')!
+    expect(app.evidence[0]).toMatchObject({ kind: 'unit', state: 'passed', run: { id: '9' } })
+    expect(app.rum).toMatchObject({ policy: 'consent-gated', state: 'unknown' })
   })
 })

@@ -16,7 +16,7 @@ import { TestIntelligenceFlow } from '@/components/testing/TestIntelligenceFlow'
 import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
 
-type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic'
+type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients'
 
 const STATE_COLOR: Record<EvidenceState, string> = {
   passed: '#16a34a', failed: '#dc2626', skipped: '#d97706', 'not-run': '#64748b',
@@ -219,6 +219,17 @@ function Synthetics({ report }: { report: TestIntelligenceReport }) {
   </div>)}</div>
 }
 
+function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
+  const { t } = useLanguage()
+  return <div style={{ display: 'grid', gap: 12 }}>{(report.clientExperiences ?? []).map(client => <div key={client.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={client.evidence.some(item => item.state === 'failed') ? 'failed' : client.evidence.length ? 'passed' : 'not-run'} /></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}</div>)}</div>
+    {client.evidence.length === 0 && <p style={{ fontSize: 12, color: '#d97706', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
+    <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span><div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div></div>
+    {client.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {client.blocker}</p>}
+  </div>)}</div>
+}
+
 export default function TestIntelligencePage() {
   const { language, t } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -248,6 +259,7 @@ export default function TestIntelligencePage() {
     { id: 'mutation', label: t('Mutace', 'Mutation'), icon: <Dna size={13} /> },
     { id: 'performance', label: t('Výkon', 'Performance'), icon: <Gauge size={13} /> },
     { id: 'synthetic', label: t('Syntetika', 'Synthetics'), icon: <Timer size={13} /> },
+    { id: 'clients', label: t('Client experience', 'Client experience'), icon: <Activity size={13} /> },
   ]
 
   return <div style={{ padding: '28px 32px', maxWidth: 1600, animation: 'fadeIn 0.2s ease-out' }}>
@@ -265,6 +277,7 @@ export default function TestIntelligencePage() {
     {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <>
       {tab === 'posture' && <Posture report={report} />}{tab === 'tests' && <TestCases report={report} />}{tab === 'history' && <History report={report} />}{tab === 'execution' && <Execution report={report} />}{tab === 'runtime' && <RuntimeInfrastructure report={report} />}{tab === 'coverage' && <Coverage report={report} />}
       {tab === 'contracts' && <Contracts report={report} />}{tab === 'mutation' && <Mutations report={report} />}{tab === 'performance' && <Performance report={report} />}{tab === 'synthetic' && <Synthetics report={report} />}
+      {tab === 'clients' && <ClientExperiences report={report} />}
     </> : <div style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný.', 'Report is unavailable.')}</div>}
     {report && <TestAgentPanel />}
     {report && <div style={{ marginTop: 18, color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Schéma', 'Schema')} v{report.schemaVersion} · {t('sesbíráno', 'collected')} {new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.collectedAt))} · {t('absence se nikdy nevykresluje jako nula', 'absence is never rendered as zero')}</div>}

@@ -327,6 +327,42 @@ function syntheticJourneys() {
   }
 }
 
+function clientExperiences() {
+  const evidenceDir = path.join(repo, 'openbank-admin-ui', 'client-test-evidence')
+  const mobileFiles = allFiles(evidenceDir, file => path.basename(file).startsWith('openbank-app-') && file.endsWith('.json'))
+  const mobileRuns = mobileFiles.map(readJson).filter(item => item?.schemaVersion === 1 && item?.component === 'openbank-app')
+  const latestMobile = mobileRuns.sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))[0]
+  const appSource = path.join(repo, '.app-src')
+  const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
+  const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
+  const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? junitEvidence('openbank-admin-ui')
+  const mobileEvidence = (latestMobile?.suites ?? []).map(item => ({
+    kind: item.kind, state: item.state, observedAt: latestMobile.run?.observedAt ?? null,
+    source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
+    counts: item.counts, detail: item.detail,
+    ...(latestMobile.run ? { run: latestMobile.run } : {}),
+  }))
+  if (!latestMobile) warnings.push('openbank-app execution artifact is not bundled; mobile test verdict is not inferred from source.')
+  return [
+    {
+      id: 'admin-ui', title: 'Admin UI web', surface: 'web', platforms: ['web'], evidence: webEvidence,
+      rum: {
+        state: 'not-run', policy: 'rejected', observedAt: null,
+        detail: 'Browser RUM is intentionally rejected for the internal operator console by ADR-0088; Playwright and server-side telemetry remain the evidence path.',
+      }, blocker: null,
+    },
+    {
+      id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: mobileEvidence,
+      rum: {
+        state: androidRum || iosRum ? 'unknown' : 'not-run', policy: 'consent-gated', observedAt: null,
+        detail: androidRum || iosRum
+          ? `Mobile RUM is implemented in source for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
+          : 'openbank-app source was not staged for this deployment, so RUM implementation status is unknown.',
+      }, blocker: latestMobile ? null : 'Latest private-app CI evidence artifact was not available to this deployment.',
+    },
+  ]
+}
+
 async function main() {
   const names = releasedComponents()
   const moneyPath = moneyPathComponents()
@@ -373,6 +409,7 @@ async function main() {
     })
   }
   const synthetic = syntheticJourneys()
+  const clientExperience = clientExperiences()
   const testCases = testCaseHistory(currentEnvelopes)
   const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
   const staleEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'stale').length
@@ -399,6 +436,7 @@ async function main() {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
     contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence,
     syntheticJourneys: synthetic, history, runHistory, testCases,
+    clientExperiences: clientExperience,
     totals: {
       components: components.length,
       componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,

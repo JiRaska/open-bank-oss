@@ -18,6 +18,7 @@ export type EvidenceKind =
   | 'performance'
   | 'synthetic'
   | 'mutation'
+  | 'visual'
   | 'simulation'
 
 export interface TestCounts {
@@ -131,6 +132,26 @@ export interface SyntheticJourneyEvidence {
   }
 }
 
+/**
+ * Evidence emitted by a customer or operator client repository.  It is intentionally
+ * separate from a deployable backend component: a mobile build can be healthy while
+ * the corresponding runtime RUM signal is absent (and vice versa).
+ */
+export interface ClientExperienceEvidence {
+  id: 'admin-ui' | 'openbank-app'
+  title: string
+  surface: 'web' | 'mobile'
+  platforms: string[]
+  evidence: EvidenceObservation[]
+  rum: {
+    state: EvidenceState
+    policy: 'not-applicable' | 'rejected' | 'consent-gated'
+    detail: string
+    observedAt: string | null
+  }
+  blocker: string | null
+}
+
 export interface TestIntelligenceReport {
   schemaVersion: 1
   collectedAt: string
@@ -139,6 +160,7 @@ export interface TestIntelligenceReport {
   mutations: MutationEvidence[]
   performance: PerformanceEvidence[]
   syntheticJourneys: SyntheticJourneyEvidence[]
+  clientExperiences: ClientExperienceEvidence[]
   history: TestIntelligenceHistoryPoint[]
   runHistory: TestRunHistoryPoint[]
   testCases: TestCaseHistory[]
