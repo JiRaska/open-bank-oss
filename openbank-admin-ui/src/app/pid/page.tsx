@@ -209,7 +209,7 @@ export default function PidPage() {
                 <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
                 {t('Obnovit', 'Refresh')}
               </button>
-              <button className="btn btn-secondary" onClick={() => setShowNewForm(true)}>
+              <button type="button" className="btn btn-secondary" onClick={() => setShowNewForm(true)} aria-label={t('Otevřít rychlé vytvoření PID záznamu', 'Open PID quick create')}>
                 {t('Rychlé vytvoření', 'Quick Create')}
               </button>
               <Can permission="parties:create">
