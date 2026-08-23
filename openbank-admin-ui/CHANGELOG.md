@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.21](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.20...admin-ui-v0.187.21) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify party detail actions ([#6631](https://github.com/JiRaska/open-bank-oss/issues/6631)) ([7934ac3](https://github.com/JiRaska/open-bank-oss/commit/7934ac38cc5d8279de34cfd6842306134a9baf05))
+
 ## [0.187.20](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.19...admin-ui-v0.187.20) (2026-08-23)
 
 
