@@ -275,10 +275,12 @@ export default function PartiesPage() {
           {inSearchMode && searchPagi?.hasNextPage && !loadingMore && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
               <button
+                type="button"
                 className="btn btn-secondary"
                 onClick={() => runSearch(debouncedQ, searchPagi.nextCursor)}
+                aria-label={t('Načíst další subjekty', 'Load more parties')}
               >
-                <ChevronDown size={13} />
+                <ChevronDown size={13} aria-hidden="true" />
                 {t('Načíst další', 'Load more')}
               </button>
             </div>
