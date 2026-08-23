@@ -124,5 +124,6 @@ journeys:
     const app = report.clientExperiences.find(item => item.id === 'openbank-app')!
     expect(app.evidence[0]).toMatchObject({ kind: 'unit', state: 'passed', run: { id: '9' } })
     expect(app.rum).toMatchObject({ policy: 'consent-gated', state: 'unknown' })
+    expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['9', '8'])
   })
 })

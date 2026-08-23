@@ -327,10 +327,16 @@ function syntheticJourneys() {
   }
 }
 
-function clientExperiences() {
+function mobileClientRuns() {
   const evidenceDir = path.join(repo, 'openbank-admin-ui', 'client-test-evidence')
   const mobileFiles = allFiles(evidenceDir, file => path.basename(file).startsWith('openbank-app-') && file.endsWith('.json'))
-  const mobileRuns = mobileFiles.map(readJson).filter(item => item?.schemaVersion === 1 && item?.component === 'openbank-app')
+  return mobileFiles.map(readJson)
+    .filter(item => item?.schemaVersion === 1 && item?.component === 'openbank-app' && item?.run)
+    .sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))
+}
+
+function clientExperiences() {
+  const mobileRuns = mobileClientRuns()
   const latestMobile = mobileRuns.sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))[0]
   const appSource = path.join(repo, '.app-src')
   const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
@@ -427,12 +433,18 @@ async function main() {
     .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
     .filter((item, index, all) => index === 0 || item.collectedAt !== all[index - 1].collectedAt)
     .slice(-30)
-  const runHistory = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
+  const serviceRunHistory = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
     .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run && item?.component)
     .map(item => ({ component: item.component, run: item.run,
       states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
       infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
       infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length }))
+  const clientRunHistory = mobileClientRuns().map(item => ({
+    component: item.component, run: item.run,
+    states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
+    infrastructureStarted: 0, infrastructureStopped: 0,
+  }))
+  const runHistory = [...serviceRunHistory, ...clientRunHistory]
     .sort((a, b) => Date.parse(b.run.observedAt) - Date.parse(a.run.observedAt)).slice(0, 500)
   const report = {
     schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
