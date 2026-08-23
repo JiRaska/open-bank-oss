@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.14](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.13...admin-ui-v0.187.14) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify PID quick create ([#6588](https://github.com/JiRaska/open-bank-oss/issues/6588)) ([427ae44](https://github.com/JiRaska/open-bank-oss/commit/427ae44c470f8ad428aa44c49234d126a51c2b6a))
+
 ## [0.187.13](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.12...admin-ui-v0.187.13) (2026-08-23)
 
 
