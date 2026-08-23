@@ -17,7 +17,7 @@ class TestIntelligenceEvidenceContractTest {
         val post = analysis["post"] as Map<String, Any>
 
         assertThat(post["operationId"]).isEqualTo("analyzeTestIntelligenceEvidence")
-        assertThat(post.toString()).contains("TestIntelligenceAnalysisRequest", "Administrator role required")
+        assertThat(post.toString()).contains("TestIntelligenceAnalysisRequest", "ROLE_ADMIN")
         assertThat(paths.keys).noneMatch { it.contains("apply") || it.contains("remediation") }
     }
 }
