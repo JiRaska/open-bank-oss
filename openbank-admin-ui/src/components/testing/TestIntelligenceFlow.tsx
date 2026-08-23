@@ -6,6 +6,7 @@
 import { useState } from 'react'
 import { Bot, Box, BrainCircuit, GitPullRequest, Radar, ShieldCheck } from 'lucide-react'
 import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const nodes = [
   { id: 'change', x: 70, y: 104, label: 'Change', sub: 'commit + service', icon: GitPullRequest },
@@ -22,6 +23,7 @@ const edges = [
 ]
 
 export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceReport | null }) {
+  const { t } = useLanguage()
   const [selected, setSelected] = useState('normalize')
   const byId = Object.fromEntries(nodes.map(node => [node.id, node]))
   const activeJourneys = report?.syntheticJourneys.filter(item => item.status === 'active').length ?? 0
@@ -35,8 +37,8 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
     decision: report ? `${attention} attention` : 'awaiting',
   }
   return <section className="ti-flow" aria-labelledby="test-intelligence-flow-title">
-    <div className="ti-flow-head"><div><span>OPENBANK QUALITY NERVOUS SYSTEM</span><h2 id="test-intelligence-flow-title">Evidence moves. Facts stay immutable.</h2></div><div className={`ti-live ${attention ? 'attention' : ''}`}><i />{report ? (attention ? ' ATTENTION' : ' HEALTHY') : ' LIVE MODEL'}</div></div>
-    <svg viewBox="0 0 700 210" role="img" aria-label="Animated flow from a code change through CI and sandbox evidence into normalization, AI agents and human decisions">
+    <div className="ti-flow-head"><div><span>{t('NERVOVÝ SYSTÉM KVALITY OPENBANK', 'OPENBANK QUALITY NERVOUS SYSTEM')}</span><h2 id="test-intelligence-flow-title">{t('Evidence proudí. Fakta zůstávají neměnná.', 'Evidence moves. Facts stay immutable.')}</h2></div><div className={`ti-live ${attention ? 'attention' : ''}`}><i />{report ? (attention ? ` ${t('POZORNOST', 'ATTENTION')}` : ` ${t('ZDRAVÉ', 'HEALTHY')}`) : ` ${t('ŽIVÝ MODEL', 'LIVE MODEL')}`}</div></div>
+    <svg viewBox="0 0 700 210" role="img" aria-label={t('Animovaný tok od změny kódu přes CI a sandboxovou evidenci do normalizace, AI agentů a lidského rozhodování', 'Animated flow from a code change through CI and sandbox evidence into normalization, AI agents and human decisions')}>
       <defs><filter id="ti-glow"><feGaussianBlur stdDeviation="3" result="blur"/><feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
       {edges.map(([from, to], index) => {
         const a = byId[from]; const b = byId[to]
