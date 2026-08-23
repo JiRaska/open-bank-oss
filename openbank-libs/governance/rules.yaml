@@ -2329,6 +2329,15 @@ gitops_ref_integrity:
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
 
+pr_build_cloud_credentials:
+  script: .github/scripts/check-pr-build-cloud-credentials.py
+  wired_into: .github/gates/gates.yaml    # gate id pr-build-cloud-credentials, group security, enforced
+  rule: >-
+    The reusable `_service-ci.yml` build job, which executes pull-request code on GitHub-hosted
+    runners, must not assume a cloud role or log in to a cloud registry. Credentialed cache,
+    contract and deployment work belongs only to a separately trusted lane.
+  basis: untrusted_code_must_not_receive_deploy_credentials
+
 oidc_secret_convention:
   script: .github/scripts/check-oidc-secret-convention.py
   wired_into: .github/gates/gates.yaml    # gate id oidc-secret-convention, group gitops, enforced

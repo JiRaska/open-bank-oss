@@ -3321,6 +3321,16 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
+  - id: pr-build-cloud-credentials
+    name: "reusable PR build lane carries no cloud credentials (enforced)"
+    group: security
+    mode: enforced
+    rationale: "The build lane executes pull-request code, so a deploy or registry role there is an exfiltrable credential rather than a cache optimization."
+    review_after: "2027-08-23"
+    selftest: python3 .github/scripts/check-pr-build-cloud-credentials.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-pr-build-cloud-credentials.py
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
