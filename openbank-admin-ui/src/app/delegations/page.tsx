@@ -126,8 +126,8 @@ export default function DelegationsPage() {
         title={t('Delegovaný přístup', 'Delegated Access')}
         subtitle={t('Kdo komu udělil práva k účtu, kartě nebo spoření (ADR-0232). Konzole je pouze pro čtení.', 'Who granted whom rights over an account, card or savings goal (ADR-0232). This console is read-only.')}
         actions={party && (
-          <button className="btn btn-secondary" onClick={() => loadGrants(party)} disabled={loading}>
-            <RefreshCw size={14} />
+          <button type="button" className="btn btn-secondary" onClick={() => loadGrants(party)} disabled={loading} aria-busy={loading} aria-label={t('Obnovit delegovaný přístup', 'Refresh delegated access')}>
+            <RefreshCw size={14} aria-hidden="true" />
             {t('Obnovit', 'Refresh')}
           </button>
         )}
