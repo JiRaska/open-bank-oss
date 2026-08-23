@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.26](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.25...admin-ui-v0.187.26) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify account controls ([#6654](https://github.com/JiRaska/open-bank-oss/issues/6654)) ([d008c2a](https://github.com/JiRaska/open-bank-oss/commit/d008c2a6df51072b97400fe223cd65c7dd7aadc0))
+
 ## [0.187.25](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.24...admin-ui-v0.187.25) (2026-08-23)
 
 
