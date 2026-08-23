@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.5.0"
+  version: "1.6.0"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -58,8 +58,15 @@ components:
             (issue #6037): REVERSED and CREDITED_REVERSED mean balance-service accepted the
             counter-movement and the money is back; REVERSAL_FAILED means a reversal was attempted
             and refused (typically the payee has spent the funds) and the money is still moved;
-            LEDGER_REVERSAL_UNSUPPORTED means the general-ledger posting was not reversed and needs
-            a manual correcting entry. LEDGER_REVERSED is deprecated and is no longer produced —
+            LEDGER_REVERSAL_UNSUPPORTED means a journal for this settlement was confirmed to
+            exist in the general ledger and was not reversed, so the GL needs a manual correcting
+            entry; LEDGER_NOT_POSTED means the ledger was asked and holds no journal for the
+            settlement, so nothing was owed and nothing was done; LEDGER_STATE_UNKNOWN means the
+            lookup itself failed and neither of those two could be established (issue #6410).
+            Those three are separate values rather than one because they call for different
+            actions, and reporting the wrong one either summons an accountant to correct an entry
+            that does not exist or asserts a clean ledger nobody checked.
+            LEDGER_REVERSED is deprecated and is no longer produced —
             the code path that wrote it updated this column without reversing anything.
             REJECTED means the saga unwound COMPLETELY: it is written only when every compensation
             succeeded (issue #6286). A settlement whose compensation was refused stays in
@@ -75,6 +82,8 @@ components:
             - CREDITED_REVERSED
             - REVERSAL_FAILED
             - LEDGER_REVERSAL_UNSUPPORTED
+            - LEDGER_NOT_POSTED
+            - LEDGER_STATE_UNKNOWN
             - LEDGER_REVERSED
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

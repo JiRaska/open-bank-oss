@@ -33,13 +33,17 @@ class SettlementCompensationCapabilities {
     init {
         log.info(
             "Settlement compensation capabilities: reverseDebit=WIRED (balance-service credit), " +
-                "reverseCredit=WIRED (balance-service debit), reverseBookToLedger=NOT IMPLEMENTED.",
+                "reverseCredit=WIRED (balance-service debit), reverseBookToLedger=DETECT-ONLY " +
+                "(reads the general ledger, cannot reverse it).",
         )
         log.warn(
-            "reverseBookToLedger cannot reverse a general-ledger posting: ledger.reverse is " +
-                "maker-checker gated and no journal id is retained. A settlement that fails after " +
-                "bookToLedger will unwind both balance movements but leave the GL entry standing, " +
-                "and will be marked LEDGER_REVERSAL_UNSUPPORTED for manual correction. See #6037.",
+            "reverseBookToLedger cannot reverse a general-ledger posting: ledger.reverse is a " +
+                "four-eyes verb, and a reversal into an ATTESTED period is refused outright. It " +
+                "does now establish which of the two situations it is in, by asking the ledger " +
+                "whether a journal exists for the settlement: a settlement that fails after the " +
+                "GL posting landed unwinds both balance movements, leaves the GL entry standing " +
+                "and is marked LEDGER_REVERSAL_UNSUPPORTED for manual correction; one that fails " +
+                "before it landed is marked LEDGER_NOT_POSTED and needs nothing. See #6037, #6410.",
         )
     }
 }

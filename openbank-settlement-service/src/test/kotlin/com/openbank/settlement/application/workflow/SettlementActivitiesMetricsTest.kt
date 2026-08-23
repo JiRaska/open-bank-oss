@@ -7,6 +7,7 @@ package com.openbank.settlement.application.workflow
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.settlement.application.port.out.CreditPort
 import com.openbank.settlement.application.port.out.DebitPort
+import com.openbank.settlement.application.port.out.LedgerJournalLookupPort
 import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.ReverseCreditPort
 import com.openbank.settlement.application.port.out.ReverseDebitPort
@@ -52,6 +53,7 @@ class SettlementActivitiesMetricsTest {
 
     private val registry = SimpleMeterRegistry()
     private val metrics = SettlementMetricsAdapter().apply { bindTo(registry) }
+    private val ledgerJournalLookupPort: LedgerJournalLookupPort = mockk(relaxed = true)
 
     private lateinit var activities: SettlementActivitiesImpl
 
@@ -76,6 +78,7 @@ class SettlementActivitiesMetricsTest {
             reverseDebitPort,
             reverseCreditPort,
             metrics,
+            ledgerJournalLookupPort,
         )
         // The row carries a 30s-old createdAt so the cycle timer has something non-zero to record —
         // a duration of exactly zero would pass even if the timer never saw the real timestamps.
@@ -135,6 +138,11 @@ class SettlementActivitiesMetricsTest {
 
         activities.reverseDebit(id)
         activities.reverseCredit(id)
+        // #6410 gave reverseBookToLedger three outcomes instead of one, so this test has to say
+        // WHICH it is exercising. A journal exists, which is the case that still cannot be reversed
+        // and must therefore show as FAILED. The relaxed mock's default of 0 would take the
+        // LEDGER_NOT_POSTED path, where a clean return is correct and the step completes.
+        coEvery { ledgerJournalLookupPort.countJournalsForSettlement(id) } returns 1
         // Ledger reversal is NOT implemented and fails loudly on purpose (#6037): settlement-service
         // cannot reverse a journal, so the activity records LEDGER_REVERSAL_UNSUPPORTED and throws
         // rather than claiming an unwind that did not happen. The step meter must therefore show it
@@ -190,6 +198,7 @@ class SettlementActivitiesMetricsTest {
 }
 
 /** Runs the activity bodies synchronously, bypassing the real Vert.x-context bridge. */
+@Suppress("LongParameterList")
 private class MetricsTestableActivities(
     settlementRepository: SettlementRepository,
     debitPort: DebitPort,
@@ -199,6 +208,7 @@ private class MetricsTestableActivities(
     reverseDebitPort: ReverseDebitPort,
     reverseCreditPort: ReverseCreditPort,
     metrics: SettlementMetricsPort,
+    ledgerJournalLookupPort: LedgerJournalLookupPort,
 ) : SettlementActivitiesImpl(
     settlementRepository,
     debitPort,
@@ -208,6 +218,7 @@ private class MetricsTestableActivities(
     reverseDebitPort,
     reverseCreditPort,
     metrics,
+    ledgerJournalLookupPort,
 ) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }

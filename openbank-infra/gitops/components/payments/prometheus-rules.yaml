@@ -403,6 +403,17 @@ spec:
           # so these states are transient by construction and a row parked in one has a workflow
           # that died between the compensation and the terminal write.
           #
+          # LEDGER_NOT_POSTED and LEDGER_STATE_UNKNOWN join them for #6410, and only became
+          # reachable with it: the ledger compensation is now registered BEFORE bookToLedger runs,
+          # so it can actually execute, and it reports which of the three situations the general
+          # ledger is in rather than assuming the worst. Neither has customer money in limbo, so
+          # both belong at this severity rather than with SettlementReversalFailed below —
+          # LEDGER_NOT_POSTED because the ledger was asked and holds nothing, LEDGER_STATE_UNKNOWN
+          # because the balance reversals are unaffected by a ledger that could not be reached.
+          # LEDGER_STATE_UNKNOWN parked for 8h is the one to act on first: it means nobody has
+          # established whether the GL carries this settlement, so it could still turn out to be
+          # LEDGER_REVERSAL_UNSUPPORTED.
+          #
           # REVERSAL_FAILED is deliberately NOT in this rule — there the money did not come back,
           # so it is critical, not warning. See SettlementReversalFailed below.
           #
@@ -414,7 +425,7 @@ spec:
             max by (status) (
               openbank_settlement_non_terminal_oldest_age_seconds{
                 service="settlement",
-                status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED|LEDGER_REVERSAL_UNSUPPORTED"
+                status=~"REVERSED|CREDITED_REVERSED|LEDGER_REVERSED|LEDGER_REVERSAL_UNSUPPORTED|LEDGER_NOT_POSTED|LEDGER_STATE_UNKNOWN"
               }
             ) > 28800
           for: 30m
