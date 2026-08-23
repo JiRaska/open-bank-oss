@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.187.18](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.17...admin-ui-v0.187.18) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify FX refresh controls ([#6605](https://github.com/JiRaska/open-bank-oss/issues/6605)) ([d1db409](https://github.com/JiRaska/open-bank-oss/commit/d1db4099be12d20b8bcf9c25499ca599cba8e56f))
+* **admin-ui:** surface test intelligence ([#6606](https://github.com/JiRaska/open-bank-oss/issues/6606)) ([1350b5f](https://github.com/JiRaska/open-bank-oss/commit/1350b5f08beedbda829b7d3f5575978061ef8f54))
+
 ## [0.187.17](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.16...admin-ui-v0.187.17) (2026-08-23)
 
 
