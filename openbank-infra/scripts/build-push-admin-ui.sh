@@ -156,6 +156,16 @@ if ! ( cd openbank-admin-ui && node scripts/collect-quality-report.mjs --repo-ro
   echo "    WARN: quality-report collector failed; baked empty bundle." >&2
 fi
 
+# Common evidence projection. A collector failure must be honest (unavailable),
+# never an all-zero report that resembles a healthy run.
+TI_OUT="openbank-admin-ui/test-intelligence.json"
+echo "==> collect unified test intelligence"
+if ! node openbank-admin-ui/scripts/collect-test-intelligence.mjs \
+    --repo "${REPO_ROOT}" --out "${TI_OUT}" 2>&1; then
+  [ -f "${TI_OUT}" ] || echo '{"schemaVersion":1,"collectedAt":"1970-01-01T00:00:00.000Z","components":[],"contracts":[],"mutations":[],"performance":[],"syntheticJourneys":[],"history":[],"runHistory":[],"testCases":[],"totals":{"components":0,"componentsWithExecutionEvidence":0,"moneyPathComponents":0,"failingEvidence":0,"missingEvidence":0,"staleEvidence":0},"warnings":["collector failed"]}' > "${TI_OUT}"
+  echo "    WARN: test-intelligence collector failed; baked unavailable bundle." >&2
+fi
+
 # Production-readiness provenance: derive the C1–C9 maturity scorecard from the
 # repo (read-only consumer; src/app/api/prod-readiness/route.ts). Pure repo read
 # via the Python collector — no JDK/creds. Best-effort: a failure must not abort

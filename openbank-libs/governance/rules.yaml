@@ -1080,6 +1080,20 @@ feature_flags:
 coverage:
   tool: kover
   ratchet_only: true
+  # ADR-0273: one privacy-preserving evidence envelope joins CI execution, real Testcontainers
+  # starts, performance/mutation runs and sandbox synthetics.  It is additive: raw JUnit and Kover
+  # stay independently consumable until the projection has proven itself across the fleet.
+  test_intelligence:
+    schema: openbank-libs/governance/test-intelligence-run.schema.json
+    producer: .github/scripts/collect-test-run-evidence.py
+    fleet_ci: .github/workflows/_service-ci.yml
+    runtime_library: openbank-libs-testing
+    projection: openbank-admin-ui
+    states: [passed, failed, skipped, not-run, stale, blocked, unknown]
+    provenance_required: [commit, workflow, run_attempt, collected_at]
+    testcontainers_runtime_proof: required-when-shared-resource-is-used
+    run_history: immutable-per-attempt-artifact-30-days
+    compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
     money_path_floor: 40                # enforced baseline (all 13 money-path services, ratchet-only)

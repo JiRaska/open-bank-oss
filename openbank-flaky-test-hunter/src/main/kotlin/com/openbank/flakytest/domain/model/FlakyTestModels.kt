@@ -18,6 +18,9 @@ enum class FlakyTestCheckType {
     PACT_LOCAL_VERIFICATION_BLIND_SPOT,
     PACT_PROVIDER_CLASS_COLLISION,
     TEST_COUNT_DRIFT,
+    MISSING_EXECUTION_EVIDENCE,
+    STALE_TEST_EVIDENCE,
+    UNPROVEN_TEST_INFRASTRUCTURE,
 }
 
 enum class FindingSeverity { WARNING, CRITICAL }
@@ -107,3 +110,20 @@ data class FlakyTestReport(
 )
 
 enum class RunTrigger { SCHEDULED, CI_TEST_SUITE_FAILURE_WEBHOOK, OPERATOR_MANUAL }
+
+/** Privacy-bounded projection received only from the authenticated Admin UI BFF. */
+data class TestIntelligenceAnalysisRequest(
+    val snapshotId: String,
+    val collectedAt: Instant,
+    val components: List<TestIntelligenceComponentInput>,
+)
+
+data class TestIntelligenceComponentInput(
+    val component: String,
+    val moneyPath: Boolean,
+    val evidence: List<TestIntelligenceEvidenceInput>,
+    val declaredInfrastructure: List<String>,
+    val observedInfrastructureStarts: Int,
+)
+
+data class TestIntelligenceEvidenceInput(val kind: String, val state: String)

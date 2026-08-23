@@ -215,6 +215,19 @@ jobs:
       # runs. Read by the openapi-request-schema-conformance step below.
       - name: Build + test (:${{ inputs.service }})
         run: |
+          # Capture only image/lifecycle/time from this job's Docker daemon. Do not
+          # export container id, labels, ports, hostnames or environment variables.
+          EVIDENCE_DIR="${{ inputs.service }}/build/test-intelligence/runtime"
+          mkdir -p "${EVIDENCE_DIR}"
+          docker events --filter event=start --filter event=die \
+            --format '{"image":"{{.Actor.Attributes.image}}","lifecycle":"{{.Action}}","observedAtUnix":{{.Time}}}' \
+            > "${EVIDENCE_DIR}/docker-events.jsonl" &
+          docker_events_pid=$!
+          cleanup_test_evidence() {
+            kill "${docker_events_pid}" 2>/dev/null || true
+            wait "${docker_events_pid}" 2>/dev/null || true
+          }
+          trap cleanup_test_evidence EXIT
           ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="${{ inputs.service }}/build/openapi-generated"
 
@@ -249,6 +262,26 @@ jobs:
       - name: Generate Kover XML report
         continue-on-error: true
         run: ./gradlew :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+
+      # The envelope is built even after a failing suite. A missing envelope is not a
+      # passing zero: the projection renders it as absent evidence. The collector only
+      # reads JUnit/Kover counts and the secret-free shared Testcontainers lifecycle log.
+      - name: Build Test Intelligence run envelope
+        if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service "${{ inputs.service }}" \
+            --out "${{ inputs.service }}/build/test-intelligence/run.json"
+
+      - name: Retain immutable Test Intelligence run envelope
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-${{ inputs.service }}-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: ${{ inputs.service }}/build/test-intelligence/run.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload coverage to Codecov
         continue-on-error: true
@@ -317,6 +350,22 @@ jobs:
           path: ${{ inputs.service }}/build/test-results/**/*.xml
           if-no-files-found: ignore
           retention-days: 3
+
+      # Compatibility projection for the image build: the latest envelope remains
+      # separate from immutable attempts above, so a re-run cannot erase history.
+      - name: Upload Test Intelligence evidence
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-${{ inputs.service }}
+          path: |
+            ${{ inputs.service }}/build/test-intelligence/run.json
+            ${{ inputs.service }}/build/test-results/**/*.xml
+            ${{ inputs.service }}/build/reports/kover/report.xml
+          if-no-files-found: ignore
+          retention-days: 14
+          overwrite: true
 
   # ── contract: Pact provider verification + consumer-pact publishing ─────────────────────
   # In-cluster ARC pool only (the Pact Broker has no public ingress, ADR-0056) and only on the

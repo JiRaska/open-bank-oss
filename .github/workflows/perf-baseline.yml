@@ -68,10 +68,27 @@ jobs:
           LEDGER_URL: ${{ steps.target.outputs.ledger }}
           TXN_URL: ${{ steps.target.outputs.txn }}
 
-      - name: Upload k6 summary
-        if: steps.target.outputs.run == 'true'
+      - name: Build money-path performance Test Intelligence envelope
+        if: always()
+        run: |
+          python3 .github/scripts/collect-test-run-evidence.py \
+            --service perf --component openbank-money-path \
+            --performance-summary perf-summary.json --out perf-run.json
+
+      - name: Upload k6 summary and versioned envelope
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: k6-money-path-summary
-          path: perf-summary.json
+          path: |
+            perf-summary.json
+            perf-run.json
           retention-days: 90
+
+      - name: Upload immutable money-path performance envelope
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-run-openbank-money-path-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: perf-run.json
+          retention-days: 30

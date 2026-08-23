@@ -76,6 +76,18 @@
 #
 gates:
 
+  - id: test-intelligence-ecosystem
+    name: "Test Intelligence producer/runtime/projection contract (ADR-0273, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A dashboard can look green while service CI, Testcontainers runtime proof and the shared schema drift independently; this gate keeps the complete evidence chain present."
+    review_after: "2027-08-23"
+    min_subjects: 50
+    selftest: python3 .github/scripts/collect-test-run-evidence.py --self-test && python3 .github/scripts/check-test-intelligence-ecosystem.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-test-intelligence-ecosystem.py
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an

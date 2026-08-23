@@ -5,11 +5,13 @@
 
 package com.openbank.flakytest.infrastructure.rest
 
+import com.openbank.flakytest.application.port.incoming.AnalyzeTestIntelligenceUseCase
 import com.openbank.flakytest.application.port.incoming.GetFindingsUseCase
 import com.openbank.flakytest.application.port.incoming.RunFlakyTestCheckUseCase
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.domain.model.FlakyTestReport
 import com.openbank.flakytest.domain.model.RunTrigger
+import com.openbank.flakytest.domain.model.TestIntelligenceAnalysisRequest
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
@@ -23,7 +25,11 @@ import kotlinx.coroutines.runBlocking
 
 @Path("/api/v1/flaky-test-hunter")
 @Produces(MediaType.APPLICATION_JSON)
-class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private val getFindings: GetFindingsUseCase) {
+class FlakyTestResource(
+    private val runCheck: RunFlakyTestCheckUseCase,
+    private val getFindings: GetFindingsUseCase,
+    private val testIntelligenceAnalysis: AnalyzeTestIntelligenceUseCase,
+) {
     @POST
     @Path("/check/trigger")
     @RolesAllowed("ROLE_ADMIN")
@@ -42,6 +48,13 @@ class FlakyTestResource(private val runCheck: RunFlakyTestCheckUseCase, private 
     fun triggerCheckAsync(): Response = runBlocking {
         Response.accepted(FlakyTestCheckStarted(runCheck.startDetached(RunTrigger.OPERATOR_MANUAL))).build()
     }
+
+    /** The agent receives only a bounded provenance projection and cannot apply a remediation. */
+    @POST
+    @Path("/evidence/analyze")
+    @RolesAllowed("ROLE_ADMIN")
+    suspend fun analyzeEvidence(request: TestIntelligenceAnalysisRequest): List<FlakyTestFinding> =
+        testIntelligenceAnalysis.analyze(request)
 
     @GET
     @Path("/findings")

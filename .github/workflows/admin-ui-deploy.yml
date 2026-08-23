@@ -273,7 +273,7 @@ jobs:
           done
           echo "SBOM staging complete."
 
-      - name: Stage JUnit test results (per-service latest artifact)
+      - name: Stage Test Intelligence evidence (per-service latest artifact)
         # services-ci.yml uploads one artifact per service: test-reports-{service}
         # (7-day retention). The old approach (download from ONE run) fails with
         # path-scoped CI: only recently-changed services have artifacts in any single
@@ -293,23 +293,12 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" \
             -H "Accept: application/vnd.github+json" "$@"; }
 
-          # Must match KNOWN in scripts/collect-test-results.mjs and KNOWN_SERVICES in
-          # src/app/api/test-results/route.ts — keep all three lists in sync.
-          SERVICES=(
-            openbank-account-service openbank-aml-service openbank-audit-service
-            openbank-balance-service openbank-card-issuance-service openbank-clearing-service
-            openbank-consent-service openbank-dispute-service openbank-domestic-payment
-            openbank-fx-service openbank-interest-service openbank-kyc-service
-            openbank-ledger-service openbank-notification-service openbank-party-service
-            openbank-pid-service openbank-psd2-service openbank-sanctions-service
-            openbank-sca-service openbank-security-scanner openbank-sepa-instant
-            openbank-sepa-payment openbank-standing-order-service openbank-swift-service
-            openbank-tpp-registry-service openbank-transaction-service
-          )
+          mapfile -t SERVICES < <(find . -mindepth 2 -maxdepth 2 -name version.txt -printf '%h\n' \
+            | sed 's#^./##' | sort)
 
           DOWNLOADED=0
           for svc in "${SERVICES[@]}"; do
-            art_name="test-reports-${svc}"
+            art_name="test-intelligence-${svc}"
             ARTIFACT=$(api \
               "https://api.github.com/repos/${REPO}/actions/artifacts?name=${art_name}&per_page=1" \
               | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired']]; print(str(a[0]['id'])+' '+a[0]['name'] if a else '')" \
@@ -324,6 +313,11 @@ jobs:
               TMPDIR_ART="/tmp/${art_name}-extracted"
               rm -rf "${TMPDIR_ART}" && mkdir -p "${TMPDIR_ART}"
               unzip -q "/tmp/${art_name}.zip" -d "${TMPDIR_ART}" 2>/dev/null || true
+              RUN_JSON="$(find "${TMPDIR_ART}" -path '*/test-intelligence/run.json' -print -quit)"
+              if [ -n "${RUN_JSON}" ]; then
+                mkdir -p "${svc}/build/test-intelligence"
+                cp "${RUN_JSON}" "${svc}/build/test-intelligence/run.json"
+              fi
               # Inside the zip: test-results/*/TEST-*.xml (actions/upload-artifact@v7 strips
               # the leading service/build/ prefix). Reconstruct the full target path.
               find "${TMPDIR_ART}" -path "*/test-results/*/TEST-*.xml" | while read -r xml; do
@@ -332,6 +326,10 @@ jobs:
                 mkdir -p "$(dirname "${target}")"
                 cp "${xml}" "${target}"
               done
+              find "${TMPDIR_ART}" -path '*/reports/kover/report.xml' | while read -r xml; do
+                mkdir -p "${svc}/build/reports/kover"
+                cp "${xml}" "${svc}/build/reports/kover/report.xml"
+              done
               DOWNLOADED=$((DOWNLOADED + 1))
               echo "  ${svc}: staged"
             else
@@ -339,7 +337,35 @@ jobs:
             fi
           done
           COUNT=$(find . -path "*/build/test-results/*/TEST-*.xml" | wc -l | tr -d ' ')
-          echo "Staged ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
+          RUN_COUNT=$(find . -path "*/build/test-intelligence/run.json" | wc -l | tr -d ' ')
+          echo "Staged ${RUN_COUNT} run envelopes and ${COUNT} JUnit XML files from ${DOWNLOADED}/${#SERVICES[@]} services."
+
+      - name: Stage immutable per-attempt Test Intelligence history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/test-run-history
+          for workflow in services-ci.yml ci.yml; do
+            api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=20" \
+              | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" 2>/dev/null \
+              | while read -r run_id; do
+                  [ -n "${run_id}" ] || continue
+                  api "https://api.github.com/repos/${REPO}/actions/runs/${run_id}/artifacts?per_page=100" \
+                    | python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('test-intelligence-run-') and not a['expired']]" 2>/dev/null \
+                    | while read -r artifact_id artifact_name; do
+                        [ -n "${artifact_id}" ] || continue
+                        archive="/tmp/${artifact_name}.zip"
+                        api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
+                        envelope="$(unzip -Z1 "${archive}" | grep 'test-intelligence/run.json$' | head -1 || true)"
+                        [ -n "${envelope}" ] || continue
+                        unzip -p "${archive}" "${envelope}" > "openbank-admin-ui/test-run-history/${artifact_name}.json"
+                      done
+                done
+          done
+          echo "Staged $(find openbank-admin-ui/test-run-history -name '*.json' | wc -l | tr -d ' ') immutable run envelopes."
 
       - name: Stage pitest mutation results from latest weekly run
         # pitest.yml uploads one artifact per service: pitest-{service} (30-day retention).
@@ -423,6 +449,22 @@ jobs:
         with:
           version: v0.72.0
 
+      - name: Stage Test Intelligence deployment history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -u
+          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          mkdir -p openbank-admin-ui/test-intelligence-history
+          api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100" \
+            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]; a.sort(key=lambda x:x['created_at'], reverse=True); [print(x['id']) for x in a[:30]]" \
+            | while read -r artifact_id; do
+                [ -n "${artifact_id}" ] || continue
+                api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue
+                unzip -joq "/tmp/test-intelligence-${artifact_id}.zip" '*.json' -d openbank-admin-ui/test-intelligence-history 2>/dev/null || true
+              done
+
       - name: Build, collect, push
         id: build
         env:
@@ -448,6 +490,14 @@ jobs:
           [ -n "${TAG}" ] || { echo "ERROR: could not extract pushed image tag"; exit 1; }
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "Pushed tag: ${TAG}"
+
+      - name: Retain immutable Test Intelligence snapshot
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: test-intelligence-snapshot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: openbank-admin-ui/test-intelligence.json
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Rewrite GitOps image tag
         id: rewrite
