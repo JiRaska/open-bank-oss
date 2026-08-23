@@ -142,56 +142,6 @@ jobs:
             echo "fs.aio-max-nr already ${cur} (>= 1048576)"
           fi
 
-      # PR builds run on GitHub-hosted runners, where a cold Testcontainers pull otherwise
-      # goes to Docker Hub during Quarkus boot. Use the same ECR pull-through cache as the
-      # self-hosted contract lane and retag the immutable references Testcontainers requests.
-      # Every cache step is deliberately fail-open: an AWS/cache incident must leave the real
-      # test command authoritative, never turn an infrastructure optimization into a gate.
-      - name: Authenticate to ECR pull-through cache via OIDC
-        id: ecr_pull_through_auth
-        continue-on-error: true
-        uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c # v6.2.3
-        with:
-          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
-          aws-region: eu-north-1
-      - name: Login to ECR pull-through cache
-        id: ecr_pull_through_login
-        if: ${{ steps.ecr_pull_through_auth.outcome == 'success' }}
-        continue-on-error: true
-        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64 # v2.1.6
-      - name: Pre-warm Testcontainers images via ECR pull-through cache
-        continue-on-error: true
-        env:
-          ECR: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
-        run: |
-          if [ "${{ steps.ecr_pull_through_login.outcome }}" != "success" ]; then
-            echo "::warning title=TC pre-warm::ECR login unavailable — Testcontainers may pull at test time"
-            exit 0
-          fi
-
-          pull_and_tag() {
-            local cached="$1"
-            local canonical="$2"
-            docker pull "$ECR/docker-hub/$cached" && docker tag "$ECR/docker-hub/$cached" "$canonical"
-          }
-
-          pids=()
-          pull_and_tag "library/postgres:16.3-alpine" "postgres:16.3-alpine" & pids+=("$!")
-          pull_and_tag "valkey/valkey:7.2-alpine" "valkey/valkey:7.2-alpine" & pids+=("$!")
-          pull_and_tag "redpandadata/redpanda:v24.1.2" "redpandadata/redpanda:v24.1.2" & pids+=("$!")
-          pull_and_tag "apicurio/apicurio-registry-mem:2.6.2.Final" "apicurio/apicurio-registry-mem:2.6.2.Final" & pids+=("$!")
-          pull_and_tag "apache/kafka-native:4.2.0" "apache/kafka-native:4.2.0" & pids+=("$!")
-
-          prewarm_failed=0
-          for pid in "${pids[@]}"; do
-            wait "$pid" || prewarm_failed=1
-          done
-          if [ "$prewarm_failed" -eq 0 ]; then
-            echo "::notice title=TC pre-warm done::Testcontainers images ready through ECR pull-through"
-          else
-            echo "::warning title=TC pre-warm::some ECR image pulls failed — Testcontainers may pull at test time"
-          fi
-
       # Most modules pin kotlin { jvmToolchain(25) }; a few use 21. Installing both
       # lets Gradle's toolchain resolution pick the right one with zero Foojay
       # downloads at build time (faster, fewer billed minutes).
