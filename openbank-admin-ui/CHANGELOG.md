@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.22](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.21...admin-ui-v0.187.22) (2026-08-23)
+
+
+### Bug Fixes
+
+* **admin-ui:** mark KYC table busy ([#6636](https://github.com/JiRaska/open-bank-oss/issues/6636)) ([d05546a](https://github.com/JiRaska/open-bank-oss/commit/d05546a5d2fb42afb41b53c23303bdf861034d6a))
+
 ## [0.187.21](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.20...admin-ui-v0.187.21) (2026-08-23)
 
 
