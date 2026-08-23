@@ -3,10 +3,11 @@
 openapi: 3.1.0
 info:
   title: Party Service API
-  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
-  # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
-  # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.18.0
+  # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.18 -> 1.19): additive
+  # only — GET /api/v1/parties/approvals (the checker's queue, issue #5679) plus two additive
+  # fields on ApprovalResponse (makerId, createdAt), now declared as a shared schema and $ref'd
+  # from PATCH /api/v1/parties/approvals/{id} too. No existing response or schema changed.
+  version: 1.19.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -194,6 +195,38 @@ paths:
             A merge precondition failed — already merged, the target is itself merged (chains are
             refused), a party is erased, or the duplicate still owns an open account.
 
+  /api/v1/parties/approvals:
+    get:
+      tags: [Parties]
+      summary: >-
+        List pending four-eyes approvals, oldest first — the checker's queue (ADR-0227 D2).
+        Without it a decision parked at 202 is discoverable only by whoever was handed its id.
+      description: >-
+        PENDING maker-checker approvals on `party.merge`, oldest first. The read side of the
+        unified approval inbox — deciding stays on PATCH /api/v1/parties/approvals/{id}. Requires
+        ROLE_OPERATOR or ROLE_ADMIN.
+      operationId: listPendingApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApprovalResponse'
+        '403':
+          description: Caller lacks a permitted role
+
   /api/v1/parties/approvals/{id}:
     patch:
       tags: [Parties]
@@ -223,6 +256,10 @@ paths:
       responses:
         '200':
           description: The decided approval
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
         '403':
           description: >-
             The decider is the original maker — segregation of duties (SelfApprovalNotAllowedMapper
@@ -596,6 +633,38 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ApprovalResponse:
+      type: object
+      description: >-
+        A four-eyes approval record (ADR-0155). `makerId` is the principal that requested the
+        gated action; a DIFFERENT principal must decide it — enforced in
+        RedisApprovalStore.decide, so the queue is readable by anyone who may decide, including
+        the maker (seeing a request is not authority over it).
+      required: [id, action, status]
+      properties:
+        id:
+          type: string
+          description: The value the maker replays as the X-Approval-Id header once approved.
+        action:
+          type: string
+          example: party.merge
+        resourceId:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED, EXECUTED]
+        makerId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          description: >-
+            Request time. The store expires a PENDING approval after 24h, so age is the only
+            visible sign of one about to lapse.
+        decidedBy:
+          type: string
+          nullable: true
     GdprExport:
       type: object
       description: GDPR Art. 15 subject-access export (party-service-direct PII).

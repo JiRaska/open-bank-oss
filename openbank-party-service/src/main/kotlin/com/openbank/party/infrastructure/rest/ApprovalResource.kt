@@ -10,11 +10,14 @@ import com.openbank.libs.authz.Authorize
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
+import jakarta.ws.rs.DefaultValue
+import jakarta.ws.rs.GET
 import jakarta.ws.rs.NotFoundException
 import jakarta.ws.rs.PATCH
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -48,6 +51,27 @@ class ApprovalResource(private val approvalStore: ApprovalStore) {
     @Inject
     lateinit var identity: SecurityIdentity
 
+    /**
+     * The checker's queue (issue #5679, mirroring sanctions, lending, ledger, fx and
+     * domestic-payment). Without it a parked `party.merge` decision is invisible: the maker gets
+     * a 202 with an approval id and no way to hand it over except out of band, so the four-eyes
+     * ceremony only completed if the two operators were already talking. The Redis TTL (24h)
+     * then expired the request silently.
+     *
+     * Read-only, and deliberately NOT filtered to "approvals someone else made": the
+     * self-approval guard lives in `RedisApprovalStore.decide`, and refusing at read time would
+     * only hide a maker's own request from them while still letting them attempt it. Seeing the
+     * queue is not authority over it.
+     */
+    @GET
+    @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "party.approval.read", resource = "")
+    @Operation(summary = "List pending four-eyes approvals, oldest first (ADR-0227 D2)")
+    suspend fun listPending(@QueryParam("limit") @DefaultValue("50") limit: Int): Response {
+        val pending = approvalStore.findPending(limit.coerceIn(1, MAX_PENDING_LIMIT))
+        return Response.ok(pending.map { it.toApprovalResponse() }).build()
+    }
+
     @PATCH
     @Path("/{id}")
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
@@ -71,6 +95,13 @@ class ApprovalResource(private val approvalStore: ApprovalStore) {
     // their own request. SecurityIdentity (not @Context SecurityContext) since this is a
     // `suspend fun` — mirrors consent-service's ApprovalResource.
     private fun checkerId(): String = identity.principal?.name ?: "anonymous"
+
+    private companion object {
+        // Same ceiling as sanctions/lending/ledger/fx/domestic-payment's queue. The read is a
+        // Redis scan, and an unbounded `limit` from a query parameter is a trivially reachable
+        // amplification.
+        const val MAX_PENDING_LIMIT = 200
+    }
 }
 
 data class DecideApprovalRequest(val approve: Boolean)
@@ -80,6 +111,12 @@ data class ApprovalResponse(
     val action: String,
     val resourceId: String?,
     val status: String,
+    // makerId and createdAt were absent while the only endpoint was PATCH-by-id: a checker who
+    // already held the id needed neither. A QUEUE does — "who asked" is what a second pair of
+    // eyes is checking, and "how old" is the only visible sign of a request about to expire
+    // against the 24h Redis TTL.
+    val makerId: String?,
+    val createdAt: String?,
     val decidedBy: String?,
 )
 
@@ -88,5 +125,7 @@ fun PendingApproval.toApprovalResponse() = ApprovalResponse(
     action = action,
     resourceId = resourceId,
     status = status.name,
+    makerId = makerId,
+    createdAt = createdAt.toString(),
     decidedBy = decidedBy,
 )

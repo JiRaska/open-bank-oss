@@ -27,12 +27,11 @@ const NOT_CONFIGURED_SOURCES = {
   billing: 'not-configured',
   consent: 'not-configured',
   notification: 'not-configured',
-  party: 'not-configured',
 } as const satisfies Record<string, SourceState>
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'agent'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'party' | 'agent'
   action: string
   resourceId: string | null
   maker: string | null
@@ -91,6 +90,11 @@ type SwiftApproval = LendingApproval
 // first per that issue's own ordering). Before this, a `sepaPayment.transitionStatus` four-eyes
 // decision parked at 202 was discoverable only by whoever had been handed its id out of band.
 type SepaPaymentApproval = LendingApproval
+
+// party-service serves the same libs `PendingApproval` shape (issue #5679). Before this, a
+// `party.merge` four-eyes decision parked at 202 was discoverable only by whoever had been
+// handed its id out of band.
+type PartyApproval = LendingApproval
 
 type AgentProposal = {
   id: string
@@ -272,6 +276,21 @@ async function sepaInstantPending(headers: HeadersInit): Promise<SourceResult> {
   }
 }
 
+async function partyPending(headers: HeadersInit): Promise<SourceResult> {
+  const res = await fetch(serverSvcUrl('party-service', 'party', 8111, '/api/v1/parties/approvals', { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as PartyApproval[]
+  return {
+    state: 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain: 'party' as const, action: r.action,
+      resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+    })),
+  }
+}
+
 function agentBase(): string {
   if (process.env.SERVICES_HOST === 'container') return 'http://openbank-agent-service:8109'
   return (process.env.AGENT_SERVICE_URL ?? 'http://localhost:8109/mcp').replace(/\/mcp$/, '')
@@ -299,7 +318,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, agent] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, party, agent] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -310,9 +329,10 @@ export async function GET() {
     swiftPending(headers).catch(() => unavailable),
     sepaPaymentPending(headers).catch(() => unavailable),
     sepaInstantPending(headers).catch(() => unavailable),
+    partyPending(headers).catch(() => unavailable),
     agentPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...agent.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...party.items, ...agent.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -328,6 +348,7 @@ export async function GET() {
       swift: swift.state,
       'sepa-payment': sepaPayment.state,
       'sepa-instant': sepaInstant.state,
+      party: party.state,
       agent: agent.state,
     },
   })
