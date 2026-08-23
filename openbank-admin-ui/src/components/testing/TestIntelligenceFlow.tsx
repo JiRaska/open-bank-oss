@@ -125,10 +125,10 @@ export function TestIntelligenceFlow({ report }: { report?: TestIntelligenceRepo
 
     <div className="ti-signals" aria-label={t('Živé signály architektury', 'Live architecture signals')}>
       <div><FlaskConical size={15} /><span>{t('Fleet evidence', 'Fleet evidence')}</span><strong>{report ? `${evidenced}/${total}` : '—'}</strong></div>
-      <div><Boxes size={15} /><span>Runtime starts</span><strong>{report ? runtimeProofs : '—'}</strong></div>
+      <div><Boxes size={15} /><span>{t('Starty runtime', 'Runtime starts')}</span><strong>{report ? runtimeProofs : '—'}</strong></div>
       <div><Radar size={15} /><span>{t('Aktivní syntetika', 'Active synthetics')}</span><strong>{report ? activeJourneys : '—'}</strong></div>
-      <div><Activity size={15} /><span>Mobile RUM</span><strong className={`state-${rumState}`}>{rumState}</strong></div>
-      <div><Bot size={15} /><span>AI mode</span><strong>HITL</strong></div>
+      <div><Activity size={15} /><span>{t('Mobilní RUM', 'Mobile RUM')}</span><strong className={`state-${rumState}`}>{rumState}</strong></div>
+      <div><Bot size={15} /><span>{t('Režim AI', 'AI mode')}</span><strong>HITL</strong></div>
     </div>
 
     <style jsx>{`
