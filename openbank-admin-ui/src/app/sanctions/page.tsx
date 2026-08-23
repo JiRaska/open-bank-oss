@@ -166,9 +166,9 @@ function ListCard({ list, onToggle, onRefresh, onSave }: {
           {t('Stáhnout', 'Download')}
         </button>
         </Can>
-        <button onClick={() => setExpanded(e => !e)}
+        <button type="button" onClick={() => setExpanded(e => !e)} aria-expanded={expanded} aria-label={expanded ? t('Sbalit podrobnosti seznamu', 'Collapse list details') : t('Rozbalit podrobnosti seznamu', 'Expand list details')}
           style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px', display: 'flex' }}>
-          {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          {expanded ? <ChevronUp size={14} aria-hidden="true" /> : <ChevronDown size={14} aria-hidden="true" />}
         </button>
       </div>
       {expanded && (

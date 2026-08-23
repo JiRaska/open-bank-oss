@@ -447,8 +447,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 <span style={{ fontSize: '13px' }}>
                   {t('Zpráva čeká na schválení druhým operátorem.', 'Message is awaiting a second operator’s approval.')}
                 </span>
-                <button className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying}>
-                  <RefreshCw size={13} /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
+                <button type="button" className="btn btn-secondary" style={{ marginLeft: 'auto' }} onClick={retrySubmit} disabled={retrying} aria-busy={retrying} aria-label={t('Zkusit znovu odeslat zprávu', 'Retry sending message')}>
+                  <RefreshCw size={13} aria-hidden="true" /> {retrying ? t('Zkouším…', 'Retrying…') : t('Zkusit znovu odeslat', 'Retry send')}
                 </button>
               </div>
               {/* No backend endpoint lists pending approvals (ApprovalStore has no query), so the
@@ -504,8 +504,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
                 </label>
               ))}
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <button className="btn btn-secondary" onClick={sendMessage} disabled={sending}>
-                  <Send size={13} /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
+                <button type="button" className="btn btn-secondary" onClick={sendMessage} disabled={sending} aria-busy={sending} aria-label={t('Poslat zprávu', 'Send message')}>
+                  <Send size={13} aria-hidden="true" /> {sending ? t('Odesílám…', 'Sending…') : t('Poslat zprávu', 'Send message')}
                 </button>
                 {composeError && <span style={{ fontSize: '12px', color: 'var(--red)' }}>{composeError}</span>}
               </div>
@@ -577,8 +577,8 @@ function MessagesTab({ partyId, partyEmail, roles }: { partyId: string; partyEma
 
       {hasNextPage && !loadingMore && (
         <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)' }}>
-          <button className="btn btn-secondary" onClick={() => load(page + 1)}>
-            <ChevronDown size={13} /> {t('Načíst další', 'Load more')}
+          <button type="button" className="btn btn-secondary" onClick={() => load(page + 1)} aria-label={t('Načíst další zprávy', 'Load more messages')}>
+            <ChevronDown size={13} aria-hidden="true" /> {t('Načíst další', 'Load more')}
           </button>
         </div>
       )}

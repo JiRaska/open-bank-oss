@@ -1823,6 +1823,44 @@ gates:
     run: |
       python3 .github/scripts/check-main-red-watch.py --check-declaration
 
+  # The spot-kill auto-retry is a control with no audience: it is `workflow_run`-triggered, so
+  # its red is addressed to nobody, and its whole design is to act unattended. Until #6255 its
+  # decision logic was a `run:` block, which means GitHub Actions on a real `workflow_run` event
+  # was its ONLY executor — every error path was reachable only by waiting for the rare event
+  # that produces it. What that cost, measured: the detection `gh api` call had no transient
+  # handling while the `gh run rerun` call three lines away had three attempts with backoff, and
+  # one installation rate limit (HTTP 403 — indistinguishable from a permission denial except by
+  # message text) killed the step before it emitted any `decision=` line. Its target, run
+  # 32499371733, had two jobs interrupted mid-flight (22 and 20 recorded steps) and is still at
+  # `run_attempt: 1`. The mirror-image hole on the `failure` branch was worse: `|| echo ""`
+  # rendered the same rate limit as `jobs-unreadable` + exit 0, a GREEN run of the control about
+  # a reclaimed run it never re-ran.
+  #
+  # This gate is that logic's only falsification. It is the pair of prevent-proofs that matter —
+  # a reclaim IS re-run, a deliberate queue cancel is NOT — plus every error class, asserted on
+  # BOTH the exit code and the calls actually issued to a stub `gh`. The call log is the
+  # load-bearing half: an exit code alone cannot tell "declined to re-run" from "re-ran and the
+  # stub happened to succeed", which is exactly the confusion the queue-cancel case exists to
+  # prevent (#3208: a retry that silently undid a queue drain).
+  - id: spot-kill-retry-selftest
+    name: "spot-kill auto-retry decides correctly and survives a rate limit (issue #6255, enforced)"
+    group: registry
+    mode: enforced
+    # The gate IS the harness: its `run:` is the script's own falsification suite, so a separate
+    # `selftest:` would be the same command executed twice for one signal.
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives the real decision function
+      against a stub gh and asserts exit code AND issued calls for all 12 cases, so its red is
+      reachable by construction; falsified in both directions before wiring in (see the
+      rationale and the script header).
+    budget_seconds: 30   # no network, no sleeps (the backoff is 0 in the harness); ~1s observed
+    rationale: "Without it the script's error paths are exercised only when a real spot reclaim coincides with a real API failure — which is how #6255 shipped a detection call with no transient handling at all, stranding a reclaimed run at attempt 1 and telling nobody."
+    review_after: "2027-02-23"
+    # Subjects are assertions, not files: the floor drops the day someone deletes a case.
+    min_subjects: 12
+    run: |
+      bash .github/scripts/spot-kill-retry.sh --self-test
+
   # Nothing in this repo has ever read a merged PR's required contexts: before #4240,
   # `grep -rl 'required_status_checks\|statusCheckRollup' .github/scripts .github/workflows`
   # returned one hit and it was a comment. A ruleset bypass is recorded only in
