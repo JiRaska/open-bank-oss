@@ -370,7 +370,11 @@ jobs:
             [ -n "${artifact_id}" ] || continue
             archive="/tmp/openbank-app-test-intelligence-${artifact_id}.zip"
             api "https://api.github.com/repos/${APP_REPO}/actions/artifacts/${artifact_id}/zip" -L -o "${archive}" 2>/dev/null || continue
-            unzip -joq "${archive}" '*.json' -d openbank-admin-ui/client-test-evidence 2>/dev/null || true
+            evidence="$(unzip -Z1 "${archive}" | awk '/\.json$/{print; exit}')"
+            [ -n "${evidence}" ] || continue
+            # Every producer artifact contains `openbank-app-unit.json`. Preserve a unique
+            # deployment-local name or older downloads overwrite the newest observation.
+            unzip -p "${archive}" "${evidence}" > "openbank-admin-ui/client-test-evidence/openbank-app-${artifact_id}.json"
           done <<< "${ARTIFACTS}"
           echo "Staged $(find openbank-admin-ui/client-test-evidence -name '*.json' | wc -l | tr -d ' ') mobile client evidence artifact(s)."
 

@@ -113,6 +113,11 @@ journeys:
       run: { id: '9', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/9', observedAt: '2026-08-23T10:00:00Z' },
       suites: [{ kind: 'unit', state: 'passed', durationMs: 100, counts: { discovered: 2, executed: 2, passed: 2, failed: 0, skipped: 0, errors: 0 } }],
     }))
+    write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-older.json', JSON.stringify({
+      schemaVersion: 1, component: 'openbank-app',
+      run: { id: '8', attempt: 1, commit: 'older', branch: 'main', workflow: 'app build', url: 'https://example.test/8', observedAt: '2026-08-22T10:00:00Z' },
+      suites: [{ kind: 'unit', state: 'failed', durationMs: 100, counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 } }],
+    }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
