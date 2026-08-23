@@ -94,24 +94,69 @@ probe_pr_failing_checks() {
 }
 
 # ---------------------------------------------------------------------------------------------
-# probe_zombie_runs [repo] -> "<id>\t<created_at>\t<name>" per wedged run
+# probe_zombie_runs [repo] [min_age_hours] -> "<id>\t<created_at>\t<name>" per wedged run
 #
 # A run whose record says `in_progress` while every one of its jobs is `completed` is wedged in
-# GitHub's own state machine. Measured 2026-08-22: 189 such runs, the oldest from 2026-08-09.
+# GitHub's own state machine, and neither `POST /actions/runs/{id}/cancel` nor `.../force-cancel`
+# can clear it -- both answer HTTP 500 (3/3 sampled, #6472). Subtracting them is the only correct
+# handling before any statement about CI saturation.
 #
-# They are NOT reapable. Both `POST /actions/runs/{id}/cancel` and `.../force-cancel` answer
-# HTTP 500 on every one of them (3/3 sampled). So the only correct handling is to SUBTRACT them
-# before any statement about CI saturation — a raw `status=in_progress` count is off by 189 here,
-# which is more than the real concurrent load has ever been.
+# AGE IS PART OF THE TEST, NOT A TIDY-UP. "Every job completed" alone is NOT sufficient, and the
+# first version of this probe shipped without the age bound and over-counted because of it: a live
+# run whose remaining jobs have not been CREATED yet also has every existing job completed. Two
+# false positives measured on 2026-08-22 within minutes of each other -- a `Services CI` run with
+# 30/30 jobs successful and still fanning out, and four runs created 90 seconds earlier. The
+# corrected census: 184 in_progress, of which 177 older than 24h (genuinely wedged, all created in
+# a 2026-08-06..08-10 window) and 6 under an hour old (simply running).
+#
+# 24h is not arbitrary and it is not a heuristic about "old": nothing in Actions creates a job a
+# day after the run started, so past that bound "all created jobs are done" and "all jobs are
+# done" cannot differ.
+#
+# It is also what makes the probe cheap. Filtering on the list payload first costs 2 API calls;
+# asking the jobs endpoint per run, as the first version did, costs N+1 -- 185 calls to answer one
+# question.
+#
+# THE ROOT CAUSE, for whoever reads this next: every one of the three workflows that produced 164
+# of the 177 (`Auto-retry spot-killed CI runs` 72, `main red watch` 53, `Dependabot auto-merge` 39)
+# has the same shape -- an event-triggered guard whose jobs skip on almost every run, so ALL of its
+# jobs are `completed/skipped`. That is a GitHub-side transition failure, not a defect in those
+# workflows. It appears fixed upstream: recent all-skipped runs of `main red watch` complete
+# normally, and exactly one run has wedged since 2026-08-10.
+# probe_utc_cutoff <hours_ago> -> an ISO-8601 UTC instant that many hours in the past
+#
+# Split out of probe_zombie_runs so it is reachable from --selftest without the network. Portable
+# across BSD `date -v` and GNU `date -d`, and ALWAYS `-u`: the Actions API reports created_at in
+# UTC, and comparing it against a local wall-clock string is the whole-hours error that once
+# flagged 53 branches as having post-merge commits when the true count was 0 (see probe_utc_epoch).
+probe_utc_cutoff() {
+  local hours="$1"
+  date -u -v-"${hours}"H +%Y-%m-%dT%H:%M:%SZ 2>/dev/null \
+    || date -u -d "${hours} hours ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null
+}
+
 probe_zombie_runs() {
   local repo="${1:-JiRaska/open-bank-oss}"
-  local page=1 ids
+  local min_age_hours="${2:-24}"
+  local page=1 ids cutoff
+
+  cutoff="$(probe_utc_cutoff "$min_age_hours")"
+  if [ -z "$cutoff" ]; then
+    echo "probe_zombie_runs: could not compute a UTC cutoff — refusing to report a census that" \
+         "would silently include live runs" >&2
+    return 1
+  fi
+
   while [ "$page" -le 10 ]; do
     ids="$(gh api "repos/$repo/actions/runs?status=in_progress&per_page=100&page=$page" \
-      --jq '.workflow_runs[] | "\(.id)\t\(.created_at)\t\(.name)"' 2>/dev/null)"
+      --jq --arg cutoff "$cutoff" \
+      '.workflow_runs[] | select(.created_at < $cutoff) | "\(.id)\t\(.created_at)\t\(.name)"' \
+      2>/dev/null)"
     [ -z "$ids" ] && break
     while IFS=$'\t' read -r id created name; do
       [ -z "$id" ] && continue
+      # Still confirmed per run: age alone would also catch a genuinely long-running job, which is
+      # slow but healthy and must not be subtracted from a saturation count.
       if gh api "repos/$repo/actions/runs/$id/jobs" \
         --jq 'if (.jobs|length) > 0 and (all(.jobs[]; .status == "completed")) then "wedged" else empty end' \
         2>/dev/null | grep -q wedged; then
@@ -282,6 +327,23 @@ _probe_selftest() {
   _check "probe_lint_findings succeeds when the files are passed properly" \
     "$([ "$status" = "0" ] && echo 1 || echo 0)"
   rm -rf "$lint_tmp"
+
+  # --- probe_utc_cutoff (the age half of probe_zombie_runs, #6472) --------------------
+  # The age bound is not a tidy-up: "every job completed" alone also matches a LIVE run whose
+  # remaining jobs have not been created yet, which is how the first version of the census
+  # over-counted. So the cutoff itself is held to both directions.
+  local cut now_s cut_s delta
+  cut="$(probe_utc_cutoff 24)"
+  ran+=("probe_utc_cutoff: shape" "probe_utc_cutoff: 24h back" "probe_utc_cutoff: TZ-invariant")
+  _check "probe_utc_cutoff returns a Z-suffixed UTC instant (got '$cut')" \
+    "$(printf '%s' "$cut" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$' && echo 1 || echo 0)"
+  now_s="$(date -u +%s)"
+  cut_s="$(probe_utc_epoch "$cut")"
+  delta=$(( now_s - cut_s ))
+  _check "probe_utc_cutoff 24 is 24h back within a minute (delta=${delta}s)" \
+    "$([ "$delta" -ge 86340 ] && [ "$delta" -le 86460 ] && echo 1 || echo 0)"
+  _check "probe_utc_cutoff is TZ-invariant" \
+    "$([ "$(TZ=Asia/Tokyo probe_utc_cutoff 24)" = "$(TZ=UTC probe_utc_cutoff 24)" ] && echo 1 || echo 0)"
 
   # The network probes (probe_pr_failing_checks, probe_zombie_runs) have no hermetic fixture: their
   # subject is GitHub's own state machine. Declared rather than silently skipped — an unexercised
