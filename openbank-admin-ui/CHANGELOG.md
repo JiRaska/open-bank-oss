@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.189.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.1...admin-ui-v0.189.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify regulatory preview close ([#6718](https://github.com/JiRaska/open-bank-oss/issues/6718)) ([1ba5f99](https://github.com/JiRaska/open-bank-oss/commit/1ba5f990e9d91f5ad0c1d49ce9a985598f65c19d))
+
 ## [0.189.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.0...admin-ui-v0.189.1) (2026-08-24)
 
 
