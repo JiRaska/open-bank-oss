@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.189.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.2...admin-ui-v0.189.0) (2026-08-24)
+
+
+### Features
+
+* **admin-ui:** consolidate test intelligence ([#6614](https://github.com/JiRaska/open-bank-oss/issues/6614)) ([0c61c39](https://github.com/JiRaska/open-bank-oss/commit/0c61c39ab9d9a5d6cf89e3db861cc6718245e85b))
+
 ## [0.188.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.1...admin-ui-v0.188.2) (2026-08-24)
 
 

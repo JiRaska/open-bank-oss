@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.9.0...flaky-test-hunter-v0.10.0) (2026-08-24)
+
+
+### Features
+
+* **admin-ui:** consolidate test intelligence ([#6614](https://github.com/JiRaska/open-bank-oss/issues/6614)) ([0c61c39](https://github.com/JiRaska/open-bank-oss/commit/0c61c39ab9d9a5d6cf89e3db861cc6718245e85b))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/flaky-test-hunter-v0.8.1...flaky-test-hunter-v0.9.0) (2026-08-18)
 
 
