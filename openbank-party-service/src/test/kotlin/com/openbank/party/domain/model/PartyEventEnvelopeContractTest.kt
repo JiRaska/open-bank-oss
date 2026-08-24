@@ -67,6 +67,7 @@ class PartyEventEnvelopeContractTest {
         assertThat(json.get("partyId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111")
         // account-service gates on partyType; legalName required for OpenAccountCommand (sanctions, ADR-0032 §C)
         assertThat(json.get("partyType").asText()).isEqualTo("INDIVIDUAL")
+        assertThat(json.get("classification").asText()).isEqualTo("CUSTOMER")
         assertThat(json.get("legalName").asText()).isEqualTo("Jan Novák")
         assertThat(json.get("status").asText()).isEqualTo("PENDING_KYC")
         assertThat(json.has("occurredAt")).isTrue()
@@ -91,6 +92,15 @@ class PartyEventEnvelopeContractTest {
         // account-service activates the pending account when it sees status=ACTIVE
         assertThat(json.get("status").asText()).isEqualTo("ACTIVE")
         assertThat(json.get("partyId").asText()).isEqualTo("11111111-1111-1111-1111-111111111111")
+    }
+
+    @Test
+    fun `synthetic classification is preserved in the lifecycle contract`() {
+        val canary = individual().copy(classification = PartyClassification.SYNTHETIC)
+        val event = PartyEvents.created(canary, at, PartyActor.system("canary"))
+        val json = mapper.readTree(mapper.writeValueAsString(event.envelope))
+
+        assertThat(json.get("classification").asText()).isEqualTo("SYNTHETIC")
     }
 
     @Test

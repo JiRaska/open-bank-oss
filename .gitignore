@@ -214,6 +214,10 @@ openbank-admin-ui/test-results.json
 # admin-ui image at build time (scripts/collect-quality-report.mjs, ADR-0063).
 # Derived data — never committed; regenerated per build.
 openbank-admin-ui/quality-report.json
+openbank-admin-ui/test-intelligence.json
+openbank-admin-ui/perf-artifacts/
+openbank-admin-ui/test-intelligence-history/
+openbank-admin-ui/test-run-history/
 # Generated AWS Cost Explorer snapshot baked into the admin-ui image at build
 # time (scripts/collect-aws-costs.mjs). Derived billing data — never committed.
 openbank-admin-ui/cost-report.json

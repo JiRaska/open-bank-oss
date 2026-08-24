@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -24,6 +25,7 @@ import java.util.UUID
  * clients (e.g. `openbank-standing-order-service`'s `SepaPaymentClient`).
  */
 @RegisterRestClient(configKey = "sca-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface ScaChallengeClient {

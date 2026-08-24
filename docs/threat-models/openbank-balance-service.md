@@ -174,6 +174,7 @@ also be deleted (nothing else in balance-service depends on it).
 
 ## 7. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `balance.credit`
   or `balance.debit` four-eyes decision parked at 202 was discoverable only by whoever had been
   handed its approval id out of band — the ceremony completed only if the two operators were

@@ -5,6 +5,7 @@
 package com.openbank.domestic.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -18,6 +19,7 @@ import java.math.BigDecimal
 import java.util.UUID
 
 @RegisterRestClient(configKey = "fraud-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/fraud")
 @Produces(MediaType.APPLICATION_JSON)

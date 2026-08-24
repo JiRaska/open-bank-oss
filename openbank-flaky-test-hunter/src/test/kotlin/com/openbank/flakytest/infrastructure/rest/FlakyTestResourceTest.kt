@@ -4,6 +4,7 @@
 
 package com.openbank.flakytest.infrastructure.rest
 
+import com.openbank.flakytest.application.port.incoming.AnalyzeTestIntelligenceUseCase
 import com.openbank.flakytest.application.port.incoming.GetFindingsUseCase
 import com.openbank.flakytest.application.port.incoming.RunFlakyTestCheckUseCase
 import com.openbank.flakytest.domain.model.RunTrigger
@@ -19,8 +20,9 @@ class FlakyTestResourceTest {
     fun `async trigger accepts the workflow without waiting for its report`() {
         val runCheck = mockk<RunFlakyTestCheckUseCase>()
         val findings = mockk<GetFindingsUseCase>()
+        val evidence = mockk<AnalyzeTestIntelligenceUseCase>()
         coEvery { runCheck.startDetached(RunTrigger.OPERATOR_MANUAL) } returns "operator-workflow-1"
-        val resource = FlakyTestResource(runCheck, findings)
+        val resource = FlakyTestResource(runCheck, findings, evidence)
 
         val response = resource.triggerCheckAsync()
 

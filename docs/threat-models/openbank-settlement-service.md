@@ -283,6 +283,8 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 ## Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing balance and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or settlement-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-20** (#6055) — **S1, E1 and residual risk 2 credited an OPA activity-authorization control
   that has never existed, and risk 2 was signed off as Closed on it.** `OpaActivityInterceptor` is in no
   Kotlin source; the policy file the entry cited was in no bundle ConfigMap, was reachable from no query

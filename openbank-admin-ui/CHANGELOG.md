@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.189.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.2...admin-ui-v0.189.3) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify regulatory exports ([#6721](https://github.com/JiRaska/open-bank-oss/issues/6721)) ([63a239d](https://github.com/JiRaska/open-bank-oss/commit/63a239d5f121255380fabcac0b529870562ae44b))
+
+## [0.189.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.1...admin-ui-v0.189.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify regulatory preview close ([#6718](https://github.com/JiRaska/open-bank-oss/issues/6718)) ([1ba5f99](https://github.com/JiRaska/open-bank-oss/commit/1ba5f990e9d91f5ad0c1d49ce9a985598f65c19d))
+
+## [0.189.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.0...admin-ui-v0.189.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify auth error retry ([#6703](https://github.com/JiRaska/open-bank-oss/issues/6703)) ([edf075a](https://github.com/JiRaska/open-bank-oss/commit/edf075a71a43fe9b1f63e9450bc2907201ef748e))
+
+## [0.189.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.2...admin-ui-v0.189.0) (2026-08-24)
+
+
+### Features
+
+* **admin-ui:** consolidate test intelligence ([#6614](https://github.com/JiRaska/open-bank-oss/issues/6614)) ([0c61c39](https://github.com/JiRaska/open-bank-oss/commit/0c61c39ab9d9a5d6cf89e3db861cc6718245e85b))
+
+## [0.188.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.1...admin-ui-v0.188.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify global error recovery ([#6700](https://github.com/JiRaska/open-bank-oss/issues/6700)) ([0746a2c](https://github.com/JiRaska/open-bank-oss/commit/0746a2c28bd3bc14c49cbf98b79c7bd9e73a0675))
+
+## [0.188.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.0...admin-ui-v0.188.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify delegations search ([#6685](https://github.com/JiRaska/open-bank-oss/issues/6685)) ([5dd944c](https://github.com/JiRaska/open-bank-oss/commit/5dd944c4a69490f32bd24c8ed36ecaa16094bcc6))
+* **admin-ui:** clarify onboarding filter reset ([#6695](https://github.com/JiRaska/open-bank-oss/issues/6695)) ([73dad5c](https://github.com/JiRaska/open-bank-oss/commit/73dad5cec6ed2856576503acc26d70c8fbd2d702))
+* **admin-ui:** clarify swift raw disclosure ([#6694](https://github.com/JiRaska/open-bank-oss/issues/6694)) ([d37352f](https://github.com/JiRaska/open-bank-oss/commit/d37352fe016d1768509c835e5360e8efe9d99e34))
+
 ## [0.188.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.30...admin-ui-v0.188.0) (2026-08-24)
 
 

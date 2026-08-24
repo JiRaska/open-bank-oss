@@ -85,6 +85,7 @@ class PartyService : PartyUseCase {
             // keycloakSub so sub-keyed lookups (getMyParty, legacy mobile path) agree.
             keycloakSub = cmd.id?.toString(),
             partyType = cmd.partyType,
+            classification = cmd.classification,
             status = PartyStatus.PENDING_KYC,
             legalName = cmd.legalName,
             tradingName = cmd.tradingName,
