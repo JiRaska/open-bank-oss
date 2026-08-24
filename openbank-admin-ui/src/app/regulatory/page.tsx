@@ -628,11 +628,11 @@ export default function RegulatoryPage() {
                   : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
-                  <FileSpreadsheet size={13} /> {t('Export CSV', 'Export CSV')}
+                <button type="button" className="btn btn-secondary" aria-label={t('Exportovat náhled jako CSV', 'Export preview as CSV')} style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
+                  <FileSpreadsheet size={13} aria-hidden="true" /> {t('Export CSV', 'Export CSV')}
                 </button>
-                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
-                  <FileJson size={13} /> {t('Export JSON', 'Export JSON')}
+                <button type="button" className="btn btn-primary" aria-label={t('Exportovat náhled jako JSON', 'Export preview as JSON')} style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
+                  <FileJson size={13} aria-hidden="true" /> {t('Export JSON', 'Export JSON')}
                 </button>
               </div>
             </div>
