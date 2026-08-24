@@ -14,10 +14,19 @@ Roles: **Payee** (requests money; advertises + runs a GATT server) and **Payer**
 
 | Item | Value |
 |------|-------|
-| Service UUID (advert filter + GATT service) | `QP01` — 128-bit, registered for the standard (placeholder `0000QP01-…`) |
-| GATT characteristic — `bundle` (read) | `…QP02`, read-only, returns the signed bundle |
-| GATT characteristic — `sas` (read/write, optional) | `…QP03`, ephemeral-DH for the Short Authentication String |
-| Advert service-data company/16-bit alias | `0xF0B2` (Android service-data budget) |
+| Service UUID (advert filter + GATT service) | `4272AAD2-26D1-41F7-96DE-69F41CD4E85D` — 128-bit, randomly generated (UUIDv4) and frozen; no registry applies to the 128-bit space |
+| GATT characteristic — `bundle` (read) | `29A03ABE-E002-4B66-A4D5-D8B07F5C195B`, read-only, returns the signed bundle |
+| GATT characteristic — `sas` (read/write, optional) | `28299596-338B-4BDA-8F5C-A74C471DCA6E`, ephemeral-DH for the Short Authentication String |
+| Advert service-data company/16-bit alias | `0xF0B2` (Android service-data budget) — Bluetooth SIG-administered space, **not yet assigned to us**; see [readiness §6](../compliance/qrlesspay-readiness.md#6-legal-ip-and-standardisation--the-least-developed-area) |
+
+The three 128-bit UUIDs above are frozen normative values for this profile: any
+implementation (including the external `qrlesspay-sdk` reference implementation)
+MUST use these exact values, not regenerate its own. The 16-bit alias is a
+Bluetooth SIG-administered space and has not been assigned to us — using it today
+is effectively squatting. Per [readiness §6](../compliance/qrlesspay-readiness.md#6-legal-ip-and-standardisation--the-least-developed-area),
+the decision taken here is to defer requesting a real assignment until a pilot
+with a second bank is real, since a collision cannot occur while QRlessPay runs
+only between our own apps.
 
 ## 2. Phase 1 — discovery advert
 
@@ -164,7 +173,7 @@ keys per §8, with graceful downgrade to the v1 baseline.
    bundle is signed but plaintext: a passive sniffer of the payer-initiated GATT
    read learns the IBAN and amount, and an active MITM is stopped only by the
    `kh` binding + payer confirmation. Proposal: the payer writes an ephemeral
-   X25519 public key to `sas` (`…QP03`) before reading `bundle`; the payee
+   X25519 public key to `sas` (`28299596-338B-4BDA-8F5C-A74C471DCA6E`) before reading `bundle`; the payee
    returns the CBOR bundle as a **ChaCha20-Poly1305** AEAD ciphertext under
    `key = HKDF-SHA-256(X25519(payer_eph, payee_session), "QP-ENC" ‖ sid)`, with
    the advert `sid` as associated data. This upgrades the existing SAS DH

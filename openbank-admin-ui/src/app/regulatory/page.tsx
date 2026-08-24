@@ -556,8 +556,8 @@ export default function RegulatoryPage() {
                   <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview.name}</div>
                 </div>
               </div>
-              <button className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít', 'Close')}>
-                <X size={15} />
+              <button type="button" className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít náhled exportu', 'Close export preview')}>
+                <X size={15} aria-hidden="true" />
               </button>
             </div>
 
