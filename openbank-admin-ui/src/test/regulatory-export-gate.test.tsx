@@ -205,8 +205,8 @@ describe('Regulatory export gate — the surface', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('export-blocked')).not.toBeInTheDocument()
     })
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeEnabled()
-    expect(screen.getByRole('button', { name: /Export CSV/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /JSON/i })).toBeEnabled()
+    expect(screen.getByRole('button', { name: /CSV/i })).toBeEnabled()
   })
 
   it('BLOCKS export, with a named reason, when a cell is a flagged data gap', async () => {
@@ -214,8 +214,8 @@ describe('Regulatory export gate — the surface', () => {
 
     const banner = await screen.findByTestId('export-blocked')
     expect(banner).toHaveAttribute('data-block-reason', 'data_gaps')
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeDisabled()
-    expect(screen.getByRole('button', { name: /Export CSV/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /JSON/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /CSV/i })).toBeDisabled()
   })
 
   it('BLOCKS export when the data source is unreachable', async () => {
@@ -223,7 +223,7 @@ describe('Regulatory export gate — the surface', () => {
 
     const banner = await screen.findByTestId('export-blocked')
     expect(banner).toHaveAttribute('data-block-reason', 'source_unavailable')
-    expect(screen.getByRole('button', { name: /Export JSON/i })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /JSON/i })).toBeDisabled()
   })
 
   it('produces NO file when a blocked export is invoked anyway', async () => {
@@ -233,7 +233,7 @@ describe('Regulatory export gate — the surface', () => {
     await openPreview(async () => template({ cells: [cell({ isDataGap: true })], hasDataGaps: true }))
     await screen.findByTestId('export-blocked')
 
-    const jsonButton = screen.getByRole('button', { name: /Export JSON/i })
+    const jsonButton = screen.getByRole('button', { name: /JSON/i })
     fireEvent.click(jsonButton)
     // Fire the handler directly too, past the disabled attribute.
     jsonButton.removeAttribute('disabled')
