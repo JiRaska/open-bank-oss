@@ -177,11 +177,11 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           >
             <Edit size={12} /> {t('Upravit', 'Edit')}
           </button>
-          <button type="button" onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
-            {product.status === 'ACTIVE' ? <><Square size={11} /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} /> {t('Aktivovat', 'Activate')}</>}
+          <button type="button" aria-pressed={product.status === 'ACTIVE'} onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
+            {product.status === 'ACTIVE' ? <><Square size={11} aria-hidden="true" /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} aria-hidden="true" /> {t('Aktivovat', 'Activate')}</>}
           </button>
           <button type="button" onClick={onClose} aria-label={t('Zavřít detail produktu', 'Close product details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px' }}>
-            <X size={18} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
       </div>
