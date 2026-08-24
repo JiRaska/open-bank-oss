@@ -44,6 +44,47 @@ function Stat({ label, value, tone }: { label: string; value: number | string; t
   )
 }
 
+/**
+ * A deliberately unweighted operator view.  It makes the four assurance
+ * surfaces navigable without turning absent evidence into a misleading score.
+ */
+function AssuranceBoard({ report, selectTab }: { report: TestIntelligenceReport; selectTab: (tab: Tab) => void }) {
+  const { t } = useLanguage()
+  const syntheticActive = report.syntheticJourneys.filter(item => item.status === 'active')
+  const syntheticState: EvidenceState = syntheticActive.some(item => item.state === 'failed') ? 'failed'
+    : syntheticActive.length === 0 ? 'unknown'
+      : syntheticActive.some(item => item.state !== 'passed') ? 'stale' : 'passed'
+  const runtimeRows = report.components.filter(component => component.testInfrastructure.declared.length > 0)
+  const runtimeState: EvidenceState = runtimeRows.some(component => {
+    const observed = component.testInfrastructure.observed
+    return observed.filter(item => item.lifecycle === 'stopped').length < observed.filter(item => item.lifecycle === 'started').length
+  }) ? 'failed' : runtimeRows.some(component => component.testInfrastructure.observed.length === 0) ? 'unknown' : 'passed'
+  const clientEvidence = report.clientExperiences ?? []
+  const clientState: EvidenceState = clientEvidence.some(client => client.evidence.some(item => item.state === 'failed')) ? 'failed'
+    : clientEvidence.some(client => client.rum.state === 'blocked') ? 'blocked'
+      : clientEvidence.some(client => client.rum.state === 'unknown') ? 'unknown'
+        : clientEvidence.length === 0 ? 'not-run' : 'passed'
+  const ciState: EvidenceState = report.totals.failingEvidence > 0 ? 'failed'
+    : report.totals.missingEvidence > 0 || report.totals.staleEvidence > 0 ? 'stale' : 'passed'
+  const cards: { tab: Tab; title: string; eyebrow: string; state: EvidenceState; detail: string }[] = [
+    { tab: 'posture', title: t('CI důkazy', 'CI evidence'), eyebrow: t('deterministické gate', 'deterministic gates'), state: ciState, detail: t(`${report.totals.componentsWithExecutionEvidence}/${report.totals.components} komponent s důkazem běhu`, `${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with run evidence`) },
+    { tab: 'runtime', title: t('Testcontainers runtime', 'Testcontainers runtime'), eyebrow: t('skutečná topologie', 'actual topology'), state: runtimeState, detail: t(`${runtimeRows.length} deklarovaných testovacích runtime`, `${runtimeRows.length} declared test runtimes`) },
+    { tab: 'synthetic', title: t('Sandbox syntetiky', 'Sandbox synthetics'), eyebrow: t('pravidelná falsifikace', 'scheduled falsification'), state: syntheticState, detail: t(`${syntheticActive.length} aktivních cest · ${report.syntheticJourneys.filter(item => item.status === 'planned').length} plánovaných`, `${syntheticActive.length} active paths · ${report.syntheticJourneys.filter(item => item.status === 'planned').length} planned`) },
+    { tab: 'clients', title: t('Client & RUM', 'Client & RUM'), eyebrow: t('E2E + produkční signál', 'E2E + production signal'), state: clientState, detail: t(`${clientEvidence.length} klientských zkušeností · consent-gated RUM`, `${clientEvidence.length} client experiences · consent-gated RUM`) },
+  ]
+  return <section aria-label={t('Mapa testovacího ujištění', 'Testing assurance map')} style={{ marginBottom: 18, border: '1px solid color-mix(in srgb, var(--accent) 26%, var(--border))', borderRadius: 14, padding: 18, background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent) 7%, var(--surface-1)), var(--surface-1))' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, alignItems: 'start', marginBottom: 14 }}>
+      <div><div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 750, letterSpacing: '.08em', textTransform: 'uppercase' }}>{t('Living assurance map', 'Living assurance map')}</div><strong style={{ fontSize: 18 }}>{t('Od změny až k zákaznickému signálu', 'From change to customer signal')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Klikni na vrstvu pro její neměnný důkaz, historii a známé mezery.', 'Open a layer for its immutable evidence, history, and known gaps.')}</div></div>
+      <div style={{ maxWidth: 310, color: 'var(--text-secondary)', fontSize: 11, padding: '8px 10px', borderRadius: 8, background: 'var(--surface-2)' }}><strong>{t('AI guardrail', 'AI guardrail')}</strong><br />{t('Agenti smějí vysvětlit a navrhnout další krok. Nezvyšují verdikt, nemažou důkaz ani neschvalují release.', 'Agents may explain and propose a next step. They do not raise a verdict, delete evidence, or approve a release.')}</div>
+    </div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(205px, 1fr))', gap: 10 }}>{cards.map((card, index) => <button key={card.tab} type="button" onClick={() => selectTab(card.tab)} style={{ textAlign: 'left', cursor: 'pointer', border: `1px solid color-mix(in srgb, ${STATE_COLOR[card.state]} 42%, var(--border))`, background: 'var(--surface-1)', borderRadius: 11, padding: 14, animation: `fadeIn ${180 + index * 80}ms ease-out both` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'start' }}><div><div style={{ color: 'var(--text-tertiary)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '.06em' }}>{card.eyebrow}</div><strong style={{ display: 'block', marginTop: 3 }}>{card.title}</strong></div><StateBadge state={card.state} /></div>
+      <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 10 }}>{card.detail}</div>
+      <div style={{ color: 'var(--accent)', fontSize: 11, fontWeight: 650, marginTop: 11 }}>{t('Otevřít důkaz →', 'Open evidence →')}</div>
+    </button>)}</div>
+  </section>
+}
+
 function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
   const evidence = component.evidence.find(item => item.kind === kind)
   if (!evidence) return <StateBadge state="not-run" />
@@ -271,6 +312,7 @@ export default function TestIntelligencePage() {
       actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
     />
     <TestIntelligenceFlow report={report} />
+    {report && <AssuranceBoard report={report} selectTab={setTab} />}
     {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid #d97706', borderRadius: 8, padding: 12, color: '#d97706', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
     <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
             aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>
