@@ -37,7 +37,7 @@ data class ScreenRequest(
     val idempotencyKey: String,
     val entityType: String,
     val name: String,
-    val aliases: List<String> = emptyList()
+    val aliases: List<String> = emptyList(),
 )
 
 /** Subset of the sanctions-service `SanctionsCheck` payload we act on. */
@@ -45,11 +45,8 @@ data class ScreenRequest(
 data class ScreenResponse(
     val status: String? = null,
     val overallScore: Double? = null,
-    val matches: List<ScreenMatch> = emptyList()
+    val matches: List<ScreenMatch> = emptyList(),
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class ScreenMatch(
-    val matchedName: String? = null,
-    val matchScore: Double? = null
-)
+data class ScreenMatch(val matchedName: String? = null, val matchScore: Double? = null)

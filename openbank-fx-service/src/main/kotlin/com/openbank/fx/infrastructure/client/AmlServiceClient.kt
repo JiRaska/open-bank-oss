@@ -30,10 +30,7 @@ import java.util.UUID
 interface AmlServiceClient {
 
     @POST
-    fun createCase(
-        @HeaderParam("Idempotency-Key") idempotencyKey: String,
-        request: CreateAmlCaseRequest
-    ): Uni<Response>
+    fun createCase(@HeaderParam("Idempotency-Key") idempotencyKey: String, request: CreateAmlCaseRequest): Uni<Response>
 }
 
 /** Mirror of aml-service `CreateAmlCaseRequest`. */
@@ -46,5 +43,5 @@ data class CreateAmlCaseRequest(
     val riskLevel: String,
     val alertCode: String,
     val alertDetail: String?,
-    val matchedEntity: String?
+    val matchedEntity: String?,
 )
