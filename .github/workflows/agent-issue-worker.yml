@@ -246,7 +246,7 @@ jobs:
           git config user.name  "openbank-issue-worker"
           git config user.email "openbank-issue-worker@users.noreply.github.com"
           claude -p "$(cat .github/agent-prompts/issue-worker.md)" \
-            --max-turns 120 \
+            --max-turns 200 \
             --permission-mode bypassPermissions \
           | tee /tmp/worker-output.txt
           echo "--- worker output above ---"
