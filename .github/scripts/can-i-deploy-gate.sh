@@ -74,13 +74,30 @@ if [ ! -x "$CLI" ]; then
 else
   echo "  ✓ pact CLI restored from cache ($CLI)"
 fi
-# Ensure sandbox environment is registered — idempotent, 409 = already exists.
-"$CLI" create-environment --name sandbox --display-name Sandbox --no-production \
-  --broker-base-url "$PACT_BROKER_URL" \
-  --broker-username "$PACT_BROKER_USERNAME" \
-  --broker-password "$PACT_BROKER_PASSWORD" \
-  && echo "  ✓ sandbox environment ready" \
-  || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
+# Ensure the sandbox environment is registered.
+#
+# This was written as "idempotent, 409 = already exists" and is not: the broker answers a
+# duplicate name with 400 and a validation body, so on every single run after the first this
+# printed
+#   Error making request to <broker>/environments status=400
+#   {"errors":{"name":["name 'sandbox' is already used by an existing environment."]}}
+#   ::warning::could not ensure sandbox environment (may already exist — continuing)
+# — a red-looking error and a warning, in the one log a person reads while a deploy is stuck,
+# describing the NORMAL state (#6568). A real broker outage produces the same two lines, so the
+# noise also costs the signal. Look first, and only create when it is genuinely missing; a
+# failure to LOOK is still a warning, because then the create is the fallback.
+env_auth="${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}"
+if envs_body="$(curl -sf --max-time 20 -u "$env_auth" "${PACT_BROKER_URL}/environments" 2>/dev/null)" \
+   && printf '%s' "$envs_body" | jq -e '[.._embedded?, .environments?] | flatten | map(select(.name? == "sandbox")) | length > 0' >/dev/null 2>&1; then
+  echo "  ✓ sandbox environment already registered"
+else
+  "$CLI" create-environment --name sandbox --display-name Sandbox --no-production \
+    --broker-base-url "$PACT_BROKER_URL" \
+    --broker-username "$PACT_BROKER_USERNAME" \
+    --broker-password "$PACT_BROKER_PASSWORD" \
+    && echo "  ✓ sandbox environment created" \
+    || echo "::warning::could not ensure sandbox environment (may already exist — continuing)"
+fi
 rc=0
 deployable_list=()
 # Shared wait budget for probe-pact-version.sh (#3082). See that script's header.

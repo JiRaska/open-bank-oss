@@ -191,6 +191,57 @@ case "$msg_unk" in
   *) echo "  FAIL unprobed counterparts do not qualify the promise: ${msg_unk}"; fails=$((fails + 1)) ;;
 esac
 
+# ── issue #6568: provider-live is a THIRD counterpart state, not a flavour of contentless ──
+# The six services blocked for 40 hours on run 32599859753 all reached UNVERIFIABLE through
+# COUNTERPART_STATE=contentless on a counterpart that was demonstrably verifiable. These cases
+# pin the new state's class, its precedence, and — the load-bearing part — that its message
+# carries a runnable remedy rather than the advice to redeploy a healthy provider.
+PL_DETAIL="openbank-product-catalog@af04613a74c7d2cb27baf1b681448ebd3e3c7c33"
+check_pl() { # <name> <want> <present> [event]
+  local name="$1" want="$2" present="$3" event="${4:-}" got
+  got="$(PACT_VERSION_PRESENT="$present" EVENT_NAME="$event" COUNTERPART_STATE=provider-live \
+    COUNTERPART_DETAIL="$PL_DETAIL" bash "$CLASSIFY" openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f1)"
+  if [ "$got" = "$want" ]; then echo "  ok   ${name} → ${got}"
+  else echo "  FAIL ${name}: want ${want}, got ${got}"; fails=$((fails + 1)); fi
+}
+check_pl "provider-live beats PENDING_BUILD" PROVIDER_UNVERIFIED no
+check_pl "provider-live beats UNVERIFIED"    PROVIDER_UNVERIFIED yes
+# It must NOT be UNVERIFIABLE — that is the exact mislabel #6568 is about, and the one a
+# "simplification" back to a single contentless branch would reintroduce.
+got_pl="$(PACT_VERSION_PRESENT=no COUNTERPART_STATE=provider-live COUNTERPART_DETAIL="$PL_DETAIL" \
+  bash "$CLASSIFY" openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f1)"
+if [ "$got_pl" = "UNVERIFIABLE" ]; then
+  echo "  FAIL provider-live must not be labelled UNVERIFIABLE (#6568)"; fails=$((fails + 1))
+else
+  echo "  ok   provider-live is not UNVERIFIABLE"
+fi
+# A REGRESSION still outranks it: an observed verification FAILURE is not a missing one.
+got_plr="$(PACT_VERSION_PRESENT=yes COUNTERPART_STATE=provider-live COUNTERPART_DETAIL="$PL_DETAIL" \
+  bash "$CLASSIFY" openbank-demo-service <<< "$VERIFICATION_FAILED" | cut -f1)"
+if [ "$got_plr" = "REGRESSION" ]; then echo "  ok   regression outranks provider-live → REGRESSION"
+else echo "  FAIL regression outranks provider-live: got ${got_plr}"; fails=$((fails + 1)); fi
+# The message is the whole point: it must name a runnable dispatch at the counterpart's exact
+# deployed sha, and must not repeat either self-clearing promise.
+msg_pl="$(PACT_VERSION_PRESENT=no COUNTERPART_STATE=provider-live COUNTERPART_DETAIL="$PL_DETAIL" \
+  bash "$CLASSIFY" openbank-demo-service <<< "$NO_VERIFIED_PACT" | cut -f2-)"
+case "$msg_pl" in
+  *"verify-provider.yml -f service=openbank-product-catalog -f ref=af04613a74c7d2cb27baf1b681448ebd3e3c7c33"*)
+    echo "  ok   PROVIDER_UNVERIFIED names a runnable remedy at the exact sha" ;;
+  *) echo "  FAIL PROVIDER_UNVERIFIED remedy is not runnable: ${msg_pl}"; fails=$((fails + 1)) ;;
+esac
+if grep -qE 'clears within one reconcile|re-drives it automatically' <<< "$msg_pl"; then
+  echo "  FAIL PROVIDER_UNVERIFIED repeats a self-clearing promise: ${msg_pl}"; fails=$((fails + 1))
+else
+  echo "  ok   PROVIDER_UNVERIFIED makes no self-clearing promise"
+fi
+# ...and it must not repeat UNVERIFIABLE's remedy, which is the wrong action for a healthy
+# provider and is what kept #6568 open.
+if grep -q 'deployed at a version that actually published pacts' <<< "$msg_pl"; then
+  echo "  FAIL PROVIDER_UNVERIFIED repeats UNVERIFIABLE's redeploy advice: ${msg_pl}"; fails=$((fails + 1))
+else
+  echo "  ok   PROVIDER_UNVERIFIED does not advise redeploying a healthy provider"
+fi
+
 # 7. Missing argument is a usage error, not a silent classification.
 if PACT_VERSION_PRESENT=no bash "$CLASSIFY" </dev/null >/dev/null 2>&1; then
   echo "  FAIL missing-service-arg: expected non-zero exit"
