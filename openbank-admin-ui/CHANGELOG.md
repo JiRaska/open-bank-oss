@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.188.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.1...admin-ui-v0.188.2) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify global error recovery ([#6700](https://github.com/JiRaska/open-bank-oss/issues/6700)) ([0746a2c](https://github.com/JiRaska/open-bank-oss/commit/0746a2c28bd3bc14c49cbf98b79c7bd9e73a0675))
+
 ## [0.188.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.0...admin-ui-v0.188.1) (2026-08-24)
 
 
