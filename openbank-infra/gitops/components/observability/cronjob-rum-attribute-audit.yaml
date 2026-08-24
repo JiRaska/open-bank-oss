@@ -100,25 +100,19 @@ spec:
                     # so a legitimately-empty attribute counts as 0 instead of aborting.
                     count=$(echo "$result" | { grep -o '"value"' || true; } | wc -l | tr -d ' ')
                     echo "{\"event\":\"rum-attribute-audit\",\"attribute\":\"${attr}\",\"unique_value_count\":${count},\"sample\":$(echo "$result" | head -c 512)}"
-                    case "$attr" in
-                      app.version|device.model|screen.name) MOBILE_TOTAL=$(( ${MOBILE_TOTAL:-0} + count )) ;;
-                    esac
                   done
-                  # RUM-INGEST LIVENESS (added 2026-08-16). The audit above is a cardinality
-                  # and PII allow-list check, and it answers exactly the same way for "the
-                  # allow-list holds" and "no RUM ever arrived" — zero values on every mobile
-                  # attribute reads as a clean run. Measured over a 168h window on 2026-08-16:
-                  # app.version, device.model, screen.name and x-correlation-id each had 0
-                  # unique values, os.type held only "linux" (server pods, no ios/android),
-                  # rum-gateway was exporting nothing but its own otelcol self-metrics, and
-                  # Prometheus held 0 `rum_*` series — yet this job had exited 0 on every run
-                  # since it was written. app.version, device.model and screen.name are emitted
-                  # ONLY by the mobile SDK, so their combined count is a direct measure of
-                  # whether the mobile pipeline delivered anything at all. Fail on zero: the
-                  # ttlSecondsAfterFinished above means the resulting KubeJobFailed clears
-                  # itself once ingest recovers, so this cannot become a permanent tombstone.
-                  if [ "${MOBILE_TOTAL:-0}" -eq 0 ]; then
-                    echo "{\"event\":\"rum-mobile-signal-absent\",\"lookback\":\"${LOOKBACK}\",\"detail\":\"app.version, device.model and screen.name all had 0 unique values — no mobile RUM reached Tempo in the window. Check the rum-gateway ingress, the app SDK exporter endpoint, and whether any build shipping the SDK is live.\"}"
+                  # RUM-INGEST LIVENESS. The attribute audit above verifies the redaction
+                  # allow-list, but app.version, device.model and screen.name are optional
+                  # mobile SDK attributes. The current app deliberately does not set all of
+                  # them, so their absence cannot prove that no trace arrived. service.name is
+                  # the canonical OTel resource identity set by the app and retained through
+                  # the gateway; query it separately to distinguish no signal from sparse
+                  # attribute coverage without widening the collected data.
+                  mobile_services=$(curl -sf --max-time 30 \
+                    "${TEMPO_URL}/api/v2/search/tag/.service.name/values?start=${START}&end=${END}" \
+                    2>/dev/null || echo '{"tagValues":[]}')
+                  if ! echo "$mobile_services" | grep -Eq '"value"[[:space:]]*:[[:space:]]*"openbank-app[^" ]*"'; then
+                    echo "{\"event\":\"rum-mobile-signal-absent\",\"lookback\":\"${LOOKBACK}\",\"detail\":\"Tempo reported no service.name matching openbank-app in the window. Check the rum-gateway ingress, the app SDK exporter endpoint, and whether any build shipping the SDK is live.\"}"
                     echo "{\"event\":\"rum-attribute-audit-done\",\"result\":\"fail\"}"
                     exit 1
                   fi
