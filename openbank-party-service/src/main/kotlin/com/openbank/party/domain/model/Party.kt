@@ -10,6 +10,16 @@ import java.util.UUID
 enum class PartyType { INDIVIDUAL, SOLE_TRADER, COMPANY, TRUST }
 
 /**
+ * Origin classification of a party. Synthetic parties are bank-owned canaries, never an
+ * alternative customer type: they must still traverse the same control paths as customers.
+ *
+ * This is deliberately immutable in [Party]. Turning an existing customer into a synthetic
+ * record (or the reverse) would falsify historical regulatory projections and taint lineage.
+ * ADR-0252.
+ */
+enum class PartyClassification { CUSTOMER, SYNTHETIC }
+
+/**
  * [CLOSED] and [MERGED] are both terminal, and deliberately distinct (ADR-0179): CLOSED is written
  * only by GDPR Art. 17 erasure, which anonymizes PII; MERGED retires a duplicate identity and
  * preserves everything, pointing at the survivor via [Party.mergedIntoPartyId].
@@ -20,6 +30,7 @@ enum class DocumentType { NATIONAL_ID, PASSPORT, DRIVING_LICENCE, COMPANY_REGIST
 data class Party(
     val id: UUID,
     val partyType: PartyType,
+    val classification: PartyClassification = PartyClassification.CUSTOMER,
     val status: PartyStatus,
     val legalName: String,
     val tradingName: String?,
