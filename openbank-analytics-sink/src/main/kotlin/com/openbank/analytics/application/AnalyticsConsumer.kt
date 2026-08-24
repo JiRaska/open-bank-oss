@@ -13,6 +13,7 @@ import com.openbank.libs.analytics.AnalyticsEnvelope
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
+import com.openbank.libs.synthetic.SyntheticTaint
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.reactive.messaging.kafka.api.IncomingKafkaRecordMetadata
@@ -188,10 +189,17 @@ class AnalyticsConsumer {
             ?.value()
             ?.toString(Charsets.UTF_8)
             ?.takeIf { it.isNotBlank() }
+        val synthetic = record.headers
+            ?.lastHeader(SyntheticTaint.KAFKA_HEADER)
+            ?.value()
+            ?.toString(Charsets.UTF_8)
+            ?.let(SyntheticTaint::isTainted)
+            ?: false
         return EventAddress(
             topic = record.topic?.takeIf { it.isNotBlank() },
             key = record.key?.toString()?.takeIf { it.isNotBlank() },
             ceType = ceType,
+            synthetic = synthetic,
         )
     }
 
@@ -238,6 +246,7 @@ class AnalyticsConsumer {
             traceId = node["traceId"]?.asText() ?: node["correlationId"]?.asText(),
             ingestedAt = Instant.now(clock),
             payload = PayloadMasker.maskToMap(node["payload"] ?: node),
+            synthetic = address.synthetic,
         )
     }
 

@@ -13,11 +13,7 @@ import java.time.LocalDate
  * quotes [rate] CZK per [amount] units of [code] (e.g. JPY is quoted per 100). [ratePerUnit]
  * normalises that to CZK per single unit, at the 8-decimal scale of the `fx_rates` table.
  */
-data class CnbFixingRate(
-    val code: String,
-    val amount: Int,
-    val rate: BigDecimal
-) {
+data class CnbFixingRate(val code: String, val amount: Int, val rate: BigDecimal) {
     init {
         require(amount > 0) { "ČNB fixing amount must be positive for $code, was $amount" }
         require(rate.signum() > 0) { "ČNB fixing rate must be positive for $code, was $rate" }
@@ -31,10 +27,6 @@ data class CnbFixingRate(
  * A parsed ČNB daily fixing: the [date] it is valid for, the publication [sequence] (the
  * `#NNN` ordinal), and one [CnbFixingRate] per quoted currency.
  */
-data class CnbFixing(
-    val date: LocalDate,
-    val sequence: Int?,
-    val rates: List<CnbFixingRate>
-) {
+data class CnbFixing(val date: LocalDate, val sequence: Int?, val rates: List<CnbFixingRate>) {
     fun rateFor(code: String): BigDecimal? = rates.firstOrNull { it.code == code }?.ratePerUnit
 }

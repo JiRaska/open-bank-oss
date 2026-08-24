@@ -51,6 +51,7 @@ class StatementPeriodRepositoryImpl @Inject constructor(
         val now = clock.instant()
         val oe = StatementOutboxEntity().apply {
             eventId = event.eventId
+            synthetic = event.synthetic
             aggregateId = event.aggregateId
             eventType = event.eventType
             payload = event.payload
@@ -76,6 +77,7 @@ class StatementPeriodRepositoryImpl @Inject constructor(
         val now = clock.instant()
         val oe = StatementOutboxEntity().apply {
             eventId = event.eventId
+            synthetic = event.synthetic
             aggregateId = event.aggregateId
             eventType = event.eventType
             payload = event.payload
@@ -172,6 +174,7 @@ class StatementOutboxImpl @Inject constructor(private val sf: Mutiny.SessionFact
         val now = clock.instant()
         val e = StatementOutboxEntity().apply {
             eventId = message.eventId
+            synthetic = message.synthetic
             aggregateId = message.aggregateId
             eventType = message.eventType
             payload = message.payload

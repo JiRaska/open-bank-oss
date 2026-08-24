@@ -25,33 +25,30 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * failure, and flows through as a [ScreeningResult].
  */
 @ApplicationScoped
-class SanctionsScreeningAdapter(
-    @RestClient private val client: SanctionsServiceClient
-) : SanctionsScreeningPort {
+class SanctionsScreeningAdapter(@RestClient private val client: SanctionsServiceClient) : SanctionsScreeningPort {
 
     @Inject
     lateinit var self: SanctionsScreeningAdapter
 
-    override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult =
-        try {
-            self.screenWithResilience(name, role, idempotencyKey)
-        } catch (ex: Exception) {
-            throw ScreeningUnavailableException(ex)
-        }
+    override suspend fun screen(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult = try {
+        self.screenWithResilience(name, role, idempotencyKey)
+    } catch (ex: Exception) {
+        throw ScreeningUnavailableException(ex)
+    }
 
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 2, delay = 300, jitter = 150, retryOn = [Exception::class])
     @Timeout(5_000)
     open suspend fun screenWithResilience(name: String, role: ScreeningRole, idempotencyKey: String): ScreeningResult {
         val response = client.screen(
-            ScreenRequest(idempotencyKey = idempotencyKey, entityType = ENTITY_TYPE, name = name)
+            ScreenRequest(idempotencyKey = idempotencyKey, entityType = ENTITY_TYPE, name = name),
         ).awaitSuspending()
         return ScreeningResult(
             subject = name,
             role = role,
             status = mapStatus(response.status),
             score = response.overallScore ?: 0.0,
-            matchedEntity = response.matches.firstOrNull()?.matchedName
+            matchedEntity = response.matches.firstOrNull()?.matchedName,
         )
     }
 

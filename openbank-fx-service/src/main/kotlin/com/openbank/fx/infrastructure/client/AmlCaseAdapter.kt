@@ -20,9 +20,7 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
  * Failures propagate so the use-case's best-effort wrapper can log them without flipping the verdict.
  */
 @ApplicationScoped
-class AmlCaseAdapter(
-    @RestClient private val client: AmlServiceClient
-) : AmlCasePort {
+class AmlCaseAdapter(@RestClient private val client: AmlServiceClient) : AmlCasePort {
 
     @Inject
     lateinit var self: AmlCaseAdapter
@@ -45,8 +43,8 @@ class AmlCaseAdapter(
                 riskLevel = command.riskLevel.name,
                 alertCode = command.alertCode,
                 alertDetail = command.alertDetail,
-                matchedEntity = command.matchedEntity
-            )
+                matchedEntity = command.matchedEntity,
+            ),
         ).awaitSuspending()
     }
 

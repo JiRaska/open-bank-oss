@@ -113,6 +113,7 @@ open class ClickHouseAnalyticsSink : AnalyticsSink {
             "ingested_at" to CLICKHOUSE_DT.format(env.ingestedAt),
             // F1 tamper-evidence: deterministic over identity + business content (excludes lineage/time).
             "record_hash" to AnalyticsIntegrity.recordHash(env),
+            "synthetic" to env.synthetic,
             // payload is a String column holding the (already PII-masked) body as embedded JSON.
             "payload" to mapper.writeValueAsString(env.payload),
         )

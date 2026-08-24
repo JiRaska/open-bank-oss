@@ -241,6 +241,7 @@ class InterestCapitalizationRepositoryImpl @Inject constructor(
         val whtEntity = mapper.toEntity(withholding)
         val outboxEntity = InterestOutboxEntity().apply {
             eventId = event.eventId
+            synthetic = event.synthetic
             aggregateId = event.aggregateId
             eventType = event.eventType
             payload = event.payload
