@@ -130,9 +130,9 @@ journeys:
     expect(app.evidence.find(item => item.kind === 'unit')).toMatchObject({
       kind: 'unit', state: 'passed', run: { id: '9' },
     })
-    expect(app.evidence).toEqual(expect.arrayContaining([
-      expect.objectContaining({ kind: 'e2e', state: 'passed', run: { id: '10' } }),
-    ]))
+    expect(app.evidence.some(item =>
+      item.kind === 'e2e' && item.state === 'passed' && item.run?.id === '10',
+    )).toBe(true)
     expect(app.rum).toMatchObject({ policy: 'consent-gated', state: 'unknown' })
     expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['10', '9', '8'])
   })
