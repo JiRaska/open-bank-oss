@@ -44,8 +44,9 @@ class Psd2OutboxClaimIT {
      * [seedPending] and this test's first repository claim.
      */
     class RepositoryIsolationProfile : QuarkusTestProfile {
-        override fun getConfigOverrides(): Map<String, String> =
-            mapOf("openbank.outbox.dispatch-enabled" to "false")
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.outbox.dispatch-enabled" to "false",
+        )
     }
 
     @Inject
