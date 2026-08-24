@@ -5,6 +5,7 @@
 package com.openbank.billing.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -68,6 +69,7 @@ data class AccountPageDto(
  * clients below — a fee assessment cannot silently fall back to "no fees" on a 401.
  */
 @RegisterRestClient(configKey = "product-catalog")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterProvider(ProductCatalogHostHeaderFilter::class)
 @Path("/api/v1")
@@ -81,6 +83,7 @@ interface ProductCatalogRestClient {
 
 /** Account read — carries account PII, so the call propagates an OIDC service token. */
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -98,6 +101,7 @@ interface AccountRestClient {
 
 /** Balance read — balance is PII, so the call propagates an OIDC service token. */
 @RegisterRestClient(configKey = "balance-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
@@ -145,6 +149,7 @@ data class LedgerJournalEntryResponse(val id: UUID, val transactionId: UUID, val
  * re-derive it).
  */
 @RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/journals")
 @Produces(MediaType.APPLICATION_JSON)

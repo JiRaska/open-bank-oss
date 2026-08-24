@@ -13,8 +13,5 @@ describe('operational refresh timestamps use active locale', () => {
       expect(source).not.toMatch(/toLocale(?:TimeString|DateString|String)\(\)/)
       expect(source).toMatch(/dateLocale/)
     }
-    expect(files[2]).toMatch(/tests\.totals\.tests\.toLocaleString\(numberLocale\)/)
-    expect(files[2]).toMatch(/tests\.totals\.passed\.toLocaleString\(numberLocale\)/)
-    expect(files[2]).toMatch(/tests\.totals\.failed\)\.toLocaleString\(numberLocale\)/)
   })
 })

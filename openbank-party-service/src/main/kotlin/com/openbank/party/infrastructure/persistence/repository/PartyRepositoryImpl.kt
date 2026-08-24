@@ -17,6 +17,7 @@ import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.DocumentType
 import com.openbank.party.domain.model.KycStatus
 import com.openbank.party.domain.model.Party
+import com.openbank.party.domain.model.PartyClassification
 import com.openbank.party.domain.model.PartyDocument
 import com.openbank.party.domain.model.PartyDocumentFile
 import com.openbank.party.domain.model.PartyEvent
@@ -222,6 +223,7 @@ class PartyRepositoryImpl(
     private fun Party.toEntity() = PartyEntity().also {
         it.partyId = id
         it.partyType = partyType.name
+        it.classification = classification.name
         it.status = status.name
         it.legalName = legalName
         it.tradingName = tradingName
@@ -253,7 +255,8 @@ class PartyRepositoryImpl(
     }
 
     private fun PartyEntity.toDomain() = Party(
-        id = partyId, partyType = PartyType.valueOf(partyType), status = PartyStatus.valueOf(status),
+        id = partyId, partyType = PartyType.valueOf(partyType),
+        classification = PartyClassification.valueOf(classification), status = PartyStatus.valueOf(status),
         legalName = legalName, tradingName = tradingName, dateOfBirth = dateOfBirth,
         nationality = nationality, taxId = taxId, registrationNumber = registrationNumber,
         email = email, phone = phone, discoverable = discoverable, kycStatus = KycStatus.valueOf(kycStatus),

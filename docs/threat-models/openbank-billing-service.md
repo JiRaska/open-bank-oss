@@ -224,6 +224,8 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate now requires every new client to choose propagation or a reasoned external boundary.
+
 | Date | Change |
 |---|---|
 | 2026-08-19 | Operationalizes the 2026-08-07 entry below: `KafkaUser billing-service` (Write+Describe on `openbank.billing.fee.event` only, no incoming channels) + `ExternalSecret`-projected mTLS keystore/truststore + the matching `KAFKA_*` env vars on the Deployment (#4701 investigation). The trust boundary itself was already documented; nothing about its shape changed, only that it now has a live identity instead of falling through to `localhost:9092`. Does **not** address #4701's dead-lettered `billing.fee.post-intent.v1` rows — that path is REST-to-ledger, not Kafka; see the corrected §5 bullet and #5642. |

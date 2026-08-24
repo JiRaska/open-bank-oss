@@ -4,6 +4,7 @@
 package com.openbank.statement.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -37,6 +38,7 @@ data class PreviewTemplateResponseDto(val renderedHtml: String? = null)
 
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "document-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 interface DocumentRestClient {

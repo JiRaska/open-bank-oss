@@ -4,6 +4,7 @@
 
 package com.openbank.domestic.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -19,6 +20,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * OIDC service-to-service auth is propagated by [OidcClientRequestReactiveFilter].
  */
 @RegisterRestClient(configKey = "clearing-simulator")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 interface ClearingSimulatorClient {
     @POST
