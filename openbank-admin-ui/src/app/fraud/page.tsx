@@ -73,7 +73,7 @@ export default function FraudPage() {
           'Payments flagged REVIEW by the engine. Resolution remains in the four-eyes compliance flow.',
         )}
         icon={<ShieldAlert size={20} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
-        actions={<button onClick={load} disabled={loading} className="btn btn-secondary btn-sm">
+        actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading} aria-label={t('Obnovit frontu podvodů', 'Refresh fraud queue')} className="btn btn-secondary btn-sm">
           <RefreshCw size={14} aria-hidden="true" className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
         </button>}
       />

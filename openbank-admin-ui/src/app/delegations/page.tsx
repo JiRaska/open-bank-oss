@@ -126,8 +126,8 @@ export default function DelegationsPage() {
         title={t('Delegovaný přístup', 'Delegated Access')}
         subtitle={t('Kdo komu udělil práva k účtu, kartě nebo spoření (ADR-0232). Konzole je pouze pro čtení.', 'Who granted whom rights over an account, card or savings goal (ADR-0232). This console is read-only.')}
         actions={party && (
-          <button className="btn btn-secondary" onClick={() => loadGrants(party)} disabled={loading}>
-            <RefreshCw size={14} />
+          <button type="button" className="btn btn-secondary" onClick={() => loadGrants(party)} disabled={loading} aria-busy={loading} aria-label={t('Obnovit delegovaný přístup', 'Refresh delegated access')}>
+            <RefreshCw size={14} aria-hidden="true" />
             {t('Obnovit', 'Refresh')}
           </button>
         )}
@@ -149,8 +149,8 @@ export default function DelegationsPage() {
             placeholder={t('Jméno strany…', 'Party name…')}
             aria-label={t('Hledat stranu', 'Search party')}
           />
-          <button className="btn btn-primary" onClick={search} disabled={term.trim().length < SEARCH_MIN}>
-            <Search size={14} />
+          <button type="button" className="btn btn-primary" onClick={search} disabled={term.trim().length < SEARCH_MIN} aria-busy={loading} aria-label={t('Vyhledat delegující stranu', 'Search delegating party')}>
+            <Search size={14} aria-hidden="true" />
             {t('Vyhledat', 'Search')}
           </button>
         </div>
@@ -175,7 +175,10 @@ export default function DelegationsPage() {
             {results.map(r => (
               <button
                 key={r.id}
+                type="button"
                 className="btn btn-secondary"
+                aria-pressed={party?.id === r.id}
+                aria-label={t(`Vybrat stranu ${r.label}`, `Select party ${r.label}`)}
                 onClick={() => loadGrants(r)}
                 style={{ fontWeight: party?.id === r.id ? 700 : 500 }}
               >

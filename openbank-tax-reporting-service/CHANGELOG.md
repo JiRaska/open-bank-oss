@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.9.4](https://github.com/JiRaska/open-bank-oss/compare/v0.9.3...v0.9.4) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
+## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/v0.9.2...v0.9.3) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** resolve the repo-fixable prod-readiness NO-GO causes (contract tests, undeployed component) ([#5896](https://github.com/JiRaska/open-bank-oss/issues/5896)) ([ab19734](https://github.com/JiRaska/open-bank-oss/commit/ab197343f09969b00b78cc1b4bd12fac97535aeb))
+
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/v0.9.1...v0.9.2) (2026-08-21)
+
+
+### Bug Fixes
+
+* **admin-ui:** resolve the repo-fixable prod-readiness NO-GO causes (contract tests, undeployed component) ([#5896](https://github.com/JiRaska/open-bank-oss/issues/5896)) ([ab19734](https://github.com/JiRaska/open-bank-oss/commit/ab197343f09969b00b78cc1b4bd12fac97535aeb))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/v0.9.0...v0.9.1) (2026-08-02)
 
 

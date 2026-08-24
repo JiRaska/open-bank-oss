@@ -1,7 +1,7 @@
 # Strimzi mTLS identity + ACLs for aml-service (ADR-0137 #2665 Tier 2c).
 #
 # aml-service publishes openbank.aml.events (outbox egress, ADR-0050) and
-# consumes openbank.party.events to auto-open onboarding screenings (ADR-0073).
+# consumes openbank.party.events to auto-open onboarding screenings (ADR-0267 §2).
 #
 # Identity model (ADR-0137): one KafkaUser = one client cert = one mTLS
 # principal for ALL Kafka traffic from this service. The KafkaUser ACLs list
@@ -36,7 +36,7 @@ spec:
           patternType: literal
         operations: [Write, Describe]
         host: "*"
-      # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0073)
+      # Onboarding trigger: consume PARTY_CREATED to auto-open screenings (ADR-0267 §2)
       - resource:
           type: topic
           name: openbank.party.events
@@ -49,6 +49,16 @@ spec:
           name: openbank-aml-service
           patternType: literal
         operations: [Read]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `party-events-in` channel (failure-strategy:
+      # dead-letter-queue, set in the service's application.yaml). Without Write here the DLQ
+      # send itself FAILS and the consumer wedges on the very failure it was meant to park —
+      # the DLQ then makes things worse than the default `fail`, not better.
+      - resource:
+          type: topic
+          name: openbank.dlq.aml.party-events-in
+          patternType: literal
+        operations: [Write, Describe]
         host: "*"
 ---
 # ── ExternalSecret: aml-service keystore ─────────────────────────────────

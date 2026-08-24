@@ -141,6 +141,36 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
         ).firstResult()
     }.awaitSuspending()?.toDomain(objectMapper)
 
+    // Projects to party_id only: the reconciliation needs presence, not the aggregate, and
+    // hydrating full KycCase rows (each of which parses checksJson) to then discard everything but
+    // the id would make a read-only monitoring query the most expensive one in the service.
+    // BATCHED, and the batching is the point. The caller's candidate set is bounded only by
+    // `page-size x max-pages` (100 x 500 = 50,000 by default), and Hibernate expands `IN :ids`
+    // into one bind parameter PER ID. The PostgreSQL wire protocol carries the parameter count
+    // as an int16, so a single statement cannot exceed 65,535 binds -- the previous shape sat
+    // 15,535 under a hard protocol ceiling on defaults, and the cap warning in
+    // OrphanedPartyDetector told operators to raise `max-pages`, which is the one action that
+    // walks it over the edge. A register of 66,000 parties, or a max-pages of 700, turned the
+    // reconciler into a hard failure with no reading of the code suggesting why.
+    //
+    // Chunking makes the statement shape independent of the register size: bind count per
+    // statement is <= ID_BATCH_SIZE no matter how large the candidate set grows, and the number
+    // of statements grows linearly instead. See `idBatches` for the measured guarantee.
+    override suspend fun findPartyIdsWithAnyCase(partyIds: Collection<UUID>): Set<UUID> {
+        if (partyIds.isEmpty()) return emptySet()
+        val found = mutableSetOf<UUID>()
+        for (batch in idBatches(partyIds)) {
+            found += Panache.withSession {
+                Panache.getSession().flatMap { session ->
+                    session.createQuery(PARTY_IDS_WITH_CASE_HQL, UUID::class.java)
+                        .setParameter("ids", batch)
+                        .resultList
+                }
+            }.awaitSuspending()
+        }
+        return found
+    }
+
     override suspend fun listAll(page: Int, size: Int): List<KycCase> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending().map { it.toDomain(objectMapper) }
 
@@ -211,6 +241,34 @@ class KycRepository(private val outboxRepository: KycOutboxRepository) :
 
     companion object {
         private val log = Logger.getLogger(KycRepository::class.java)
+
+        /**
+         * Scalar HQL rather than Panache's `.project(...)`: a constructor-arg projection resolves
+         * its columns from CONSTRUCTOR PARAMETER NAMES, which requires the `-parameters` compiler
+         * flag this build does not set, so it compiles cleanly and throws
+         * `PanacheQueryException` at runtime. Selecting the single column directly needs no
+         * parameter-name metadata, and returns only the ids — the point of the query.
+         */
+/**
+         * Maximum ids bound into one `IN` statement.
+         *
+         * Well under PostgreSQL's 65,535-parameter protocol ceiling, so the margin absorbs any
+         * other binds the statement grows later, and small enough that one batch stays a cheap
+         * index probe rather than a planner-defeating list.
+         */
+        internal const val ID_BATCH_SIZE = 1_000
+
+        /**
+         * Split [partyIds] into statement-sized batches.
+         *
+         * `internal` so the bound can be MEASURED rather than argued: each returned list is
+         * exactly the collection handed to `setParameter("ids", ...)`, so its size IS the bind
+         * count of one statement (`KycRepositoryBatchingTest`).
+         */
+        internal fun idBatches(partyIds: Collection<UUID>): List<List<UUID>> = partyIds.toList().chunked(ID_BATCH_SIZE)
+
+        private const val PARTY_IDS_WITH_CASE_HQL =
+            "SELECT c.partyId FROM KycCaseEntity c WHERE c.partyId IN :ids"
 
         internal fun anonymizeChecksJson(checksJson: String, objectMapper: ObjectMapper): String = try {
             val checks: List<KycCheck> = objectMapper.readValue(

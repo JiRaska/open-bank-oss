@@ -33,7 +33,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(res.status).toBe(401)
   })
 
-  it('merges lending, sanctions, transaction, domestic-payment, clearing, fx, ledger, swift, sepaPayment, sepa-instant, balance and agent queues into canonical items, sorted by proposedAt', async () => {
+  it('merges lending, sanctions, transaction, domestic-payment, clearing, fx, ledger, swift, sepaPayment, sepa-instant, balance, notification and agent queues into canonical items, sorted by proposedAt', async () => {
     const mock = vi.fn().mockImplementation((url: string) => {
       if (url.includes('lending')) {
         return Promise.resolve(new Response(JSON.stringify([
@@ -93,9 +93,14 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       }
       if (url.includes('balance')) {
         // 11:00, joining the D-1/C-1/J-1/W-1/SP-1 tie — balance is concatenated last of the
-        // six in route.ts, so B-1 must land at the end of that tied group.
+        // group in route.ts, so B-1 must land at the end of that tied group.
         return Promise.resolve(new Response(JSON.stringify([
           { id: 'B-1', action: 'balance.debit', resourceId: 'acc-4', makerId: 'operator.d', createdAt: '2026-07-29T11:00:00Z' },
+        ]), { status: 200 }))
+      }
+      if (url.includes('notification')) {
+        return Promise.resolve(new Response(JSON.stringify([
+          { id: 'N-1', action: 'opsmessage.compose', resourceId: null, makerId: 'operator.f', createdAt: '2026-07-29T10:30:00Z' },
         ]), { status: 200 }))
       }
       return Promise.resolve(new Response(JSON.stringify([
@@ -106,25 +111,27 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     const res = await (await route()).GET()
     const body = await res.json()
-    // D-1, C-1, J-1, W-1, SP-1 and B-1 all sit at 11:00 (domestic-payment, clearing, ledger,
-    // swift, sepaPayment, balance); F-1 and I-1 both sit at 11:30 (fx before sepa-instant) —
-    // both ties resolved by the stable-sort's concat order in route.ts, which is
-    // ... fx, ledger, swift, sepaPayment, sepaInstant, balance, agent. Note balance is
-    // concatenated AFTER sepa-instant yet sorts before it: 11:00 < 11:30, so proposedAt wins
-    // and only the within-minute ties fall back to concat order.
-    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'D-1', 'C-1', 'J-1', 'W-1', 'SP-1', 'B-1', 'F-1', 'I-1', 'S-1', 'P-1', 'T-1', 'L-2'])
+    // N-1 sits at 10:30, between L-1 (09:00) and the 11:00 tie. D-1, C-1, J-1, W-1, SP-1 and B-1
+    // all sit at 11:00 (domestic-payment, clearing, ledger, swift, sepaPayment, balance); F-1
+    // and I-1 both sit at 11:30 (fx before sepa-instant) — both ties resolved by the
+    // stable-sort's concat order in route.ts: ... fx, ledger, swift, sepaPayment, sepaInstant,
+    // balance, notification, agent. Note balance is concatenated after sepa-instant yet sorts
+    // before it: 11:00 < 11:30, so proposedAt wins and only within-minute ties fall back to
+    // concat order.
+    expect(body.items.map((i: { id: string }) => i.id)).toEqual(['L-1', 'N-1', 'D-1', 'C-1', 'J-1', 'W-1', 'SP-1', 'B-1', 'F-1', 'I-1', 'S-1', 'P-1', 'T-1', 'L-2'])
     expect(body.items[0]).toMatchObject({ domain: 'lending', action: 'lending.writeoff', maker: 'officer.a' })
-    expect(body.items[1]).toMatchObject({ domain: 'domestic-payment', action: 'domestic-payment.transitionStatus', maker: 'operator.d' })
-    expect(body.items[2]).toMatchObject({ domain: 'clearing', action: 'clearingBatch.settle', maker: 'operator.d' })
-    expect(body.items[3]).toMatchObject({ domain: 'ledger', action: 'ledger.reverse', maker: 'operator.d' })
-    expect(body.items[4]).toMatchObject({ domain: 'swift', action: 'swift.send', maker: 'operator.d' })
-    expect(body.items[5]).toMatchObject({ domain: 'sepa-payment', action: 'sepaPayment.transitionStatus', maker: 'operator.d' })
-    expect(body.items[6]).toMatchObject({ domain: 'balance', action: 'balance.debit', maker: 'operator.d' })
-    expect(body.items[7]).toMatchObject({ domain: 'fx', action: 'fx.convert', maker: 'trader.d' })
-    expect(body.items[8]).toMatchObject({ domain: 'sepa-instant', action: 'sctInstPayment.recall', maker: 'operator.e' })
-    expect(body.items[9]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
-    expect(body.items[10]).toMatchObject({ domain: 'agent', action: 'agent.research' })
-    expect(body.items[11]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
+    expect(body.items[1]).toMatchObject({ domain: 'notification', action: 'opsmessage.compose', maker: 'operator.f' })
+    expect(body.items[2]).toMatchObject({ domain: 'domestic-payment', action: 'domestic-payment.transitionStatus', maker: 'operator.d' })
+    expect(body.items[3]).toMatchObject({ domain: 'clearing', action: 'clearingBatch.settle', maker: 'operator.d' })
+    expect(body.items[4]).toMatchObject({ domain: 'ledger', action: 'ledger.reverse', maker: 'operator.d' })
+    expect(body.items[5]).toMatchObject({ domain: 'swift', action: 'swift.send', maker: 'operator.d' })
+    expect(body.items[6]).toMatchObject({ domain: 'sepa-payment', action: 'sepaPayment.transitionStatus', maker: 'operator.d' })
+    expect(body.items[7]).toMatchObject({ domain: 'balance', action: 'balance.debit', maker: 'operator.d' })
+    expect(body.items[8]).toMatchObject({ domain: 'fx', action: 'fx.convert', maker: 'trader.d' })
+    expect(body.items[9]).toMatchObject({ domain: 'sepa-instant', action: 'sctInstPayment.recall', maker: 'operator.e' })
+    expect(body.items[10]).toMatchObject({ domain: 'sanctions', action: 'sanctions.clear', maker: 'analyst.c' })
+    expect(body.items[11]).toMatchObject({ domain: 'agent', action: 'agent.research' })
+    expect(body.items[12]).toMatchObject({ domain: 'transaction', action: 'transaction.reverse', maker: 'teller.d' })
     expect(body.sources.account).toBe('not-configured')
   })
 
@@ -291,6 +298,23 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
 
     expect(seen.some(u => u.includes('/api/v1/balances/approvals'))).toBe(true)
     expect(body.sources.balance).toBe('ok')
+  })
+
+  // Same regression, notification side (issue #5679): notification-service has served
+  // ApprovalStore.decide since ADR-0176 D5 but never the pending list, so a parked
+  // `opsmessage.compose` decision was invisible on the one screen built to show parked
+  // decisions.
+  it('reads the notification queue at all — an unread source is indistinguishable from an empty one', async () => {
+    const seen: string[] = []
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((url: string) => {
+      seen.push(String(url))
+      return Promise.resolve(new Response(JSON.stringify([]), { status: 200 }))
+    }))
+
+    const body = await (await (await route()).GET()).json()
+
+    expect(seen.some(u => u.includes('/api/v1/notifications/approvals'))).toBe(true)
+    expect(body.sources.notification).toBe('ok')
   })
 
   it('degrades to the working half when one queue is down', async () => {

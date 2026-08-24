@@ -192,7 +192,7 @@ function EodPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Clock size={12} /> {lastRefreshed.toLocaleTimeString(locale)}
+              <Clock size={12} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(locale)}
             </span>
           )}
           <button type="button" className="btn btn-secondary" aria-busy={refreshing} aria-label={t('Obnovit denní závěrku', 'Refresh day-end close')} onClick={() => refresh(true)} disabled={refreshing}>
@@ -599,7 +599,7 @@ function EomPanel() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           {lastRefreshed && (
             <span style={{ fontSize: '12px', color: 'var(--text-tertiary)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <Clock size={12} /> {lastRefreshed.toLocaleTimeString(locale)}
+              <Clock size={12} aria-hidden="true" /> {lastRefreshed.toLocaleTimeString(locale)}
             </span>
           )}
           <button type="button" className="btn btn-secondary" aria-busy={refreshing} aria-label={t('Obnovit měsíční závěrku', 'Refresh month-end close')} onClick={() => load(true)} disabled={refreshing}>

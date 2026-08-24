@@ -32,11 +32,27 @@ class ConsentRepositoryImpl(
     override suspend fun save(consent: Consent): Consent =
         Panache.withTransaction { mergeConsent(consent) }.awaitSuspending().toDomain()
 
-    override suspend fun save(consent: Consent, event: DomainEvent): Consent = Panache.withTransaction {
-        // Aggregate state change + outbox row in ONE transaction: the bare persist() inside
-        // persistInTransaction joins this @WithTransaction session (transactional outbox, ADR-0126 §D3).
-        mergeConsent(consent).flatMap { merged ->
-            outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(merged)
+    // Aggregate state change + outbox row in ONE transaction: the bare persist() inside
+    // persistInTransaction joins this @WithTransaction session (transactional outbox, ADR-0126 §D3).
+    // The single-aggregate save(consent, event) is the empty-supersede case of this, defaulted on
+    // the port rather than written twice.
+    override suspend fun saveSuperseding(
+        consent: Consent,
+        event: DomainEvent,
+        superseded: List<Pair<Consent, DomainEvent>>,
+    ): Consent = Panache.withTransaction {
+        // Every merge and every outbox row joins THIS transaction, so the activation and the
+        // retirement of the rows it replaces commit together or not at all (#6487).
+        superseded.fold(Uni.createFrom().voidItem()) { chain, (old, oldEvent) ->
+            chain.flatMap {
+                mergeConsent(old).flatMap {
+                    outboxRepository.persistInTransaction(outboxMessage(oldEvent))
+                }
+            }.replaceWithVoid()
+        }.flatMap {
+            mergeConsent(consent).flatMap { merged ->
+                outboxRepository.persistInTransaction(outboxMessage(event)).replaceWith(merged)
+            }
         }
     }.awaitSuspending().toDomain()
 

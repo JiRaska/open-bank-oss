@@ -15,8 +15,10 @@ import { deriveCaseDecisionBrief } from '@/lib/governance/caseDecisionBrief'
 import { caseStatusPresentation } from '@/lib/governance/caseStatusPresentation'
 import type { CaseStatus } from '@/lib/governance/caseStatusPresentation'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { CaseRuntimeTimeline, CaseRuntimeTopology } from '@/components/agent/CaseRuntimeViews'
+import type { RuntimeEvidenceView } from '@/components/agent/CaseRuntimeViews'
 
-type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED'
+type EntryType = 'CASE_OPENED' | 'CONTRIBUTION' | 'PROPOSAL_EMITTED' | 'SHADOW_RECORDED' | 'POLICY_DECISION' | 'SIGNAL_INVOKED' | 'SIGNAL_CONSUMED' | 'CONTRIBUTION_PERSISTED'
 
 interface ThreadEntry {
   type: EntryType
@@ -30,6 +32,11 @@ interface ThreadEntry {
   proposalId?: string
   proposalType?: string
   shadow?: boolean
+  tokensUsed?: number
+  signalId?: string
+  capability?: string
+  rolloutId?: string
+  runtimeEvidence: RuntimeEvidenceView
 }
 
 interface CaseThread {
@@ -40,6 +47,15 @@ interface CaseThread {
   openedAtEpochMs: number
   deadlineAtEpochMs: number
   contestedRate: number
+  budgetTokens: number
+  budgetContributions: number
+  observedAtEpochMs: number
+  dataFromEpochMs: number
+  dataToEpochMs: number
+  lastSuccessfulLoadEpochMs: number
+  coverageStatus: string
+  historySource: string
+  retentionPolicy: string
   entries: ThreadEntry[]
 }
 
@@ -69,6 +85,7 @@ export default function IaopsCaseThreadPage() {
   const [thread, setThread] = useState<CaseThread | null>(null)
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
+  const [view, setView] = useState<'thread' | 'timeline' | 'topology'>('thread')
 
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const fmt = useCallback(
@@ -154,7 +171,16 @@ export default function IaopsCaseThreadPage() {
             <span>{t('Otevřeno', 'Opened')}: <strong style={{ color: 'var(--text-secondary)' }}>{fmt(thread.openedAtEpochMs)}</strong></span>
             <span>{t('Deadline', 'Deadline')}: <strong style={{ color: 'var(--text-secondary)' }}>{fmt(thread.deadlineAtEpochMs)}</strong></span>
             <span>{t('Míra sporu', 'Contested rate')}: <strong style={{ color: 'var(--text-secondary)' }}>{Math.round(thread.contestedRate * 100)} %</strong></span>
+            <span>{t('Rozpočet', 'Budget')}: <strong style={{ color: 'var(--text-secondary)' }}>{thread.budgetTokens.toLocaleString(locale)} tokens / {thread.budgetContributions} contributions</strong></span>
           </div>
+
+          <nav aria-label={t('Pohled na case', 'Case view')} style={{ display: 'flex', gap: '6px', marginBottom: '16px' }}>
+            {(['thread', 'timeline', 'topology'] as const).map(candidate => (
+              <button key={candidate} type="button" onClick={() => setView(candidate)} aria-pressed={view === candidate} style={{ padding: '6px 11px', borderRadius: '9px', border: `1px solid ${view === candidate ? 'var(--accent-border)' : 'var(--border)'}`, background: view === candidate ? 'var(--accent-bg)' : 'var(--surface)', color: view === candidate ? 'var(--accent-text)' : 'var(--text-secondary)', fontSize: '11px', fontWeight: 750, cursor: 'pointer', textTransform: 'capitalize' }}>
+                {candidate}
+              </button>
+            ))}
+          </nav>
 
           {(() => {
             const brief = deriveCaseDecisionBrief(thread)
@@ -234,7 +260,9 @@ export default function IaopsCaseThreadPage() {
             </div>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {view === 'timeline' && <CaseRuntimeTimeline thread={thread} locale={locale} />}
+          {view === 'topology' && <CaseRuntimeTopology thread={thread} locale={locale} />}
+          {view === 'thread' && <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
             {thread.entries.map((entry, index) => {
               if (entry.type === 'CASE_OPENED') {
                 return (
@@ -268,6 +296,24 @@ export default function IaopsCaseThreadPage() {
                     {!shadow && <Link href="/approvals" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', marginTop: '10px', fontSize: '11px', fontWeight: 700, color: 'var(--accent-text)', textDecoration: 'none' }}>
                       {t('Procházet HITL frontu', 'Browse the HITL queue')}
                     </Link>}
+                  </div>
+                )
+              }
+              if (entry.type === 'POLICY_DECISION' || entry.type === 'SIGNAL_INVOKED' || entry.type === 'SIGNAL_CONSUMED' || entry.type === 'CONTRIBUTION_PERSISTED') {
+                const denied = entry.runtimeEvidence.stage === 'DENIED'
+                return (
+                  <div key={index} style={{ padding: '12px 16px', borderRadius: '12px', background: denied ? 'var(--danger-bg)' : 'var(--info-bg)', border: `1px solid ${denied ? 'var(--danger)' : 'var(--border)'}` }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      {denied ? <TriangleAlert size={13} style={{ color: 'var(--danger)' }} /> : <CircleDot size={13} style={{ color: 'var(--blue)' }} />}
+                      <strong style={{ fontSize: '11px', color: denied ? 'var(--danger)' : 'var(--text-primary)' }}>{entry.type}</strong>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-secondary)' }}>{entry.actor ?? '—'}</span>
+                      {entry.capability && <span style={{ fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--accent-text)' }}>{entry.capability}</span>}
+                      <span style={{ marginLeft: 'auto', fontSize: '10px', color: 'var(--text-tertiary)' }}>{fmt(entry.atEpochMs)}</span>
+                    </div>
+                    <div style={{ marginTop: '6px', fontFamily: 'var(--font-mono)', fontSize: '9px', color: 'var(--text-tertiary)' }}>
+                      {entry.signalId && <>signal {entry.signalId}</>}{entry.signalId && entry.rolloutId && ' · '}{entry.rolloutId && <>rollout {entry.rolloutId}</>}
+                    </div>
+                    {entry.summary && <p style={{ margin: '6px 0 0', fontSize: '11px', color: 'var(--text-secondary)' }}>{entry.summary}</p>}
                   </div>
                 )
               }
@@ -321,7 +367,7 @@ export default function IaopsCaseThreadPage() {
                 </div>
               )
             })}
-          </div>
+          </div>}
         </>
       ) : null}
     </div>

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.2...party-service-v0.18.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+* **party:** create the Hibernate id sequences in lower case so inserts can allocate an id ([#6467](https://github.com/JiRaska/open-bank-oss/issues/6467)) ([134cce5](https://github.com/JiRaska/open-bank-oss/commit/134cce517a32a3e8253885b3735e4877e95fab9a)), closes [#5913](https://github.com/JiRaska/open-bank-oss/issues/5913)
+
+## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.1...party-service-v0.18.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** wire the dead-letter queue the rethrow depends on ([#5745](https://github.com/JiRaska/open-bank-oss/issues/5745)) ([#5751](https://github.com/JiRaska/open-bank-oss/issues/5751)) ([21049ae](https://github.com/JiRaska/open-bank-oss/commit/21049aef887668f2828bd1e719bd05ea32aa48b4))
+
 ## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.0...party-service-v0.18.1) (2026-08-21)
 
 

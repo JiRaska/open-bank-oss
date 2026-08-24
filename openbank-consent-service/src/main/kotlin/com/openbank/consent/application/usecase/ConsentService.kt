@@ -18,6 +18,7 @@ import com.openbank.consent.application.port.out.ScaChallengeClient
 import com.openbank.consent.domain.event.ConsentGranted
 import com.openbank.consent.domain.event.ConsentRejected
 import com.openbank.consent.domain.event.ConsentRevoked
+import com.openbank.consent.domain.event.ConsentSuperseded
 import com.openbank.consent.domain.model.Consent
 import com.openbank.consent.domain.model.ConsentScope
 import com.openbank.consent.domain.model.ConsentStatus
@@ -110,20 +111,11 @@ class ConsentService(
             updatedAt = now,
         )
 
+        // A GDPR-only consent is born ACTIVE (ADR-0205 D1), so it supersedes on creation — the
+        // PENDING_SCA reasoning in persistActivation does not apply where there is no SCA to wait
+        // for. Every other consent supersedes at activateConsent, not here.
         return if (allGdprOnly) {
-            consentRepository.save(
-                consent,
-                ConsentGranted(
-                    aggregateId = consent.id,
-                    partyId = consent.partyId,
-                    granteeId = consent.granteeId,
-                    granteeType = consent.granteeType,
-                    scopes = consent.scopes,
-                    validTo = consent.validTo,
-                    occurredAt = clock.instant(),
-                    sourceService = "consent-service",
-                ),
-            )
+            persistActivation(consent, now)
         } else {
             consentRepository.save(consent)
         }
@@ -153,20 +145,53 @@ class ConsentService(
             throw ConsentScaNotCompletedException(consentId, scaSessionId)
         }
 
-        val activated = consent.activate(scaSessionId, OffsetDateTime.now(clock))
-        return consentRepository.save(
-            activated,
-            ConsentGranted(
-                aggregateId = activated.id,
-                partyId = activated.partyId,
-                granteeId = activated.granteeId,
-                granteeType = activated.granteeType,
-                scopes = activated.scopes,
-                validTo = activated.validTo,
-                occurredAt = clock.instant(),
-                sourceService = "consent-service",
-            ),
+        val now = OffsetDateTime.now(clock)
+        val activated = consent.activate(scaSessionId, now)
+        return persistActivation(activated, now)
+    }
+
+    /**
+     * Commits an activation together with the retirement of every consent it replaces (#6487).
+     *
+     * Superseding happens HERE and not at creation, and the difference matters: a new consent is
+     * born PENDING_SCA, so retiring the old one at creation would end the customer's access before
+     * the replacement had been confirmed — and if the SCA then failed or was abandoned, they would
+     * be left with no consent at all. The old grant stands until the new one is genuinely ACTIVE.
+     *
+     * Without this, `createConsent` never looked for an existing grant, the table has no unique
+     * constraint, `revokeConsent` revokes one row by id, and `hasActiveConsent` answers over a
+     * LIST — so duplicates accumulated and withdrawing access left the older ones granting it.
+     */
+    private suspend fun persistActivation(activated: Consent, now: OffsetDateTime): Consent {
+        val granted = ConsentGranted(
+            aggregateId = activated.id,
+            partyId = activated.partyId,
+            granteeId = activated.granteeId,
+            granteeType = activated.granteeType,
+            scopes = activated.scopes,
+            validTo = activated.validTo,
+            occurredAt = clock.instant(),
+            sourceService = "consent-service",
         )
+
+        val superseded = consentRepository
+            .findActiveByGranteeAndParty(activated.granteeId, activated.partyId)
+            .filter { activated.supersedes(it) }
+            .map { old ->
+                old.supersede(now) to ConsentSuperseded(
+                    aggregateId = old.id,
+                    partyId = old.partyId,
+                    granteeId = old.granteeId,
+                    scopes = old.scopes,
+                    supersededBy = activated.id,
+                    occurredAt = clock.instant(),
+                    sourceService = "consent-service",
+                )
+            }
+
+        // No log line here on purpose: this class logs nothing, and the durable record is the
+        // ConsentSuperseded outbox event, which is queryable long after a log line has aged out.
+        return consentRepository.saveSuperseding(activated, granted, superseded)
     }
 
     override suspend fun rejectConsent(consentId: UUID, reason: String): Consent {

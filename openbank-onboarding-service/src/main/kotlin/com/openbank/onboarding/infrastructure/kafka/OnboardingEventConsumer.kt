@@ -182,7 +182,12 @@ class OnboardingEventConsumer(private val clock: Clock) {
         return when (type) {
             "DEVICE_ENROLLED" -> OnboardingEvent.DeviceEnrolled(
                 partyId = partyId,
-                credentialId = node.path("credentialId").asText(""),
+                // sca-service sends both; `credentialId` is the stable identity of the key
+                // material and `deviceId` the row id. Fall back rather than default to "",
+                // because an empty credential id collapses every one of a party's devices onto
+                // the same ledger key and silently caps device_count at 1.
+                credentialId = node.path("credentialId").asText("").takeIf { it.isNotBlank() }
+                    ?: node.path("deviceId").asText(""),
                 occurredAt = occurredAt,
             )
             else -> null
@@ -226,23 +231,25 @@ class OnboardingEventConsumer(private val clock: Clock) {
             metrics.record(topic, ProjectionOutcomeMetrics.Outcome.FAILED)
             throw e
         }
-        // A skip is NOT a success (#6248). Recording both as PROJECTED is what let 15 DEVICE_ENROLLED
-        // events be consumed with zero lag, reach no row, and leave every alert reading healthy.
+        // A seed is NOT an ordinary success (#6248). This used to be a *drop* counted as
+        // PROJECTED, which is how 15 DEVICE_ENROLLED events were consumed with zero lag, reached
+        // no row, and left every alert reading healthy.
         when (result) {
             ProjectionResult.APPLIED ->
                 metrics.record(topic, ProjectionOutcomeMetrics.Outcome.PROJECTED)
 
-            ProjectionResult.SKIPPED_UNKNOWN_PARTY -> {
-                // WARN, not ERROR: an out-of-order arrival is expected across independent consumer
-                // groups. It is logged at all because the drop is otherwise invisible per-party —
-                // the metric says how many, only this line says which.
-                log.warnf(
-                    "[%s] Dropped %s for party %s: no onboarding record exists yet",
+            ProjectionResult.APPLIED_TO_SEEDED_RECORD -> {
+                // INFO, not WARN: nothing is lost any more. It is logged at all because the
+                // ordering is otherwise invisible per-party — the metric says how many, only
+                // this line says which, and a row with no legal name is a question an operator
+                // will eventually ask about.
+                log.infof(
+                    "[%s] Seeded onboarding record for party %s from %s: PARTY_CREATED has not arrived yet",
                     topic,
-                    event::class.simpleName,
                     partyIdOf(event),
+                    event::class.simpleName,
                 )
-                metrics.record(topic, ProjectionOutcomeMetrics.Outcome.SKIPPED_UNKNOWN_PARTY)
+                metrics.record(topic, ProjectionOutcomeMetrics.Outcome.SEEDED_UNKNOWN_PARTY)
             }
         }
     }

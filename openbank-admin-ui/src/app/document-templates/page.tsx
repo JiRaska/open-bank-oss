@@ -448,12 +448,13 @@ export default function DocumentTemplatesPage() {
       <div style={{ padding: '28px 32px', maxWidth: '1400px' }}>
         <PageHeader breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Šablony dokumentů', 'Document Templates')}</span></div>} icon={<FileSignature size={20} aria-hidden="true" />} title={t('Šablony dokumentů', 'Document Templates')} subtitle={t('Správa šablon smluv, formulářů a vygenerovaných dokumentů (openbank-document-service)', 'Manage contract/form templates and generated documents (openbank-document-service)')} actions={<div style={{ display: 'flex', gap: '8px' }}>
             {canEdit && tab === 'templates' && (
-              <button className="btn btn-primary" onClick={openCreateModal} disabled={loading}>
+              <button className="btn btn-primary" type="button" onClick={openCreateModal} disabled={loading}>
                 <Plus size={14} /> {t('Nová šablona', 'New Template')}
               </button>
             )}
-            <button className="btn btn-secondary" onClick={load} disabled={loading}>
-              <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+            <button className="btn btn-secondary" type="button" onClick={load} disabled={loading}
+              aria-busy={loading} aria-label={t('Obnovit šablony dokumentů', 'Refresh document templates')}>
+              <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
               {t('Obnovit', 'Refresh')}
             </button>
           </div>} />
@@ -572,7 +573,7 @@ export default function DocumentTemplatesPage() {
               </table>
               {!loading && filtered.length > visibleCount && (
                 <div style={{ padding: '12px', textAlign: 'center', borderTop: '1px solid var(--border)' }}>
-                  <button className="btn btn-secondary btn-sm" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>
+                  <button className="btn btn-secondary btn-sm" type="button" onClick={() => setVisibleCount(c => c + PAGE_SIZE)}>
                     {t(`Načíst dalších ${Math.min(PAGE_SIZE, filtered.length - visibleCount)}`, `Load ${Math.min(PAGE_SIZE, filtered.length - visibleCount)} more`)}
                   </button>
                 </div>
@@ -797,8 +798,8 @@ export default function DocumentTemplatesPage() {
                 : t('Vyřazená šablona se přestane nabízet pro generování nových dokumentů.', 'A retired template stops being offered for new document generation.')}
             </div>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button className="btn btn-secondary" onClick={() => setPendingAction(null)} disabled={actioning}>{t('Zrušit', 'Cancel')}</button>
-              <button className="btn btn-primary" onClick={() => runAction(pendingAction.id, pendingAction.kind)} disabled={actioning}>
+              <button className="btn btn-secondary" type="button" onClick={() => setPendingAction(null)} disabled={actioning}>{t('Zrušit', 'Cancel')}</button>
+              <button className="btn btn-primary" type="button" onClick={() => runAction(pendingAction.id, pendingAction.kind)} disabled={actioning} aria-busy={actioning}>
                 {actioning ? t('Provádím…', 'Working…') : t('Potvrdit', 'Confirm')}
               </button>
             </div>
@@ -868,7 +869,7 @@ function DocumentsLookup({ t, language }: { t: (cs: string, en: string) => strin
             onKeyDown={e => { if (e.key === 'Enter') lookup() }}
           />
         </div>
-        <button className="btn btn-primary" onClick={lookup} disabled={loading || idInput.trim().length === 0}>
+        <button className="btn btn-primary" type="button" onClick={lookup} disabled={loading || idInput.trim().length === 0} aria-busy={loading} aria-label={t('Vyhledat dokument podle ID', 'Look up document by ID')}>
           <Search size={13} /> {loading ? t('Hledám…', 'Looking up…') : t('Vyhledat', 'Look up')}
         </button>
       </div>

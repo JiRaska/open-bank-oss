@@ -312,9 +312,9 @@ export default function FxPage() {
           title={t('Devizové operace', 'Foreign Exchange')}
           subtitle={t('CNB, ECB & Bankovní kurzovní lístek', 'CNB, ECB & bank rate sheet')}
           actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <button onClick={loadData} disabled={loading} className="btn btn-secondary btn-sm"><RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>
-            <button onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
-              <Download size={13} style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
+            <button type="button" onClick={loadData} disabled={loading} aria-busy={loading} aria-label={t('Obnovit kurzy FX', 'Refresh FX rates')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>
+            <button type="button" onClick={() => manualRefresh('all')} disabled={!!refreshing || loading} aria-busy={refreshing === 'all'} aria-label={t('Stáhnout všechny kurzy FX', 'Fetch all FX rates')} className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px' }}>
+              <Download size={13} aria-hidden="true" style={{ animation: refreshing === 'all' ? 'spin 1s linear infinite' : 'none' }} />
               {t('Stáhnout vše', 'Fetch All')}
             </button>
             {(() => {

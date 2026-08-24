@@ -178,15 +178,18 @@ export default function TechInventoryPage() {
             </span>
           )}
           <button
+            type="button"
             onClick={() => refresh(true)}
             disabled={refreshing}
+            aria-busy={refreshing}
+            aria-label={t('Obnovit inventář služeb', 'Refresh service inventory')}
             style={{
               padding: '6px 12px', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '6px',
               background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--r-md)',
               cursor: refreshing ? 'wait' : 'pointer', color: 'var(--text-secondary)',
             }}
           >
-            <RefreshCw size={12} style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
+            <RefreshCw size={12} aria-hidden="true" style={{ animation: refreshing ? 'spin 1s linear infinite' : undefined }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}

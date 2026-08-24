@@ -172,8 +172,9 @@ export default function OnboardingPage() {
             <TrendingUp size={13} style={{ color: 'var(--accent)' }} />
             {t('Konverze', 'Conversion')}
           </Link>
-          <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
-            <RefreshCw size={13} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
+          <button className="btn btn-secondary" type="button" onClick={refresh} disabled={loading}
+            aria-busy={loading} aria-label={t('Obnovit onboarding', 'Refresh onboarding')}>
+            <RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} />
             {t('Obnovit', 'Refresh')}
           </button>
         </div>}
@@ -222,12 +223,12 @@ export default function OnboardingPage() {
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('Filtr:', 'Filter:')}</span>
           <span className="pill" style={{ background: `${STAGE_COLOR[stage]}22`, color: STAGE_COLOR[stage], display: 'flex', alignItems: 'center', gap: '4px' }}>
             {stageLabel(stage)}
-            <button
+            <button type="button"
               onClick={() => handleStageFilter('')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: 'inherit' }}
               aria-label={t('Zrušit filtr', 'Clear filter')}
             >
-              <X size={11} />
+              <X size={11} aria-hidden="true" />
             </button>
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t(`${total} záznamů`, `${total} records`)}</span>
@@ -240,7 +241,7 @@ export default function OnboardingPage() {
           <DataUnavailable kind={listUnavail.kind} service={t('Onboarding-service', 'Onboarding-service')} feature={t('Onboarding záznamy', 'Onboarding records')} lang={language} dense />
         </div>
       ) : (
-        <div className="card" style={{ overflow: 'hidden' }}>
+        <div className="card" aria-busy={loading} style={{ overflow: 'hidden' }}>
           <table className="data-table">
             <thead>
               <tr>
@@ -312,13 +313,13 @@ export default function OnboardingPage() {
           {/* Pagination */}
           {total > 20 && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="btn btn-secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+              <button type="button" className="btn btn-secondary" aria-label={t('Předchozí strana onboardingu', 'Previous onboarding page')} disabled={page === 0} onClick={() => setPage(p => p - 1)}>
                 {t('← Předchozí', '← Prev')}
               </button>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                 {t(`Strana ${page + 1} z ${Math.ceil(total / 20)}`, `Page ${page + 1} of ${Math.ceil(total / 20)}`)}
               </span>
-              <button className="btn btn-secondary" disabled={(page + 1) * 20 >= total} onClick={() => setPage(p => p + 1)}>
+              <button type="button" className="btn btn-secondary" aria-label={t('Další strana onboardingu', 'Next onboarding page')} disabled={(page + 1) * 20 >= total} onClick={() => setPage(p => p + 1)}>
                 {t('Další →', 'Next →')}
               </button>
             </div>
