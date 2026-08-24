@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.187.28](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.27...admin-ui-v0.187.28) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify studio review state ([#6662](https://github.com/JiRaska/open-bank-oss/issues/6662)) ([9c3d61c](https://github.com/JiRaska/open-bank-oss/commit/9c3d61cdc32b5855d06cf264c506dc2e0cca9484))
+
 ## [0.187.27](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.26...admin-ui-v0.187.27) (2026-08-23)
 
 
