@@ -177,11 +177,11 @@ function ProductDetailPanel({ product, onClose, onEdit, onToggleStatus }: { prod
           >
             <Edit size={12} /> {t('Upravit', 'Edit')}
           </button>
-          <button type="button" onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
-            {product.status === 'ACTIVE' ? <><Square size={11} /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} /> {t('Aktivovat', 'Activate')}</>}
+          <button type="button" aria-pressed={product.status === 'ACTIVE'} onClick={onToggleStatus} aria-label={product.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')} style={{ background: sc.bg, border: `1px solid ${sc.border}`, borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', color: sc.text }}>
+            {product.status === 'ACTIVE' ? <><Square size={11} aria-hidden="true" /> {t('Deaktivovat', 'Deactivate')}</> : <><Play size={11} aria-hidden="true" /> {t('Aktivovat', 'Activate')}</>}
           </button>
           <button type="button" onClick={onClose} aria-label={t('Zavřít detail produktu', 'Close product details')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-tertiary)', padding: '4px' }}>
-            <X size={18} />
+            <X size={18} aria-hidden="true" />
           </button>
         </div>
       </div>
@@ -692,7 +692,7 @@ export default function ProductCatalogPage() {
                         <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
                           <Edit size={13} aria-hidden="true" />
                         </button>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
+                        <button type="button" aria-pressed={p.status === 'ACTIVE'} className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
                           {p.status === 'ACTIVE' ? <Square size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
                         </button>
                       </div>

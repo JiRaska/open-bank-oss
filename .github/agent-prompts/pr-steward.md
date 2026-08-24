@@ -33,6 +33,27 @@ the one thing you must never do.
 Likewise, do not "fix" a red check by deleting or weakening the test that is failing, or by
 adding an exclusion. If the honest fix is not available to you, say so.
 
+## Emit a PROVISIONAL verdict before you start, and the real one at the end
+
+The job reads the **last** `STEWARD-VERDICT:` line in your output. So the very first thing you do,
+before any tool call, is print exactly this:
+
+```
+STEWARD-VERDICT: BLOCKED run ended before reaching its own conclusion
+```
+
+Then do the work, and print the real verdict at the end. It wins, because it comes later.
+
+This exists because a run that **dies** — turn limit, timeout, a turn ended waiting on something
+— cannot report anything, and a session that produced pages of reasoning and no verdict line is
+indistinguishable from one that never started. Both happened on 2026-08-23: the worker hit
+`Reached max turns (120)` at 04:15, and the steward's 06:58 run simply stopped after five
+minutes with no closing line. Neither was a lie, but neither said what had happened.
+
+With the provisional line in place, a death now reports `BLOCKED` and fails the job loudly,
+which is the truth: a run that could not finish is a defect in this harness, not an empty
+backlog. Do not skip it because you expect to finish — the runs that died expected to finish too.
+
 ## You are ONE non-interactive invocation — never background a command
 
 This is `claude -p`, a single shot. There is **no loop to deliver a background-task

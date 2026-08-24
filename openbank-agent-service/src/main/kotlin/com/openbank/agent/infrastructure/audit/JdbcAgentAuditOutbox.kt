@@ -129,7 +129,14 @@ data class AgentAuditEventEnvelope(
     val eventId: UUID,
     val eventType: String,
     val aggregateType: String,
-    val aggregateId: String,
+    /**
+     * `null` when the audited operation has no distinct resource — never a substitute for one.
+     * [DurableAgentAuditPublisher.publish] used to fall back to [actorId] here, which made an
+     * agent action with no resource store the ACTOR's id as the aggregate, indistinguishable
+     * from a real declaration. A null lets `AuditConsumer.resolveAggregateId` run its own
+     * inference chain and, failing that, record the honest `ABSENT` provenance instead (#6479).
+     */
+    val aggregateId: String?,
     val actorId: String,
     val actorType: String,
     val sourceService: String,
@@ -163,7 +170,7 @@ class DurableAgentAuditPublisher @Inject constructor(
             eventId = event.eventId,
             eventType = event.operation,
             aggregateType = event.resourceType,
-            aggregateId = event.resourceId ?: event.actorId,
+            aggregateId = event.resourceId,
             actorId = event.actorId,
             actorType = event.actorType,
             sourceService = "agent-service",

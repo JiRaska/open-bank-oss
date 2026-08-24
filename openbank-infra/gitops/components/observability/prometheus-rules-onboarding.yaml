@@ -97,6 +97,45 @@ spec:
           annotations:
             summary: "{{ $value }} party(ies) have no KYC case at all"
             description: "openbank_kyc_orphaned_parties is {{ $value }} — that many parties, all past the detection grace period, have NO kyc_cases row. Each is a customer permanently stuck: PENDING_KYC party, accounts stuck in PENDING_ACTIVATION, no welcome bonus, and nothing retries because the PARTY_CREATED event was acked and dropped (#5698). Not self-healing — the event is gone, so it needs a replay per party. The stranded party ids are logged by kyc-service under `[orphan-detection]`; openbank_kyc_orphaned_parties_oldest_age_seconds says how long the worst one has been waiting."
+        - alert: OnboardingProjectionWireFormatMismatch
+          # #4353/#4692/#6248. sca-service published DEVICE_ENROLLED without the discriminator in
+          # the payload body; onboarding's parser fell through to `?: return`, and 15 enrolments
+          # were consumed, acked and discarded with no lag, no error and no log. The alertable
+          # state is therefore the SUCCESS state, not an error rate: a topic delivering messages
+          # of which NONE are projected. `ProjectionOutcomeMetrics` was added for exactly this
+          # and this rule was written only as prose in its KDoc — so when #6248 asked why the
+          # alert had not fired, the answer was that it had never been created. A suggested rule
+          # in a comment is documentation, not a control.
+          expr: |
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="UNRECOGNISED"}[1h])) > 0
+            and
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="PROJECTED"}[1h])) == 0
+          for: 15m
+          labels:
+            severity: critical
+          annotations:
+            # continuous: the subject is inbound event traffic, not a periodic job, so the 1h
+            # window is bounded by the `and PROJECTED == 0` clause rather than by a period.
+            subject_period: continuous
+            summary: "onboarding-service recognises nothing on {{ $labels.topic }}"
+            description: "Every message onboarding-service consumed from `{{ $labels.topic }}` in the last hour parsed as JSON and matched no known event type, and none was projected. The producer and this consumer disagree about the wire format — typically a missing or renamed `eventType` discriminator in the payload body. The funnel is silently frozen for this topic: no lag, no errors, no log lines. Compare a real message on the topic against the parser in `OnboardingEventConsumer`."
+        - alert: OnboardingProjectionSeedingBackwards
+          # Events arriving for parties whose row does not exist yet. Since #6248 the row is
+          # seeded from the event rather than dropped, so this is no longer data loss — but a
+          # topic where seeding DOMINATES means party-events is chronically behind its siblings,
+          # and every such row carries no legal name or email until PARTY_CREATED lands.
+          # A steady trickle is normal across three independent consumer groups; the ratio is not.
+          expr: |
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="SEEDED_UNKNOWN_PARTY"}[1h]))
+            >
+            sum by (topic) (rate(openbank_onboarding_projection_events_total{outcome="PROJECTED"}[1h]))
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "onboarding-service is assembling records backwards on {{ $labels.topic }}"
+            description: "More events on `{{ $labels.topic }}` created a placeholder onboarding record than updated an existing one, for 30 minutes. party-events-in is running behind the KYC/SCA topics, so rows are being built from the wrong end and will show no legal name or email until PARTY_CREATED arrives. Check the `onboarding-service-party` consumer group's lag."
         - alert: KafkaConsumerGroupLagStuck
           # General event-bus safety net — the config comment on the Kafka Exporter calls
           # consumer-group lag "the single most useful event-bus health signal" and until now NO
