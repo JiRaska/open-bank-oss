@@ -141,6 +141,8 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: screening and SCA still run. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-20** — The `/returns` non-repudiation control now exists (issue #6056). It did not
   before: the R row of §5a credited an `AuditService` that is present in no source file in this
   repository, and `openbank-sepa-payment/src/main` contained no audit publisher of any kind. The

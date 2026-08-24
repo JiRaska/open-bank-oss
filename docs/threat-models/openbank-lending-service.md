@@ -412,6 +412,8 @@ comes only from `X-Customer-Party-Id`.
 
 ## 10. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or credit-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-21** — Trust-boundary change (ADR-0269 slice 1): a new customer-edge-facing read
   surface, `GET /api/v1/lending/intake/applications[/{id}]`. See section 9a. Same caller and
   party-header controls as section 9; the new risk is disclosure of another party's credit history,

@@ -4,6 +4,7 @@
 
 package com.openbank.psd2.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -12,6 +13,7 @@ import jakarta.ws.rs.QueryParam
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 
@@ -24,6 +26,7 @@ data class TppAuthorizationResponse(
 
 @Path("/api/v1/tpp-registry")
 @RegisterRestClient(configKey = "tpp-registry")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 interface TppRegistryRestClient {
     @GET
     @Path("/check")
