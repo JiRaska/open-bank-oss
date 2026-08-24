@@ -362,7 +362,13 @@ jobs:
           APP_REPO: JiRaska/openbank-app
         run: |
           set -u
-          api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          # Cross-repository evidence is advisory input. A stalled artifact redirect must
+          # never hold the sandbox deployment indefinitely; an unavailable artifact is
+          # represented as absent evidence by the collector instead.
+          api() {
+            curl -sf --connect-timeout 10 --max-time 20 --retry 2 --retry-delay 1 \
+              -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"
+          }
           mkdir -p openbank-admin-ui/client-test-evidence
           # Only reviewed default-branch evidence may enter a deployed control plane. A newer
           # PR artifact remains visible in GitHub but cannot replace the sandbox verdict.
