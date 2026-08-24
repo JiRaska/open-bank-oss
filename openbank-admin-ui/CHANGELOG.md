@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.187.30](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.29...admin-ui-v0.187.30) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify catalog status control ([#6673](https://github.com/JiRaska/open-bank-oss/issues/6673)) ([85f4619](https://github.com/JiRaska/open-bank-oss/commit/85f4619d15b7ab2620d345ed0cfa4774cc8e7386))
+* **admin-ui:** expose catalog row state ([#6674](https://github.com/JiRaska/open-bank-oss/issues/6674)) ([bbe3ddb](https://github.com/JiRaska/open-bank-oss/commit/bbe3ddbd0d772cb05fc45bba28f234a8d8bf7ca3))
+
 ## [0.187.29](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.28...admin-ui-v0.187.29) (2026-08-24)
 
 
