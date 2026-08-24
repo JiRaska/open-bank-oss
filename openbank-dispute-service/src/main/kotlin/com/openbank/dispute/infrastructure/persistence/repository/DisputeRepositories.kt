@@ -95,6 +95,7 @@ class DisputeRepositoryImpl @Inject constructor(
 
     private fun OutboxMessage.toOutboxEntity() = DisputeOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

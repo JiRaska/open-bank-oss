@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.7.0...case-coordinator-agent-v0.8.0) (2026-08-24)
+
+
+### Features
+
+* **libs:** persist synthetic outbox taint ([#6731](https://github.com/JiRaska/open-bank-oss/issues/6731)) ([f8d165d](https://github.com/JiRaska/open-bank-oss/commit/f8d165dd695cc63ad0181ac97f4303b26c4ded18))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.6.2...case-coordinator-agent-v0.7.0) (2026-08-22)
 
 

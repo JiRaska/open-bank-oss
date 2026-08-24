@@ -112,6 +112,7 @@ class DomesticPaymentOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun OutboxMessage.toEntity() = DomesticPaymentOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

@@ -26,6 +26,8 @@ data class EventAddress(
     val key: String? = null,
     /** `ce-type` header — the outbox event type. */
     val ceType: String? = null,
+    /** Durable synthetic-origin header reconstructed from the outbox entry. */
+    val synthetic: Boolean = false,
 ) {
     companion object {
         val NONE = EventAddress()

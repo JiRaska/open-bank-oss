@@ -59,6 +59,15 @@ class AnalyticsConsumerTest {
     }
 
     @Test
+    fun `persists synthetic provenance from broker metadata`() {
+        val node = mapper.readTree("""{ "aggregateId": "canary-1", "eventType": "payment.created" }""")
+
+        val env = consumer.toEnvelope(node, EventAddress(synthetic = true))
+
+        assertThat(env.synthetic).isTrue()
+    }
+
+    @Test
     fun `infers aggregate type and id when not explicit`() {
         val node = mapper.readTree("""{ "partyId": "p-1", "eventType": "party.created" }""")
 

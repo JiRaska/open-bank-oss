@@ -114,6 +114,7 @@ class EngagementOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun OutboxMessage.toEntity() = EngagementOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

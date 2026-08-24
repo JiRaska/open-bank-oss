@@ -98,6 +98,7 @@ class DelegationOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun OutboxMessage.toEntity() = DelegationOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload
