@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.187.29](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.28...admin-ui-v0.187.29) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify audience draft state ([#6668](https://github.com/JiRaska/open-bank-oss/issues/6668)) ([0a3e366](https://github.com/JiRaska/open-bank-oss/commit/0a3e366340b5de9dd6c31e129a7044b5254c9362))
+* **admin-ui:** clarify payment creation ([#6667](https://github.com/JiRaska/open-bank-oss/issues/6667)) ([9bc7995](https://github.com/JiRaska/open-bank-oss/commit/9bc79957804666af6b53a53fb7471f7dfe713092))
+
 ## [0.187.28](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.27...admin-ui-v0.187.28) (2026-08-24)
 
 
