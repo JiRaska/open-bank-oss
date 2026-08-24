@@ -6,6 +6,5 @@ import io.quarkus.test.junit.QuarkusTestProfile
 
 /** Keeps repository fixtures owned by the test, not the background dispatcher. */
 class OutboxRepositoryIsolationProfile : QuarkusTestProfile {
-    override fun getConfigOverrides(): Map<String, String> =
-        mapOf("openbank.outbox.dispatch-enabled" to "false")
+    override fun getConfigOverrides(): Map<String, String> = mapOf("openbank.outbox.dispatch-enabled" to "false")
 }
