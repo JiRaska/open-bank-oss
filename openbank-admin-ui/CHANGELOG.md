@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.188.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.0...admin-ui-v0.188.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify delegations search ([#6685](https://github.com/JiRaska/open-bank-oss/issues/6685)) ([5dd944c](https://github.com/JiRaska/open-bank-oss/commit/5dd944c4a69490f32bd24c8ed36ecaa16094bcc6))
+* **admin-ui:** clarify onboarding filter reset ([#6695](https://github.com/JiRaska/open-bank-oss/issues/6695)) ([73dad5c](https://github.com/JiRaska/open-bank-oss/commit/73dad5cec6ed2856576503acc26d70c8fbd2d702))
+* **admin-ui:** clarify swift raw disclosure ([#6694](https://github.com/JiRaska/open-bank-oss/issues/6694)) ([d37352f](https://github.com/JiRaska/open-bank-oss/commit/d37352fe016d1768509c835e5360e8efe9d99e34))
+
 ## [0.188.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.30...admin-ui-v0.188.0) (2026-08-24)
 
 
