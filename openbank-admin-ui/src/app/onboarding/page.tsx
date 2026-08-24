@@ -223,12 +223,12 @@ export default function OnboardingPage() {
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t('Filtr:', 'Filter:')}</span>
           <span className="pill" style={{ background: `${STAGE_COLOR[stage]}22`, color: STAGE_COLOR[stage], display: 'flex', alignItems: 'center', gap: '4px' }}>
             {stageLabel(stage)}
-            <button
+            <button type="button"
               onClick={() => handleStageFilter('')}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex', color: 'inherit' }}
               aria-label={t('Zrušit filtr', 'Clear filter')}
             >
-              <X size={11} />
+              <X size={11} aria-hidden="true" />
             </button>
           </span>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{t(`${total} záznamů`, `${total} records`)}</span>
