@@ -271,6 +271,8 @@ jobs:
       # reads JUnit/Kover counts and the secret-free shared Testcontainers lifecycle log.
       - name: Build Test Intelligence run envelope
         if: always()
+        # Evidence collection observes the build; it must never gate it (#6614).
+        continue-on-error: true
         run: |
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "${{ inputs.service }}" \

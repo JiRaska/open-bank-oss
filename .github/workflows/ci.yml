@@ -155,6 +155,7 @@ jobs:
 
       - name: Build Admin UI Test Intelligence envelope
         if: always()
+        continue-on-error: true
         run: |
           python3 ../.github/scripts/collect-test-run-evidence.py \
             --service . --component openbank-admin-ui --out build/test-intelligence/run.json

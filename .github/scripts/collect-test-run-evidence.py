@@ -90,12 +90,38 @@ def classify(name: str, classname: str, task: str, component: str) -> str:
     return "unit"
 
 
+def junit_suites(root: Path):
+    """Yield (task, testsuite element) for every JUnit report under build/test-results.
+
+    Gradle writes ``TEST-<class>.xml`` with a ``<testsuite>`` root; vitest and Playwright
+    write an arbitrarily named file with a ``<testsuites>`` wrapper. Globbing the Gradle
+    filename convention silently produced an empty Admin UI envelope, so match any XML and
+    discriminate on the parsed root tag instead. An unparsable report is skipped rather than
+    failing the producing build: a missing observation must never gate the suite it observes.
+    """
+    if not root.exists():
+        return
+    for report in sorted(root.glob("**/*.xml")):
+        try:
+            tree = ET.parse(report).getroot()
+        except ET.ParseError:
+            print(f"::warning::test-intelligence: unparsable JUnit report skipped: {report}")
+            continue
+        if tree.tag not in ("testsuite", "testsuites"):
+            continue
+        task = report.relative_to(root).parts[0]
+        if tree.tag == "testsuite":
+            yield task, tree
+            continue
+        children = tree.findall("testsuite")
+        for child in children or [tree]:
+            yield task, child
+
+
 def suites(component: str, service: Path) -> list[dict]:
     totals: dict[str, dict] = {}
     root = service / "build" / "test-results"
-    for report in root.glob("**/TEST-*.xml") if root.exists() else []:
-        task = report.relative_to(root).parts[0]
-        tree = ET.parse(report).getroot()
+    for task, tree in junit_suites(root):
         cases = tree.findall(".//testcase")
         sample = cases[0] if cases else None
         kind = classify(tree.attrib.get("name", ""), sample.attrib.get("classname", "") if sample is not None else "", task, component)
@@ -110,6 +136,11 @@ def suites(component: str, service: Path) -> list[dict]:
                    skipped=row["skipped"] + skipped, passed=row["passed"] + max(0, executed - failed - errors),
                    durationMs=row["durationMs"] + round(float(tree.attrib.get("time", 0)) * 1000))
     for row in totals.values():
+        # Derive the totals the v1 contract requires to be consistent. A report whose
+        # failures+errors exceed tests-minus-skipped (a killed JVM, a partial write) must not
+        # make validate_envelope reject the envelope and fail an otherwise green build.
+        row["executed"] = row["passed"] + row["failed"] + row["errors"]
+        row["discovered"] = row["executed"] + row["skipped"]
         row["state"] = "failed" if row["failed"] + row["errors"] else "skipped" if row["executed"] == 0 else "passed"
     return sorted(totals.values(), key=lambda row: row["kind"])
 
@@ -118,9 +149,7 @@ def test_cases(component: str, service: Path) -> list[dict]:
     """Emit secret-free observations with a stable test-definition identity."""
     result = []
     root = service / "build" / "test-results"
-    for report in root.glob("**/TEST-*.xml") if root.exists() else []:
-        task = report.relative_to(root).parts[0]
-        tree = ET.parse(report).getroot()
+    for task, tree in junit_suites(root):
         for case in tree.findall(".//testcase"):
             name = case.attrib.get("name", "unknown")
             classname = case.attrib.get("classname", tree.attrib.get("name", "unknown"))
@@ -229,6 +258,41 @@ def main() -> None:
             performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":{"ok":false}}}}}')
             mutation = service / "mutations.xml"
             mutation.write_text('<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>')
+            # Negative control for the report discovery itself: a vitest/Playwright
+            # `<testsuites>` file is not named TEST-*.xml, and globbing that Gradle
+            # convention reported an empty Admin UI envelope while its suites passed.
+            for task, payload in (
+                ("test", '<testsuites name="vitest" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
+                          '<testsuite name="unit" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
+                          '<testcase classname="guard" name="allows" time="0.5"/>'
+                          '<testcase classname="guard" name="denies" time="1.0"><failure/></testcase>'
+                          '</testsuite></testsuites>'),
+                ("e2e", '<testsuites name="playwright" tests="1" failures="0" errors="0" skipped="0" time="2">'
+                        '<testsuite name="nav" tests="1" failures="0" errors="0" skipped="0" time="2">'
+                        '<testcase classname="nav.spec.ts" name="loads" time="2"/>'
+                        '</testsuite></testsuites>'),
+            ):
+                directory = service / "build/test-results" / task
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / f"{task}.xml").write_text(payload)
+            discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
+            assert set(discovered) == {"unit", "e2e"}, discovered
+            assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
+            assert discovered["unit"]["state"] == "failed" and discovered["e2e"]["state"] == "passed"
+            assert len(test_cases("openbank-admin-ui", service)) == 3
+            # An unparsable report is observed as absent, never as a build failure.
+            (service / "build/test-results/test/broken.xml").write_text("<testsuite")
+            assert len(suites("openbank-admin-ui", service)) == 2
+            # A report whose failures exceed its executed count still yields a valid envelope.
+            (service / "build/test-results/test/TEST-Truncated.xml").write_text(
+                '<testsuite name="Truncated" tests="1" failures="3" errors="0" skipped="0" time="0"/>')
+            validate_envelope({
+                "schemaVersion": 1,
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main",
+                        "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                "component": "openbank-admin-ui", "suites": suites("openbank-admin-ui", service),
+                "coverage": None, "testInfrastructure": {"declared": [], "observed": []},
+            })
             assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
             assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
             assert [item["lifecycle"] for item in observations(service)] == ["started", "stopped"]

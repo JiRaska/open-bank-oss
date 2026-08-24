@@ -497,8 +497,14 @@ jobs:
           set -u
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-intelligence-history
-          api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100" \
-            | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]; a.sort(key=lambda x:x['created_at'], reverse=True); [print(x['id']) for x in a[:30]]" \
+          # The repository-wide artifact list is newest-first and every services-ci run
+          # contributes two per changed service, so a single 100-item page never reaches a
+          # snapshot. The `name=` filter is exact-match and these names carry the run id, so
+          # it cannot be used either: paginate and filter on the prefix (#6614).
+          for page in 1 2 3 4 5; do
+            api "https://api.github.com/repos/${REPO}/actions/artifacts?per_page=100&page=${page}" \
+              | python3 -c "import json,sys; [print(x['id']) for x in json.load(sys.stdin).get('artifacts',[]) if x['name'].startswith('test-intelligence-snapshot-') and not x['expired']]" 2>/dev/null || true
+          done | head -30 \
             | while read -r artifact_id; do
                 [ -n "${artifact_id}" ] || continue
                 api "https://api.github.com/repos/${REPO}/actions/artifacts/${artifact_id}/zip" -L -o "/tmp/test-intelligence-${artifact_id}.zip" 2>/dev/null || continue

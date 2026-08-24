@@ -91,6 +91,7 @@ jobs:
 
       - name: Build mutation Test Intelligence envelope
         if: always()
+        continue-on-error: true
         run: |
           python3 .github/scripts/collect-test-run-evidence.py \
             --service "${{ matrix.service }}" \

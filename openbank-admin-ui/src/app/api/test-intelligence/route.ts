@@ -25,6 +25,17 @@ const emptyReport = (error: string): TestIntelligenceReport => ({
 type PrometheusVector = { status?: string; data?: { result?: { value?: [number, string] }[] } }
 type PrometheusLabelVector = { status?: string; data?: { result?: { metric?: Record<string, string>; value?: [number, string] }[] } }
 
+// Journey ids arrive from the build-time bundled report, so they are file data reaching an
+// outbound Prometheus request. Kubernetes object names are already restricted to this
+// alphabet, which makes rejection — never escaping — the correct handling: an id that cannot
+// be a cronjob name has no live counterpart to query, and quoting it would hide that.
+const KUBERNETES_NAME = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
+
+function cronjobSelector(journeyId: string): string | null {
+  const name = `journey-${journeyId}`
+  return KUBERNETES_NAME.test(name) ? name : null
+}
+
 function prometheusBase(): string | null {
   if (process.env.SERVICES_HOST === 'container') return 'http://prometheus:9090'
   return process.env.PROMETHEUS_URL ?? null
@@ -77,7 +88,8 @@ async function attachLiveJourneys(report: TestIntelligenceReport): Promise<TestI
   const nowSeconds = Date.now() / 1000
   const syntheticJourneys = await Promise.all(report.syntheticJourneys.map(async journey => {
     if (journey.status !== 'active') return journey
-    const cronjob = `journey-${journey.id}`
+    const cronjob = cronjobSelector(journey.id)
+    if (!cronjob) return journey
     const [scheduled, successful, failures, recentRuns] = await Promise.all([
       queryPrometheus(base, `max(kube_cronjob_status_last_schedule_time{namespace="observability",cronjob="${cronjob}"})`),
       queryPrometheus(base, `max(kube_cronjob_status_last_successful_time{namespace="observability",cronjob="${cronjob}"})`),
