@@ -88,29 +88,29 @@ class OnboardingEventConsumerTest {
      * measuring that a counter was touched, not which bucket it landed in.
      */
     @Test
-    fun `a skipped projection is recorded as SKIPPED_UNKNOWN_PARTY and never as PROJECTED`(): Unit = runBlocking {
+    fun `a seeded projection is recorded as SEEDED_UNKNOWN_PARTY and never as PROJECTED`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
-        coEvery { projection.applyEvent(any()) } returns ProjectionResult.SKIPPED_UNKNOWN_PARTY
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED_TO_SEEDED_RECORD
 
         consumer.consumeScaEvent(
             """{"eventType":"DEVICE_ENROLLED","partyId":"$partyId","credentialId":"c1"}""",
         )
 
         verify(exactly = 1) {
-            metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.SKIPPED_UNKNOWN_PARTY)
+            metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.SEEDED_UNKNOWN_PARTY)
         }
         verify(exactly = 0) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.PROJECTED) }
         verify(exactly = 0) { metrics.record("sca-events-in", ProjectionOutcomeMetrics.Outcome.FAILED) }
     }
 
     /**
-     * A skip must stay acked. Nacking it would wedge the consumer group on an ordering race that
-     * resolves itself, which is the failure mode the original `?: return` was right to avoid —
-     * only its reporting was wrong.
+     * A seed must stay acked. Nacking it would wedge the consumer group on an ordering race
+     * that resolves itself, which is the failure mode the original `?: return` was right to
+     * avoid — what was wrong was discarding the event, and then reporting that as a success.
      */
     @Test
-    fun `a skipped projection does not throw`() {
-        coEvery { projection.applyEvent(any()) } returns ProjectionResult.SKIPPED_UNKNOWN_PARTY
+    fun `a seeded projection does not throw`() {
+        coEvery { projection.applyEvent(any()) } returns ProjectionResult.APPLIED_TO_SEEDED_RECORD
 
         assertThatCode {
             runBlocking {

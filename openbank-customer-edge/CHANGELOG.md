@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.67.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.1...customer-edge-v0.67.0) (2026-08-22)
+
+
+### Features
+
+* **lending:** ADR-0269 slice 1 — one credit journey, three product shapes, customer-readable projection ([#6230](https://github.com/JiRaska/open-bank-oss/issues/6230)) ([a969810](https://github.com/JiRaska/open-bank-oss/commit/a969810df5541832f63580dfa828efaec81a3ba4))
+
+
+### Bug Fixes
+
+* **docs:** repair the 7 .mmd diagrams that do not parse ([#6496](https://github.com/JiRaska/open-bank-oss/issues/6496)) ([c1e6ad7](https://github.com/JiRaska/open-bank-oss/commit/c1e6ad7b14887db70ec3365747f2ed06d9ec02db))
+
 ## [0.66.1](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.66.0...customer-edge-v0.66.1) (2026-08-22)
 
 

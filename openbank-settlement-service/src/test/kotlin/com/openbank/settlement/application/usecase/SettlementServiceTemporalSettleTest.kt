@@ -52,7 +52,7 @@ class SettlementServiceTemporalSettleTest {
         worker.registerActivitiesImplementations(RelaxedActivities())
         env.start()
         every { temporalConfig.taskQueue() } returns TASK_QUEUE
-        service = SettlementService(repo, temporalConfig, env.workflowClient)
+        service = SettlementService(repo, temporalConfig, env.workflowClient, mockk(relaxed = true))
     }
 
     @AfterEach
@@ -104,6 +104,7 @@ class SettlementServiceTemporalSettleTest {
         override fun bookToLedger(settlementId: UUID) = Unit
         override fun reverseDebit(settlementId: UUID) = Unit
         override fun reverseCredit(settlementId: UUID) = Unit
+        override fun reverseBookToLedger(settlementId: UUID) = Unit
         override fun rejectSettlement(settlementId: UUID) = Unit
     }
 }

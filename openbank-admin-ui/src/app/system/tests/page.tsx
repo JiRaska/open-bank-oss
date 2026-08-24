@@ -1,646 +1,285 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  FlaskConical, RefreshCw, CheckCircle2, XCircle, Minus,
-  ShieldCheck, Dna, Star,
+  Activity, BarChart3, CheckCircle2, CircleHelp, Dna, FlaskConical,
+  Gauge, RefreshCw, ShieldCheck, Timer, TriangleAlert, XCircle,
 } from 'lucide-react'
-import { DataUnavailable } from '@/components/feedback/DataUnavailable'
+import { useLanguage } from '@/lib/i18n/LanguageContext'
+import type {
+  ComponentTestPosture, EvidenceKind, EvidenceState, TestIntelligenceReport,
+} from '@/lib/types/test-intelligence'
+import { TestIntelligenceFlow } from '@/components/testing/TestIntelligenceFlow'
+import { TestAgentPanel } from '@/components/testing/TestAgentPanel'
 import { PageHeader } from '@/components/ui/PageHeader'
-import type { TestResultsResponse, ServiceTestResult } from '@/lib/types/test-results'
-import type { QualityReport, MutationScore, ContractVerification, ServiceQualityScore } from '@/lib/types/quality-report'
 
-// ── Shared helpers ────────────────────────────────────────────────────────────
+type Tab = 'posture' | 'tests' | 'history' | 'execution' | 'runtime' | 'coverage' | 'contracts' | 'mutation' | 'performance' | 'synthetic' | 'clients'
 
-function PassRateBar({ passed, total }: { passed: number; total: number }) {
-  if (total === 0) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
-  const pct = Math.round((passed / total) * 100)
-  const color = pct === 100 ? '#16a34a' : pct >= 80 ? '#d97706' : '#dc2626'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <div style={{ flex: 1, height: '6px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '80px' }}>
-        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.3s ease' }} />
-      </div>
-      <span style={{ fontSize: '11px', fontWeight: 700, color, minWidth: '34px', textAlign: 'right' }}>{pct}%</span>
-    </div>
-  )
+const STATE_COLOR: Record<EvidenceState, string> = {
+  passed: '#16a34a', failed: '#dc2626', skipped: '#d97706', 'not-run': '#64748b',
+  stale: '#d97706', blocked: '#7c3aed', unknown: '#64748b',
 }
 
-function ScoreBar({ score, threshold = 70 }: { score: number | null; threshold?: number }) {
-  if (score === null) return <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>—</span>
-  const color = score >= threshold ? '#16a34a' : score >= threshold * 0.8 ? '#d97706' : '#dc2626'
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <div style={{ flex: 1, height: '6px', background: 'var(--surface-3)', borderRadius: '3px', overflow: 'hidden', minWidth: '80px' }}>
-        <div style={{ width: `${score}%`, height: '100%', background: color, borderRadius: '3px', transition: 'width 0.3s ease' }} />
-      </div>
-      <span style={{ fontSize: '11px', fontWeight: 700, color, minWidth: '34px', textAlign: 'right' }}>{score}%</span>
-    </div>
-  )
-}
+const KINDS: EvidenceKind[] = ['unit', 'integration', 'contract', 'e2e', 'mutation', 'simulation', 'performance', 'synthetic']
 
-function StatusBadge({ status }: { status: 'passed' | 'failed' | 'pending' }) {
-  const cfg = {
-    passed: { color: '#16a34a', bg: '#dcfce7', label: '✓' },
-    failed: { color: '#dc2626', bg: '#fee2e2', label: '✗' },
-    pending: { color: '#6b7280', bg: 'var(--surface-2)', label: '–' },
-  }[status]
+function StateBadge({ state }: { state: EvidenceState }) {
+  const Icon = state === 'passed' ? CheckCircle2 : state === 'failed' ? XCircle
+    : state === 'unknown' || state === 'not-run' ? CircleHelp : TriangleAlert
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '22px', height: '22px', borderRadius: '4px', background: cfg.bg, color: cfg.color, fontSize: '12px', fontWeight: 700 }}>
-      {cfg.label}
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, color: STATE_COLOR[state], fontSize: 11, fontWeight: 700 }}>
+      <Icon size={12} />{state}
     </span>
   )
 }
 
-// ── Tests tab ─────────────────────────────────────────────────────────────────
-
-function ServiceRow({ svc }: { svc: ServiceTestResult }) {
-  const { t, language } = useLanguage()
-  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const hasTests = svc.tests > 0
-  const hasFail = svc.failed + svc.errors > 0
-  const statusIcon = !hasTests
-    ? <Minus size={14} style={{ color: 'var(--text-tertiary)' }} />
-    : hasFail
-      ? <XCircle size={14} style={{ color: '#dc2626' }} />
-      : <CheckCircle2 size={14} style={{ color: '#16a34a' }} />
+function Stat({ label, value, tone }: { label: string; value: number | string; tone?: string }) {
   return (
-    <tr style={{ borderBottom: '1px solid var(--border)', background: !hasTests ? 'transparent' : hasFail ? 'rgba(220,38,38,0.03)' : 'transparent' }}>
-      <td style={{ padding: '10px 16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-        {statusIcon}
-        <span style={{ fontSize: '12px', fontFamily: 'monospace', color: 'var(--text-primary)', fontWeight: 500 }}>
-          {svc.service.replace('openbank-', '')}
-        </span>
-      </td>
-      <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '13px', fontWeight: 700, color: 'var(--text-primary)' }}>
-        {hasTests ? svc.tests : <span style={{ color: 'var(--text-tertiary)' }}>0</span>}
-      </td>
-      <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '13px', color: '#16a34a', fontWeight: hasTests ? 600 : 400 }}>
-        {hasTests ? svc.passed : '—'}
-      </td>
-      <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '13px', color: hasFail ? '#dc2626' : 'var(--text-tertiary)', fontWeight: hasFail ? 700 : 400 }}>
-        {hasTests ? (svc.failed + svc.errors || '—') : '—'}
-      </td>
-      <td style={{ padding: '10px 16px', minWidth: '140px' }}>
-        <PassRateBar passed={svc.passed} total={svc.tests} />
-      </td>
-      <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '11px', color: 'var(--text-tertiary)', fontFamily: 'monospace' }}>
-        {hasTests ? `${svc.durationMs}ms` : '—'}
-      </td>
-      <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-        {svc.lastRunAt ? new Date(svc.lastRunAt).toLocaleString(dateLocale) : '—'}
-      </td>
-      <td style={{ padding: '10px 16px', textAlign: 'center', fontSize: '11px', color: 'var(--text-tertiary)' }}>
-        {t(`${svc.unit.tests} unit`, `${svc.unit.tests} unit`)} / {t(`${svc.integration.tests} int.`, `${svc.integration.tests} int.`)}
-      </td>
-    </tr>
+    <div style={{ padding: 16, border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface-1)' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 750, color: tone ?? 'var(--text-primary)' }}>{value}</div>
+    </div>
   )
 }
 
-function TestsTab({ data, error, loading }: { data: TestResultsResponse | null; error: string | null; loading: boolean }) {
+function EvidenceCell({ component, kind }: { component: ComponentTestPosture; kind: EvidenceKind }) {
+  const evidence = component.evidence.find(item => item.kind === kind)
+  if (!evidence) return <StateBadge state="not-run" />
+  return <StateBadge state={evidence.state} />
+}
+
+const tableStyle = { width: '100%', borderCollapse: 'collapse' as const, fontSize: 12 }
+const thStyle = { padding: '10px 12px', textAlign: 'left' as const, borderBottom: '1px solid var(--border)', color: 'var(--text-tertiary)', fontSize: 11 }
+const tdStyle = { padding: '10px 12px', borderBottom: '1px solid var(--border-subtle)' }
+const formatTimestamp = (value: string) => new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+
+function Posture({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
-  const totals = data?.totals
-  const passRate = totals && totals.tests > 0 ? Math.round((totals.passed / totals.tests) * 100) : null
-  const coverageColor = passRate == null ? 'var(--text-secondary)' : passRate === 100 ? '#16a34a' : passRate >= 80 ? '#d97706' : '#dc2626'
-  const coverageBg = passRate == null ? 'var(--surface-2)' : passRate === 100 ? '#dcfce7' : passRate >= 80 ? '#fef9c3' : '#fee2e2'
-
-  const sorted = data?.services.slice().sort((a, b) => {
-    if (a.failed + a.errors > 0 && b.failed + b.errors === 0) return -1
-    if (b.failed + b.errors > 0 && a.failed + a.errors === 0) return 1
-    if (a.tests === 0 && b.tests > 0) return 1
-    if (b.tests === 0 && a.tests > 0) return -1
-    return a.service.localeCompare(b.service)
-  })
-
+  const sorted = useMemo(() => [...report.components].sort((a, b) => {
+    if (a.moneyPath !== b.moneyPath) return a.moneyPath ? -1 : 1
+    return a.component.localeCompare(b.component)
+  }), [report.components])
   return (
     <>
-      {error && (
-        <div style={{ marginBottom: '20px' }}>
-          <DataUnavailable
-            kind="error"
-            feature={t('Pokrytí testy', 'Test coverage')}
-            lang={t('cs', 'en') as 'cs' | 'en'}
-            detail={t(
-              'Zdroj výsledků testů (CI databáze) není v tomto prostředí dostupný.',
-              'The test-results source (CI database) is not available in this environment.',
-            )}
-            dense
-          />
-        </div>
-      )}
-
-      {totals && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px', marginBottom: '24px' }}>
-          {[
-            { label: t('Celkový pass rate', 'Overall pass rate'), value: passRate != null ? `${passRate}%` : '—', sub: `${totals.passed}/${totals.tests} ${t('testů', 'tests')}`, color: coverageColor, bg: coverageBg },
-            { label: t('Testy celkem', 'Total tests'), value: totals.tests.toString(), sub: '', color: 'var(--text-primary)', bg: 'var(--surface-2)' },
-            { label: t('Úspěšné', 'Passed'), value: totals.passed.toString(), sub: '', color: '#16a34a', bg: '#dcfce7' },
-            { label: t('Selhání', 'Failed'), value: totals.failed.toString(), sub: '', color: totals.failed > 0 ? '#dc2626' : 'var(--text-secondary)', bg: totals.failed > 0 ? '#fee2e2' : 'var(--surface-2)' },
-            { label: t('Služby s testy', 'Services with tests'), value: `${totals.servicesWithTests}/${totals.services}`, sub: `${totals.services - totals.servicesWithTests} ${t('bez testů', 'without tests')}`, color: totals.servicesWithTests < totals.services ? '#d97706' : '#16a34a', bg: totals.servicesWithTests < totals.services ? '#fef9c3' : '#dcfce7' },
-          ].map(stat => (
-            <div key={stat.label} className="card" style={{ padding: '16px', background: stat.bg }}>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{stat.label}</div>
-              <div style={{ fontSize: '22px', fontWeight: 800, color: stat.color, marginBottom: '2px' }}>{stat.value}</div>
-              {stat.sub && <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{stat.sub}</div>}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {loading && !data ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {Array.from({ length: 8 }).map((_, idx) => <div key={idx} className="skeleton" style={{ height: '42px' }} />)}
-        </div>
-      ) : sorted && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-            <thead>
-              <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-                {[
-                  t('Služba', 'Service'),
-                  t('Testy', 'Tests'),
-                  t('OK', 'Passed'),
-                  t('FAIL', 'Failed'),
-                  t('Pass rate', 'Pass rate'),
-                  t('Trvání', 'Duration'),
-                  t('Poslední spuštění', 'Last run'),
-                  t('Typ', 'Type'),
-                ].map(h => (
-                  <th key={h} style={{ padding: '10px 16px', textAlign: h === t('Služba', 'Service') ? 'left' : 'center', fontWeight: 600, color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map(svc => <ServiceRow key={svc.service} svc={svc} />)}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      <div style={{ marginTop: '12px', fontSize: '11px', color: 'var(--text-tertiary)', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
-        {t(
-          'Data se čtou z build/test-results/test/*.xml každé služby. Spusť testy příkazem: ./gradlew test.',
-          'Data is read from build/test-results/test/*.xml per service. Run tests with: ./gradlew test.',
-        )}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12, marginBottom: 20 }}>
+        <Stat label="Inventoried components" value={report.totals.components} />
+        <Stat label="With execution evidence" value={`${report.totals.componentsWithExecutionEvidence}/${report.totals.components}`} />
+        <Stat label="Money-path components" value={report.totals.moneyPathComponents} />
+        <Stat label="Failing evidence" value={report.totals.failingEvidence} tone={report.totals.failingEvidence ? '#dc2626' : '#16a34a'} />
+        <Stat label="No execution evidence" value={report.totals.missingEvidence} tone={report.totals.missingEvidence ? '#d97706' : '#16a34a'} />
+        <Stat label="Stale evidence" value={report.totals.staleEvidence} tone={report.totals.staleEvidence ? '#d97706' : '#16a34a'} />
+      </div>
+      <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+        <table style={tableStyle}>
+          <thead><tr><th style={thStyle}>{t('Komponenta', 'Component')}</th>{KINDS.map(kind => <th key={kind} style={thStyle}>{kind}</th>)}<th style={thStyle}>{t('Řádky Kover', 'Kover lines')}</th></tr></thead>
+          <tbody>{sorted.map(component => (
+            <tr key={component.component}>
+              <td style={{ ...tdStyle, fontWeight: 650 }}>{component.component}{component.moneyPath && <span style={{ marginLeft: 6, color: '#dc2626', fontSize: 9 }}>{t('PENĚŽNÍ TOK', 'MONEY PATH')}</span>}</td>
+              {KINDS.map(kind => <td key={kind} style={tdStyle}><EvidenceCell component={component} kind={kind} /></td>)}
+              <td style={tdStyle}>{component.coverage.lines.percentage === null ? <StateBadge state={component.coverage.state} /> : `${component.coverage.lines.percentage}%`}</td>
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     </>
   )
 }
 
-// ── Contract tab ──────────────────────────────────────────────────────────────
-
-function ContractTab({ contracts, error }: { contracts: ContractVerification[]; error: boolean }) {
-  const { t, language } = useLanguage()
-  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-
-  if (error) {
-    return (
-      <DataUnavailable
-        kind="no_data"
-        feature={t('Smluvní testy (Pact)', 'Contract tests (Pact)')}
-        lang={t('cs', 'en') as 'cs' | 'en'}
-        detail={t(
-          'Výsledky kontraktních testů nejsou k dispozici. Spusť ./gradlew test v balance-service a ledger-service.',
-          'Contract test results are not available. Run ./gradlew test in balance-service and ledger-service.',
-        )}
-        dense
-      />
-    )
-  }
-
-  if (contracts.length === 0) {
-    return (
-      <div className="card" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-        <ShieldCheck size={32} style={{ margin: '0 auto 12px', color: 'var(--text-tertiary)' }} />
-        <p style={{ fontSize: '13px' }}>
-          {t(
-            'Žádné kontraktní testy k dispozici. Výsledky se zobrazí po spuštění CI pipeline.',
-            'No contract test results available. Results appear after running the CI pipeline.',
-          )}
-        </p>
-        <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>
-          {t('Paktové soubory: pacts/', 'Pact files: pacts/')}
-        </p>
-      </div>
-    )
-  }
-
-  const providers = [...new Set(contracts.map(c => c.provider))].sort()
-  const consumers = [...new Set(contracts.map(c => c.consumer))].sort()
-
+function Execution({ report }: { report: TestIntelligenceReport }) {
+  const rows = report.components.flatMap(component => component.evidence
+    .filter(item => ['unit', 'integration', 'e2e', 'simulation'].includes(item.kind))
+    .map(item => ({ component: component.component, ...item })))
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', background: 'var(--surface-2)', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-          {t('Provider × Consumer matice', 'Provider × Consumer matrix')}
-        </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-            <thead>
-              <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                <th style={{ padding: '10px 16px', textAlign: 'left', fontWeight: 600, color: 'var(--text-secondary)', minWidth: '180px' }}>
-                  {t('Provider ↓ / Consumer →', 'Provider ↓ / Consumer →')}
-                </th>
-                {consumers.map(consumer => (
-                  <th key={consumer} style={{ padding: '10px 16px', textAlign: 'center', fontWeight: 600, color: 'var(--text-secondary)', fontFamily: 'monospace', fontSize: '11px' }}>
-                    {consumer.replace('openbank-', '')}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {providers.map(provider => (
-                <tr key={provider} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                    {provider.replace('openbank-', '')}
-                  </td>
-                  {consumers.map(consumer => {
-                    const contract = contracts.find(c => c.provider === provider && c.consumer === consumer)
-                    return (
-                      <td key={consumer} style={{ padding: '10px 16px', textAlign: 'center' }}>
-                        {contract ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-                            <StatusBadge status={contract.status} />
-                            {contract.verifiedAt && (
-                              <span style={{ fontSize: '10px', color: 'var(--text-tertiary)' }}>
-                                {new Date(contract.verifiedAt).toLocaleDateString(dateLocale)}
-                              </span>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--text-tertiary)', fontSize: '11px' }}>—</span>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {contracts.map(contract => (
-        <div key={`${contract.consumer}-${contract.provider}`} className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: '10px', background: 'var(--surface-2)' }}>
-            <StatusBadge status={contract.status} />
-            <span style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: 600 }}>
-              {contract.consumer.replace('openbank-', '')}
-            </span>
-            <span style={{ color: 'var(--text-tertiary)' }}>→</span>
-            <span style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: 600 }}>
-              {contract.provider.replace('openbank-', '')}
-            </span>
-            <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginLeft: 'auto' }}>
-              {contract.pactFile}
-            </span>
-          </div>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-            <tbody>
-              {contract.interactions.map((interaction, idx) => (
-                <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '8px 16px', width: '24px' }}>
-                    <StatusBadge status={interaction.status} />
-                  </td>
-                  <td style={{ padding: '8px 16px', color: 'var(--text-primary)' }}>
-                    {interaction.description}
-                  </td>
-                  {interaction.failure && (
-                    <td style={{ padding: '8px 16px', color: '#dc2626', fontSize: '11px', fontFamily: 'monospace' }}>
-                      {interaction.failure}
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ))}
-
-      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
-        {t(
-          'Kontrakty se generují z Pact consumer testů a ukládají do pacts/ (git-pact, ADR-0063). Verifikace probíhá v CI providera.',
-          'Contracts are generated from Pact consumer tests and stored in pacts/ (git-pact, ADR-0063). Verification runs in the provider CI job.',
-        )}
-      </div>
+    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}>
+      <table style={tableStyle}><thead><tr>{['Component', 'Kind', 'State', 'Discovered', 'Executed', 'Passed', 'Failed', 'Skipped', 'Observed'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
+        <tbody>{rows.map((row, index) => <tr key={`${row.component}-${row.kind}-${index}`}>
+          <td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.kind}</td><td style={tdStyle}><StateBadge state={row.state} /></td>
+          <td style={tdStyle}>{row.counts?.discovered ?? '—'}</td><td style={tdStyle}>{row.counts?.executed ?? '—'}</td><td style={tdStyle}>{row.counts?.passed ?? '—'}</td>
+          <td style={tdStyle}>{row.counts?.failed ?? '—'}</td><td style={tdStyle}>{row.counts?.skipped ?? '—'}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td>
+        </tr>)}</tbody>
+      </table>
     </div>
   )
 }
 
-// ── Mutation tab ──────────────────────────────────────────────────────────────
-
-function MutationGauge({ score, threshold = 70 }: { score: number | null; threshold?: number }) {
-  if (score === null) {
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', width: '72px', height: '72px', borderRadius: '50%', border: '4px solid var(--border)', color: 'var(--text-tertiary)', fontSize: '11px' }}>
-        —
-      </div>
-    )
-  }
-  const color = score >= threshold ? '#16a34a' : score >= threshold * 0.8 ? '#d97706' : '#dc2626'
-  const circumference = 2 * Math.PI * 28
-  const dashOffset = circumference * (1 - score / 100)
-  return (
-    <div style={{ position: 'relative', width: '72px', height: '72px' }}>
-      <svg width="72" height="72" viewBox="0 0 72 72" style={{ transform: 'rotate(-90deg)' }}>
-        <circle cx="36" cy="36" r="28" fill="none" stroke="var(--border)" strokeWidth="6" />
-        <circle cx="36" cy="36" r="28" fill="none" stroke={color} strokeWidth="6"
-          strokeDasharray={circumference} strokeDashoffset={dashOffset}
-          strokeLinecap="round" style={{ transition: 'stroke-dashoffset 0.5s ease' }} />
-      </svg>
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 800, color }}>
-        {score}%
-      </div>
-    </div>
-  )
-}
-
-function MutationTab({ mutations, error }: { mutations: MutationScore[]; error: boolean }) {
-  const { t, language } = useLanguage()
-  const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-
-  if (error) {
-    return (
-      <DataUnavailable
-        kind="no_data"
-        feature={t('Mutační testy (pitest)', 'Mutation tests (pitest)')}
-        lang={t('cs', 'en') as 'cs' | 'en'}
-        detail={t(
-          'Výsledky pitest nejsou k dispozici. Spusť ./gradlew pitest nebo počkej na týdenní CI job.',
-          'Pitest results are not available. Run ./gradlew pitest or wait for the weekly CI job.',
-        )}
-        dense
-      />
-    )
-  }
-
-  if (mutations.length === 0) {
-    return (
-      <div className="card" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-        <Dna size={32} style={{ margin: '0 auto 12px', color: 'var(--text-tertiary)' }} />
-        <p style={{ fontSize: '13px' }}>
-          {t(
-            'Žádné výsledky mutačního testování. Pitest běží týdně v CI (workflow pitest.yml).',
-            'No mutation test results. Pitest runs weekly in CI (pitest.yml workflow).',
-          )}
-        </p>
-        <p style={{ fontSize: '11px', color: 'var(--text-tertiary)', marginTop: '8px' }}>
-          {t('Manuální spuštění: ./gradlew pitest', 'Manual run: ./gradlew pitest')}
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>
-        {mutations.map(mut => (
-          <div key={mut.service} className="card" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <MutationGauge score={mut.score} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>
-                {mut.service.replace('openbank-', '')}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-secondary)', marginBottom: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {mut.targetPackage}
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px', fontSize: '10px', color: 'var(--text-tertiary)' }}>
-                <span style={{ color: '#16a34a' }}>✓ {mut.killed}</span>
-                <span style={{ color: '#dc2626' }}>✗ {mut.survived}</span>
-                <span>◌ {mut.noCoverage}</span>
-              </div>
-              {mut.reportedAt && (
-                <div style={{ fontSize: '10px', color: 'var(--text-tertiary)', marginTop: '4px' }}>
-                  {new Date(mut.reportedAt).toLocaleDateString(dateLocale)}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
-        {t(
-          'Pitest testuje domain vrstvu (finanční aritmetika). Práh: 70%. Týdenní CI job: .github/workflows/pitest.yml (ADR-0063).',
-          'Pitest tests the domain layer (financial arithmetic). Threshold: 70%. Weekly CI job: .github/workflows/pitest.yml (ADR-0063).',
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ── Quality score tab ─────────────────────────────────────────────────────────
-
-function QualityScoreCell({ score }: { score: number | null }) {
-  if (score === null) return <span style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>—</span>
-  const color = score >= 80 ? '#16a34a' : score >= 60 ? '#d97706' : '#dc2626'
-  return <span style={{ fontWeight: 700, fontSize: '13px', color }}>{score}%</span>
-}
-
-function QualityTab({ scores }: { scores: ServiceQualityScore[] }) {
+function TestCases({ report }: { report: TestIntelligenceReport }) {
   const { t } = useLanguage()
-
-  const sorted = scores.slice().sort((a, b) => {
-    if (a.composite !== null && b.composite !== null) return b.composite - a.composite
-    if (a.composite !== null) return -1
-    if (b.composite !== null) return 1
-    return a.service.localeCompare(b.service)
-  })
-
-  if (scores.length === 0) {
-    return (
-      <div className="card" style={{ padding: '32px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-        <Star size={32} style={{ margin: '0 auto 12px', color: 'var(--text-tertiary)' }} />
-        <p style={{ fontSize: '13px' }}>
-          {t(
-            'Kompozitní skóre bude dostupné po spuštění CI pipeline (testy + pitest + Pact).',
-            'Composite score will be available after running the CI pipeline (tests + pitest + Pact).',
-          )}
-        </p>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '12px' }}>
-          <thead>
-            <tr style={{ background: 'var(--surface-2)', borderBottom: '1px solid var(--border)' }}>
-              {[
-                { label: t('Služba', 'Service'), align: 'left' as const },
-                { label: t('Testy', 'Tests'), align: 'center' as const },
-                { label: t('Pokrytí', 'Coverage'), align: 'center' as const },
-                { label: t('Mutace', 'Mutation'), align: 'center' as const },
-                { label: t('Kontrakty', 'Contracts'), align: 'center' as const },
-                { label: t('Celkové skóre', 'Overall score'), align: 'center' as const },
-              ].map(col => (
-                <th key={col.label} style={{ padding: '10px 16px', textAlign: col.align, fontWeight: 600, color: 'var(--text-secondary)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                  {col.label}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map(row => (
-              <tr key={row.service} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '10px 16px', fontFamily: 'monospace', fontSize: '11px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {row.service.replace('openbank-', '')}
-                </td>
-                <td style={{ padding: '10px 16px', textAlign: 'center' }}><QualityScoreCell score={row.unitScore} /></td>
-                <td style={{ padding: '10px 16px', textAlign: 'center' }}><QualityScoreCell score={row.coverageScore} /></td>
-                <td style={{ padding: '10px 16px', textAlign: 'center' }}><QualityScoreCell score={row.mutationScore} /></td>
-                <td style={{ padding: '10px 16px', textAlign: 'center' }}><QualityScoreCell score={row.contractScore} /></td>
-                <td style={{ padding: '10px 16px', textAlign: 'center' }}>
-                  {row.composite !== null
-                    ? <ScoreBar score={row.composite} threshold={80} />
-                    : <span style={{ color: 'var(--text-tertiary)', fontSize: '12px' }}>—</span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      <div style={{ fontSize: '11px', color: 'var(--text-tertiary)', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
-        {t(
-          'Kompozitní skóre = průměr dostupných složek: pass rate testů (25 %) + kover pokrytí (25 %) + pitest mutace (25 %) + kontrakty (25 %).',
-          'Composite score = average of available components: test pass rate (25%) + kover coverage (25%) + pitest mutation (25%) + contracts (25%).',
-        )}
-      </div>
+  const flaky = report.testCases.filter(item => item.state === 'flaky')
+  const failing = report.testCases.filter(item => item.state === 'failing')
+  const wasted = report.testCases.reduce((sum, item) => sum + item.wastedDurationMs, 0)
+  return <div style={{ display: 'grid', gap: 18 }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
+      <Stat label="Tracked test definitions" value={report.testCases.length} />
+      <Stat label="Observed flaky" value={flaky.length} tone={flaky.length ? '#d97706' : '#16a34a'} />
+      <Stat label="Currently failing" value={failing.length} tone={failing.length ? '#dc2626' : '#16a34a'} />
+      <Stat label="Failed runtime" value={`${Math.round(wasted / 1000)} s`} tone={wasted ? '#d97706' : undefined} />
     </div>
-  )
+    <div style={{ padding: 12, border: '1px solid color-mix(in srgb, #16a34a 35%, var(--border))', borderRadius: 9, color: 'var(--text-secondary)', fontSize: 12 }}>
+      {t('Test je označen jako flaky až po úspěšném i neúspěšném pozorování stejného commitu. Vlastnictví vychází z CODEOWNERS. Triage nikdy nemění deterministický verdikt CI ani nepřeskakuje peněžní kontroly.', 'A test is marked flaky only after pass and fail observations on the same commit. Ownership comes from CODEOWNERS. Triage never changes the deterministic CI verdict or skips money-path controls.')}
+    </div>
+    <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+      <thead><tr>{['State', 'Test definition', 'Component', 'Kind', 'Owner', 'Runs', 'Failure rate', 'Avg duration', 'Failed runtime', 'Fingerprint'].map(label => <th key={label} style={thStyle}>{label}</th>)}</tr></thead>
+      <tbody>{report.testCases.map(item => <tr key={item.fingerprint}>
+        <td style={tdStyle}><StateBadge state={item.state === 'stable' ? 'passed' : item.state === 'failing' ? 'failed' : item.state === 'skipped' ? 'skipped' : 'stale'} /></td>
+        <td style={{ ...tdStyle, minWidth: 230 }}><strong>{item.name}</strong><div style={{ color: 'var(--text-tertiary)', fontSize: 10, marginTop: 3 }}>{item.classname}</div>{item.sameCommitTransitions > 0 && <div style={{ color: '#d97706', fontSize: 10, marginTop: 3 }}>{item.sameCommitTransitions} same-commit pass/fail transition(s)</div>}</td>
+        <td style={tdStyle}>{item.component}</td><td style={tdStyle}>{item.kind}</td><td style={tdStyle}>{item.owner}</td><td style={tdStyle}>{item.observations}</td>
+        <td style={tdStyle}>{item.failureRate === null ? '—' : `${item.failureRate}%`}</td><td style={tdStyle}>{item.averageDurationMs} ms</td><td style={tdStyle}>{item.wastedDurationMs} ms</td>
+        <td style={{ ...tdStyle, fontFamily: 'monospace', fontSize: 10 }}>{item.fingerprint}</td>
+      </tr>)}</tbody>
+    </table>{report.testCases.length === 0 && <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou uchovány žádné per-test obálky běhů. Verdikty sad zůstávají autoritativní.', 'No per-test run envelopes have been retained yet. Suite verdicts remain authoritative.')}</div>}</div>
+  </div>
 }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
+function History({ report }: { report: TestIntelligenceReport }) {
+  const { t } = useLanguage()
+  const max = Math.max(1, ...report.history.map(point => point.components))
+  return <div style={{ display: 'grid', gap: 18 }}><div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
+    <div style={{ marginBottom: 16 }}><strong>{t('Historie fleet evidence', 'Fleet evidence history')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Neměnné deployment snapshoty uchované jako CI artefakty. Sloupce nikdy neodvozují chybějící běhy.', 'Immutable deployment snapshots retained as CI artifacts. Bars never infer missing runs.')}</div></div>
+    {report.history.length < 2 && <div style={{ color: '#d97706', fontSize: 12, marginBottom: 12 }}><TriangleAlert size={13} style={{ verticalAlign: 'text-bottom', marginRight: 5 }} />The first snapshot is present; a trend appears after the next admin deployment.</div>}
+    <div style={{ display: 'flex', alignItems: 'end', gap: 8, minHeight: 190, overflowX: 'auto', paddingTop: 12 }}>
+      {report.history.map(point => <div key={point.collectedAt} title={`${new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(point.collectedAt))} · ${point.componentsWithExecutionEvidence}/${point.components} evidenced · ${point.failingEvidence} failing`} style={{ minWidth: 38, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'end', gap: 3, height: 170 }}>
+        <div style={{ height: `${Math.max(2, point.failingEvidence / max * 150)}px`, background: '#dc2626', borderRadius: '4px 4px 0 0' }} />
+        <div style={{ height: `${Math.max(2, point.missingEvidence / max * 150)}px`, background: '#d97706' }} />
+        <div style={{ height: `${Math.max(2, point.componentsWithExecutionEvidence / max * 150)}px`, background: '#16a34a', borderRadius: '0 0 4px 4px' }} />
+        <span style={{ fontSize: 9, color: 'var(--text-tertiary)', textAlign: 'center' }}>{new Intl.DateTimeFormat('en-GB', { month: 'short', day: 'numeric' }).format(new Date(point.collectedAt))}</span>
+      </div>)}
+    </div>
+    <div style={{ display: 'flex', gap: 14, marginTop: 12, fontSize: 11, color: 'var(--text-secondary)' }}><span style={{ color: '#16a34a' }}>● evidenced</span><span style={{ color: '#d97706' }}>● missing</span><span style={{ color: '#dc2626' }}>● failing</span></div>
+  </div><div style={{ border: '1px solid var(--border)', borderRadius: 10, overflowX: 'auto' }}>
+    <div style={{ padding: '16px 18px 8px' }}><strong>{t('Neměnné pokusy služeb', 'Immutable service attempts')}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 4 }}>{t('Nejnovější verzované CI obálky; opakované běhy zůstávají samostatnými pokusy.', 'Latest versioned CI envelopes; reruns remain separate attempts.')}</div></div>
+    <table style={tableStyle}><thead><tr><th style={thStyle}>Component</th><th style={thStyle}>Run / attempt</th><th style={thStyle}>Commit</th><th style={thStyle}>{t('Stavy evidence', 'Evidence states')}</th><th style={thStyle}>Runtime</th><th style={thStyle}>Observed</th></tr></thead>
+      <tbody>{report.runHistory.slice(0, 100).map(item => <tr key={`${item.component}-${item.run.id}-${item.run.attempt}`}><td style={{ ...tdStyle, fontWeight: 650 }}>{item.component}</td><td style={tdStyle}>{item.run.id} / {item.run.attempt}</td><td style={tdStyle}>{item.run.commit.slice(0, 8)}</td><td style={tdStyle}>{Object.entries(item.states).map(([kind, state]) => <span key={kind} style={{ marginRight: 9 }}>{kind}: <StateBadge state={state} /></span>)}</td><td style={tdStyle}>{item.infrastructureStarted} start · {item.infrastructureStopped} stop</td><td style={tdStyle}>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(item.run.observedAt))}</td></tr>)}</tbody>
+    </table>
+    {report.runHistory.length === 0 && <div style={{ padding: 18, color: 'var(--text-tertiary)', fontSize: 12 }}>{t('Zatím nejsou přibaleny žádné uchované service-run obálky.', 'No retained service-run envelopes are bundled yet.')}</div>}
+  </div></div>
+}
 
-type Tab = 'tests' | 'contract' | 'mutation' | 'quality'
+function RuntimeInfrastructure({ report }: { report: TestIntelligenceReport }) {
+  const { t } = useLanguage()
+  const rows = report.components.filter(component => component.testInfrastructure.declared.length > 0 || component.testInfrastructure.observed.length > 0)
+  return <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+    <thead><tr><th style={thStyle}>Component</th><th style={thStyle}>{t('Deklarovaná topologie', 'Declared topology')}</th><th style={thStyle}>{t('Důkaz runtime', 'Runtime proof')}</th><th style={thStyle}>Lifecycle</th><th style={thStyle}>Observed</th></tr></thead>
+    <tbody>{rows.map(row => {
+      const started = row.testInfrastructure.observed.filter(item => item.lifecycle === 'started')
+      const stopped = row.testInfrastructure.observed.filter(item => item.lifecycle === 'stopped')
+      const state: EvidenceState = started.length === 0 ? 'unknown' : stopped.length < started.length ? 'failed' : 'passed'
+      const latest = row.testInfrastructure.observed.at(-1)?.observedAt
+      return <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}>{row.testInfrastructure.declared.join(' · ') || 'none'}</td><td style={tdStyle}><StateBadge state={state} /></td><td style={tdStyle}>{started.length} started · {stopped.length} stopped</td><td style={tdStyle}>{latest ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(latest)) : 'not emitted by this run'}</td></tr>
+    })}</tbody>
+  </table></div>
+}
 
-export default function TestCoveragePage() {
-  const { t, language } = useLanguage()
+function Coverage({ report }: { report: TestIntelligenceReport }) {
+  return <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+    <thead><tr><th style={thStyle}>Component</th><th style={thStyle}>State</th><th style={thStyle}>Lines</th><th style={thStyle}>Branches</th><th style={thStyle}>Observed</th><th style={thStyle}>Source</th></tr></thead>
+    <tbody>{report.components.map(row => <tr key={row.component}><td style={{ ...tdStyle, fontWeight: 650 }}>{row.component}</td><td style={tdStyle}><StateBadge state={row.coverage.state} /></td>
+      <td style={tdStyle}>{row.coverage.lines.percentage === null ? '—' : `${row.coverage.lines.percentage}%`}</td><td style={tdStyle}>{row.coverage.branches.percentage === null ? '—' : `${row.coverage.branches.percentage}%`}</td>
+      <td style={tdStyle}>{row.coverage.observedAt ? formatTimestamp(row.coverage.observedAt) : '—'}</td><td style={tdStyle}>{row.coverage.source ?? '—'}</td></tr>)}</tbody>
+  </table></div>
+}
+
+function Contracts({ report }: { report: TestIntelligenceReport }) {
+  return <div style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 10 }}><table style={tableStyle}>
+    <thead><tr><th style={thStyle}>Consumer</th><th style={thStyle}>Provider</th><th style={thStyle}>State</th><th style={thStyle}>Interactions</th><th style={thStyle}>Pact</th><th style={thStyle}>Verified</th></tr></thead>
+    <tbody>{report.contracts.map(row => <tr key={row.pactFile}><td style={tdStyle}>{row.consumer}</td><td style={tdStyle}>{row.provider}</td><td style={tdStyle}><StateBadge state={row.state} /></td><td style={tdStyle}>{row.interactions}</td><td style={tdStyle}>{row.pactFile}</td><td style={tdStyle}>{row.observedAt ? formatTimestamp(row.observedAt) : '—'}</td></tr>)}</tbody>
+  </table></div>
+}
+
+function Mutations({ report }: { report: TestIntelligenceReport }) {
+  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12 }}>{report.mutations.map(row => <div key={row.component} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, background: 'var(--surface-1)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}><strong>{row.component}</strong><StateBadge state={row.state} /></div>
+    <div style={{ fontSize: 28, fontWeight: 750, margin: '12px 0' }}>{row.score ?? '—'}%</div>
+    <div style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{row.killed} killed · {row.survived} survived · {row.noCoverage} no coverage</div>
+    {row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 7 }}>run {row.run.id} · {row.run.commit.slice(0, 8)}</div>}
+  </div>)}</div>
+}
+
+function Performance({ report }: { report: TestIntelligenceReport }) {
+  return <div style={{ display: 'grid', gap: 10 }}>{report.performance.map(row => <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 16, display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+    <div><strong>{row.id}</strong><div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 5 }}>{row.source} · {row.thresholds} threshold group(s)</div>{row.run && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>run {row.run.id} · {row.run.commit.slice(0, 8)} · {row.run.branch}</div>}{row.detail && <div style={{ color: 'var(--text-tertiary)', fontSize: 11, marginTop: 5 }}>{row.detail}</div>}</div><StateBadge state={row.state} />
+  </div>)}</div>
+}
+
+function Synthetics({ report }: { report: TestIntelligenceReport }) {
+  const { t } = useLanguage()
+  return <div style={{ display: 'grid', gap: 12 }}>{report.syntheticJourneys.map(row => <div key={row.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{row.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{row.id}</span></div><StateBadge state={row.state} /></div>
+    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 10, fontSize: 12, color: 'var(--text-secondary)' }}><span>Status: {row.status}</span><span>Severity: {row.severity}</span><span>{row.status === 'planned' ? 'Target schedule' : 'Schedule'}: {row.schedule ?? 'not scheduled'}</span><span>Environment: {row.environment ?? '—'}</span></div>
+    {row.live && <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8, marginTop: 12, padding: 12, borderRadius: 8, background: 'var(--surface-2)', fontSize: 11 }}>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Naposledy naplánováno', 'Last scheduled')}</span><br /><strong>{row.live.lastScheduledAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastScheduledAt)) : 'never observed'}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední úspěch', 'Last success')}</span><br /><strong>{row.live.lastSuccessfulAt ? new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(row.live.lastSuccessfulAt)) : 'never observed'}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>Failures / 30m</span><br /><strong>{row.live.failuresLast30m ?? 'unavailable'}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Čerstvost evidence', 'Evidence freshness')}</span><br /><strong>{row.live.freshnessSeconds === null ? 'unknown' : `${Math.round(row.live.freshnessSeconds / 60)} min`}</strong></div>
+      <div><span style={{ color: 'var(--text-tertiary)' }}>{t('Poslední Kubernetes běhy', 'Recent Kubernetes runs')}</span><br /><strong>{row.live.recentRuns.length || 'none retained'}</strong></div>
+    </div>}
+    {row.falsifies && <p style={{ fontSize: 12, color: 'var(--text-secondary)', margin: '10px 0 0' }}><strong>Falsification:</strong> {row.falsifies}</p>}
+    {row.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {row.blocker}</p>}
+  </div>)}</div>
+}
+
+function ClientExperiences({ report }: { report: TestIntelligenceReport }) {
+  const { t } = useLanguage()
+  return <div style={{ display: 'grid', gap: 12 }}>{(report.clientExperiences ?? []).map(client => <div key={client.id} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 18, background: 'var(--surface-1)' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}><div><strong>{client.title}</strong><span style={{ marginLeft: 8, color: 'var(--text-tertiary)', fontSize: 11 }}>{client.platforms.join(' · ')}</span></div><StateBadge state={client.evidence.some(item => item.state === 'failed') ? 'failed' : client.evidence.length ? 'passed' : 'not-run'} /></div>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: 10, marginTop: 12 }}>{client.evidence.map((item, index) => <div key={`${item.kind}-${index}`} style={{ padding: 10, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>{item.kind}</strong><div style={{ marginTop: 6 }}><StateBadge state={item.state} /></div>{item.counts && <div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{item.counts.passed}/{item.counts.executed} passed</div>}{item.detail && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{item.detail}</div>}</div>)}</div>
+    {client.evidence.length === 0 && <p style={{ fontSize: 12, color: '#d97706', margin: '12px 0 0' }}>{t('Není přibalen důkaz posledního client CI běhu; zdrojový kód se nesmí vydávat za proběhlý test.', 'No latest client-CI evidence is bundled; source code is not represented as a completed test.')}</p>}
+    <div style={{ marginTop: 12, padding: 11, borderRadius: 8, background: 'var(--surface-2)', fontSize: 12 }}><strong>RUM</strong><span style={{ marginLeft: 8 }}><StateBadge state={client.rum.state} /></span>{client.rum.source && <span style={{ marginLeft: 8, color: 'var(--text-tertiary)' }}>{client.rum.source} · 7d</span>}<div style={{ color: 'var(--text-secondary)', marginTop: 5 }}>{client.rum.detail}</div>{client.rum.sampledSpansLast7d !== undefined && client.rum.sampledSpansLast7d !== null && <div style={{ color: 'var(--text-tertiary)', marginTop: 5 }}>{client.rum.sampledSpansLast7d} sampled spans · {client.rum.errorSpansLast7d ?? 'unknown'} error spans</div>}</div>
+    {client.blocker && <p style={{ fontSize: 12, color: '#7c3aed', margin: '10px 0 0' }}><strong>Blocker:</strong> {client.blocker}</p>}
+  </div>)}</div>
+}
+
+export default function TestIntelligencePage() {
+  const { language, t } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const [tab, setTab] = useState<Tab>('tests')
-
-  const [testData, setTestData] = useState<TestResultsResponse | null>(null)
-  const [testError, setTestError] = useState<string | null>(null)
-  const [testLoading, setTestLoading] = useState(true)
-
-  const [qualityData, setQualityData] = useState<QualityReport | null>(null)
-  const [qualityError, setQualityError] = useState(false)
-  const [qualityLoading, setQualityLoading] = useState(true)
-
-  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [tab, setTab] = useState<Tab>('posture')
+  const [report, setReport] = useState<TestIntelligenceReport | null>(null)
+  const [loading, setLoading] = useState(true)
+  const testLoading = loading
+  const qualityLoading = false
 
   const load = useCallback(async () => {
-    setTestLoading(true)
-    setQualityLoading(true)
-    setTestError(null)
-    setQualityError(false)
-
-    const [testRes, qualRes] = await Promise.allSettled([
-      fetch('/api/test-results', { cache: 'no-store' }),
-      fetch('/api/quality-report', { cache: 'no-store' }),
-    ])
-
-    if (testRes.status === 'fulfilled' && testRes.value.ok) {
-      setTestData(await testRes.value.json())
-    } else {
-      setTestError('unavailable')
-    }
-    setTestLoading(false)
-
-    if (qualRes.status === 'fulfilled' && qualRes.value.ok) {
-      setQualityData(await qualRes.value.json() as QualityReport)
-    } else {
-      setQualityError(true)
-    }
-    setQualityLoading(false)
-    setLastRefresh(new Date())
+    setLoading(true)
+    try {
+      const response = await fetch('/api/test-intelligence', { cache: 'no-store' })
+      setReport(await response.json() as TestIntelligenceReport)
+    } catch { setReport(null) } finally { setLoading(false) }
   }, [])
+  useEffect(() => { void load() }, [load])
 
-  useEffect(() => { load() }, [load])
-
-  const tabs: { id: Tab; label: string; icon: React.ReactNode; count?: number }[] = [
-    { id: 'tests', label: t('Testy', 'Tests'), icon: <FlaskConical size={13} /> },
-    { id: 'contract', label: t('Kontrakty', 'Contracts'), icon: <ShieldCheck size={13} />, count: qualityData?.contracts.length },
-    { id: 'mutation', label: t('Mutace', 'Mutation'), icon: <Dna size={13} />, count: qualityData?.mutations.length },
-    { id: 'quality', label: t('Skóre kvality', 'Quality Score'), icon: <Star size={13} />, count: qualityData?.serviceScores.length },
+  const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
+    { id: 'posture', label: t('Přehled', 'Posture'), icon: <Activity size={13} /> },
+    { id: 'tests', label: t('Testy a flaky', 'Tests & flaky'), icon: <FlaskConical size={13} /> },
+    { id: 'history', label: t('Historie', 'History'), icon: <BarChart3 size={13} /> },
+    { id: 'execution', label: t('Běhy', 'Execution'), icon: <FlaskConical size={13} /> },
+    { id: 'runtime', label: t('Testovací runtime', 'Test runtime'), icon: <Activity size={13} /> },
+    { id: 'coverage', label: t('Pokrytí kódu', 'Code coverage'), icon: <BarChart3 size={13} /> },
+    { id: 'contracts', label: t('Kontrakty', 'Contracts'), icon: <ShieldCheck size={13} /> },
+    { id: 'mutation', label: t('Mutace', 'Mutation'), icon: <Dna size={13} /> },
+    { id: 'performance', label: t('Výkon', 'Performance'), icon: <Gauge size={13} /> },
+    { id: 'synthetic', label: t('Syntetika', 'Synthetics'), icon: <Timer size={13} /> },
+    { id: 'clients', label: t('Client experience', 'Client experience'), icon: <Activity size={13} /> },
   ]
 
-  return (
-    <div style={{ padding: '28px 32px', maxWidth: '1400px', animation: 'fadeIn 0.2s ease-out' }}>
-      <PageHeader
-        breadcrumb={<div className="breadcrumb"><span>{t('OpenBank', 'OpenBank')}</span><span className="breadcrumb-sep">/</span><span>{t('Systém', 'System')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Kvalita kódu', 'Code Quality')}</span></div>}
-        icon={<FlaskConical size={20} aria-hidden="true" />}
-        title={t('Kvalita kódu', 'Code Quality')}
-        subtitle={t('Výsledky testů, kontraktní verifikace (Pact), mutační testování (pitest) a kompozitní skóre kvality.', 'Test results, contract verification (Pact), mutation testing (pitest), and composite quality score.')}
-        actions={<div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {lastRefresh && (
-            <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-              {t('Aktualizováno', 'Updated')} {lastRefresh.toLocaleTimeString(dateLocale)}
-            </span>
-          )}
-          <button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading}
-            aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm">
-            <RefreshCw size={13} aria-hidden="true" style={{ animation: (testLoading || qualityLoading) ? 'spin 0.8s linear infinite' : 'none' }} />
-            {t('Obnovit', 'Refresh')}
-          </button>
-        </div>}
-      />
-
-      <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: '2px', marginBottom: '20px', borderBottom: '1px solid var(--border)' }}>
-        {tabs.map(tabDef => (
-          <button
-            key={tabDef.id}
-            type="button"
-            aria-pressed={tab === tabDef.id}
-            onClick={() => setTab(tabDef.id)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '6px',
-              padding: '8px 14px',
-              fontSize: '13px', fontWeight: tab === tabDef.id ? 600 : 400,
-              color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)',
-              background: 'none', border: 'none',
-              borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent',
-              cursor: 'pointer', marginBottom: '-1px', transition: 'color 0.15s',
-            }}
-          >
-            <span aria-hidden="true">{tabDef.icon}</span>
-            {tabDef.label}
-            {tabDef.count !== undefined && tabDef.count > 0 && (
-              <span style={{ fontSize: '10px', background: 'var(--surface-3)', borderRadius: '10px', padding: '1px 6px', color: 'var(--text-secondary)', fontWeight: 500 }}>
-                {tabDef.count}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {tab === 'tests' && (
-        <TestsTab data={testData} error={testError} loading={testLoading} />
-      )}
-      {tab === 'contract' && (
-        qualityLoading
-          ? <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{Array.from({ length: 3 }).map((_, idx) => <div key={idx} className="skeleton" style={{ height: '48px' }} />)}</div>
-          : <ContractTab contracts={qualityData?.contracts ?? []} error={qualityError} />
-      )}
-      {tab === 'mutation' && (
-        qualityLoading
-          ? <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '12px' }}>{Array.from({ length: 4 }).map((_, idx) => <div key={idx} className="skeleton" style={{ height: '100px' }} />)}</div>
-          : <MutationTab mutations={qualityData?.mutations ?? []} error={qualityError} />
-      )}
-      {tab === 'quality' && (
-        qualityLoading
-          ? <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>{Array.from({ length: 6 }).map((_, idx) => <div key={idx} className="skeleton" style={{ height: '42px' }} />)}</div>
-          : <QualityTab scores={qualityData?.serviceScores ?? []} />
-      )}
-    </div>
-  )
+  return <div style={{ padding: '28px 32px', maxWidth: 1600, animation: 'fadeIn 0.2s ease-out' }}>
+    <PageHeader
+      breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span>{t('Systém', 'System')}</span><span className="breadcrumb-sep" aria-hidden="true">/</span><span className="breadcrumb-current">{t('Test Intelligence', 'Test Intelligence')}</span></div>}
+      icon={<FlaskConical size={19} aria-hidden="true" style={{ color: 'var(--accent)' }} />}
+      title={t('Test Intelligence', 'Test Intelligence')}
+      subtitle={t('Jednotný pohled na běhy, pokrytí kódu, kontrakty, mutace, výkon a sandboxové syntetické scénáře.', 'One evidence view for execution, code coverage, contracts, mutation, performance, and sandbox synthetic journeys.')}
+      actions={<button type="button" onClick={load} disabled={testLoading || qualityLoading} aria-busy={testLoading || qualityLoading} aria-label={t('Obnovit systémové testy', 'Refresh system tests')} className="btn btn-secondary btn-sm"><RefreshCw size={13} aria-hidden="true" style={{ animation: loading ? 'spin 0.8s linear infinite' : 'none' }} />{t('Obnovit', 'Refresh')}</button>}
+    />
+    <TestIntelligenceFlow report={report} />
+    {report?.warnings.length ? <div style={{ marginBottom: 16, border: '1px solid #d97706', borderRadius: 8, padding: 12, color: '#d97706', fontSize: 12 }}><TriangleAlert size={14} style={{ verticalAlign: 'text-bottom', marginRight: 6 }} />{report.warnings.join(' · ')}</div> : null}
+    <div role="group" aria-label={t('Přepínač pohledů kvality kódu', 'Code quality view')} style={{ display: 'flex', gap: 2, overflowX: 'auto', borderBottom: '1px solid var(--border)', marginBottom: 20 }}>{tabs.map(tabDef => <button key={tabDef.id} type="button"
+            aria-pressed={tab === tabDef.id} onClick={() => setTab(tabDef.id)} style={{ display: 'flex', gap: 6, alignItems: 'center', padding: '9px 13px', whiteSpace: 'nowrap', border: 'none', borderBottom: tab === tabDef.id ? '2px solid var(--accent)' : '2px solid transparent', background: 'none', color: tab === tabDef.id ? 'var(--accent)' : 'var(--text-secondary)', cursor: 'pointer', fontWeight: tab === tabDef.id ? 650 : 450 }}><span aria-hidden="true">{tabDef.icon}</span>{tabDef.label}</button>)}</div>
+    {loading && !report ? <div className="skeleton" style={{ height: 260 }} /> : report ? <>
+      {tab === 'posture' && <Posture report={report} />}{tab === 'tests' && <TestCases report={report} />}{tab === 'history' && <History report={report} />}{tab === 'execution' && <Execution report={report} />}{tab === 'runtime' && <RuntimeInfrastructure report={report} />}{tab === 'coverage' && <Coverage report={report} />}
+      {tab === 'contracts' && <Contracts report={report} />}{tab === 'mutation' && <Mutations report={report} />}{tab === 'performance' && <Performance report={report} />}{tab === 'synthetic' && <Synthetics report={report} />}
+      {tab === 'clients' && <ClientExperiences report={report} />}
+    </> : <div style={{ padding: 24, color: 'var(--text-secondary)' }}>{t('Report není dostupný.', 'Report is unavailable.')}</div>}
+    {report && <TestAgentPanel />}
+    {report && <div style={{ marginTop: 18, color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Schéma', 'Schema')} v{report.schemaVersion} · {t('sesbíráno', 'collected')} {new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(report.collectedAt))} · {t('absence se nikdy nevykresluje jako nula', 'absence is never rendered as zero')}</div>}
+  </div>
 }

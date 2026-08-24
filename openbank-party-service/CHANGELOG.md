@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.19.0...party-service-v0.20.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.3...party-service-v0.19.0) (2026-08-24)
+
+
+### Features
+
+* **party:** classify synthetic canary parties ([#6730](https://github.com/JiRaska/open-bank-oss/issues/6730)) ([f478d04](https://github.com/JiRaska/open-bank-oss/commit/f478d04fec9d4c6a0a31ca0a443d4783c4d796de))
+
+## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.2...party-service-v0.18.3) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+* **party:** create the Hibernate id sequences in lower case so inserts can allocate an id ([#6467](https://github.com/JiRaska/open-bank-oss/issues/6467)) ([134cce5](https://github.com/JiRaska/open-bank-oss/commit/134cce517a32a3e8253885b3735e4877e95fab9a)), closes [#5913](https://github.com/JiRaska/open-bank-oss/issues/5913)
+
 ## [0.18.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.1...party-service-v0.18.2) (2026-08-22)
 
 

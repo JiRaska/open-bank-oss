@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.utility.DockerImageName
 
@@ -22,6 +23,7 @@ class PostgresRedisTestResource : PostgresBase() {
 
         val rd = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine")).withExposedPorts(REDIS_PORT)
         rd.start()
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started")
         redis = rd
 
         return postgresConfig(pg) + mapOf(
@@ -31,10 +33,12 @@ class PostgresRedisTestResource : PostgresBase() {
 
     override fun stop() {
         redis?.stop()
+        if (redis != null) TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped")
         super.stop()
     }
 
     private companion object {
         const val REDIS_PORT = 6379
+        const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
     }
 }

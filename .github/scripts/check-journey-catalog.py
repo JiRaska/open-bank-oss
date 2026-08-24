@@ -82,8 +82,10 @@ LABEL_MATCH_RE = re.compile(
 )
 REQUIRED_ALWAYS = ("id", "title", "capability", "status", "severity", "money_moving", "falsification")
 REQUIRED_ACTIVE = ("cronjob", "schedule")
+REQUIRED_PLANNED = ("target_schedule",)
 VALID_STATUS = ("active", "planned")
 VALID_SEVERITY = ("page", "ticket")
+CRON_EXPRESSION = re.compile(r"^\S+\s+\S+\s+\S+\s+\S+\s+\S+$")
 
 
 def load_docs(path: pathlib.Path):
@@ -227,6 +229,15 @@ def check(root: pathlib.Path):
                     f"{jid}: planned journeys must name what blocks them (`blocked_by`) — "
                     "an unexplained gap decays into background noise"
                 )
+            for field in REQUIRED_PLANNED:
+                if entry.get(field) in (None, ""):
+                    findings.append(
+                        f"{jid}: planned journeys need `{field}` so the intended monitoring "
+                        "cadence is reviewable before activation"
+                    )
+            target_schedule = str(entry.get("target_schedule") or "")
+            if target_schedule and not CRON_EXPRESSION.match(target_schedule):
+                findings.append(f"{jid}: target_schedule is not a five-field cron expression")
             continue
         if status != "active":
             continue
@@ -291,6 +302,7 @@ journeys:
     status: planned
     severity: ticket
     money_moving: true
+    target_schedule: "0 * * * *"
     falsification: blackhole the topic
     blocked_by: "#4348 — needs synthetic parties"
 """
@@ -381,6 +393,10 @@ def self_test():
 
     run("planned journey with no blocker",
         SELF_TEST_CATALOG_OK.replace('    blocked_by: "#4348 — needs synthetic parties"\n', ""),
+        SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
+
+    run("planned journey with no target schedule",
+        SELF_TEST_CATALOG_OK.replace('    target_schedule: "0 * * * *"\n', ""),
         SELF_TEST_CRONJOB, SELF_TEST_RULES, expect_finding=True)
 
     run("journey with no falsification",

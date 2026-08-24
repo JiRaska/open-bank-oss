@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import org.testcontainers.redpanda.RedpandaContainer
 import org.testcontainers.utility.DockerImageName
 
@@ -24,6 +25,7 @@ class PostgresRedpandaTestResource : PostgresBase() {
                 .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
         )
         rp.start()
+        TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
         redpanda = rp
 
         val bootstrap = rp.bootstrapServers
@@ -35,6 +37,11 @@ class PostgresRedpandaTestResource : PostgresBase() {
 
     override fun stop() {
         redpanda?.stop()
+        if (redpanda != null) TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
         super.stop()
+    }
+
+    private companion object {
+        const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
     }
 }

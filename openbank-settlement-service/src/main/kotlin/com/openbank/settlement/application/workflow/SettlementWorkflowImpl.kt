@@ -37,15 +37,16 @@ class SettlementWorkflowImpl : SettlementWorkflow {
         Workflow.newActivityStub(SettlementActivities::class.java, activityOptions)
 
     /**
-     * Compensations are recorded as plain lambdas: every one of them is a balance-service reversal,
-     * and every balance-service reversal records [SettlementStatus.REVERSAL_FAILED] when it is
-     * refused. The general-ledger posting has no compensation — `bookToLedger` is the last forward
-     * step, so nothing can fail after it (issue #6410).
+     * One registered compensation, paired with the status its activity records when it fails.
      *
-     * If a step is ever added AFTER `bookToLedger`, its compensation will not share that status,
-     * and the single `REVERSAL_FAILED` below stops being the right answer. That is the moment to
-     * pair each compensation with the status its activity records, not before.
+     * The pairing is what lets [settle] report which half of the unwind is outstanding without
+     * reading the row back: `reverseDebit`/`reverseCredit` write
+     * [SettlementStatus.REVERSAL_FAILED] on a refusal (money moved and not returned), while
+     * `reverseBookToLedger` writes [SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED] (the GL posting
+     * still stands). Both are recorded by the activity itself, inside its own transaction.
      */
+    private data class Compensation(val onFailure: SettlementStatus, val run: () -> Unit)
+
     /**
      * Runs every registered compensation, and returns the status of the obligation left
      * outstanding — or `null` when the unwind was complete and the settlement may be rejected.
@@ -53,16 +54,19 @@ class SettlementWorkflowImpl : SettlementWorkflow {
      * Every compensation is attempted even after one fails, so a refused credit reversal does not
      * strand the debit reversal that would still have worked.
      */
-    private fun unwind(settlementId: UUID, compensations: Collection<() -> Unit>): SettlementStatus? {
+    private fun unwind(settlementId: UUID, compensations: Collection<Compensation>): SettlementStatus? {
         val log = Workflow.getLogger(SettlementWorkflowImpl::class.java)
         var outstanding: SettlementStatus? = null
-        compensations.forEach { compensate ->
+        compensations.forEach { compensation ->
             try {
-                compensate()
+                compensation.run()
             } catch (compEx: ActivityFailure) {
-                // The activity has already recorded REVERSAL_FAILED for this settlement: the money
-                // moved and did not come back.
-                outstanding = SettlementStatus.REVERSAL_FAILED
+                // A refused money reversal outranks an unsupported GL reversal: the first means
+                // customer funds are still moved, the second that the ledger owes a correcting
+                // entry. Report the worse of the two, whichever order they failed in.
+                if (outstanding != SettlementStatus.REVERSAL_FAILED) {
+                    outstanding = compensation.onFailure
+                }
                 log.error("Compensation failed for settlement $settlementId", compEx)
             }
         }
@@ -71,19 +75,25 @@ class SettlementWorkflowImpl : SettlementWorkflow {
 
     @Suppress("TooGenericExceptionCaught")
     override fun settle(settlementId: UUID): SettlementStatus {
-        val compensations = ArrayDeque<() -> Unit>()
+        val compensations = ArrayDeque<Compensation>()
 
         return try {
             activities.debitPayer(settlementId)
-            compensations.addFirst { activities.reverseDebit(settlementId) }
+            compensations.addFirst(
+                Compensation(SettlementStatus.REVERSAL_FAILED) { activities.reverseDebit(settlementId) },
+            )
 
             activities.creditPayee(settlementId)
-            compensations.addFirst { activities.reverseCredit(settlementId) }
+            compensations.addFirst(
+                Compensation(SettlementStatus.REVERSAL_FAILED) { activities.reverseCredit(settlementId) },
+            )
 
-            // bookToLedger registers no compensation: it is the last forward step and writes the
-            // terminal BOOKED status itself, so nothing can fail afterwards to trigger one. See
-            // SettlementActivitiesImpl.bookToLedger for what a step added after it would owe.
             activities.bookToLedger(settlementId)
+            compensations.addFirst(
+                Compensation(SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED) {
+                    activities.reverseBookToLedger(settlementId)
+                },
+            )
 
             SettlementStatus.BOOKED
         } catch (ex: ActivityFailure) {

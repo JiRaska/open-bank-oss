@@ -1,0 +1,466 @@
+#!/usr/bin/env node
+// SPDX-License-Identifier: Apache-2.0
+// Compose repository governance and staged CI artifacts into the versioned,
+// read-only Test Intelligence snapshot decided by ADR-0273.
+
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import { parse as parseYaml } from 'yaml'
+import { parseStringPromise } from 'xml2js'
+
+const here = path.dirname(fileURLToPath(import.meta.url))
+const args = process.argv.slice(2)
+const arg = (name, fallback) => {
+  const index = args.indexOf(name)
+  return index >= 0 && args[index + 1] ? args[index + 1] : fallback
+}
+const repo = path.resolve(arg('--repo', path.resolve(here, '..', '..')))
+const out = path.resolve(arg('--out', path.resolve(here, '..', 'test-intelligence.json')))
+const staleAfterMs = Number(arg('--stale-after-days', '14')) * 86_400_000
+const collectedAt = new Date()
+const warnings = []
+
+const exists = file => fs.existsSync(file)
+const readJson = file => {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')) } catch { return null }
+}
+const observedAt = file => {
+  try { return fs.statSync(file).mtime.toISOString() } catch { return null }
+}
+const stateFrom = (failed, executed, at) => {
+  if (!at) return 'not-run'
+  if (failed > 0) return 'failed'
+  if (executed === 0) return 'skipped'
+  if (collectedAt.getTime() - new Date(at).getTime() > staleAfterMs) return 'stale'
+  return 'passed'
+}
+
+function releasedComponents() {
+  return fs.readdirSync(repo, { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && entry.name.startsWith('openbank-'))
+    .map(entry => entry.name)
+    .filter(name => exists(path.join(repo, name, 'version.txt')))
+    .sort()
+}
+
+function allFiles(dir, predicate) {
+  if (!exists(dir)) return []
+  const result = []
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) result.push(...allFiles(full, predicate))
+    else if (predicate(full)) result.push(full)
+  }
+  return result
+}
+
+function junitEvidence(component) {
+  const root = path.join(repo, component, 'build', 'test-results')
+  const files = allFiles(root, file => path.basename(file).startsWith('TEST-') && file.endsWith('.xml'))
+  const buckets = new Map()
+  for (const file of files) {
+    const relative = path.relative(root, file).split(path.sep)
+    const task = relative[0] || 'test'
+    const xml = fs.readFileSync(file, 'utf8')
+    // Gradle commonly puts Quarkus/API/DB `*IT` classes under the ordinary `test`
+    // task. Directory-only classification was the reason those tests disappeared
+    // from the integration count. Prefer explicit task metadata, then the JUnit
+    // suite/class identity carried by the artifact itself.
+    const integrationIdentity = /(?:name|classname)="[^"]*(?:\.integration\.|\.it\.|IT(?:"|\$|\.))/i.test(xml)
+    const kind = /integration|inttest/i.test(task) || integrationIdentity ? 'integration'
+      : /e2e|playwright/i.test(task) ? 'e2e'
+        : component === 'openbank-simulation' ? 'simulation' : 'unit'
+    const bucket = buckets.get(kind) ?? {
+      kind, source: `JUnit:${task}`, environment: 'ci', durationMs: 0,
+      counts: { discovered: 0, executed: 0, passed: 0, failed: 0, skipped: 0, errors: 0 },
+      observedAt: null,
+    }
+    const value = name => Number(new RegExp(`<testsuite[^>]*\\b${name}="([0-9.]+)"`).exec(xml)?.[1] ?? 0)
+    const discovered = value('tests')
+    const failures = value('failures')
+    const errors = value('errors')
+    const skipped = value('skipped')
+    bucket.counts.discovered += discovered
+    bucket.counts.failed += failures + errors
+    bucket.counts.errors += errors
+    bucket.counts.skipped += skipped
+    bucket.counts.executed += Math.max(0, discovered - skipped)
+    bucket.counts.passed += Math.max(0, discovered - failures - errors - skipped)
+    bucket.durationMs += Math.round(value('time') * 1000)
+    const at = observedAt(file)
+    if (at && (!bucket.observedAt || at > bucket.observedAt)) bucket.observedAt = at
+    buckets.set(kind, bucket)
+  }
+  return [...buckets.values()].map(bucket => ({
+    ...bucket,
+    state: stateFrom(bucket.counts.failed, bucket.counts.executed, bucket.observedAt),
+  }))
+}
+
+function runEnvelope(component) {
+  const file = path.join(repo, component, 'build', 'test-intelligence', 'run.json')
+  const run = readJson(file)
+  if (!run || run.schemaVersion !== 1 || run.component !== component || !Array.isArray(run.suites)) return null
+  const provenance = run.run ? {
+    id: String(run.run.id), attempt: Number(run.run.attempt), commit: String(run.run.commit),
+    branch: String(run.run.branch), workflow: String(run.run.workflow), url: String(run.run.url),
+  } : undefined
+  return {
+    evidence: run.suites.map(suite => ({
+      kind: suite.kind, state: suite.state, observedAt: run.run?.observedAt ?? observedAt(file),
+      source: 'test-intelligence-run:v1', environment: 'ci', durationMs: suite.durationMs,
+      counts: { discovered: suite.discovered, executed: suite.executed, passed: suite.passed,
+        failed: suite.failed, skipped: suite.skipped, errors: suite.errors }, run: provenance,
+    })),
+    coverage: run.coverage ? {
+      state: stateFrom(0, 1, run.run?.observedAt ?? observedAt(file)),
+      observedAt: run.run?.observedAt ?? observedAt(file), lines: run.coverage.lines,
+      branches: run.coverage.branches, source: 'test-intelligence-run:v1',
+    } : null,
+    testInfrastructure: run.testInfrastructure ?? { declared: [], observed: [] },
+  }
+}
+
+function componentOwners() {
+  const file = path.join(repo, 'CODEOWNERS')
+  const owners = new Map()
+  let fallback = 'unowned'
+  if (!exists(file)) return { owners, fallback }
+  for (const raw of fs.readFileSync(file, 'utf8').split('\n')) {
+    const line = raw.replace(/\s+#.*$/, '').trim()
+    if (!line || line.startsWith('#')) continue
+    const [pattern, ...values] = line.split(/\s+/)
+    if (pattern === '*') fallback = values.join(' ') || fallback
+    const match = /^\/([^/*]+)\/$/.exec(pattern)
+    if (match && values.length) owners.set(match[1], values.join(' '))
+  }
+  return { owners, fallback }
+}
+
+function testCaseHistory(currentEnvelopes) {
+  const historical = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
+    .map(readJson)
+  const envelopes = [...historical, ...currentEnvelopes]
+    .filter(item => item?.schemaVersion === 1 && item?.run && item?.component && Array.isArray(item.testCases))
+  const unique = new Map()
+  for (const envelope of envelopes) {
+    for (const item of envelope.testCases) {
+      const key = `${envelope.component}:${envelope.run.id}:${envelope.run.attempt}:${item.fingerprint}:${item.state}`
+      unique.set(key, { ...item, component: envelope.component, run: envelope.run })
+    }
+  }
+  const grouped = new Map()
+  for (const item of unique.values()) {
+    const rows = grouped.get(item.fingerprint) ?? []
+    rows.push(item)
+    grouped.set(item.fingerprint, rows)
+  }
+  const ownership = componentOwners()
+  return [...grouped.entries()].map(([fingerprint, rows]) => {
+    rows.sort((a, b) => Date.parse(a.run.observedAt) - Date.parse(b.run.observedAt))
+    const executed = rows.filter(item => item.state !== 'skipped')
+    const failures = executed.filter(item => item.state === 'failed')
+    const commitStates = new Map()
+    for (const item of executed) {
+      const states = commitStates.get(item.run.commit) ?? new Set()
+      states.add(item.state)
+      commitStates.set(item.run.commit, states)
+    }
+    const sameCommitTransitions = [...commitStates.values()].filter(states => states.has('passed') && states.has('failed')).length
+    const last = rows.at(-1)
+    return {
+      fingerprint, component: last.component, kind: last.kind, classname: last.classname, name: last.name,
+      owner: ownership.owners.get(last.component) ?? ownership.fallback,
+      state: sameCommitTransitions > 0 ? 'flaky' : last.state === 'failed' ? 'failing' : last.state === 'skipped' ? 'skipped' : 'stable',
+      lastState: last.state, observations: rows.length,
+      failureRate: executed.length ? Math.round(failures.length * 10_000 / executed.length) / 100 : null,
+      averageDurationMs: Math.round(rows.reduce((sum, item) => sum + item.durationMs, 0) / rows.length),
+      wastedDurationMs: failures.reduce((sum, item) => sum + item.durationMs, 0),
+      sameCommitTransitions, lastObservedAt: last.run.observedAt,
+    }
+  }).sort((a, b) => {
+    const priority = { flaky: 0, failing: 1, skipped: 2, stable: 3 }
+    return priority[a.state] - priority[b.state] || b.wastedDurationMs - a.wastedDurationMs || a.name.localeCompare(b.name)
+  }).slice(0, 2000)
+}
+
+function ratio(covered, missed) {
+  const total = covered + missed
+  return total === 0 ? null : Math.round((covered / total) * 10_000) / 100
+}
+
+function coverage(component) {
+  const candidates = [
+    path.join(repo, component, 'build', 'reports', 'kover', 'report.xml'),
+    path.join(repo, component, 'build', 'reports', 'kover', 'xml', 'report.xml'),
+  ]
+  const file = candidates.find(exists)
+  if (!file) return {
+    state: 'not-run', observedAt: null, source: null,
+    lines: { covered: 0, missed: 0, percentage: null },
+    branches: { covered: 0, missed: 0, percentage: null },
+  }
+  const xml = fs.readFileSync(file, 'utf8')
+  const counter = type => {
+    const matches = [...xml.matchAll(new RegExp(`<counter\\s+type="${type}"\\s+missed="(\\d+)"\\s+covered="(\\d+)"\\s*/>`, 'g'))]
+    const match = matches.at(-1)
+    const missed = Number(match?.[1] ?? 0)
+    const covered = Number(match?.[2] ?? 0)
+    return { covered, missed, percentage: ratio(covered, missed) }
+  }
+  const at = observedAt(file)
+  return {
+    state: stateFrom(0, 1, at), observedAt: at, source: path.relative(repo, file),
+    lines: counter('LINE'), branches: counter('BRANCH'),
+  }
+}
+
+function moneyPathComponents() {
+  const file = path.join(repo, 'openbank-libs', 'governance', 'rules.yaml')
+  try {
+    const raw = parseYaml(fs.readFileSync(file, 'utf8'))
+    return new Set(raw?.money_path_services ?? raw?.services?.money_path ?? [])
+  } catch (error) {
+    warnings.push(`money-path inventory unavailable: ${error.message}`)
+    return new Set()
+  }
+}
+
+function contracts() {
+  const quality = readJson(path.join(repo, 'openbank-admin-ui', 'quality-report.json'))
+  if (quality?.contracts) return quality.contracts.map(item => ({
+    consumer: item.consumer, provider: item.provider, pactFile: item.pactFile,
+    state: item.status === 'pending' ? 'unknown' : item.status,
+    observedAt: item.verifiedAt ?? null, interactions: item.interactions?.length ?? 0,
+  }))
+  const dir = path.join(repo, 'pacts')
+  if (!exists(dir)) return []
+  return fs.readdirSync(dir).filter(name => name.endsWith('.json')).flatMap(name => {
+    const pact = readJson(path.join(dir, name))
+    return pact ? [{
+      consumer: pact.consumer?.name ?? 'unknown', provider: pact.provider?.name ?? 'unknown',
+      pactFile: name, state: 'unknown', observedAt: null, interactions: pact.interactions?.length ?? 0,
+    }] : []
+  })
+}
+
+async function mutations(components) {
+  const result = []
+  for (const component of components) {
+    const file = path.join(repo, component, 'build', 'reports', 'pitest', 'mutations.xml')
+    if (!exists(file)) continue
+    const parsed = await parseStringPromise(fs.readFileSync(file, 'utf8'), { explicitArray: true })
+    const items = parsed?.mutations?.mutation ?? []
+    const status = name => items.filter(item => item.$?.status === name).length
+    const killed = status('KILLED')
+    const survived = status('SURVIVED')
+    const noCoverage = status('NO_COVERAGE')
+    const at = observedAt(file)
+    const mutationRun = readJson(path.join(path.dirname(file), 'test-intelligence-run.json'))
+    const specialized = mutationRun?.specializedEvidence?.find(item => item.kind === 'mutation')
+    result.push({
+      component, state: specialized?.state ?? stateFrom(0, items.length, at), observedAt: mutationRun?.run?.observedAt ?? at,
+      total: items.length, killed, survived, noCoverage,
+      score: items.length ? Math.round((killed / items.length) * 10_000) / 100 : null,
+      ...(mutationRun?.run ? { run: mutationRun.run } : {}),
+    })
+  }
+  return result
+}
+
+function performance() {
+  const definitions = [
+    ...allFiles(path.join(repo, 'perf', 'k6'), file => file.endsWith('.js')),
+    ...fs.readdirSync(repo, { withFileTypes: true })
+      .filter(entry => entry.isDirectory() && entry.name.startsWith('openbank-'))
+      .flatMap(entry => allFiles(path.join(repo, entry.name, 'src', 'test', 'k6'), file => file.endsWith('.js'))),
+  ]
+  const summaries = allFiles(path.join(repo, 'openbank-admin-ui', 'perf-artifacts'), file => file.endsWith('-summary.json'))
+  return definitions.map(file => {
+    const raw = fs.readFileSync(file, 'utf8')
+    const thresholds = (raw.match(/thresholds\s*:/g) ?? []).length
+    const relative = path.relative(repo, file).split(path.sep)
+    const component = relative[0].startsWith('openbank-') ? relative[0] : null
+    const localId = path.basename(file, '.js')
+    const id = component ? `${component}-${localId.replace(/^openbank-/, '')}` : localId
+    const summaryFile = summaries.find(candidate => {
+      const name = path.basename(candidate)
+      return name.includes(id) || name.includes(localId)
+    })
+    const summary = summaryFile ? readJson(summaryFile) : null
+    const summaryMeta = summaryFile ? readJson(`${summaryFile}.meta.json`) : null
+    const performanceRun = summaryFile ? readJson(`${summaryFile}.run.json`) : null
+    const specialized = performanceRun?.specializedEvidence?.find(item => item.kind === 'performance')
+    const thresholdResults = summary
+      ? Object.values(summary.metrics ?? {}).flatMap(metric => Object.values(metric?.thresholds ?? {}))
+      : []
+    const failed = thresholdResults.filter(result => result?.ok === false).length
+    const at = summaryFile ? observedAt(summaryFile) : null
+    return {
+      id, component,
+      state: specialized?.state ?? (summary ? stateFrom(failed, 1, at) : 'not-run'),
+      observedAt: performanceRun?.run?.observedAt ?? at,
+      source: path.relative(repo, file), thresholds,
+      detail: specialized?.detail ?? (summary
+        ? `${thresholdResults.length} threshold result(s), ${failed} breached`
+        : 'Scenario is declared; the latest k6 run artifact is not bundled into this image.'),
+      ...((performanceRun?.run ?? summaryMeta?.run) ? { run: performanceRun?.run ?? summaryMeta.run } : {}),
+    }
+  })
+}
+
+function syntheticJourneys() {
+  const file = path.join(repo, 'openbank-libs', 'governance', 'journeys.yaml')
+  try {
+    const raw = parseYaml(fs.readFileSync(file, 'utf8'))
+    return (raw?.journeys ?? []).map(item => ({
+      id: item.id, title: item.name ?? item.title ?? item.id, status: item.status,
+      state: item.status === 'active' ? 'unknown' : 'blocked', severity: item.severity,
+      schedule: item.schedule ?? item.target_schedule ?? null, environment: item.environment ?? null,
+      covers: item.covers ?? item.covered_services ?? [],
+      falsifies: item.falsification ?? '', blocker: item.blocked_by ?? null,
+    }))
+  } catch (error) {
+    warnings.push(`synthetic journey catalogue unavailable: ${error.message}`)
+    return []
+  }
+}
+
+function mobileClientRuns() {
+  const evidenceDir = path.join(repo, 'openbank-admin-ui', 'client-test-evidence')
+  const mobileFiles = allFiles(evidenceDir, file => path.basename(file).startsWith('openbank-app-') && file.endsWith('.json'))
+  return mobileFiles.map(readJson)
+    .filter(item => item?.schemaVersion === 1 && item?.component === 'openbank-app' && item?.run)
+    .sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))
+}
+
+function clientExperiences() {
+  const mobileRuns = mobileClientRuns()
+  const latestMobile = mobileRuns.sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))[0]
+  const appSource = path.join(repo, '.app-src')
+  const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
+  const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
+  const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? junitEvidence('openbank-admin-ui')
+  const mobileEvidence = (latestMobile?.suites ?? []).map(item => ({
+    kind: item.kind, state: item.state, observedAt: latestMobile.run?.observedAt ?? null,
+    source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
+    counts: item.counts, detail: item.detail,
+    ...(latestMobile.run ? { run: latestMobile.run } : {}),
+  }))
+  if (!latestMobile) warnings.push('openbank-app execution artifact is not bundled; mobile test verdict is not inferred from source.')
+  return [
+    {
+      id: 'admin-ui', title: 'Admin UI web', surface: 'web', platforms: ['web'], evidence: webEvidence,
+      rum: {
+        state: 'not-run', policy: 'rejected', observedAt: null,
+        source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
+        detail: 'Browser RUM is intentionally rejected for the internal operator console by ADR-0088; Playwright and server-side telemetry remain the evidence path.',
+      }, blocker: null,
+    },
+    {
+      id: 'openbank-app', title: 'OpenBank customer app', surface: 'mobile', platforms: ['android', 'ios'], evidence: mobileEvidence,
+      rum: {
+        state: androidRum || iosRum ? 'unknown' : 'not-run', policy: 'consent-gated', observedAt: null,
+        source: null, sampledSpansLast7d: null, errorSpansLast7d: null,
+        detail: androidRum || iosRum
+          ? `Mobile RUM is implemented in source for ${androidRum ? 'Android' : ''}${androidRum && iosRum ? ' and ' : ''}${iosRum ? 'iOS' : ''}; runtime arrival is intentionally not inferred from a CI artifact.`
+          : 'openbank-app source was not staged for this deployment, so RUM implementation status is unknown.',
+      }, blocker: latestMobile ? null : 'Latest private-app CI evidence artifact was not available to this deployment.',
+    },
+  ]
+}
+
+async function main() {
+  const names = releasedComponents()
+  const moneyPath = moneyPathComponents()
+  const currentEnvelopes = names.map(component => readJson(path.join(repo, component, 'build', 'test-intelligence', 'run.json'))).filter(Boolean)
+  const components = names.map(component => {
+    const envelope = runEnvelope(component)
+    return {
+      component, released: true, moneyPath: moneyPath.has(component),
+      evidence: envelope?.evidence ?? junitEvidence(component),
+      coverage: envelope?.coverage ?? coverage(component),
+      testInfrastructure: envelope?.testInfrastructure ?? { declared: [], observed: [] },
+    }
+  })
+  const simulation = 'openbank-simulation'
+  if (exists(path.join(repo, simulation))) components.push({
+    component: simulation, released: false, moneyPath: false,
+    evidence: junitEvidence(simulation), coverage: coverage(simulation),
+    testInfrastructure: { declared: [], observed: [] },
+  })
+  const mutationEvidence = await mutations(names)
+  for (const item of mutationEvidence) {
+    components.find(component => component.component === item.component)?.evidence.push({
+      kind: 'mutation', state: item.state, observedAt: item.observedAt,
+      source: 'Pitest:mutations.xml', environment: 'ci', detail: `${item.score ?? '—'}% mutation score`,
+    })
+  }
+  const contractEvidence = contracts()
+  for (const item of contractEvidence) {
+    for (const componentName of new Set([item.consumer, item.provider])) {
+      components.find(component => component.component === componentName)?.evidence.push({
+        kind: 'contract', state: item.state, observedAt: item.observedAt,
+        source: `Pact:${item.pactFile}`, environment: 'ci',
+        detail: `${item.consumer} -> ${item.provider} (${item.interactions} interactions)`,
+      })
+    }
+  }
+  const performanceEvidence = performance()
+  for (const item of performanceEvidence) {
+    if (!item.component) continue
+    components.find(component => component.component === item.component)?.evidence.push({
+      kind: 'performance', state: item.state, observedAt: item.observedAt,
+      source: `k6:${item.source}`, environment: item.id === 'money-path-smoke' ? 'sandbox' : 'ci',
+      detail: item.detail,
+    })
+  }
+  const synthetic = syntheticJourneys()
+  const clientExperience = clientExperiences()
+  const testCases = testCaseHistory(currentEnvelopes)
+  const failingEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'failed').length
+  const staleEvidence = components.flatMap(item => item.evidence).filter(item => item.state === 'stale').length
+  const missingEvidence = components.filter(item => item.evidence.length === 0).length
+  const historyDir = path.join(repo, 'openbank-admin-ui', 'test-intelligence-history')
+  const historicalReports = allFiles(historyDir, file => file.endsWith('.json'))
+    .map(readJson).filter(item => item?.collectedAt && item?.totals)
+    .map(item => ({ collectedAt: item.collectedAt, ...item.totals }))
+  const currentPoint = { collectedAt: collectedAt.toISOString(), components: components.length,
+    componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+    failingEvidence, missingEvidence, staleEvidence }
+  const history = [...historicalReports, currentPoint]
+    .sort((a, b) => Date.parse(a.collectedAt) - Date.parse(b.collectedAt))
+    .filter((item, index, all) => index === 0 || item.collectedAt !== all[index - 1].collectedAt)
+    .slice(-30)
+  const serviceRunHistory = allFiles(path.join(repo, 'openbank-admin-ui', 'test-run-history'), file => file.endsWith('.json'))
+    .map(readJson).filter(item => item?.schemaVersion === 1 && item?.run && item?.component)
+    .map(item => ({ component: item.component, run: item.run,
+      states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
+      infrastructureStarted: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'started').length,
+      infrastructureStopped: (item.testInfrastructure?.observed ?? []).filter(event => event.lifecycle === 'stopped').length }))
+  const clientRunHistory = mobileClientRuns().map(item => ({
+    component: item.component, run: item.run,
+    states: Object.fromEntries((item.suites ?? []).map(suite => [suite.kind, suite.state])),
+    infrastructureStarted: 0, infrastructureStopped: 0,
+  }))
+  const runHistory = [...serviceRunHistory, ...clientRunHistory]
+    .sort((a, b) => Date.parse(b.run.observedAt) - Date.parse(a.run.observedAt)).slice(0, 500)
+  const report = {
+    schemaVersion: 1, collectedAt: collectedAt.toISOString(), components,
+    contracts: contractEvidence, mutations: mutationEvidence, performance: performanceEvidence,
+    syntheticJourneys: synthetic, history, runHistory, testCases,
+    clientExperiences: clientExperience,
+    totals: {
+      components: components.length,
+      componentsWithExecutionEvidence: components.filter(item => item.evidence.length > 0).length,
+      moneyPathComponents: components.filter(item => item.moneyPath).length,
+      failingEvidence, missingEvidence, staleEvidence,
+    },
+    warnings,
+  }
+  fs.writeFileSync(out, JSON.stringify(report, null, 2))
+  console.log(`[collect-test-intelligence] ${report.totals.componentsWithExecutionEvidence}/${report.totals.components} components with execution evidence -> ${out}`)
+}
+
+main().catch(error => { console.error(error); process.exit(1) })

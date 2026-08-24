@@ -238,6 +238,7 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-24** — Synthetic-journey taint now reaches this service over its existing internal FX REST edge through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or ledger-control bypass. It is the prerequisite for correctly classifying synthetic postings at a later persistence-backed ledger boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 - **2026-08-22** — `POST /api/v1/journals` answered 500, not 400, for a body carrying a `null`
   element in `lines` (issue #5913): `List<PostJournalLineRequest>` is a compile-time-only non-null
   promise Jackson does not keep at runtime, so `request.lines.map { it.toCommand() }` threw NPE on

@@ -1,0 +1,97 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+
+import { NextResponse } from 'next/server'
+import { auth } from '@/auth'
+import type { EvidenceKind, EvidenceState, TestAgentFinding } from '@/lib/types/test-intelligence'
+import type { TestIntelligenceReport } from '@/lib/types/test-intelligence'
+import { promises as fs } from 'fs'
+import path from 'path'
+
+export const dynamic = 'force-dynamic'
+
+// The snapshot is file data and this route forwards it to another service, so every value
+// leaving here is reduced to a closed vocabulary rather than escaped. An unrecognised kind or
+// state becomes `unknown`: the agent must never receive free text lifted out of a report.
+const COMPONENT_NAME = /^[a-z0-9][a-z0-9-]{0,63}$/
+// Written as exhaustive records so a kind or state added to the union fails compilation here
+// instead of silently degrading a real observation to `unknown` on the way to the agent.
+const EVIDENCE_KIND_KEYS: Record<EvidenceKind, true> = {
+  unit: true, integration: true, contract: true, e2e: true, performance: true,
+  synthetic: true, mutation: true, visual: true, simulation: true,
+}
+const EVIDENCE_STATE_KEYS: Record<EvidenceState, true> = {
+  passed: true, failed: true, skipped: true, 'not-run': true, stale: true, blocked: true, unknown: true,
+}
+const EVIDENCE_KINDS = new Set<string>(Object.keys(EVIDENCE_KIND_KEYS))
+const EVIDENCE_STATES = new Set<string>(Object.keys(EVIDENCE_STATE_KEYS))
+const INFRASTRUCTURE = new Set(['postgres', 'redpanda', 'valkey'])
+
+const safeEvidence = (items: ReadonlyArray<{ kind: string; state: string }> | undefined) =>
+  (items ?? []).map(item => ({
+    kind: EVIDENCE_KINDS.has(item.kind) ? item.kind : 'unknown',
+    state: EVIDENCE_STATES.has(item.state) ? item.state : 'unknown',
+  }))
+
+function flakyHunterBase(): string {
+  if (process.env.SERVICES_HOST === 'container') return 'http://flaky-test-hunter.flaky-test-hunter.svc:8148'
+  return process.env.FLAKY_TEST_HUNTER_URL ?? 'http://localhost:8148'
+}
+
+export async function GET(): Promise<NextResponse> {
+  const accessToken = (await auth())?.user?.accessToken
+  if (!accessToken) return NextResponse.json({ findings: [], available: false, reason: 'unauthorized' }, { status: 401 })
+  try {
+    const response = await fetch(`${flakyHunterBase()}/api/v1/flaky-test-hunter/findings`, {
+      headers: { Authorization: `Bearer ${accessToken}` }, signal: AbortSignal.timeout(10_000),
+    })
+    if (!response.ok) return NextResponse.json({ findings: [], available: false })
+    return NextResponse.json({ findings: await response.json() as TestAgentFinding[], available: true })
+  } catch {
+    return NextResponse.json({ findings: [], available: false })
+  }
+}
+
+export async function POST(): Promise<NextResponse> {
+  const session = await auth()
+  const accessToken = session?.user?.accessToken
+  if (!accessToken) return NextResponse.json({ findings: [], available: false, reason: 'unauthorized' }, { status: 401 })
+  if (!session.user.roles?.includes('ROLE_ADMIN')) {
+    return NextResponse.json({ findings: [], available: false, reason: 'forbidden' }, { status: 403 })
+  }
+  try {
+    const file = process.env.OPENBANK_TEST_INTELLIGENCE ?? path.resolve(process.cwd(), 'test-intelligence.json')
+    const report = JSON.parse(await fs.readFile(file, 'utf8')) as TestIntelligenceReport
+    const serviceComponents = report.components
+      .filter(component => COMPONENT_NAME.test(component.component))
+      .map(component => ({
+        component: component.component,
+        moneyPath: component.moneyPath === true,
+        evidence: safeEvidence(component.evidence),
+        declaredInfrastructure: (component.testInfrastructure?.declared ?? []).filter(item => INFRASTRUCTURE.has(item)),
+        observedInfrastructureStarts: component.testInfrastructure?.observed.filter(item => item.lifecycle === 'started').length ?? 0,
+      }))
+    const clientComponents = (report.clientExperiences ?? []).filter(client => COMPONENT_NAME.test(client.id)).map(client => ({
+      component: client.id,
+      // The customer app can initiate money movement; absence of its execution evidence
+      // deserves the same critical human attention as a money-path service gap.
+      moneyPath: client.id === 'openbank-app',
+      evidence: safeEvidence(client.evidence),
+      declaredInfrastructure: [],
+      observedInfrastructureStarts: 0,
+    }))
+    const payload = {
+      snapshotId: `${new Date(report.collectedAt).toISOString()}:schema-${Number(report.schemaVersion)}`,
+      collectedAt: new Date(report.collectedAt).toISOString(),
+      components: [...serviceComponents, ...clientComponents],
+    }
+    const response = await fetch(`${flakyHunterBase()}/api/v1/flaky-test-hunter/evidence/analyze`, {
+      method: 'POST', headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(30_000),
+    })
+    if (!response.ok) return NextResponse.json({ findings: [], available: false }, { status: 502 })
+    return NextResponse.json({ findings: await response.json() as TestAgentFinding[], available: true })
+  } catch {
+    return NextResponse.json({ findings: [], available: false }, { status: 502 })
+  }
+}

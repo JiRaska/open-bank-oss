@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.2...interest-service-v0.18.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.1...interest-service-v0.17.2) (2026-08-22)
+
+
+### Bug Fixes
+
+* **fleet:** stop event handlers acking work they did not do, and gate it ([#5719](https://github.com/JiRaska/open-bank-oss/issues/5719)) ([7b1c78d](https://github.com/JiRaska/open-bank-oss/commit/7b1c78d5b6a7223a05ad9b52860f5e0aac7db9d3))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.17.0...interest-service-v0.17.1) (2026-08-22)
 
 

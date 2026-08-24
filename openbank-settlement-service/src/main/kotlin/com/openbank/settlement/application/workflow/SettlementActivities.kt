@@ -14,5 +14,6 @@ interface SettlementActivities {
     fun bookToLedger(settlementId: UUID)
     fun reverseDebit(settlementId: UUID)
     fun reverseCredit(settlementId: UUID)
+    fun reverseBookToLedger(settlementId: UUID)
     fun rejectSettlement(settlementId: UUID)
 }

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.19.1...consent-service-v0.20.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.19.0...consent-service-v0.19.1) (2026-08-22)
+
+
+### Bug Fixes
+
+* **consent:** supersede the consent a new grant replaces ([#6505](https://github.com/JiRaska/open-bank-oss/issues/6505)) ([2a499da](https://github.com/JiRaska/open-bank-oss/commit/2a499da386b08eaded7f5c462dbb5be325c4f996)), closes [#6487](https://github.com/JiRaska/open-bank-oss/issues/6487)
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/consent-service-v0.18.2...consent-service-v0.19.0) (2026-08-21)
 
 

@@ -113,6 +113,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal clearing and transaction REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-05-30** — Added `swift_outbox_seq` (Hibernate fix). Additive DDL only — no new flow/surface/
   boundary. Risk class = **availability**, mitigated by `HibernateSequenceGuardTest`.
   Rollback: `DROP SEQUENCE`.

@@ -556,8 +556,8 @@ export default function RegulatoryPage() {
                   <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{preview.name}</div>
                 </div>
               </div>
-              <button className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít', 'Close')}>
-                <X size={15} />
+              <button type="button" className="btn btn-secondary" style={{ padding: '5px', flexShrink: 0 }} onClick={() => setPreview(null)} aria-label={t('Zavřít náhled exportu', 'Close export preview')}>
+                <X size={15} aria-hidden="true" />
               </button>
             </div>
 
@@ -572,8 +572,8 @@ export default function RegulatoryPage() {
                     style={{ font: 'inherit', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: '4px', padding: '4px 6px', background: 'var(--surface-1)' }}
                   />
                 </label>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'}>
-                  <RefreshCw size={13} className={previewData.status === 'loading' ? 'animate-spin' : ''} />
+                <button type="button" className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => void loadPreview(preview)} disabled={previewData.status === 'loading'} aria-busy={previewData.status === 'loading'} aria-label={t('Načíst data pro náhled', 'Load preview data')}>
+                  <RefreshCw size={13} aria-hidden="true" className={previewData.status === 'loading' ? 'animate-spin' : ''} />
                   {t('Načíst data', 'Load data')}
                 </button>
               </div>
@@ -628,11 +628,11 @@ export default function RegulatoryPage() {
                   : t('FINREP/COREP se při načtení ověřují ve finrep-service nad ledger trial balance; při nedostupnosti se hodnoty nezobrazí. ClickHouse ani ČNB XBRL/SDAT přenos nejsou součástí tohoto náhledu.', 'FINREP/COREP are verified on load from finrep-service over the ledger trial balance; values are not shown when unavailable. ClickHouse and ČNB XBRL/SDAT transmission are not part of this preview.')}
               </div>
               <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
-                <button className="btn btn-secondary" style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
-                  <FileSpreadsheet size={13} /> {t('Export CSV', 'Export CSV')}
+                <button type="button" className="btn btn-secondary" aria-label={t('Exportovat náhled jako CSV', 'Export preview as CSV')} style={{ fontSize: '12px' }} onClick={() => exportCsv(preview)} disabled={!exportReadiness.ok}>
+                  <FileSpreadsheet size={13} aria-hidden="true" /> {t('Export CSV', 'Export CSV')}
                 </button>
-                <button className="btn btn-primary" style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
-                  <FileJson size={13} /> {t('Export JSON', 'Export JSON')}
+                <button type="button" className="btn btn-primary" aria-label={t('Exportovat náhled jako JSON', 'Export preview as JSON')} style={{ fontSize: '12px' }} onClick={() => exportJson(preview)} disabled={!exportReadiness.ok}>
+                  <FileJson size={13} aria-hidden="true" /> {t('Export JSON', 'Export JSON')}
                 </button>
               </div>
             </div>

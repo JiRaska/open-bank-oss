@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.7.0...delegation-service-v0.8.0) (2026-08-24)
+
+
+### Features
+
+* **testing:** enforce synthetic taint REST boundaries ([#6724](https://github.com/JiRaska/open-bank-oss/issues/6724)) ([569c856](https://github.com/JiRaska/open-bank-oss/commit/569c85624aa3d6f1933865ae7ebcb69589d7d60d))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.6.2...delegation-service-v0.7.0) (2026-08-18)
 
 

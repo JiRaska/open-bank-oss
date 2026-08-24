@@ -4,6 +4,7 @@
 
 package com.openbank.settlement.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -17,6 +18,7 @@ import java.math.BigDecimal
 import java.util.UUID
 
 @RegisterRestClient(configKey = "ledger-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/journals")
 @Produces(MediaType.APPLICATION_JSON)

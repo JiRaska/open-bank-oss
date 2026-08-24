@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openbank.dev/schemas/test-intelligence-run-v1.json",
+  "title": "OpenBank Test Intelligence run envelope",
+  "type": "object",
+  "required": ["schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "run": {
+      "type": "object",
+      "required": ["id", "attempt", "commit", "branch", "workflow", "url", "observedAt"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "attempt": { "type": "integer", "minimum": 1 },
+        "commit": { "type": "string", "minLength": 7 },
+        "branch": { "type": "string", "minLength": 1 },
+        "workflow": { "type": "string", "minLength": 1 },
+        "url": { "type": "string" },
+        "observedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "component": { "type": "string", "pattern": "^openbank-" },
+    "suites": { "type": "array", "items": { "$ref": "#/$defs/suite" } },
+    "testCases": { "type": "array", "items": { "$ref": "#/$defs/testCase" } },
+    "coverage": { "oneOf": [{ "$ref": "#/$defs/coverageObservation" }, { "type": "null" }] },
+    "testInfrastructure": {
+      "type": "object",
+      "required": ["declared", "observed"],
+      "properties": {
+        "declared": { "type": "array", "items": { "enum": ["postgres", "redpanda", "valkey"] }, "uniqueItems": true },
+        "observed": { "type": "array", "items": { "$ref": "#/$defs/infrastructureObservation" } }
+      },
+      "additionalProperties": false
+    },
+    "specializedEvidence": { "type": "array", "items": { "$ref": "#/$defs/specializedEvidence" } }
+  },
+  "$defs": {
+    "coverageObservation": {
+      "type": "object",
+      "required": ["source", "lines", "branches"],
+      "properties": {
+        "source": { "type": "string", "minLength": 1 },
+        "lines": { "$ref": "#/$defs/coverageCounter" },
+        "branches": { "$ref": "#/$defs/coverageCounter" }
+      },
+      "additionalProperties": false
+    },
+    "coverageCounter": {
+      "type": "object",
+      "required": ["covered", "missed", "percentage"],
+      "properties": {
+        "covered": { "type": "integer", "minimum": 0 },
+        "missed": { "type": "integer", "minimum": 0 },
+        "percentage": { "type": ["number", "null"], "minimum": 0, "maximum": 100 }
+      },
+      "additionalProperties": false
+    },
+    "suite": {
+      "type": "object",
+      "required": ["kind", "state", "discovered", "executed", "passed", "failed", "skipped", "errors", "durationMs"],
+      "properties": {
+        "kind": { "enum": ["unit", "integration", "contract", "e2e", "simulation"] },
+        "state": { "enum": ["passed", "failed", "skipped", "not-run"] },
+        "discovered": { "type": "integer", "minimum": 0 },
+        "executed": { "type": "integer", "minimum": 0 },
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "errors": { "type": "integer", "minimum": 0 },
+        "durationMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "testCase": {
+      "type": "object",
+      "required": ["fingerprint", "kind", "classname", "name", "state", "durationMs"],
+      "properties": {
+        "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{24}$" },
+        "kind": { "enum": ["unit", "integration", "contract", "e2e", "simulation"] },
+        "classname": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "state": { "enum": ["passed", "failed", "skipped"] },
+        "durationMs": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "infrastructureObservation": {
+      "type": "object",
+      "required": ["resource", "image", "lifecycle", "observedAt"],
+      "properties": {
+        "resource": { "enum": ["postgres", "redpanda", "valkey"] },
+        "image": { "type": "string", "minLength": 1 },
+        "lifecycle": { "enum": ["started", "stopped"] },
+        "observedAt": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "specializedEvidence": {
+      "type": "object",
+      "required": ["kind", "state", "source"],
+      "properties": {
+        "kind": { "enum": ["performance", "mutation", "synthetic"] },
+        "state": { "enum": ["passed", "failed", "skipped", "not-run", "blocked", "unknown"] },
+        "source": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

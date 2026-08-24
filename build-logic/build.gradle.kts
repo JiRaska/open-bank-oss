@@ -79,9 +79,9 @@ dependencies {
 // was floored).
 configurations.all {
     resolutionStrategy {
-        force("org.codehaus.plexus:plexus-utils:4.0.3")
-        force("com.fasterxml.jackson.core:jackson-databind:2.22.1")
-        force("com.fasterxml.jackson.core:jackson-core:2.22.1")
+        force("org.codehaus.plexus:plexus-utils:4.1.0")
+        force("com.fasterxml.jackson.core:jackson-databind:2.22.2")
+        force("com.fasterxml.jackson.core:jackson-core:2.22.2")
         force("io.netty:netty-codec:4.2.17.Final")
         force("io.netty:netty-codec-http:4.2.17.Final")
         force("io.netty:netty-codec-http2:4.2.17.Final")

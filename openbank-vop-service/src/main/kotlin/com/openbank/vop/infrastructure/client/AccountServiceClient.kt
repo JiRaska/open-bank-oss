@@ -5,6 +5,7 @@
 package com.openbank.vop.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -25,6 +26,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * owner, so the M2M token (ROLE_API) is the right identity and owner-scoping must not apply.
  */
 @RegisterRestClient(configKey = "account-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)

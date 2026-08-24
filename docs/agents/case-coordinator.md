@@ -67,6 +67,7 @@ The `openbank-case-coordinator-agent` module now runs the case lifecycle:
 - **The capability gate is not yet OPA-backed.** Phase 1 checks `agents.yaml` directly (fail-closed);
   routing the decision through the per-service OPA bundle, and shipping the coordinator's GitOps
   deployment (CNPG database, `openbank.temporal.enabled=true`, network policies), is Phase 4.
-- **There is no read API or visualization yet.** Case history projection (Phase 2) and the admin-ui
-  swarm thread view (Phase 3, ADR-0246) are follow-up work; until then a case is observable only
-  through Temporal's own tooling.
+- **The read-only case index is live, but durable history remains incomplete.** `/iaops/cases`
+  truthfully shows opened coordination cases (and an explicit empty state when none exist). A
+  durable history projection and a per-case evidence/thread view remain follow-up work; Temporal
+  is still the authoritative source for workflow history.

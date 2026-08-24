@@ -12,6 +12,7 @@ import com.openbank.settlement.application.port.out.DebitPort
 import com.openbank.settlement.application.port.out.LedgerPort
 import com.openbank.settlement.application.port.out.ReverseCreditPort
 import com.openbank.settlement.application.port.out.ReverseDebitPort
+import com.openbank.settlement.application.port.out.SettlementMetricsPort
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
@@ -19,6 +20,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.coVerifyOrder
 import io.mockk.mockk
+import io.temporal.failure.ApplicationFailure
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -41,6 +43,7 @@ class SettlementActivitiesImplTest {
     private val auditPublisher: AuditEventPublisher = mockk(relaxed = true)
     private val reverseDebitPort: ReverseDebitPort = mockk(relaxed = true)
     private val reverseCreditPort: ReverseCreditPort = mockk(relaxed = true)
+    private val metrics: SettlementMetricsPort = mockk(relaxed = true)
 
     private lateinit var activities: SettlementActivitiesImpl
 
@@ -67,6 +70,7 @@ class SettlementActivitiesImplTest {
             auditPublisher,
             reverseDebitPort,
             reverseCreditPort,
+            metrics,
         )
         coEvery { settlementRepository.updateStatus(any(), any()) } answers {
             settlement(firstArg(), secondArg())
@@ -171,6 +175,38 @@ class SettlementActivitiesImplTest {
     }
 
     @Test
+    fun `reverseBookToLedger fails loudly as unsupported instead of claiming a reversal`() {
+        val id = UUID.randomUUID()
+        val events = mutableListOf<AuditEvent>()
+        coEvery { auditPublisher.publish(capture(events)) } returns Unit
+
+        assertThatThrownBy { activities.reverseBookToLedger(id) }
+            .isInstanceOf(ApplicationFailure::class.java)
+            .hasMessageContaining("Ledger reversal is not implemented")
+
+        coVerify(exactly = 0) { ledgerPort.book(any()) }
+        // Its own value, never the old LEDGER_REVERSED, which asserted an unwind that never ran.
+        coVerify { settlementRepository.updateStatus(id, SettlementStatus.LEDGER_REVERSAL_UNSUPPORTED) }
+        @Suppress("DEPRECATION")
+        coVerify(exactly = 0) { settlementRepository.updateStatus(id, SettlementStatus.LEDGER_REVERSED) }
+        assertThat(events).singleElement().satisfies({ e ->
+            assertThat(e.result).isEqualTo(AuditResult.FAILURE)
+        })
+    }
+
+    @Test
+    fun `the unsupported ledger reversal is NON-retryable so it cannot delay the balance unwinds`() {
+        // SettlementWorkflowImpl runs compensations LIFO and catches ActivityFailure per step, so a
+        // retryable failure here would burn five attempts of backoff before reverseCredit and
+        // reverseDebit — the two that actually return money — even got to run.
+        assertThatThrownBy { activities.reverseBookToLedger(UUID.randomUUID()) }
+            .isInstanceOfSatisfying(ApplicationFailure::class.java) { failure ->
+                assertThat(failure.isNonRetryable).isTrue()
+                assertThat(failure.type).isEqualTo("LedgerReversalUnsupported")
+            }
+    }
+
+    @Test
     fun `rejectSettlement sets REJECTED status without port calls`() {
         val id = UUID.randomUUID()
         activities.rejectSettlement(id)
@@ -204,6 +240,7 @@ private class TestableActivities(
     auditPublisher: AuditEventPublisher,
     reverseDebitPort: ReverseDebitPort,
     reverseCreditPort: ReverseCreditPort,
+    metrics: SettlementMetricsPort,
 ) : SettlementActivitiesImpl(
     settlementRepository,
     debitPort,
@@ -212,6 +249,7 @@ private class TestableActivities(
     auditPublisher,
     reverseDebitPort,
     reverseCreditPort,
+    metrics,
 ) {
     override fun <T> runOnVertxContext(block: suspend () -> T): T = runBlocking { block() }
 }

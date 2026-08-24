@@ -11,7 +11,7 @@ import java.util.UUID
 /**
  * Settlement saga states.
  *
- * The compensation outcomes below are deliberately distinct values, not one (issue #6037).
+ * The three compensation outcomes below are deliberately **four** values, not one (issue #6037).
  * Until this was fixed, `reverseDebit`/`reverseCredit`/`reverseBookToLedger` wrote
  * `REVERSED`/`CREDITED_REVERSED`/`LEDGER_REVERSED` and moved no money at all, so the one thing an
  * operator could observe — the status column — asserted an unwind that had not happened. That is
@@ -41,12 +41,18 @@ enum class SettlementStatus {
     REVERSAL_FAILED,
 
     /**
-     * Deprecated and **never written** since #6037. Retained because rows written before it still
-     * carry the value; the code path that produced it only ever updated this column and never
-     * reversed anything in the general ledger. Nothing reverses a GL posting today either — see
-     * `SettlementActivitiesImpl.bookToLedger` (#6410).
+     * The ledger booking was **not** reversed because settlement-service cannot reverse a journal
+     * (see `SettlementActivitiesImpl.reverseBookToLedger`). Distinct from [LEDGER_REVERSED], which
+     * is what the old stub wrote while doing nothing.
      */
-    @Deprecated("Never produced; the stub that wrote it reversed nothing. The GL is not reversed at all.")
+    LEDGER_REVERSAL_UNSUPPORTED,
+
+    /**
+     * Deprecated and **never written** since #6037. Retained so the value keeps its meaning for any
+     * consumer that pinned the old enum; the code path that produced it only ever updated this
+     * column and never reversed anything in the general ledger.
+     */
+    @Deprecated("Never produced; the stub that wrote it reversed nothing. See LEDGER_REVERSAL_UNSUPPORTED.")
     LEDGER_REVERSED,
 }
 

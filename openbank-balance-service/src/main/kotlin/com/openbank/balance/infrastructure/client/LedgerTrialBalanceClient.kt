@@ -5,6 +5,7 @@
 package com.openbank.balance.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -23,6 +24,7 @@ import java.math.BigDecimal
  * filter, like the other inter-service clients.
  */
 @RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/journals")
 @Produces(MediaType.APPLICATION_JSON)
