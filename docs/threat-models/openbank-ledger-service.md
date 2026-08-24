@@ -238,6 +238,16 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-08-22** — `POST /api/v1/journals` answered 500, not 400, for a body carrying a `null`
+  element in `lines` (issue #5913): `List<PostJournalLineRequest>` is a compile-time-only non-null
+  promise Jackson does not keep at runtime, so `request.lines.map { it.toCommand() }` threw NPE on
+  the first null element — the same shape CLAUDE.md records for a non-null `@QueryParam`, where the
+  declared type only decides **where** the failure lands, never whether one happens. Fix: the
+  element type becomes nullable and each element is checked with `requireNotNull` carrying its
+  index; libs-runtime maps `IllegalArgumentException` to 400 (no service-local mapper, #526). `400`
+  added to the OpenAPI spec's documented responses for this operation (`info.version` 1.16.0 ->
+  1.17.0). **No new trust boundary, caller, or field** — same endpoint, same shape, an
+  input-validation fix. Rollback: revert; the previous behaviour was a 500 on malformed input.
 - **2026-08-19** — `ApprovalResource` served only `PATCH /{id}` (decide), so a `ledger.reverse`
   four-eyes decision parked at 202 was discoverable only by whoever had been handed its approval
   id out of band — the ceremony completed only if the two operators were already talking, and the
