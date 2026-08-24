@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.189.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.0...admin-ui-v0.189.1) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify auth error retry ([#6703](https://github.com/JiRaska/open-bank-oss/issues/6703)) ([edf075a](https://github.com/JiRaska/open-bank-oss/commit/edf075a71a43fe9b1f63e9450bc2907201ef748e))
+
 ## [0.189.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.188.2...admin-ui-v0.189.0) (2026-08-24)
 
 
