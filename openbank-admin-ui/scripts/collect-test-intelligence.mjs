@@ -337,16 +337,27 @@ function mobileClientRuns() {
 
 function clientExperiences() {
   const mobileRuns = mobileClientRuns()
-  const latestMobile = mobileRuns.sort((a, b) => Date.parse(b.run?.observedAt ?? 0) - Date.parse(a.run?.observedAt ?? 0))[0]
+  // Mobile lanes complete independently.  Select the latest *execution of each
+  // evidence kind*, rather than treating a later connected-device artifact as a
+  // replacement for the earlier unit/visual artifact from the same app build.
+  // This preserves provenance and prevents an E2E run from visually erasing
+  // passing deterministic checks.
+  const latestMobile = mobileRuns[0]
+  const latestMobileSuites = new Map()
+  for (const run of mobileRuns) {
+    for (const suite of run.suites ?? []) {
+      if (!latestMobileSuites.has(suite.kind)) latestMobileSuites.set(suite.kind, { suite, run })
+    }
+  }
   const appSource = path.join(repo, '.app-src')
   const androidRum = exists(path.join(appSource, 'shared/src/androidMain/kotlin/tech/openbank/app/telemetry/RumMonitor.android.kt'))
   const iosRum = exists(path.join(appSource, 'shared/src/iosMain/kotlin/tech/openbank/app/telemetry/RumMonitor.ios.kt'))
   const webEvidence = runEnvelope('openbank-admin-ui')?.evidence ?? junitEvidence('openbank-admin-ui')
-  const mobileEvidence = (latestMobile?.suites ?? []).map(item => ({
-    kind: item.kind, state: item.state, observedAt: latestMobile.run?.observedAt ?? null,
+  const mobileEvidence = [...latestMobileSuites.values()].map(({ suite: item, run }) => ({
+    kind: item.kind, state: item.state, observedAt: run.run?.observedAt ?? null,
     source: 'openbank-app-test-intelligence:v1', environment: 'ci', durationMs: item.durationMs,
     counts: item.counts, detail: item.detail,
-    ...(latestMobile.run ? { run: latestMobile.run } : {}),
+    ...(run.run ? { run: run.run } : {}),
   }))
   if (!latestMobile) warnings.push('openbank-app execution artifact is not bundled; mobile test verdict is not inferred from source.')
   return [
