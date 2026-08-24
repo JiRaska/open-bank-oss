@@ -313,13 +313,13 @@ export default function OnboardingPage() {
           {/* Pagination */}
           {total > 20 && (
             <div style={{ padding: '12px 20px', borderTop: '1px solid var(--border)', display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <button className="btn btn-secondary" disabled={page === 0} onClick={() => setPage(p => p - 1)}>
+              <button type="button" className="btn btn-secondary" aria-label={t('Předchozí strana onboardingu', 'Previous onboarding page')} disabled={page === 0} onClick={() => setPage(p => p - 1)}>
                 {t('← Předchozí', '← Prev')}
               </button>
               <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
                 {t(`Strana ${page + 1} z ${Math.ceil(total / 20)}`, `Page ${page + 1} of ${Math.ceil(total / 20)}`)}
               </span>
-              <button className="btn btn-secondary" disabled={(page + 1) * 20 >= total} onClick={() => setPage(p => p + 1)}>
+              <button type="button" className="btn btn-secondary" aria-label={t('Další strana onboardingu', 'Next onboarding page')} disabled={(page + 1) * 20 >= total} onClick={() => setPage(p => p + 1)}>
                 {t('Další →', 'Next →')}
               </button>
             </div>
