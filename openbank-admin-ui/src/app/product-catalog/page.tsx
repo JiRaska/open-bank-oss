@@ -692,7 +692,7 @@ export default function ProductCatalogPage() {
                         <button type="button" className="btn btn-secondary btn-sm" disabled={p.status === 'ACTIVE'} onClick={() => openEditModal(p)} style={{ padding: '4px' }} title={p.status === 'ACTIVE' ? t('Nejprve deaktivujte', 'Deactivate before editing') : t('Upravit', 'Edit')} aria-label={p.status === 'ACTIVE' ? t('Nejprve deaktivujte produkt před úpravou', 'Deactivate product before editing') : t('Upravit produkt', 'Edit product')}>
                           <Edit size={13} aria-hidden="true" />
                         </button>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
+                        <button type="button" aria-pressed={p.status === 'ACTIVE'} className="btn btn-secondary btn-sm" onClick={() => handleToggleStatus(p)} style={{ padding: '4px', color: p.status === 'ACTIVE' ? 'var(--warning-text)' : 'var(--success-text)' }} title={p.status === 'ACTIVE' ? t('Deaktivovat', 'Deactivate') : t('Aktivovat', 'Activate')} aria-label={p.status === 'ACTIVE' ? t('Deaktivovat produkt', 'Deactivate product') : t('Aktivovat produkt', 'Activate product')}>
                           {p.status === 'ACTIVE' ? <Square size={13} aria-hidden="true" /> : <Play size={13} aria-hidden="true" />}
                         </button>
                       </div>
