@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -21,6 +22,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * shared OIDC client filter (Bearer token).
  */
 @RegisterRestClient(configKey = "clearing-simulator")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/clearing")
 interface ClearingSimulatorClient {

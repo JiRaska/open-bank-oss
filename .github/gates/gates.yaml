@@ -88,6 +88,18 @@ gates:
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
 
+  - id: synthetic-taint-rest-client-boundaries
+    name: "Synthetic taint reaches every internal REST edge (ADR-0252, enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A synthetic journey that loses its marker at an unregistered REST client reaches downstream persistence as real activity; forwarding the marker to an external endpoint is a separate trust-boundary failure. Every client declaration must make exactly one of those decisions explicit."
+    review_after: "2027-08-24"
+    min_subjects: 110
+    selftest: python3 .github/scripts/check-synthetic-taint-rest-clients.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-synthetic-taint-rest-clients.py --enforce
+
   # ==== lint ===========================================================
   # The runner's own falsification, riding the cheapest shard. run-gates.py decides for
   # every other gate in this file whether a non-zero exit fails the build, whether an

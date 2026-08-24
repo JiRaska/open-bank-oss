@@ -5,6 +5,7 @@
 package com.openbank.notification.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -32,6 +33,7 @@ import java.util.UUID
  * is exactly the thing a cache would get wrong.
  */
 @RegisterRestClient(configKey = "party-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/parties")
 @Produces(MediaType.APPLICATION_JSON)

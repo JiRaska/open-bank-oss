@@ -59,3 +59,20 @@ test('keeps the evidence flow usable at the mobile breakpoint', async ({ page })
   await expect(page.getByRole('button', { name: /CI breaks assumptions/ })).toBeVisible()
   await expect(page.getByRole('button', { name: /Výkon|Performance/ })).toBeVisible()
 })
+
+test('uses Test Intelligence as the only DevOps test-evidence destination', async ({ page }) => {
+  await page.route('**/api/devops/dora', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+    overall: 'high', metrics: {
+      deploymentFrequency: { level: 'high', description: 'daily' }, leadTime: { level: 'high', description: 'hours' },
+      changeFailureRate: { level: 'high', description: 'low' }, mttr: { level: 'high', description: 'hours' },
+    }, recentDeployments: [], sources: { git: true, prometheus: true }, collectedAt: '2026-08-24T10:00:00.000Z',
+  }) }))
+  await page.route('**/api/devops/insights', route => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ findings: [] }) }))
+  await page.route('**/api/test-results', route => route.abort('failed'))
+
+  await page.goto('/devops')
+  const destination = page.getByRole('link', { name: /Otevřít Test Intelligence|Open Test Intelligence/ })
+  await expect(destination).toBeVisible()
+  await destination.click()
+  await expect(page).toHaveURL(/\/system\/tests$/)
+})

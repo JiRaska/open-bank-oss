@@ -5,6 +5,7 @@
 package com.openbank.document.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -24,6 +25,7 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  * ADR-0069) on-file details.
  */
 @RegisterRestClient(configKey = "party-service-api")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 interface PartyClient {

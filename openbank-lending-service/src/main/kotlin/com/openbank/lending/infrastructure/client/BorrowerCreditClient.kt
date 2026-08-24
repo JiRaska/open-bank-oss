@@ -5,6 +5,7 @@ package com.openbank.lending.infrastructure.client
 
 import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.arc.properties.IfBuildProperty
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
@@ -36,6 +37,7 @@ import java.util.UUID
  * booking a loan disbursement needs, with no scheme or clearing calendar involved.
  */
 @RegisterRestClient(configKey = "transaction-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/transactions")
 @Produces(MediaType.APPLICATION_JSON)
