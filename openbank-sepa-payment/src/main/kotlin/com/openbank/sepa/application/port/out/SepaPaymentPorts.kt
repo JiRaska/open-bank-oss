@@ -20,6 +20,7 @@ data class SepaPaymentOutboxMessage(
     val payload: String,
     val eventId: UUID = UUID.randomUUID(),
     val createdAt: Instant,
+    val synthetic: Boolean = false,
 )
 
 /**

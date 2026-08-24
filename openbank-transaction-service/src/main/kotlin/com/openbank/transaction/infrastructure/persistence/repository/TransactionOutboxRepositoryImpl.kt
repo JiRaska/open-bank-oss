@@ -115,6 +115,7 @@ class TransactionOutboxRepositoryImpl(private val clock: Clock) :
 
     private fun OutboxMessage.toEntity() = TransactionOutboxEntity().also {
         it.eventId = eventId
+        it.synthetic = synthetic
         it.aggregateId = aggregateId
         it.eventType = eventType
         it.payload = payload

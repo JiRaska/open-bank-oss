@@ -28,6 +28,7 @@ class StatementOutboxRepositoryImpl(private val clock: Clock) :
         val now = clock.instant()
         val e = StatementOutboxEntity().apply {
             eventId = message.eventId
+            synthetic = message.synthetic
             aggregateId = message.aggregateId
             eventType = message.eventType
             payload = message.payload

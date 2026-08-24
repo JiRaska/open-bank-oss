@@ -99,6 +99,7 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
         val outboxEntities = feeEntities.filter { it.postingStatus == PostingStatus.PENDING }.map { fee ->
             BillingOutboxEntity().apply {
                 eventId = Ids.newId()
+                synthetic = false
                 aggregateId = fee.id
                 eventType = "billing.fee.post-intent.v1"
                 payload = AssessedFeeOutboxPayloads.postIntent(fee)
@@ -218,6 +219,7 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                 fee.updatedAt = now
                 val outboxEntity = BillingOutboxEntity().apply {
                     eventId = Ids.newId()
+                    synthetic = false
                     aggregateId = fee.id
                     eventType = "billing.fee.reversal-intent.v1"
                     payload = AssessedFeeOutboxPayloads.reversalIntent(fee, reason)
@@ -306,6 +308,7 @@ class BillingAssessmentRepositoryImpl(private val sf: Mutiny.SessionFactory, pri
                     } else {
                         val entity = BillingOutboxEntity().apply {
                             eventId = Ids.newId()
+                            synthetic = false
                             this.aggregateId = aggregateId
                             eventType = ANNUAL_FEE_SUMMARY_EVENT_TYPE
                             this.payload = payload
