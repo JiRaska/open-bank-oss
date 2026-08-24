@@ -31,7 +31,7 @@ function ErrorContent() {
         <div style={{ fontSize: "13px", color: "var(--text-secondary)", marginBottom: "24px" }}>
           {messages[error ?? "Default"] ?? messages.Default}
         </div>
-        <button onClick={() => signIn("keycloak")} style={{
+        <button type="button" aria-label="Retry sign-in / Zkusit přihlášení znovu" onClick={() => signIn("keycloak")} style={{
           padding: "10px 24px", borderRadius: "8px", border: "none",
           background: "var(--accent)", color: "#fff", fontSize: "13px",
           fontWeight: 600, cursor: "pointer",
