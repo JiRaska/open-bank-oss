@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.3...party-service-v0.19.0) (2026-08-24)
+
+
+### Features
+
+* **party:** classify synthetic canary parties ([#6730](https://github.com/JiRaska/open-bank-oss/issues/6730)) ([f478d04](https://github.com/JiRaska/open-bank-oss/commit/f478d04fec9d4c6a0a31ca0a443d4783c4d796de))
+
 ## [0.18.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.18.2...party-service-v0.18.3) (2026-08-22)
 
 
