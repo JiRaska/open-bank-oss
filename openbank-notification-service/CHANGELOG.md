@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.25.2...notification-service-v0.26.0) (2026-08-24)
+
+
+### Features
+
+* **notification:** expose pending four-eyes approvals via approval inbox ([#6547](https://github.com/JiRaska/open-bank-oss/issues/6547)) ([312a73b](https://github.com/JiRaska/open-bank-oss/commit/312a73b0ddffa4eb834b871d75e93fbd022411f1))
+
 ## [0.25.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.25.1...notification-service-v0.25.2) (2026-08-22)
 
 
