@@ -82,7 +82,7 @@ export default function AuditPage() {
               onKeyDown={e => e.key === 'Enter' && search()}
             />
           </div>
-          <button className="btn btn-primary" onClick={search} disabled={loading || !aggregateId.trim()}>
+          <button type="button" className="btn btn-primary" onClick={search} disabled={loading || !aggregateId.trim()} aria-busy={loading} aria-label={t('Vyhledat auditní záznam', 'Search audit trail')}>
             {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
           </button>
         </div>
