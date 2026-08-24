@@ -90,6 +90,22 @@ List open issues with `gh issue list`. Discard, in this order:
   architecture;
 - any too large for one run: a whole new service, a 30-module sweep, a framework migration.
 
+**Do not reason about whether the fix lands on a protected path — ASK.** Once you know which
+files you would touch, run:
+
+```
+python3 .github/scripts/check-agent-pr-guard.py --paths <file> <file> ...
+```
+
+Exit 1 means the gate will refuse the PR, so the issue is out of scope: pick another and say why.
+Exit 0 means it is in scope.
+
+This exists because reasoning about it failed. On 2026-08-24 the worker picked the
+party-service slice of #5679, having weighed `money_path_services` and overlooked
+`extra_protected_tokens`, where `party` sits. #6607 was red from its first check and could never
+merge — a whole run spent on work the gate was always going to refuse. The rule was in these
+instructions the entire time; applying it by hand is what went wrong. One command answers it.
+
 Then ask the question that decides everything else: **what test would prove this fix, and can I
 run that test on this runner?** Check rather than assume — the job step before you measured
 whether a real database image can be pulled here, and its output is in the run log. If the proof

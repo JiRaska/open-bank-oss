@@ -475,10 +475,42 @@ def main():
     ap = argparse.ArgumentParser(description="agent PR guard")
     ap.add_argument("--pr")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument(
+        "--paths", nargs="+", metavar="PATH",
+        help="classify a file list directly, with no PR: exit 1 if any path is protected. "
+             "For an agent deciding whether a change is in scope BEFORE writing it.",
+    )
     args = ap.parse_args()
 
     if args.self_test:
         return self_test()
+
+    # --paths: ask the gate instead of reasoning about it.
+    #
+    # The worker's own instructions tell it to discard an issue whose fix would land on a
+    # protected path. On 2026-08-24 it reasoned about that and got it wrong: it picked the
+    # party-service slice of #5679, having weighed `money_path_services` and overlooked
+    # `extra_protected_tokens`, where `party` sits. The PR (#6607) was red from its first
+    # check and could never merge — a whole run spent on work the gate was always going to
+    # refuse.
+    #
+    # A rule an agent must APPLY BY REASONING is a rule it can misread. This makes the same
+    # question answerable by running one command, before any code is written.
+    if args.paths:
+        try:
+            cfg = load_rules()
+        except Undetermined as e:
+            print(f"::error::agent-pr-guard --paths could not read the rules: {e}")
+            return 2
+        hits = protected_reasons(list(args.paths), cfg)
+        if not hits:
+            print(f"in scope: none of the {len(args.paths)} path(s) given are protected")
+            return 0
+        print("PROTECTED — an agent PR touching these will be refused by the gate:")
+        for clause, matched in hits:
+            print(f"  * {REASON_TEXT[clause]}")
+            print(f"    matched: {' '.join(sorted(matched)[:3])}")
+        return 1
 
     try:
         cfg = load_rules()
