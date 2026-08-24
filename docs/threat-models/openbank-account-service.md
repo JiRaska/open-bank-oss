@@ -95,6 +95,8 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass: sanctions, SCA and all other downstream controls still see the journey. It prevents synthetic activity from becoming indistinguishable before a downstream persistence/event boundary; a separate fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-20** — Product-catalog product/currency enforcement (#668). This existing reference-data
   edge now authenticates with the `openbank-services` OIDC client and validates a confirmed product's
   currency before account creation. It deliberately preserves ADR-0158's fail-open posture only for

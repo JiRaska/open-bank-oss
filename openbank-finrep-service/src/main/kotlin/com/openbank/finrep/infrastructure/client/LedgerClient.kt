@@ -7,6 +7,7 @@ package com.openbank.finrep.infrastructure.client
 import com.openbank.finrep.application.port.out.LedgerPort
 import com.openbank.finrep.application.port.out.TrialBalanceLineDto
 import com.openbank.finrep.application.port.out.TrialBalanceSnapshot
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -37,6 +38,7 @@ import java.time.LocalDate
  * the endpoint. Review alone would not catch either direction (#2269).
  */
 @RegisterRestClient(configKey = "ledger-service")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
 @Path("/api/v1/ledger/periods/MONTH")
 @Produces(MediaType.APPLICATION_JSON)

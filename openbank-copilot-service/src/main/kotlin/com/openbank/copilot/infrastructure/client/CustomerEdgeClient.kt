@@ -3,6 +3,7 @@
 // A commercial licence is available from the maintainers as an alternative to the AGPL-3.0.
 package com.openbank.copilot.infrastructure.client
 
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.security.identity.SecurityIdentity
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
@@ -31,6 +32,7 @@ import java.util.UUID
  * directly would 403 — those expect SERVICE/OPERATOR roles a customer token does not carry.
  */
 @RegisterRestClient(configKey = "customer-edge")
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @RegisterProvider(CopilotAuthPropagationFilter::class)
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

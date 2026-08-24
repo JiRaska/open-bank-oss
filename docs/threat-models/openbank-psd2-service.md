@@ -72,6 +72,8 @@ requests, but the irreversible action lives downstream.
 
 ## 6. Change log
 
+- **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or PSD2-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
+
 - **2026-08-07 (#3658, recorded retroactively 2026-08-14)** — The required Berlin Group headers on
   `AisResource` and `PisResource` changed from non-nullable `String` to `String?` plus an explicit
   guard, so a **missing** `Consent-ID` / `Idempotency-Key` answers **400** instead of **500**.
