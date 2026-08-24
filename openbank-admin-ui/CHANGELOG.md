@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.189.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.3...admin-ui-v0.189.4) (2026-08-24)
+
+
+### Bug Fixes
+
+* **admin-ui:** retain latest client evidence by kind ([#6748](https://github.com/JiRaska/open-bank-oss/issues/6748)) ([a8711dc](https://github.com/JiRaska/open-bank-oss/commit/a8711dcae9980ea0dcfb3c2f2bd8db05967b9528))
+
 ## [0.189.3](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.2...admin-ui-v0.189.3) (2026-08-24)
 
 
