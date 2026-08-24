@@ -118,12 +118,22 @@ journeys:
       run: { id: '8', attempt: 1, commit: 'older', branch: 'main', workflow: 'app build', url: 'https://example.test/8', observedAt: '2026-08-22T10:00:00Z' },
       suites: [{ kind: 'unit', state: 'failed', durationMs: 100, counts: { discovered: 2, executed: 2, passed: 1, failed: 1, skipped: 0, errors: 0 } }],
     }))
+    write(repo, 'openbank-admin-ui/client-test-evidence/openbank-app-e2e.json', JSON.stringify({
+      schemaVersion: 1, component: 'openbank-app',
+      run: { id: '10', attempt: 1, commit: 'abc', branch: 'main', workflow: 'app build', url: 'https://example.test/10', observedAt: '2026-08-23T11:00:00Z' },
+      suites: [{ kind: 'e2e', state: 'passed', durationMs: 200, counts: { discovered: 2, executed: 2, passed: 2, failed: 0, skipped: 0, errors: 0 } }],
+    }))
     const out = path.join(repo, 'report.json')
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
     const app = report.clientExperiences.find(item => item.id === 'openbank-app')!
-    expect(app.evidence[0]).toMatchObject({ kind: 'unit', state: 'passed', run: { id: '9' } })
+    expect(app.evidence.find(item => item.kind === 'unit')).toMatchObject({
+      kind: 'unit', state: 'passed', run: { id: '9' },
+    })
+    expect(app.evidence.some(item =>
+      item.kind === 'e2e' && item.state === 'passed' && item.run?.id === '10',
+    )).toBe(true)
     expect(app.rum).toMatchObject({ policy: 'consent-gated', state: 'unknown' })
-    expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['9', '8'])
+    expect(report.runHistory.filter(item => item.component === 'openbank-app').map(item => item.run.id)).toEqual(['10', '9', '8'])
   })
 })
