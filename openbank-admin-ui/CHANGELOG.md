@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.188.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.30...admin-ui-v0.188.0) (2026-08-24)
+
+
+### Features
+
+* **notification:** expose pending four-eyes approvals via approval inbox ([#6547](https://github.com/JiRaska/open-bank-oss/issues/6547)) ([312a73b](https://github.com/JiRaska/open-bank-oss/commit/312a73b0ddffa4eb834b871d75e93fbd022411f1))
+
+
+### Bug Fixes
+
+* **admin-ui:** clarify audit search state ([#6681](https://github.com/JiRaska/open-bank-oss/issues/6681)) ([e1248bb](https://github.com/JiRaska/open-bank-oss/commit/e1248bba6b5e426b8c1069e4e7f3b458a2adfd50))
+* **admin-ui:** clarify onboarding pagination ([#6680](https://github.com/JiRaska/open-bank-oss/issues/6680)) ([7566192](https://github.com/JiRaska/open-bank-oss/commit/756619256c973ae5952f589bd2c1971bdacd3c8a))
+* **admin-ui:** clarify transaction filters ([#6675](https://github.com/JiRaska/open-bank-oss/issues/6675)) ([3cfe015](https://github.com/JiRaska/open-bank-oss/commit/3cfe015120ae8ec167e72dc9cfb9f1ba23b6e4c1))
+
 ## [0.187.30](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.187.29...admin-ui-v0.187.30) (2026-08-24)
 
 
