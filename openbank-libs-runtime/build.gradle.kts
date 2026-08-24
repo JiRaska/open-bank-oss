@@ -78,6 +78,10 @@ dependencies {
     compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
+    // SyntheticTaintRequestFilter binds the trusted synthetic classification into OTel baggage
+    // for the lifetime of an inbound request. Keep this compileOnly: Quarkus services already
+    // supply the API at runtime, and libs-runtime must not bring an observability SDK with it.
+    compileOnly("io.opentelemetry:opentelemetry-api:1.62.0")
 
     // NulByteGuards: the fleet-wide U+0000 rejection (#5913). jackson-databind supplies
     // StringDeserializer/SimpleModule; quarkus-jackson supplies ObjectMapperCustomizer, the
@@ -127,6 +131,7 @@ dependencies {
     testImplementation("com.fasterxml.jackson.core:jackson-databind:2.22.1")
     testImplementation("com.fasterxml.jackson.module:jackson-module-kotlin:2.22.1")
     testImplementation("io.quarkus:quarkus-jackson:3.33.2")
+    testImplementation("io.opentelemetry:opentelemetry-api:1.62.0")
     testImplementation("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // ResilientCallMetrics classifies CircuitBreakerOpenException; the API is compileOnly above.
     testImplementation("org.eclipse.microprofile.fault-tolerance:microprofile-fault-tolerance-api:4.1.1")

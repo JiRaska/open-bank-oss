@@ -5,6 +5,9 @@
 package com.openbank.libs.web
 
 import com.openbank.libs.synthetic.SyntheticTaint
+import io.opentelemetry.api.baggage.Baggage
+import io.opentelemetry.context.Context
+import io.opentelemetry.context.Scope
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.container.ContainerRequestFilter
 import jakarta.ws.rs.container.ContainerResponseContext
@@ -20,6 +23,9 @@ const val SYNTHETIC_TAINT_PROPERTY: String = "openbank.synthetic"
 
 /** MDC key, so every log line of a canary request is attributable without guessing. */
 const val MDC_SYNTHETIC: String = "synthetic"
+
+/** Request-scoped OTel context handle; closed by [SyntheticTaintResponseFilter]. */
+private const val SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY: String = "openbank.synthetic.baggage-scope"
 
 /**
  * Where the synthetic taint ENTERS the platform (ADR-0252 phase 1, issue #4348).
@@ -98,6 +104,16 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
         }
         ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, true)
         MDC.put(MDC_SYNTHETIC, "true")
+        // This is the observability rail, not an authorization input. Only the trusted decision
+        // above may set it; accepting a browser-provided baggage value would recreate the same
+        // regulatory-evasion hole as trusting the HTTP header directly.
+        val baggage = Baggage.current().toBuilder()
+            .put(SyntheticTaint.BAGGAGE_KEY, SyntheticTaint.headerValue())
+            .build()
+        ctx.setProperty(
+            SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY,
+            baggage.storeInContext(Context.current()).makeCurrent(),
+        )
     }
 
     // `isInitialized` rather than a Kotlin default on the field. A Kotlin default on a
@@ -127,6 +143,11 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
 @Provider
 class SyntheticTaintResponseFilter : ContainerResponseFilter {
     override fun filter(req: ContainerRequestContext, resp: ContainerResponseContext) {
+        // The scope is created only after a trusted assertion. Closing it is as important as the
+        // MDC cleanup: OTel Context is thread-local, and a leak would mark the next request's
+        // trace as synthetic. A malformed/missing property is intentionally ignored; it means
+        // the request was real or an earlier filter failed before context setup.
+        (req.getProperty(SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY) as? Scope)?.close()
         MDC.remove(MDC_SYNTHETIC)
     }
 }
