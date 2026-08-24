@@ -4,6 +4,7 @@
 
 package com.openbank.libs.testing.containers
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
@@ -40,6 +41,7 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
             .withPassword("openbank_secret")
             .withDatabaseName(dbName)
         pg.start()
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
         postgres = pg
         return pg
     }
@@ -58,5 +60,10 @@ abstract class PostgresBase : QuarkusTestResourceLifecycleManager {
 
     override fun stop() {
         postgres?.stop()
+        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped")
+    }
+
+    private companion object {
+        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
     }
 }

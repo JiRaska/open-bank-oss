@@ -66,6 +66,7 @@ NO_CORPUS = {
     "pact-version-probe-fail-closed-unit-test",
     "pact-provider-version-proof-unit-test",
     "pact-version-tree-equivalence-unit-test",
+    "pr-build-cloud-credentials",
     "record-deployment-version-resolver",
     "runtime-conformance-comparators",
     "supersede-deploy-prs-ancestry",

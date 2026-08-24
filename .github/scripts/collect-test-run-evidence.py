@@ -1,0 +1,351 @@
+#!/usr/bin/env python3
+"""Build one provenance-complete, secret-free Test Intelligence run envelope."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import re
+from datetime import datetime, timezone
+from pathlib import Path
+import xml.etree.ElementTree as ET
+import tempfile
+
+
+SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
+SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
+SPECIALIZED_KINDS = {"performance", "mutation", "synthetic"}
+SPECIALIZED_STATES = SUITE_STATES | {"blocked", "unknown"}
+INFRASTRUCTURE = {"postgres", "redpanda", "valkey"}
+
+
+def validate_envelope(envelope: dict) -> None:
+    """Fail closed before CI publishes an envelope that violates the v1 contract."""
+    required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
+    if set(envelope) - (required | {"specializedEvidence", "testCases"}) or not required.issubset(envelope):
+        raise ValueError("run envelope has missing or unknown top-level fields")
+    if envelope["schemaVersion"] != 1 or not str(envelope["component"]).startswith("openbank-"):
+        raise ValueError("run envelope schemaVersion/component is invalid")
+    run = envelope["run"]
+    if set(run) != {"id", "attempt", "commit", "branch", "workflow", "url", "observedAt"}:
+        raise ValueError("run provenance fields are incomplete")
+    if not run["id"] or run["attempt"] < 1 or len(run["commit"]) < 7 or not run["branch"] or not run["workflow"]:
+        raise ValueError("run provenance values are invalid")
+    for suite in envelope["suites"]:
+        if suite["kind"] not in SUITE_KINDS or suite["state"] not in SUITE_STATES:
+            raise ValueError("suite kind/state is invalid")
+        counts = [suite[key] for key in ("discovered", "executed", "passed", "failed", "skipped", "errors", "durationMs")]
+        if any(not isinstance(value, int) or value < 0 for value in counts):
+            raise ValueError("suite counts must be non-negative integers")
+        if suite["executed"] + suite["skipped"] != suite["discovered"]:
+            raise ValueError("suite discovered count does not equal executed + skipped")
+        if suite["passed"] + suite["failed"] + suite["errors"] != suite["executed"]:
+            raise ValueError("suite executed count does not equal passed + failed + errors")
+    coverage_value = envelope["coverage"]
+    if coverage_value is not None:
+        if set(coverage_value) != {"source", "lines", "branches"} or not coverage_value["source"]:
+            raise ValueError("coverage observation fields are invalid")
+        for counter in (coverage_value["lines"], coverage_value["branches"]):
+            if set(counter) != {"covered", "missed", "percentage"}:
+                raise ValueError("coverage counter fields are invalid")
+            if any(not isinstance(counter[key], int) or counter[key] < 0 for key in ("covered", "missed")):
+                raise ValueError("coverage counts must be non-negative integers")
+            percentage = counter["percentage"]
+            if percentage is not None and (not isinstance(percentage, (int, float)) or not 0 <= percentage <= 100):
+                raise ValueError("coverage percentage must be null or between 0 and 100")
+    infrastructure = envelope["testInfrastructure"]
+    if set(infrastructure) != {"declared", "observed"} or not set(infrastructure["declared"]).issubset(INFRASTRUCTURE):
+        raise ValueError("declared test infrastructure is invalid")
+    for item in infrastructure["observed"]:
+        if set(item) != {"resource", "image", "lifecycle", "observedAt"}:
+            raise ValueError("runtime observation contains unsafe or incomplete fields")
+        if item["resource"] not in INFRASTRUCTURE or item["lifecycle"] not in {"started", "stopped"} or not item["image"]:
+            raise ValueError("runtime observation values are invalid")
+    for item in envelope.get("specializedEvidence", []):
+        if set(item) - {"kind", "state", "source", "detail"} or not {"kind", "state", "source"}.issubset(item):
+            raise ValueError("specialized evidence fields are invalid")
+        if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
+            raise ValueError("specialized evidence values are invalid")
+    for item in envelope.get("testCases", []):
+        if set(item) != {"fingerprint", "kind", "classname", "name", "state", "durationMs"}:
+            raise ValueError("test case fields are invalid")
+        if (not re.fullmatch(r"[0-9a-f]{24}", item["fingerprint"]) or item["kind"] not in SUITE_KINDS
+                or item["state"] not in {"passed", "failed", "skipped"}
+                or not item["classname"] or not item["name"] or item["durationMs"] < 0):
+            raise ValueError("test case values are invalid")
+
+
+def classify(name: str, classname: str, task: str, component: str) -> str:
+    identity = f"{name} {classname} {task}"
+    if re.search(r"integration|inttest", identity, re.I) or re.search(r"IT(?:$|[.$\s])", identity):
+        return "integration"
+    if re.search(r"pact|contract", identity, re.I):
+        return "contract"
+    if re.search(r"e2e|playwright", identity, re.I):
+        return "e2e"
+    if component == "openbank-simulation":
+        return "simulation"
+    return "unit"
+
+
+def junit_suites(root: Path):
+    """Yield (task, testsuite element) for every JUnit report under build/test-results.
+
+    Gradle writes ``TEST-<class>.xml`` with a ``<testsuite>`` root; vitest and Playwright
+    write an arbitrarily named file with a ``<testsuites>`` wrapper. Globbing the Gradle
+    filename convention silently produced an empty Admin UI envelope, so match any XML and
+    discriminate on the parsed root tag instead. An unparsable report is skipped rather than
+    failing the producing build: a missing observation must never gate the suite it observes.
+    """
+    if not root.exists():
+        return
+    for report in sorted(root.glob("**/*.xml")):
+        try:
+            tree = ET.parse(report).getroot()
+        except ET.ParseError:
+            print(f"::warning::test-intelligence: unparsable JUnit report skipped: {report}")
+            continue
+        if tree.tag not in ("testsuite", "testsuites"):
+            continue
+        task = report.relative_to(root).parts[0]
+        if tree.tag == "testsuite":
+            yield task, tree
+            continue
+        children = tree.findall("testsuite")
+        for child in children or [tree]:
+            yield task, child
+
+
+def suites(component: str, service: Path) -> list[dict]:
+    totals: dict[str, dict] = {}
+    root = service / "build" / "test-results"
+    for task, tree in junit_suites(root):
+        cases = tree.findall(".//testcase")
+        sample = cases[0] if cases else None
+        kind = classify(tree.attrib.get("name", ""), sample.attrib.get("classname", "") if sample is not None else "", task, component)
+        row = totals.setdefault(kind, {"kind": kind, "discovered": 0, "executed": 0, "passed": 0, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 0})
+        discovered = int(tree.attrib.get("tests", len(cases)))
+        failed = int(tree.attrib.get("failures", 0))
+        errors = int(tree.attrib.get("errors", 0))
+        skipped = int(tree.attrib.get("skipped", 0))
+        executed = discovered - skipped
+        row.update(discovered=row["discovered"] + discovered, executed=row["executed"] + executed,
+                   failed=row["failed"] + failed, errors=row["errors"] + errors,
+                   skipped=row["skipped"] + skipped, passed=row["passed"] + max(0, executed - failed - errors),
+                   durationMs=row["durationMs"] + round(float(tree.attrib.get("time", 0)) * 1000))
+    for row in totals.values():
+        # Derive the totals the v1 contract requires to be consistent. A report whose
+        # failures+errors exceed tests-minus-skipped (a killed JVM, a partial write) must not
+        # make validate_envelope reject the envelope and fail an otherwise green build.
+        row["executed"] = row["passed"] + row["failed"] + row["errors"]
+        row["discovered"] = row["executed"] + row["skipped"]
+        row["state"] = "failed" if row["failed"] + row["errors"] else "skipped" if row["executed"] == 0 else "passed"
+    return sorted(totals.values(), key=lambda row: row["kind"])
+
+
+def test_cases(component: str, service: Path) -> list[dict]:
+    """Emit secret-free observations with a stable test-definition identity."""
+    result = []
+    root = service / "build" / "test-results"
+    for task, tree in junit_suites(root):
+        for case in tree.findall(".//testcase"):
+            name = case.attrib.get("name", "unknown")
+            classname = case.attrib.get("classname", tree.attrib.get("name", "unknown"))
+            kind = classify(name, classname, task, component)
+            definition = re.sub(r"\s*(?:\[[^]]*]|\([^)]*\))\s*$", "", name).strip() or name
+            identity = f"{component}\0{kind}\0{classname}\0{definition}"
+            state = "skipped" if case.find("skipped") is not None else "failed" if (
+                case.find("failure") is not None or case.find("error") is not None
+            ) else "passed"
+            result.append({
+                "fingerprint": hashlib.sha256(identity.encode()).hexdigest()[:24],
+                "kind": kind, "classname": classname, "name": definition, "state": state,
+                "durationMs": max(0, round(float(case.attrib.get("time", 0)) * 1000)),
+            })
+    return sorted(result, key=lambda item: (item["fingerprint"], item["state"]))
+
+
+def coverage(service: Path) -> dict | None:
+    report = service / "build" / "reports" / "kover" / "report.xml"
+    if not report.exists():
+        return None
+    root = ET.parse(report).getroot()
+    counters = {node.attrib["type"].lower(): node.attrib for node in root.findall("counter")}
+    def value(kind: str) -> dict:
+        item = counters.get(kind, {})
+        covered, missed = int(item.get("covered", 0)), int(item.get("missed", 0))
+        return {"covered": covered, "missed": missed, "percentage": round(covered * 100 / (covered + missed), 2) if covered + missed else None}
+    return {"source": str(report), "lines": value("line"), "branches": value("branch")}
+
+
+def declared_infrastructure(service: Path) -> list[str]:
+    text = "\n".join(path.read_text(errors="ignore") for path in service.glob("src/test/**/*.kt"))
+    build_file = service / "build.gradle.kts"
+    build = build_file.read_text(errors="ignore") if build_file.exists() else ""
+    values = []
+    if "PostgreSQLContainer" in text or "testcontainers.postgresql" in build: values.append("postgres")
+    if "RedpandaContainer" in text or "testcontainers.redpanda" in build: values.append("redpanda")
+    if re.search(r"valkey|redis", text, re.I) and "GenericContainer" in text: values.append("valkey")
+    return values
+
+
+def observations(service: Path) -> list[dict]:
+    result = []
+    for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
+        for line in file.read_text().splitlines():
+            try:
+                item = json.loads(line)
+                item.pop("schemaVersion", None)
+                if "observedAtUnix" in item:
+                    image = str(item.get("image", ""))
+                    resource = "postgres" if "postgres" in image else "redpanda" if "redpanda" in image else "valkey" if re.search(r"valkey|redis", image, re.I) else None
+                    lifecycle = {"start": "started", "die": "stopped"}.get(item.get("lifecycle"))
+                    if resource and lifecycle:
+                        result.append({"resource": resource, "image": image, "lifecycle": lifecycle,
+                                       "observedAt": datetime.fromtimestamp(int(item["observedAtUnix"]), timezone.utc).isoformat().replace("+00:00", "Z")})
+                else:
+                    result.append(item)
+            except json.JSONDecodeError:
+                continue
+    return result
+
+
+def specialized_evidence(performance_summary: str | None, mutation_report: str | None) -> list[dict]:
+    specialized = []
+    if performance_summary:
+        summary_file = Path(performance_summary)
+        summary = json.loads(summary_file.read_text()) if summary_file.exists() else None
+        thresholds = [value for metric in (summary or {}).get("metrics", {}).values()
+                      for value in (metric.get("thresholds") or {}).values()]
+        failed = sum(1 for value in thresholds if value.get("ok") is False)
+        specialized.append({"kind": "performance", "state": "not-run" if summary is None else "failed" if failed else "passed",
+                            "source": str(summary_file), "detail": f"{len(thresholds)} threshold result(s), {failed} breached"})
+    if mutation_report:
+        mutation_file = Path(mutation_report)
+        if mutation_file.exists():
+            root = ET.parse(mutation_file).getroot()
+            mutations = root.findall(".//mutation")
+            killed = sum(1 for item in mutations if item.attrib.get("status") == "KILLED")
+            score = round(killed * 100 / len(mutations), 2) if mutations else None
+            specialized.append({"kind": "mutation", "state": "passed" if mutations else "skipped",
+                                "source": str(mutation_file), "detail": f"{killed}/{len(mutations)} killed ({score if score is not None else 'n/a'}%)"})
+        else:
+            specialized.append({"kind": "mutation", "state": "not-run", "source": str(mutation_file), "detail": "mutation report absent"})
+    return specialized
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--service")
+    parser.add_argument("--out")
+    parser.add_argument("--component")
+    parser.add_argument("--performance-summary")
+    parser.add_argument("--mutation-report")
+    parser.add_argument("--self-test", action="store_true")
+    args = parser.parse_args()
+    if args.self_test:
+        with tempfile.TemporaryDirectory() as directory:
+            service = Path(directory)
+            runtime = service / "build/test-intelligence/runtime"
+            runtime.mkdir(parents=True)
+            (runtime / "docker-events.jsonl").write_text(
+                '{"image":"postgres:16.3-alpine","lifecycle":"start","observedAtUnix":1787433000}\n'
+                '{"image":"postgres:16.3-alpine","lifecycle":"die","observedAtUnix":1787433060}\n'
+            )
+            performance = service / "perf.json"
+            performance.write_text('{"metrics":{"http_req_duration":{"thresholds":{"p(95)<500":{"ok":false}}}}}')
+            mutation = service / "mutations.xml"
+            mutation.write_text('<mutations><mutation status="KILLED"/><mutation status="SURVIVED"/></mutations>')
+            # Negative control for the report discovery itself: a vitest/Playwright
+            # `<testsuites>` file is not named TEST-*.xml, and globbing that Gradle
+            # convention reported an empty Admin UI envelope while its suites passed.
+            for task, payload in (
+                ("test", '<testsuites name="vitest" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
+                          '<testsuite name="unit" tests="2" failures="1" errors="0" skipped="0" time="1.5">'
+                          '<testcase classname="guard" name="allows" time="0.5"/>'
+                          '<testcase classname="guard" name="denies" time="1.0"><failure/></testcase>'
+                          '</testsuite></testsuites>'),
+                ("e2e", '<testsuites name="playwright" tests="1" failures="0" errors="0" skipped="0" time="2">'
+                        '<testsuite name="nav" tests="1" failures="0" errors="0" skipped="0" time="2">'
+                        '<testcase classname="nav.spec.ts" name="loads" time="2"/>'
+                        '</testsuite></testsuites>'),
+            ):
+                directory = service / "build/test-results" / task
+                directory.mkdir(parents=True, exist_ok=True)
+                (directory / f"{task}.xml").write_text(payload)
+            discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
+            assert set(discovered) == {"unit", "e2e"}, discovered
+            assert (discovered["unit"]["discovered"], discovered["unit"]["failed"]) == (2, 1), discovered
+            assert discovered["unit"]["state"] == "failed" and discovered["e2e"]["state"] == "passed"
+            assert len(test_cases("openbank-admin-ui", service)) == 3
+            # An unparsable report is observed as absent, never as a build failure.
+            (service / "build/test-results/test/broken.xml").write_text("<testsuite")
+            assert len(suites("openbank-admin-ui", service)) == 2
+            # A report whose failures exceed its executed count still yields a valid envelope.
+            (service / "build/test-results/test/TEST-Truncated.xml").write_text(
+                '<testsuite name="Truncated" tests="1" failures="3" errors="0" skipped="0" time="0"/>')
+            validate_envelope({
+                "schemaVersion": 1,
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main",
+                        "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                "component": "openbank-admin-ui", "suites": suites("openbank-admin-ui", service),
+                "coverage": None, "testInfrastructure": {"declared": [], "observed": []},
+            })
+            assert classify("PaymentApiIT", "com.openbank.PaymentApiIT", "test", "openbank-x") == "integration"
+            assert classify("UnitTest", "com.openbank.UnitTest", "test", "openbank-x") == "unit"
+            assert [item["lifecycle"] for item in observations(service)] == ["started", "stopped"]
+            specialized = specialized_evidence(str(performance), str(mutation))
+            assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "passed")]
+            valid = {
+                "schemaVersion": 1,
+                "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "", "observedAt": "2026-08-22T00:00:00Z"},
+                "component": "openbank-x",
+                "suites": [{"kind": "integration", "state": "passed", "discovered": 1, "executed": 1, "passed": 1, "failed": 0, "skipped": 0, "errors": 0, "durationMs": 1}],
+                "coverage": None,
+                "testInfrastructure": {"declared": ["postgres"], "observed": observations(service)},
+                "specializedEvidence": [{"kind": "performance", "state": "passed", "source": "summary.json"}],
+                "testCases": [],
+            }
+            validate_envelope(valid)
+            invalid = json.loads(json.dumps(valid))
+            invalid["suites"][0]["executed"] = 0
+            try:
+                validate_envelope(invalid)
+                raise AssertionError("invalid suite arithmetic was accepted")
+            except ValueError:
+                pass
+        print("test-run evidence collector self-test: classification and runtime red/green paths proven")
+        return
+    if not args.service or not args.out:
+        parser.error("--service and --out are required unless --self-test is used")
+    service = Path(args.service)
+    component = args.component or service.name
+    server = os.getenv("GITHUB_SERVER_URL", "")
+    repository = os.getenv("GITHUB_REPOSITORY", "")
+    run_id = os.getenv("GITHUB_RUN_ID", "local")
+    specialized = specialized_evidence(args.performance_summary, args.mutation_report)
+    envelope = {
+        "schemaVersion": 1,
+        "run": {
+            "id": run_id, "attempt": int(os.getenv("GITHUB_RUN_ATTEMPT", "1")),
+            "commit": os.getenv("GITHUB_SHA", "local000"),
+            "branch": os.getenv("GITHUB_HEAD_REF") or os.getenv("GITHUB_REF_NAME", "local"),
+            "workflow": os.getenv("GITHUB_WORKFLOW", "local"),
+            "url": f"{server}/{repository}/actions/runs/{run_id}" if server and repository else "",
+            "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        },
+        "component": component, "suites": suites(component, service), "testCases": test_cases(component, service), "coverage": coverage(service),
+        "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
+        "specializedEvidence": specialized,
+    }
+    validate_envelope(envelope)
+    output = Path(args.out)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(envelope, indent=2) + "\n")
+    print(f"test-intelligence: {component}: {len(envelope['suites'])} suite kinds, {len(envelope['testCases'])} test observations, {len(envelope['testInfrastructure']['observed'])} runtime events -> {output}")
+
+
+if __name__ == "__main__":
+    main()

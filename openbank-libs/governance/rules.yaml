@@ -1080,6 +1080,20 @@ feature_flags:
 coverage:
   tool: kover
   ratchet_only: true
+  # ADR-0273: one privacy-preserving evidence envelope joins CI execution, real Testcontainers
+  # starts, performance/mutation runs and sandbox synthetics.  It is additive: raw JUnit and Kover
+  # stay independently consumable until the projection has proven itself across the fleet.
+  test_intelligence:
+    schema: openbank-libs/governance/test-intelligence-run.schema.json
+    producer: .github/scripts/collect-test-run-evidence.py
+    fleet_ci: .github/workflows/_service-ci.yml
+    runtime_library: openbank-libs-testing
+    projection: openbank-admin-ui
+    states: [passed, failed, skipped, not-run, stale, blocked, unknown]
+    provenance_required: [commit, workflow, run_attempt, collected_at]
+    testcontainers_runtime_proof: required-when-shared-resource-is-used
+    run_history: immutable-per-attempt-artifact-30-days
+    compatibility: raw-junit-and-kover-remain-readable-during-expand-migrate-verify
   floors:
     default: 39                         # current openbank-libs floor (ADR-0020)
     money_path_floor: 40                # enforced baseline (all 13 money-path services, ratchet-only)
@@ -2314,6 +2328,15 @@ gitops_ref_integrity:
   # layer down. Verified by REVERT: with #1232's ExternalSecret removed the guard fails
   # naming `Secret payments/vop-oidc`; restored, it passes.
   incident: 2026-07-16
+
+pr_build_cloud_credentials:
+  script: .github/scripts/check-pr-build-cloud-credentials.py
+  wired_into: .github/gates/gates.yaml    # gate id pr-build-cloud-credentials, group security, enforced
+  rule: >-
+    The reusable `_service-ci.yml` build job, which executes pull-request code on GitHub-hosted
+    runners, must not assume a cloud role or log in to a cloud registry. Credentialed cache,
+    contract and deployment work belongs only to a separately trusted lane.
+  basis: untrusted_code_must_not_receive_deploy_credentials
 
 oidc_secret_convention:
   script: .github/scripts/check-oidc-secret-convention.py

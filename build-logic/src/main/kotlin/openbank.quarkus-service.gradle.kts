@@ -99,6 +99,13 @@ tasks.withType<Test>().configureEach {
         providers.environmentVariable("DOCKER_HOST").orElse("unix:///var/run/docker.sock").get(),
     )
     environment("TESTCONTAINERS_RYUK_DISABLED", "true")
+    // A shared Testcontainers resource emits a deliberately secret-free lifecycle
+    // observation here. The CI envelope is evidence, not a container inventory:
+    // ports, hosts, credentials and ids must never leave the test runner.
+    environment(
+        "OPENBANK_TEST_EVIDENCE_DIR",
+        layout.buildDirectory.dir("test-intelligence/runtime").get().asFile.absolutePath,
+    )
 
     // Committed pacts are derived data (ADR-0063), so a regenerated pact must be AUTHORITATIVE —
     // it has to be able to remove an interaction, not only add one. pact-jvm's default writer
