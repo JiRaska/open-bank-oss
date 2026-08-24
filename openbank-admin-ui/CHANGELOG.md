@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.190.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.4...admin-ui-v0.190.0) (2026-08-24)
+
+
+### Features
+
+* **admin-ui:** add testing assurance board ([#6756](https://github.com/JiRaska/open-bank-oss/issues/6756)) ([4edd2c2](https://github.com/JiRaska/open-bank-oss/commit/4edd2c24ae1863f186a9b105735dc615b4dd1082))
+
 ## [0.189.4](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.189.3...admin-ui-v0.189.4) (2026-08-24)
 
 
