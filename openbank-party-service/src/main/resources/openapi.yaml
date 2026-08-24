@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.8 -> 1.9): additive
   # only — a new PATCH /api/v1/parties/approvals/{id} endpoint and an additional 202 response
   # on POST /{id}/merge (ADR-0155 four-eyes). No existing response or schema changed.
-  version: 1.18.0
+  version: 1.19.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -681,6 +681,13 @@ components:
         consentMarketing:
           type: boolean
           description: Optional marketing-communications consent from the same onboarding step.
+        classification:
+          type: string
+          enum: [CUSTOMER, SYNTHETIC]
+          default: CUSTOMER
+          description: >-
+            Bank-owned synthetic canary only. Requires ROLE_ADMIN and is immutable once created;
+            ordinary self-service onboarding always creates CUSTOMER.
 
     UpdatePartyRequest:
       type: object
