@@ -617,7 +617,7 @@ function PaymentsContent() {
 
           {canCreate && (
             <div style={{ display: 'flex', gap: '10px', marginBottom: '16px', justifyContent: 'flex-end' }}>
-              <button className="btn btn-primary" onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
+              <button className="btn btn-primary" type="button" aria-expanded={showCreate === 'payment-type'} aria-controls="payment-create-type-panel" aria-label={t('Nová platba', 'New Payment')} onClick={() => setShowCreate(showCreate ? null : 'payment-type')}>
                 <Plus size={14} aria-hidden="true" />
                 {t('Nová platba', 'New Payment')}
               </button>
@@ -626,7 +626,7 @@ function PaymentsContent() {
 
           {/* Payment type selector */}
           {showCreate === 'payment-type' && (
-            <div className="card" style={{ padding: '20px', marginBottom: '20px' }}>
+            <div id="payment-create-type-panel" className="card" style={{ padding: '20px', marginBottom: '20px' }}>
               <h2 style={{ fontSize: '16px', fontWeight: 600, marginBottom: '16px' }}>{t('Vyberte typ platby', 'Select payment type')}</h2>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                 {CREATE_OPTIONS.map(opt => {
