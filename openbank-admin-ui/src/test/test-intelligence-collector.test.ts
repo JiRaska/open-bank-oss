@@ -127,7 +127,9 @@ journeys:
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
     const app = report.clientExperiences.find(item => item.id === 'openbank-app')!
-    expect(app.evidence[0]).toMatchObject({ kind: 'unit', state: 'passed', run: { id: '9' } })
+    expect(app.evidence.find(item => item.kind === 'unit')).toMatchObject({
+      kind: 'unit', state: 'passed', run: { id: '9' },
+    })
     expect(app.evidence).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'e2e', state: 'passed', run: { id: '10' } }),
     ]))
