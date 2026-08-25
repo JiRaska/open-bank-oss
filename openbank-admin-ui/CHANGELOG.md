@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.194.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.1...admin-ui-v0.194.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* **admin-ui:** bound gate health API requests ([#6890](https://github.com/JiRaska/open-bank-oss/issues/6890)) ([e1451d2](https://github.com/JiRaska/open-bank-oss/commit/e1451d224bcac3c5bb5fe3388f11412e03f4edce))
+
 ## [0.194.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.194.0...admin-ui-v0.194.1) (2026-08-25)
 
 
