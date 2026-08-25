@@ -408,7 +408,12 @@ jobs:
           api() { curl -sf -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           mkdir -p openbank-admin-ui/test-run-history
           for workflow in services-ci.yml ci.yml; do
-            api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=20" \
+            # Deploy-only commits can arrive faster than service envelopes (each creates a
+            # completed Services CI run with no per-service artifact).  A 20-run window then
+            # contains only those empty runs and silently erases Testcontainers lifecycle proof
+            # from the projection.  Keep the bounded history but search a wider 100-run window
+            # for the latest immutable envelopes instead of treating workflow recency as evidence.
+            api "https://api.github.com/repos/${REPO}/actions/workflows/${workflow}/runs?branch=main&status=completed&per_page=100" \
               | python3 -c "import json,sys; [print(r['id']) for r in json.load(sys.stdin).get('workflow_runs',[])]" 2>/dev/null \
               | while read -r run_id; do
                   [ -n "${run_id}" ] || continue
