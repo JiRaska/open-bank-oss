@@ -11,6 +11,7 @@ import com.openbank.lending.application.port.out.CreditOffersConsentPort
 import com.openbank.lending.application.port.out.LoanRepository
 import com.openbank.lending.domain.model.BorrowerDistressSignals
 import com.openbank.lending.domain.model.LoanStatus
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -29,6 +30,7 @@ import java.util.UUID
 /** consent-service's own active-consent check, reused verbatim (the shape campaign-service uses). */
 @RegisterRestClient(configKey = "consent-service")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)
 interface LendingConsentServiceClient {
@@ -73,6 +75,7 @@ class RestCreditOffersConsentAdapter(@param:RestClient private val consents: Len
 /** analytics-sink's ADR-0269 credit profile (#6215) — the single definition of these numbers. */
 @RegisterRestClient(configKey = "analytics-sink")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/analytics/credit-profile")
 @Produces(MediaType.APPLICATION_JSON)
 interface CreditProfileClient {

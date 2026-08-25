@@ -5,6 +5,7 @@ package com.openbank.copilot.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -28,6 +29,7 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "analytics-sink")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/analytics/credit-profile")
 @Produces(MediaType.APPLICATION_JSON)
 interface CreditProfileReadClient {

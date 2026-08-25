@@ -4,6 +4,7 @@
 package com.openbank.copilot.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
@@ -25,6 +26,7 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "consent-service")
 @RegisterProvider(OidcClientRequestReactiveFilter::class)
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/consents")
 @Produces(MediaType.APPLICATION_JSON)
 interface ConsentQueryClient {
