@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.24.0...agent-service-v1.25.0) (2026-08-25)
+
+
+### Features
+
+* **testing:** add trace contract kit ([#6805](https://github.com/JiRaska/open-bank-oss/issues/6805)) ([bcee169](https://github.com/JiRaska/open-bank-oss/commit/bcee1697140bbe1f96fec33a6ed6ddf7f90ab109))
+
 ## [1.24.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.23.2...agent-service-v1.24.0) (2026-08-24)
 
 
